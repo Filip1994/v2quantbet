@@ -35,3 +35,13 @@ def test_load_config_rejects_invalid_log_level(monkeypatch):
 
     with pytest.raises(ConfigError, match="LOG_LEVEL"):
         load_config()
+
+
+def test_config_repr_redacts_secrets(monkeypatch):
+    _set_valid_config(monkeypatch)
+
+    rendered = repr(load_config())
+
+    assert "postgresql://example" not in rendered
+    assert "test-key" not in rendered
+    assert "[REDACTED]" in rendered
