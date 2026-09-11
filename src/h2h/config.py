@@ -10,12 +10,22 @@ class ConfigError(ValueError):
     """Raised when required configuration is missing or invalid."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class Config:
     app_env: str
     log_level: str
     database_url: str
     odds_api_key: str
+
+    def __repr__(self) -> str:
+        return (
+            "Config("
+            f"app_env={self.app_env!r}, "
+            f"log_level={self.log_level!r}, "
+            "database_url='[REDACTED]', "
+            "odds_api_key='[REDACTED]'"
+            ")"
+        )
 
 
 def _required(name: str) -> str:
