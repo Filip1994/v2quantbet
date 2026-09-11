@@ -1,6 +1,6 @@
 from __future__ import annotations
-from math import isclose
 
+from math import isclose
 
 # Baseline values calculated from the pinned legacy implementation at commit
 # 9b2337b8432546420945f32586b7a4b84355589b using its deterministic
