@@ -1,18 +1,20 @@
 # Project Status
 
 ## Current task
-A3.2 — local Python version pin
+A3.4 — locked dependency verification
 
 ## Completed
 - A1 — repository skeleton.
 - A2 — development tooling and minimal test setup.
 - A3.1 — standard local quality checker used by CI.
-- Local Python version is explicitly pinned to 3.11.
+- A3.2 — local Python version pinned to 3.11.
+- A3.3 — dependency lockfile (`uv.lock`) created and committed.
+- A3.4 — CI verified with the locked dependency environment.
 - No legacy production code copied.
 - No API keys or secrets included.
 
 ## Next
-A3.3 — only after A3.2 CI passes.
+A4 — foundation invariant definition before any implementation work.
 
 ## Non-negotiable rules
 1. One small task at a time.
