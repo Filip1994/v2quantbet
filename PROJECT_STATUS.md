@@ -1,7 +1,7 @@
 # Project Status
 
 ## Current task
-C2 — executable golden-master fixture and regression test
+C4 — quant API contract and public-interface definition
 
 ## Completed
 - A1 — repository skeleton.
@@ -20,11 +20,12 @@ C2 — executable golden-master fixture and regression test
 - B3.4 — Railway PostgreSQL service, replica, and persistent volume verified.
 - C1 baseline — legacy quant reference commit and regression anchors recorded in `docs/quant-golden-master.md`.
 - C2 — deterministic executable golden-master fixture and Dixon–Coles regression tests added.
+- C3 — quant boundary, edge-case, numerical-stability, market-invariant, and determinism tests added; CI verified green at 2026-09-12T21:45:47Z in run 64 (`8cbe89807f5d61087089b7391c28ebc2e3630f0f`).
 - Quant namespace consolidation — canonical `h2h` namespace selected and duplicate domain namespace removed.
 - No API keys or secrets included.
 
 ## Next
-C3 — quant boundary, edge-case, and numerical-stability tests.
+C4 — quant API contract and public-interface definition
 
 ## Non-negotiable rules
 1. One small task at a time.
