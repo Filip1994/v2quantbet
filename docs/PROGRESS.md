@@ -4,8 +4,8 @@ Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implemen
 
 ## Poslednje ažuriranje
 
-- Datum i vreme: **2026-09-12 15:00:00 CEST (UTC+02:00)**
-- Ažurirano: implementirani `CanonicalQuote` i `MarketSnapshot` ugovori sa osnovnim testovima.
+- Datum i vreme: **2026-09-13**
+- Ažurirano: C5.7 validacioni sloj za kolekcije `CanonicalQuote` je implementiran i potvrđen zelenim CI-jem.
 
 ## Trenutno stanje
 
@@ -65,6 +65,16 @@ Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
 - `opposite_odd` nije deo osnovnog `CanonicalQuote` zapisa; suprotna kvota se dobija iz odgovarajuće druge quote-observacije u snapshot-u.
 - Lifecycle checkpoint-i su uloge nad istorijom immutable quote-observacija, a ne četiri različita osnovna zapisa.
 
+### 7. Validacioni sloj — C5.7
+
+- Dodat je `validate_quotes()` u `src/h2h/domain/quote_validation.py`.
+- Validator zahteva nepraznu kolekciju isključivo `CanonicalQuote` objekata.
+- Proverava tačno kompletan skup selekcija za podržano tržište i zajednički fixture, bookmaker, market i timestamp.
+- `MarketSnapshot` koristi validator pre daljih provera konteksta.
+- Dodati su testovi za validnu kolekciju, praznu kolekciju, mešani fixture i nevalidne tipove.
+- CI run #93 i #94 su završeni sa statusom `success`.
+- CI run #89 je bio neuspešan zbog neispravne tvrdnje o duplicate identity testu; test je uklonjen jer `selection` jeste deo identity-ja.
+
 ## Važne odluke
 
 - Ne koristiti `peak_quote`.
@@ -76,4 +86,4 @@ Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
 
 ## Sledeći korak
 
-Definisati sledeći mali ugovor: validacioni sloj koji će proveravati ulazne `CanonicalQuote` zapise pre formiranja `MarketSnapshot` objekta. Provider normalizaciju, persistence, worker-e, lifecycle checkpoint-e i CLV ostaviti za odvojene korake.
+Implementirati mali ugovor za normalizaciju provider-specific odds podataka u `CanonicalQuote` zapise, bez povezivanja sa konkretnim providerom ili persistence slojem. Prvo definisati ulazni oblik, mapiranje market/selection vrednosti, validaciju identiteta i testove za poznate i nepoznate provider vrednosti.
