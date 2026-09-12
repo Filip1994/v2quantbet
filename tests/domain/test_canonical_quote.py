@@ -1,9 +1,8 @@
-import pytest
-
 from datetime import UTC, datetime
 
-from quantbet.domain.odds import CanonicalQuote, Market, Selection
+import pytest
 
+from quantbet.domain.odds import CanonicalQuote, Market, Selection
 
 OBSERVED_AT = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 
