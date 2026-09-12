@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from math import isfinite
 
 
 class Market(StrEnum):
@@ -45,8 +46,8 @@ class CanonicalQuote:
             raise ValueError("source must not be empty")
         if not isinstance(self.observed_at, datetime):
             raise TypeError("observed_at must be a datetime")
-        if self.odd <= 1.0:
-            raise ValueError("odd must be greater than 1.0")
+        if not isfinite(self.odd) or self.odd <= 1.0:
+            raise ValueError("odd must be finite and greater than 1.0")
 
         valid_selections = {
             Market.OU_25: {Selection.OVER, Selection.UNDER},
