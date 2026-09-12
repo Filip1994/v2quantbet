@@ -35,6 +35,11 @@ class CanonicalQuote:
     observed_at: datetime
     source: str
 
+    @property
+    def identity(self) -> tuple[str, int, Market, Selection]:
+        """Return the stable identity shared by observations of one quote."""
+        return (self.fixture_id, self.bookmaker_id, self.market, self.selection)
+
     def __post_init__(self) -> None:
         if not self.fixture_id.strip():
             raise ValueError("fixture_id must not be empty")
