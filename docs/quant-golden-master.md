@@ -31,6 +31,23 @@ The legacy test suite contains deterministic anchors for the Dixon-Coles impleme
 
 These anchors are taken from the legacy test file `tests/test_dixon_coles.py` at the same reference commit.
 
+## C2 executable fixture
+
+The V2 repository now contains `tests/quant/test_dixon_coles_golden_master.py`.
+It builds a deterministic six-team, ten-round synthetic dataset containing 300 matches and
+asserts the locked legacy-reference outputs for:
+
+- fitted match and team counts;
+- objective, intercept, home advantage, and `rho`;
+- attack and defense parameter vectors;
+- expected goals for a fixed fixture;
+- OVER 2.5, UNDER 2.5, and BTTS YES probabilities;
+- low-score Dixon–Coles correction values.
+
+The fixture is synthetic and deterministic. It is intended to detect unintended numerical
+or behavioral drift, not to represent historical football data. The regression tolerances are
+explicitly bounded at `1e-6` for floating-point outputs.
+
 ## Freeze rule
 
 Until executable V2 golden-master tests are established, do not change the mathematical behavior of:
@@ -54,3 +71,9 @@ Infrastructure may be redesigned around these components, but mathematical behav
 
 C1 establishes the immutable legacy reference and regression anchors.
 It does **not** yet claim that V2 reproduces the full legacy model. That executable equivalence is a later C-task and must be proven with tests before the quant layer is considered frozen.
+
+## C2 boundary
+
+C2 establishes the first executable V2 golden-master regression boundary. It does not authorize
+changes to quant mathematics; subsequent changes must preserve these tests or update the locked
+reference through an explicit, reviewed baseline change.
