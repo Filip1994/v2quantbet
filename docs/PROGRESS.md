@@ -4,8 +4,8 @@ Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implemen
 
 ## Poslednje ažuriranje
 
-- Datum i vreme: **2026-09-12 14:53:49 CEST (UTC+02:00)**
-- Ažurirano: scope tržišta i naredni implementacioni korak.
+- Datum i vreme: **2026-09-12 15:00:00 CEST (UTC+02:00)**
+- Ažurirano: implementirani `CanonicalQuote` i `MarketSnapshot` ugovori sa osnovnim testovima.
 
 ## Trenutno stanje
 
@@ -25,62 +25,45 @@ Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implemen
 ### 2. Product ciljevi i CLV semantika
 
 - Dokumentovani su ciljevi sistema u `docs/QUANTBET_GOALS.md`.
-- Razdvojeni su:
-  - value;
-  - expected CLV;
-  - realized CLV.
-- Definisano je da se realized CLV računa naknadno, uz validnu closing referencu.
-- Definisani su obavezni odds checkpoint-i:
-  - `first_seen_quote`;
-  - `pick_quote`;
-  - `current_quote`;
-  - `closing_quote`.
+- Razdvojeni su value, expected CLV i realized CLV.
+- Realized CLV se računa naknadno, uz validnu closing referencu.
+- Definisani su odds checkpoint-i: `first_seen_quote`, `pick_quote`, `current_quote` i `closing_quote`.
 
 ### 3. Arhitektura
 
-- U `docs/architecture.md` dokumentovan je planirani tok:
+- Planirani tok je:
 
   `Provider -> Raw Odds -> Normalizer -> Canonical Quote -> Validation -> Market Snapshot -> Quant -> Decision -> Risk -> Bet lifecycle -> Settlement`
 
-- Ispravljena je terminologija: `peak_quote` je uklonjen i zamenjen sa `pick_quote`.
 - `pick_quote` znači validnu kvotu u trenutku objave tipa/biltena i predstavlja referentnu ponuđenu cenu za pick.
 
 ### 4. Scope tržišta
 
 Za sada ostajemo striktno na dva tržišta:
 
-- `OU_25` — ukupno golova 2.5;
-- `BTTS` — oba tima daju gol.
-
-Za `OU_25` selekcije su `OVER` i `UNDER`.
-Za `BTTS` selekcije su `YES` i `NO`.
+- `OU_25` — ukupno golova 2.5, selekcije `OVER` i `UNDER`;
+- `BTTS` — oba tima daju gol, selekcije `YES` i `NO`.
 
 Dodatna tržišta nisu deo trenutne implementacije.
 
 ### 5. Plan proširenja tržišta — nije aktivni scope
 
-Ovo je samo zabeležen budući plan, bez implementacije:
-
-1. **Faza A — sada:** `OU_25` i `BTTS`.
-2. **Faza B — nakon stabilizacije osnovnog ugovora i podataka:** `OU_15` i `OU_35`.
-3. **Faza C — nakon provere modela za tri ishoda:** `MATCH_RESULT` sa selekcijama `HOME`, `DRAW`, `AWAY`.
+1. Faza A — sada: `OU_25` i `BTTS`.
+2. Faza B — nakon stabilizacije osnovnog ugovora i podataka: `OU_15` i `OU_35`.
+3. Faza C — nakon provere modela za tri ishoda: `MATCH_RESULT` sa selekcijama `HOME`, `DRAW`, `AWAY`.
 4. Asian Handicap, corners, cards, player props i slična tržišta ostaju van plana dok ne postoji poseban model i dovoljan kvalitet podataka.
 
-Ovaj plan ne menja trenutni scope. Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
+Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
 
-### 6. Kanonski model — usvojeni smer
+### 6. Kanonski modeli
 
-Kanonski zapis treba da razlikuje tržište od selekcije:
-
-- `market`: `OU_25` ili `BTTS`;
-- `selection`: `OVER`, `UNDER`, `YES` ili `NO`, u zavisnosti od tržišta;
-- `odd`: kvota izabrane selekcije;
-- `opposite_odd`: kvota suprotne selekcije;
-- identifikator utakmice i kladionice;
-- vreme opažanja;
-- izvor/provenance.
-
-`first_seen_quote`, `pick_quote`, `current_quote` i `closing_quote` nisu četiri različita tipa osnovnog podatka. Oni su lifecycle uloge nad istorijom immutable quote-observacija.
+- `CanonicalQuote` je immutable zapis jedne kvote konkretne selekcije.
+- Sadrži identifikator utakmice i kladionice, tržište, selekciju, kvotu, vreme opažanja i izvor.
+- `MarketSnapshot` predstavlja kompletan binarni snapshot za jedan fixture, bookmaker, market i timestamp.
+- Za `OU_25` snapshot mora sadržati tačno `OVER` i `UNDER`.
+- Za `BTTS` snapshot mora sadržati tačno `YES` i `NO`.
+- `opposite_odd` nije deo osnovnog `CanonicalQuote` zapisa; suprotna kvota se dobija iz odgovarajuće druge quote-observacije u snapshot-u.
+- Lifecycle checkpoint-i su uloge nad istorijom immutable quote-observacija, a ne četiri različita osnovna zapisa.
 
 ## Važne odluke
 
@@ -93,12 +76,4 @@ Kanonski zapis treba da razlikuje tržište od selekcije:
 
 ## Sledeći korak
 
-Pre implementacije treba potvrditi minimalni tehnički oblik kanonskog ugovora:
-
-1. neutralni package path, bez korišćenja `src/h2h/domain` kao novog kanonskog domena;
-2. jasni tipovi za `market` i `selection`;
-3. da li `opposite_odd` ostaje deo osnovnog zapisa ili postaje izvedena vrednost za binarna tržišta;
-4. immutable observation zapis;
-5. testovi za validne i nevalidne kombinacije.
-
-Nakon potvrde tog minimalnog ugovora implementirati samo `CanonicalQuote` i njegove testove. Provider normalizaciju, persistence, worker-e, lifecycle checkpoint-e i CLV ostaviti za sledeće odvojene korake.
+Definisati sledeći mali ugovor: validacioni sloj koji će proveravati ulazne `CanonicalQuote` zapise pre formiranja `MarketSnapshot` objekta. Provider normalizaciju, persistence, worker-e, lifecycle checkpoint-e i CLV ostaviti za odvojene korake.
