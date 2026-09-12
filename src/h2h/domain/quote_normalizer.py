@@ -1,7 +1,6 @@
 """Normalize provider odds payloads into canonical quote observations."""
 
 from collections.abc import Mapping
-from datetime import datetime
 
 from .odds import CanonicalQuote, Market, Selection
 
