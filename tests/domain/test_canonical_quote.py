@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from math import inf, nan
 
 import pytest
 
@@ -51,6 +52,12 @@ def test_invalid_market_selection_pairs(market, selection):
 
 @pytest.mark.parametrize("odd", [1.0, 0.99, 0.0, -1.0])
 def test_odd_must_be_greater_than_one(odd):
+    with pytest.raises(ValueError):
+        make_quote(odd=odd)
+
+
+@pytest.mark.parametrize("odd", [nan, inf, -inf])
+def test_odd_must_be_finite(odd):
     with pytest.raises(ValueError):
         make_quote(odd=odd)
 
