@@ -2,6 +2,11 @@
 
 Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implementacioni zadatak. Ne predstavlja tvrdnju da je ceo roadmap završen.
 
+## Poslednje ažuriranje
+
+- Datum i vreme: **2026-09-12 14:53:49 CEST (UTC+02:00)**
+- Ažurirano: scope tržišta i naredni implementacioni korak.
+
 ## Trenutno stanje
 
 - Rad se vodi na repozitorijumu `Filip1994/v2quantbet`, grana `main`.
@@ -42,7 +47,7 @@ Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implemen
 
 ### 4. Scope tržišta
 
-Podržavamo samo:
+Za sada ostajemo striktno na dva tržišta:
 
 - `OU_25` — ukupno golova 2.5;
 - `BTTS` — oba tima daju gol.
@@ -50,9 +55,20 @@ Podržavamo samo:
 Za `OU_25` selekcije su `OVER` i `UNDER`.
 Za `BTTS` selekcije su `YES` i `NO`.
 
-Ne uvodimo dodatna tržišta bez nove eksplicitne odluke.
+Dodatna tržišta nisu deo trenutne implementacije.
 
-### 5. Kanonski model — usvojeni smer
+### 5. Plan proširenja tržišta — nije aktivni scope
+
+Ovo je samo zabeležen budući plan, bez implementacije:
+
+1. **Faza A — sada:** `OU_25` i `BTTS`.
+2. **Faza B — nakon stabilizacije osnovnog ugovora i podataka:** `OU_15` i `OU_35`.
+3. **Faza C — nakon provere modela za tri ishoda:** `MATCH_RESULT` sa selekcijama `HOME`, `DRAW`, `AWAY`.
+4. Asian Handicap, corners, cards, player props i slična tržišta ostaju van plana dok ne postoji poseban model i dovoljan kvalitet podataka.
+
+Ovaj plan ne menja trenutni scope. Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
+
+### 6. Kanonski model — usvojeni smer
 
 Kanonski zapis treba da razlikuje tržište od selekcije:
 
@@ -69,18 +85,20 @@ Kanonski zapis treba da razlikuje tržište od selekcije:
 ## Važne odluke
 
 - Ne koristiti `peak_quote`.
-- Ne širiti scope tržišta bez eksplicitnog dogovora.
+- Ne širiti aktivni scope tržišta bez eksplicitnog dogovora.
 - Ne prosleđivati provider-specific odds strukture direktno u quant sloj.
 - Ne mešati immutable observations sa lifecycle ulogama i izvedenim metrikama.
 - Ne raditi široke refaktore; implementirati jednu malu celinu uz testove.
+- Sve buduće izmene ovog dokumenta moraju imati datum i vreme.
 
 ## Sledeći korak
 
-Precizirati i implementirati kanonski quote/odds-snapshot contract, počevši od:
+Pre implementacije treba potvrditi minimalni tehnički oblik kanonskog ugovora:
 
-1. jasnih tipova za `market` i `selection`;
-2. validacionih pravila za `odd` i `opposite_odd`;
-3. immutable observation zapisa;
-4. testova za validne i nevalidne kombinacije.
+1. neutralni package path, bez korišćenja `src/h2h/domain` kao novog kanonskog domena;
+2. jasni tipovi za `market` i `selection`;
+3. da li `opposite_odd` ostaje deo osnovnog zapisa ili postaje izvedena vrednost za binarna tržišta;
+4. immutable observation zapis;
+5. testovi za validne i nevalidne kombinacije.
 
-Tek nakon toga povezivati provider normalizaciju, persistence i lifecycle checkpoint-e.
+Nakon potvrde tog minimalnog ugovora implementirati samo `CanonicalQuote` i njegove testove. Provider normalizaciju, persistence, worker-e, lifecycle checkpoint-e i CLV ostaviti za sledeće odvojene korake.
