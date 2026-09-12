@@ -1,6 +1,6 @@
-from datetime import UTC, datetime
-
 import pytest
+
+from datetime import UTC, datetime
 
 from quantbet.domain.odds import CanonicalQuote, Market, Selection
 
