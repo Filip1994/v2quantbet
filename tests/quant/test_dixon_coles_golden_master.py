@@ -6,39 +6,39 @@ from math import isclose
 
 from h2h.quant.dixon_coles import DixonColesModel, dixon_coles_tau
 
-# Baseline values calculated from the pinned legacy implementation at commit
-# 9b2337b8432546420945f32586b7a4b84355589b using its deterministic
+# Baseline values reproduced directly from the pinned legacy implementation at
+# commit 9b2337b8432546420945f32586b7a4b84355589b using its deterministic
 # tests/test_dixon_coles.py synthetic dataset.
 LEGACY_COMMIT = "9b2337b8432546420945f32586b7a4b84355589b"
 
 EXPECTED = {
     "fitted_matches": 300,
     "team_count": 6,
-    "objective": 663.8139057155488,
-    "rho": 0.015893744318639533,
-    "intercept": 0.01748506205616492,
-    "home_advantage": 0.3859856224069123,
+    "objective": 663.8139057155444,
+    "rho": 0.01589364107452436,
+    "intercept": 0.01748507932076622,
+    "home_advantage": 0.3859856071979705,
     "attacks": (
-        -0.00018334590272585017,
-        -0.0006049796968737931,
-        -0.040101042923168156,
-        0.041287812035137164,
-        -0.0002241807607518084,
-        -0.00017426275161756398,
+        -0.00018347248635490674,
+        -0.0006050883808518735,
+        -0.04010097799354302,
+        0.04128781966868718,
+        -0.0002240745818352707,
+        -0.0001742062261021043,
     ),
     "defenses": (
-        0.00011349512825542724,
-        -0.000579092307183124,
-        -0.040203966050346186,
-        0.04128382299887347,
-        -0.0007433661036229883,
-        0.00012910633402339673,
+        0.00011324868613728643,
+        -0.0005791645627450235,
+        -0.04020386667446759,
+        0.04128407795165249,
+        -0.0007434236740169042,
+        0.00012912827343974557,
     ),
-    "expected_goals": (1.4958704021983442, 1.017138789717719),
+    "expected_goals": (1.4958701078357128, 1.017138446065745),
     "probabilities": {
-        "OVER_2_5": 0.45951928075270043,
-        "UNDER_2_5": 0.5404807192472996,
-        "BTTS_YES": 0.4933829544540229,
+        "OVER_2_5": 0.4595191175221306,
+        "UNDER_2_5": 0.5404808824778694,
+        "BTTS_YES": 0.4933828284467549,
     },
 }
 
