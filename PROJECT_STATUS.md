@@ -24,6 +24,8 @@ C5 — odds domain and canonical quote pipeline
 - Quant namespace consolidation — canonical `h2h` namespace selected and duplicate domain namespace removed.
 - C4.1 — public quant API exports verified; CI verified green in run 69 (`5b0314abe24a67a009087d786ecf5a3133fb3b0c`).
 - C4.2 — public quant API behavior contract documented and tested, including inputs, outputs, error boundaries, numerical invariants, determinism, and golden-master compatibility; CI verified green at 2026-09-12T22:45:58Z in run 72 (`ea4d1f28215a7988312e843a1d2d4d8712d008bb`).
+- C5.1 — canonical market snapshots cover OU_25 and BTTS two-sided invariants; CI verified green in run 77 (`85007ecdee2aea1f08cd854603fe5aeef8c3e553`).
+- C5.2 — canonical quotes reject non-finite odds (`NaN`, positive infinity, and negative infinity); CI verified green in run 78 (`e4bcbbf3181020743423969ea7affc84bbc3be69`).
 - No API keys or secrets included.
 
 ## Next
