@@ -1,6 +1,6 @@
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import inspect
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -21,7 +21,7 @@ class MatchRecord:
 
 
 def _records() -> list[MatchRecord]:
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 1, tzinfo=UTC)
     return [
         MatchRecord(
             date=start + timedelta(days=index),
@@ -60,7 +60,7 @@ def test_fit_signature_is_keyword_only_after_records() -> None:
 def test_fitted_model_exposes_contract_attributes_and_prediction_shapes() -> None:
     model = DixonColesModel.fit(
         _records(),
-        reference_time=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         xi=0.001,
         min_matches=80,
     )
@@ -89,7 +89,7 @@ def test_fitted_model_exposes_contract_attributes_and_prediction_shapes() -> Non
 def test_prediction_for_unknown_team_uses_public_fit_error() -> None:
     model = DixonColesModel.fit(
         _records(),
-        reference_time=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         xi=0.001,
         min_matches=80,
     )
