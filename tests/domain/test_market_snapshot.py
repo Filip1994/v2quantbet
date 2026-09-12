@@ -44,6 +44,17 @@ def test_snapshot_rejects_incomplete_market() -> None:
         )
 
 
+def test_snapshot_rejects_duplicate_selection() -> None:
+    with pytest.raises(ValueError, match="exactly"):
+        MarketSnapshot(
+            fixture_id="fixture-1",
+            bookmaker_id=10,
+            market=Market.OU_25,
+            observed_at=OBSERVED_AT,
+            quotes=(quote(Selection.OVER), quote(Selection.OVER)),
+        )
+
+
 def test_snapshot_rejects_mismatched_quote_context() -> None:
     under = CanonicalQuote(
         fixture_id="fixture-2",
