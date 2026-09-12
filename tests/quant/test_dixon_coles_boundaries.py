@@ -38,6 +38,15 @@ def records_for_teams(team_ids: tuple[int, ...], count: int = 20) -> list[Record
     return records
 
 
+def fitted_model() -> DixonColesModel:
+    return DixonColesModel.fit(
+        records_for_teams((1, 2, 3, 4), count=40),
+        reference_time=datetime(2025, 1, 1, tzinfo=UTC),
+        xi=0.0015,
+        min_matches=1,
+    )
+
+
 def test_fit_rejects_insufficient_training_matches() -> None:
     records = records_for_teams((1, 2, 3, 4), count=3)
     with pytest.raises(DixonColesFitError, match="Premalo trening mečeva"):
@@ -73,27 +82,39 @@ def test_fit_excludes_matches_at_or_after_reference_time() -> None:
 
 
 def test_expected_goals_rejects_unknown_team() -> None:
-    records = records_for_teams((1, 2, 3, 4), count=20)
-    model = DixonColesModel.fit(
-        records,
-        reference_time=datetime(2025, 1, 1, tzinfo=UTC),
-        xi=0.0015,
-        min_matches=1,
-    )
+    model = fitted_model()
     with pytest.raises(DixonColesFitError, match="ne postoji u trening uzorku"):
         model.expected_goals(1, 99)
 
 
 def test_score_matrix_is_finite_and_normalized() -> None:
-    records = records_for_teams((1, 2, 3, 4), count=40)
-    model = DixonColesModel.fit(
-        records,
-        reference_time=datetime(2025, 1, 1, tzinfo=UTC),
-        xi=0.0015,
-        min_matches=1,
-    )
-    matrix = model.score_matrix(1, 2, max_goals=12)
+    matrix = fitted_model().score_matrix(1, 2, max_goals=12)
     assert matrix.shape == (13, 13)
     assert np.isfinite(matrix).all()
     assert (matrix >= 0.0).all()
     assert np.isclose(matrix.sum(), 1.0)
+
+
+def test_market_probabilities_are_bounded_and_over_under_complementary() -> None:
+    probabilities = fitted_model().market_probabilities(1, 2, max_goals=12)
+    assert set(probabilities) == {"OVER_2_5", "UNDER_2_5", "BTTS_YES"}
+    assert all(0.0 <= value <= 1.0 for value in probabilities.values())
+    assert np.isclose(
+        probabilities["OVER_2_5"] + probabilities["UNDER_2_5"],
+        1.0,
+    )
+
+
+def test_fit_and_predictions_are_deterministic() -> None:
+    first = fitted_model()
+    second = fitted_model()
+    np.testing.assert_allclose(first.attacks, second.attacks)
+    np.testing.assert_allclose(first.defenses, second.defenses)
+    assert first.intercept == second.intercept
+    assert first.home_advantage == second.home_advantage
+    assert first.rho == second.rho
+    assert first.objective == second.objective
+    np.testing.assert_allclose(
+        first.score_matrix(1, 2, max_goals=12),
+        second.score_matrix(1, 2, max_goals=12),
+    )
