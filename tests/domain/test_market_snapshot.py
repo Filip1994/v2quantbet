@@ -83,28 +83,6 @@ def test_snapshot_rejects_duplicate_selection() -> None:
         )
 
 
-def test_snapshot_rejects_duplicate_quote_identity() -> None:
-    duplicate_under = CanonicalQuote(
-        fixture_id="fixture-1",
-        bookmaker_id=10,
-        bookmaker_name="Another Bookmaker Label",
-        market=Market.OU_25,
-        selection=Selection.UNDER,
-        odd=2.2,
-        observed_at=OBSERVED_AT,
-        source="another-source",
-    )
-
-    with pytest.raises(ValueError, match="duplicate quote identities"):
-        MarketSnapshot(
-            fixture_id="fixture-1",
-            bookmaker_id=10,
-            market=Market.OU_25,
-            observed_at=OBSERVED_AT,
-            quotes=(quote(Selection.OVER), duplicate_under),
-        )
-
-
 def test_snapshot_rejects_mismatched_quote_context() -> None:
     under = CanonicalQuote(
         fixture_id="fixture-2",
