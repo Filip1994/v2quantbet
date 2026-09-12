@@ -8,10 +8,13 @@ This document defines the public contract of the Dixon–Coles quant layer. It d
 
 The canonical implementation is `h2h.quant.dixon_coles.DixonColesModel`.
 
-The module also exposes:
+The public package `h2h.quant` exports:
 
-- `DixonColesFitError`: raised when fitting or prediction cannot produce a valid result.
-- `dixon_coles_tau(...)`: low-score Dixon–Coles correction function.
+- `DixonColesModel`;
+- `DixonColesFitError`, raised when fitting or prediction cannot produce a valid result;
+- `dixon_coles_tau`, the low-score Dixon–Coles correction function.
+
+The package exports are aliases of the canonical module objects.
 
 ## Training input
 
@@ -63,6 +66,10 @@ Returns a dictionary containing:
 
 Each value is a finite probability in `[0, 1]`. The over/under values are complementary within floating-point tolerance.
 
+### `team_match_counts(records)`
+
+A static helper returning `Counter[int]`, counting every appearance of each team as either home or away. It does not apply the `reference_time` filter and does not fit a model.
+
 ## Responsibility boundary
 
 - The API/domain layer validates external payloads, provider formats, authentication, and bookmaker-specific fields.
@@ -72,4 +79,4 @@ Each value is a finite probability in `[0, 1]`. The over/under values are comple
 
 ## Compatibility rule
 
-Changes to the public method names, required record fields, return shapes, or probability keys require dedicated tests and an explicit contract update. The golden-master tests remain the authority for numerical behavior.
+Changes to the public method names, required record fields, return shapes, or probability keys require dedicated tests and an explicit contract update. The golden-master tests remain the authority for numerical behavior. Public exports and the documented behavior are covered by API contract tests.
