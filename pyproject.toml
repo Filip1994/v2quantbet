@@ -25,4 +25,4 @@ testpaths = ["tests"]
 line-length = 100
 
 [tool.ruff.lint.isort]
-known-first-party = ["quantbet"]
+known-first-party = ["h2h"]
