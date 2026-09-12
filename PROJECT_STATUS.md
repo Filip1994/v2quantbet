@@ -27,6 +27,7 @@ C5 — odds domain and canonical quote pipeline
 - C5.1 — canonical market snapshots cover OU_25 and BTTS two-sided invariants; CI verified green in run 77 (`85007ecdee2aea1f08cd854603fe5aeef8c3e553`).
 - C5.2 — canonical quotes reject non-finite odds (`NaN`, positive infinity, and negative infinity); CI verified green in run 78 (`e4bcbbf3181020743423969ea7affc84bbc3be69`).
 - C5.3 — canonical quotes reject blank required text fields; CI verified green at 2026-09-12T23:01:02Z in run 82 (`aba96ea0daf09d9bb7951c93268f610010b8d127`).
+- C5.4 — canonical quote identity and timestamp validation coverage added; CI verified green at 2026-09-12T23:02:54Z in run 84 (`a0dbb402b2240a51a1e58aab6059824eb4bc3731`).
 - No API keys or secrets included.
 
 ## Next
