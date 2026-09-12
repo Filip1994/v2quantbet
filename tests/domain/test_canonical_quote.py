@@ -89,3 +89,32 @@ def test_required_text_fields_must_not_be_blank(field):
 
     with pytest.raises(ValueError):
         CanonicalQuote(**values)
+
+
+@pytest.mark.parametrize("bookmaker_id", [0, -1])
+def test_bookmaker_id_must_be_positive(bookmaker_id):
+    with pytest.raises(ValueError):
+        CanonicalQuote(
+            fixture_id="fixture-1",
+            bookmaker_id=bookmaker_id,
+            bookmaker_name="Bookmaker",
+            market=Market.OU_25,
+            selection=Selection.OVER,
+            odd=1.9,
+            observed_at=OBSERVED_AT,
+            source="provider-x",
+        )
+
+
+def test_observed_at_must_be_datetime():
+    with pytest.raises(TypeError):
+        CanonicalQuote(
+            fixture_id="fixture-1",
+            bookmaker_id=8,
+            bookmaker_name="Bookmaker",
+            market=Market.OU_25,
+            selection=Selection.OVER,
+            odd=1.9,
+            observed_at="2026-09-12T12:00:00Z",
+            source="provider-x",
+        )
