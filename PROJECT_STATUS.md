@@ -1,7 +1,7 @@
 # Project Status
 
 ## Current task
-C1 — legacy quant baseline pin
+C2 — executable golden-master fixture and regression test
 
 ## Completed
 - A1 — repository skeleton.
@@ -19,10 +19,12 @@ C1 — legacy quant baseline pin
 - B3.3 — no application tables remain in `public`.
 - B3.4 — Railway PostgreSQL service, replica, and persistent volume verified.
 - C1 baseline — legacy quant reference commit and regression anchors recorded in `docs/quant-golden-master.md`.
+- C2 — deterministic executable golden-master fixture and Dixon–Coles regression tests added.
+- Quant namespace consolidation — canonical `h2h` namespace selected and duplicate domain namespace removed.
 - No API keys or secrets included.
 
 ## Next
-C2 — executable golden-master fixture and regression test.
+C3 — quant boundary, edge-case, and numerical-stability tests.
 
 ## Non-negotiable rules
 1. One small task at a time.
