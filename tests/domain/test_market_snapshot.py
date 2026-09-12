@@ -8,12 +8,12 @@ from h2h.domain.odds import CanonicalQuote, Market, Selection
 OBSERVED_AT = datetime(2026, 9, 12, 15, 0, tzinfo=UTC)
 
 
-def quote(selection: Selection) -> CanonicalQuote:
+def quote(selection: Selection, *, market: Market = Market.OU_25) -> CanonicalQuote:
     return CanonicalQuote(
         fixture_id="fixture-1",
         bookmaker_id=10,
         bookmaker_name="Bookmaker",
-        market=Market.OU_25,
+        market=market,
         selection=selection,
         odd=2.0,
         observed_at=OBSERVED_AT,
@@ -31,6 +31,18 @@ def test_snapshot_requires_both_ou25_selections() -> None:
     )
 
     assert snapshot.quote_for(Selection.OVER).odd == 2.0
+
+
+def test_snapshot_requires_both_btts_selections() -> None:
+    snapshot = MarketSnapshot(
+        fixture_id="fixture-1",
+        bookmaker_id=10,
+        market=Market.BTTS,
+        observed_at=OBSERVED_AT,
+        quotes=(quote(Selection.YES, market=Market.BTTS), quote(Selection.NO, market=Market.BTTS)),
+    )
+
+    assert snapshot.quote_for(Selection.NO).selection is Selection.NO
 
 
 def test_snapshot_rejects_incomplete_market() -> None:
