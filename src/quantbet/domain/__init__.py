@@ -1,1 +1,0 @@
-"""Canonical QuantBet domain models."""
