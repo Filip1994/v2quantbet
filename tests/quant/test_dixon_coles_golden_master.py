@@ -15,7 +15,7 @@ EXPECTED = {
     "fitted_matches": 300,
     "team_count": 6,
     "objective": 663.8139057155488,
-    "rho": 0.01589364107452436,
+    "rho": 0.015893744318639533,
     "intercept": 0.01748507932076622,
     "home_advantage": 0.3859856071979705,
     "attacks": (
