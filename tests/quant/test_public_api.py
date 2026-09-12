@@ -1,9 +1,7 @@
 from h2h.quant import DixonColesFitError, DixonColesModel, dixon_coles_tau
-from h2h.quant.dixon_coles import (
-    DixonColesFitError as ModuleFitError,
-    DixonColesModel as ModuleModel,
-    dixon_coles_tau as module_tau,
-)
+from h2h.quant.dixon_coles import DixonColesFitError as ModuleFitError
+from h2h.quant.dixon_coles import DixonColesModel as ModuleModel
+from h2h.quant.dixon_coles import dixon_coles_tau as module_tau
 
 
 def test_public_quant_exports_are_canonical() -> None:
