@@ -36,6 +36,28 @@ def test_valid_market_selection_pairs(market, selection):
     assert quote.selection is selection
 
 
+def test_quote_identity_excludes_observation_attributes():
+    first = make_quote(odd=1.9)
+    second = CanonicalQuote(
+        fixture_id=first.fixture_id,
+        bookmaker_id=first.bookmaker_id,
+        bookmaker_name=first.bookmaker_name,
+        market=first.market,
+        selection=first.selection,
+        odd=2.1,
+        observed_at=datetime(2026, 9, 12, 13, 0, tzinfo=UTC),
+        source="provider-y",
+    )
+
+    assert first.identity == second.identity
+
+
+def test_quote_identity_contains_canonical_dimensions():
+    quote = make_quote(market=Market.BTTS, selection=Selection.YES)
+
+    assert quote.identity == ("fixture-1", 8, Market.BTTS, Selection.YES)
+
+
 @pytest.mark.parametrize(
     ("market", "selection"),
     [
