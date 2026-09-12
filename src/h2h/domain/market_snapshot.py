@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .odds import CanonicalQuote, Market, Selection
+from .quote_validation import validate_quotes
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,23 +24,8 @@ class MarketSnapshot:
             raise ValueError("bookmaker_id must be positive")
         if not isinstance(self.observed_at, datetime):
             raise TypeError("observed_at must be a datetime")
-        if not self.quotes:
-            raise ValueError("quotes must not be empty")
 
-        expected = {
-            Market.OU_25: {Selection.OVER, Selection.UNDER},
-            Market.BTTS: {Selection.YES, Selection.NO},
-        }[self.market]
-        actual = {quote.selection for quote in self.quotes}
-
-        if len(self.quotes) != len(expected) or actual != expected:
-            raise ValueError(
-                f"snapshot must contain exactly one quote per selection in {expected!r}"
-            )
-
-        identities = {quote.identity for quote in self.quotes}
-        if len(identities) != len(self.quotes):
-            raise ValueError("snapshot must not contain duplicate quote identities")
+        validate_quotes(self.quotes)
 
         for quote in self.quotes:
             if quote.fixture_id != self.fixture_id:
