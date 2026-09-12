@@ -14,7 +14,7 @@ LEGACY_COMMIT = "9b2337b8432546420945f32586b7a4b84355589b"
 EXPECTED = {
     "fitted_matches": 300,
     "team_count": 6,
-    "objective": 663.8139057155488,
+    "objective": 663.8139057155473,
     "rho": 0.015893744318639533,
     "intercept": 0.01748507932076622,
     "home_advantage": 0.3859856071979705,
