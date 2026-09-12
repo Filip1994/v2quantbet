@@ -31,7 +31,8 @@ No additional bookmaker should be introduced without an explicit decision.
 
 - `first_seen_quote`: first valid quote observed for a fixture/market/selection.
   This is the provisional opening quote because the system does not know the true market opening time.
-- `peak_quote`: quote associated with the selected signal/peak opportunity.
+- `pick_quote`: valid quote captured at the moment the bulletin/tip is published.
+  This is the actual offered price used as the reference for the pick.
 - `current_quote`: latest valid quote known to the system.
 - `closing_quote`: designated pre-kickoff closing observation.
 
