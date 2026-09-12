@@ -37,6 +37,10 @@ class MarketSnapshot:
                 f"snapshot must contain exactly one quote per selection in {expected!r}"
             )
 
+        identities = {quote.identity for quote in self.quotes}
+        if len(identities) != len(self.quotes):
+            raise ValueError("snapshot must not contain duplicate quote identities")
+
         for quote in self.quotes:
             if quote.fixture_id != self.fixture_id:
                 raise ValueError("all quotes must belong to the same fixture")
