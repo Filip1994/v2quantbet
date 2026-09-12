@@ -1,1 +1,0 @@
-"""QuantBet canonical domain package."""
