@@ -32,9 +32,9 @@ class MarketSnapshot:
         }[self.market]
         actual = {quote.selection for quote in self.quotes}
 
-        if actual != expected:
+        if len(self.quotes) != len(expected) or actual != expected:
             raise ValueError(
-                f"snapshot must contain exactly {expected!r}, got {actual!r}"
+                f"snapshot must contain exactly one quote per selection in {expected!r}"
             )
 
         for quote in self.quotes:
