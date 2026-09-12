@@ -1,7 +1,7 @@
 # Project Status
 
 ## Current task
-C4 — quant API contract and public-interface definition
+C5 — odds domain and canonical quote pipeline
 
 ## Completed
 - A1 — repository skeleton.
@@ -22,10 +22,12 @@ C4 — quant API contract and public-interface definition
 - C2 — deterministic executable golden-master fixture and Dixon–Coles regression tests added.
 - C3 — quant boundary, edge-case, numerical-stability, market-invariant, and determinism tests added; CI verified green at 2026-09-12T21:45:47Z in run 64 (`8cbe89807f5d61087089b7391c28ebc2e3630f0f`).
 - Quant namespace consolidation — canonical `h2h` namespace selected and duplicate domain namespace removed.
+- C4.1 — public quant API exports verified; CI verified green in run 69 (`5b0314abe24a67a009087d786ecf5a3133fb3b0c`).
+- C4.2 — public quant API behavior contract documented and tested, including inputs, outputs, error boundaries, numerical invariants, determinism, and golden-master compatibility; CI verified green at 2026-09-12T22:45:58Z in run 72 (`ea4d1f28215a7988312e843a1d2d4d8712d008bb`).
 - No API keys or secrets included.
 
 ## Next
-C4 — quant API contract and public-interface definition
+C5 — odds domain and canonical quote pipeline
 
 ## Non-negotiable rules
 1. One small task at a time.
