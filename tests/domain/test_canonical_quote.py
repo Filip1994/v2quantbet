@@ -73,15 +73,19 @@ def test_unsupported_market_is_rejected():
         make_quote(market="CORRECT_SCORE")
 
 
-def test_empty_required_text_is_rejected():
+@pytest.mark.parametrize("field", ["fixture_id", "bookmaker_name", "source"])
+def test_required_text_fields_must_not_be_blank(field):
+    values = {
+        "fixture_id": "fixture-1",
+        "bookmaker_id": 8,
+        "bookmaker_name": "Bookmaker",
+        "market": Market.OU_25,
+        "selection": Selection.OVER,
+        "odd": 1.9,
+        "observed_at": OBSERVED_AT,
+        "source": "provider-x",
+    }
+    values[field] = "   "
+
     with pytest.raises(ValueError):
-        CanonicalQuote(
-            fixture_id="",
-            bookmaker_id=8,
-            bookmaker_name="Bookmaker",
-            market=Market.OU_25,
-            selection=Selection.OVER,
-            odd=1.9,
-            observed_at=OBSERVED_AT,
-            source="provider-x",
-        )
+        CanonicalQuote(**values)
