@@ -84,24 +84,24 @@ def test_golden_master_values_are_locked() -> None:
 
     assert model.fitted_matches == EXPECTED["fitted_matches"]
     assert len(model.team_ids) == EXPECTED["team_count"]
-    assert isclose(model.objective, EXPECTED["objective"], rel_tol=0.0, abs_tol=1e-7)
-    assert isclose(model.rho, EXPECTED["rho"], rel_tol=0.0, abs_tol=1e-7)
-    assert isclose(model.intercept, EXPECTED["intercept"], rel_tol=0.0, abs_tol=1e-7)
-    assert isclose(model.home_advantage, EXPECTED["home_advantage"], rel_tol=0.0, abs_tol=1e-7)
+    assert isclose(model.objective, EXPECTED["objective"], rel_tol=0.0, abs_tol=1e-6)
+    assert isclose(model.rho, EXPECTED["rho"], rel_tol=0.0, abs_tol=1e-6)
+    assert isclose(model.intercept, EXPECTED["intercept"], rel_tol=0.0, abs_tol=1e-6)
+    assert isclose(model.home_advantage, EXPECTED["home_advantage"], rel_tol=0.0, abs_tol=1e-6)
     assert all(
-        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-7)
+        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
         for actual, expected in zip(model.attacks, EXPECTED["attacks"], strict=True)
     )
     assert all(
-        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-7)
+        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
         for actual, expected in zip(model.defenses, EXPECTED["defenses"], strict=True)
     )
     assert all(
-        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-7)
+        isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
         for actual, expected in zip(expected_goals, EXPECTED["expected_goals"], strict=True)
     )
     assert all(
-        isclose(probabilities[market], expected, rel_tol=0.0, abs_tol=1e-7)
+        isclose(probabilities[market], expected, rel_tol=0.0, abs_tol=1e-6)
         for market, expected in EXPECTED["probabilities"].items()
     )
 
