@@ -5,7 +5,7 @@ Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implemen
 ## Poslednje ažuriranje
 
 - Datum i vreme: **2026-09-13**
-- Ažurirano: C5.7 validacioni sloj za kolekcije `CanonicalQuote` je implementiran i potvrđen zelenim CI-jem.
+- Ažurirano: C5.8 normalizator je implementiran kao mali provider-neutral sloj; dodati su testovi, a domen i dalje ostaje završna validaciona granica.
 
 ## Trenutno stanje
 
@@ -75,6 +75,15 @@ Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
 - CI run #93 i #94 su završeni sa statusom `success`.
 - CI run #89 je bio neuspešan zbog neispravne tvrdnje o duplicate identity testu; test je uklonjen jer `selection` jeste deo identity-ja.
 
+### 8. Normalizacija quote-a — C5.8
+
+- Dodat je `normalize_quote()` u `src/h2h/domain/quote_normalizer.py`.
+- Uveden je `QuoteNormalizationError` za neuspešnu normalizaciju.
+- Provider-neutral ulaz je mapiran na postojeće `Market` i `Selection` vrednosti.
+- Podržani marketi ostaju samo `OU_25` i `BTTS`; podržan je i eksplicitni alias `TOTALS_2_5` za `OU_25`.
+- Svaki izlaz se konstruiše kao `CanonicalQuote`, pa postojeća domen-validacija ostaje konačna zaštitna granica.
+- Dodati su testovi za validne market/selection kombinacije, alias, nepoznat market, nepoznatu selekciju, nedostajuće polje, nevalidnu kvotu i pogrešan tip ulaza.
+
 ## Važne odluke
 
 - Ne koristiti `peak_quote`.
@@ -82,8 +91,9 @@ Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
 - Ne prosleđivati provider-specific odds strukture direktno u quant sloj.
 - Ne mešati immutable observations sa lifecycle ulogama i izvedenim metrikama.
 - Ne raditi široke refaktore; implementirati jednu malu celinu uz testove.
+- Normalizator ostaje provider-neutral dok ne uvedemo konkretan adapter.
 - Sve buduće izmene ovog dokumenta moraju imati datum i vreme.
 
 ## Sledeći korak
 
-Implementirati mali ugovor za normalizaciju provider-specific odds podataka u `CanonicalQuote` zapise, bez povezivanja sa konkretnim providerom ili persistence slojem. Prvo definisati ulazni oblik, mapiranje market/selection vrednosti, validaciju identiteta i testove za poznate i nepoznate provider vrednosti.
+Proveriti CI za C5.8 i, ako je zelen, napraviti sledeći mali ugovor za formiranje `MarketSnapshot` iz normalizovanih `CanonicalQuote` observacija. Provider adaptere, persistence, workere, lifecycle checkpoint-e i CLV ostaviti za odvojene korake.
