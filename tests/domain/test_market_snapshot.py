@@ -39,10 +39,26 @@ def test_snapshot_requires_both_btts_selections() -> None:
         bookmaker_id=10,
         market=Market.BTTS,
         observed_at=OBSERVED_AT,
-        quotes=(quote(Selection.YES, market=Market.BTTS), quote(Selection.NO, market=Market.BTTS)),
+        quotes=(
+            quote(Selection.YES, market=Market.BTTS),
+            quote(Selection.NO, market=Market.BTTS),
+        ),
     )
 
     assert snapshot.quote_for(Selection.NO).selection is Selection.NO
+
+
+def test_snapshot_quote_for_rejects_missing_selection() -> None:
+    snapshot = MarketSnapshot(
+        fixture_id="fixture-1",
+        bookmaker_id=10,
+        market=Market.OU_25,
+        observed_at=OBSERVED_AT,
+        quotes=(quote(Selection.OVER), quote(Selection.UNDER)),
+    )
+
+    with pytest.raises(KeyError):
+        snapshot.quote_for(Selection.YES)
 
 
 def test_snapshot_rejects_incomplete_market() -> None:
