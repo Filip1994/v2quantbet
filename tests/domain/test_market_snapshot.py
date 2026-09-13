@@ -48,6 +48,22 @@ def test_snapshot_requires_both_btts_selections() -> None:
     assert snapshot.quote_for(Selection.NO).selection is Selection.NO
 
 
+def test_snapshot_can_derive_shared_context_from_quotes() -> None:
+    snapshot = MarketSnapshot.from_quotes(
+        (quote(Selection.OVER), quote(Selection.UNDER))
+    )
+
+    assert snapshot.fixture_id == "fixture-1"
+    assert snapshot.bookmaker_id == 10
+    assert snapshot.market is Market.OU_25
+    assert snapshot.observed_at == OBSERVED_AT
+
+
+def test_snapshot_from_quotes_rejects_empty_input() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        MarketSnapshot.from_quotes(())
+
+
 def test_snapshot_quote_for_rejects_missing_selection() -> None:
     snapshot = MarketSnapshot(
         fixture_id="fixture-1",
