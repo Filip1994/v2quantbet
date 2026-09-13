@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import pytest
 
 from h2h.domain.odds import CanonicalQuote, Market, Selection
-from h2h.odds.quote_deduplication import QuoteConflictError
 from h2h.persistence import InMemoryQuoteRepository
+from h2h.odds.quote_deduplication import QuoteConflictError
 
 
 OBSERVED_AT = datetime(2026, 1, 1, tzinfo=UTC)
