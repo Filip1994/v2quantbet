@@ -1,0 +1,64 @@
+name: API-Football Discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date in YYYY-MM-DD format"
+        required: true
+        type: string
+      league:
+        description: "Optional API-Football league ID"
+        required: false
+        type: string
+      season:
+        description: "Optional season, for example 2026"
+        required: false
+        type: string
+
+jobs:
+  discover-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch fixtures
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          MATCH_DATE: ${{ inputs.date }}
+          LEAGUE_ID: ${{ inputs.league }}
+          SEASON: ${{ inputs.season }}
+        run: |
+          set -euo pipefail
+          test -n "$API_FOOTBALL_KEY"
+          args=(--data-urlencode "date=${MATCH_DATE}")
+          if [ -n "$LEAGUE_ID" ]; then args+=(--data-urlencode "league=${LEAGUE_ID}"); fi
+          if [ -n "$SEASON" ]; then args+=(--data-urlencode "season=${SEASON}"); fi
+          curl --fail-with-body --silent --show-error \
+            --get "https://v3.football.api-sports.io/fixtures" \
+            --header "x-apisports-key: ${API_FOOTBALL_KEY}" \
+            "${args[@]}" \
+            --output fixtures.json
+          python -m json.tool fixtures.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("fixtures.json").read_text())
+          if payload.get("errors"):
+              raise SystemExit(f"API-Football returned errors: {payload['errors']}")
+
+          for item in payload.get("response", []):
+              fixture = item.get("fixture", {})
+              teams = item.get("teams", {})
+              home = teams.get("home", {}).get("name", "?")
+              away = teams.get("away", {}).get("name", "?")
+              print(f"fixture_id={fixture.get('id')} | {home} - {away}")
+
+          print(f"Discovered {len(payload.get('response', []))} fixture(s).")
+          PY
+      - name: Upload raw response
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-football-fixtures-${{ inputs.date }}
+          path: fixtures.json
+          if-no-files-found: error
+          retention-days: 7
