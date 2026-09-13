@@ -4,7 +4,6 @@ from collections.abc import Mapping
 
 from .odds import CanonicalQuote, Market, Selection
 
-
 _MARKET_MAP = {
     "OU_25": Market.OU_25,
     "TOTALS_2_5": Market.OU_25,
