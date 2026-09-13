@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from h2h.domain.odds import Market, Selection
 from h2h.odds import NormalizingProviderQuoteAdapter
 
@@ -32,7 +34,5 @@ def test_normalizing_adapter_returns_canonical_quote() -> None:
 
 
 def test_normalizing_adapter_preserves_normalizer_validation() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="greater than 1.0"):
         NormalizingProviderQuoteAdapter().adapt(payload(odd=1.0))
