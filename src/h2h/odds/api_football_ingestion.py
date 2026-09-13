@@ -1,7 +1,11 @@
-"""Flatten API-Football odds responses into adapter-ready quote payloads."""
+"""Flatten API-Football odds responses into canonical quote inputs."""
 
 from collections.abc import Iterator, Mapping
 from typing import Any
+
+from h2h.domain.odds import CanonicalQuote
+
+from .api_football_adapter import ApiFootballQuoteAdapter
 
 
 def iter_api_football_quote_payloads(
@@ -57,3 +61,16 @@ def iter_api_football_quote_payloads(
                         or bookmaker.get("update")
                         or fixture.get("update"),
                     }
+
+
+def ingest_api_football_odds(
+    response: Mapping[str, Any],
+    *,
+    adapter: ApiFootballQuoteAdapter | None = None,
+) -> tuple[CanonicalQuote, ...]:
+    """Convert a complete API-Football odds response into canonical quotes."""
+    quote_adapter = adapter or ApiFootballQuoteAdapter()
+    return tuple(
+        quote_adapter.adapt(payload)
+        for payload in iter_api_football_quote_payloads(response)
+    )
