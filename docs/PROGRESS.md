@@ -14,11 +14,13 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Formiranje snapshot-a delegira validaciju na `MarketSnapshot.from_quotes()`.
 - API-Football ingestion funkcije su eksportovane kroz `h2h.odds`.
 - Dodati testovi za flattenovanje, ingestiju, snapshot construction i malformed provider grane.
-- CI za aktuelnu celinu je uspešan.
+- Dodat `deduplicate_quotes()` za idempotentno uklanjanje identičnih ponovljenih quote-ova.
+- Dodat `QuoteConflictError` za eksplicitno odbijanje različitih opažanja sa istim canonical identity ključem.
+- Dodat test za identične duplikate, različite identitete i konfliktne quote-ove.
 
 ## Sledeći korak
 
-Dodati eksplicitnu politiku za duplicate/conflict quote-ove na ingestion granici i testirati idempotentnu obradu ponovljenih API-Football zapisa. Nakon toga razmotriti persistence boundary; quant sloj ostaje odvojen od provider-specific struktura.
+Proveriti CI za duplicate/conflict celinu. Nakon toga razmotriti persistence boundary; quant sloj ostaje odvojen od provider-specific struktura.
 
 ## Pravila rada
 
