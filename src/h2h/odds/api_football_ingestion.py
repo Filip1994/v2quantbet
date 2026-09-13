@@ -7,6 +7,7 @@ from h2h.domain.market_snapshot import MarketSnapshot
 from h2h.domain.odds import CanonicalQuote
 
 from .api_football_adapter import ApiFootballQuoteAdapter
+from .quote_deduplication import deduplicate_quotes
 
 
 def iter_api_football_quote_payloads(
@@ -71,7 +72,7 @@ def ingest_api_football_odds(
 ) -> tuple[CanonicalQuote, ...]:
     """Convert a complete API-Football odds response into canonical quotes."""
     quote_adapter = adapter or ApiFootballQuoteAdapter()
-    return tuple(
+    return deduplicate_quotes(
         quote_adapter.adapt(payload)
         for payload in iter_api_football_quote_payloads(response)
     )
