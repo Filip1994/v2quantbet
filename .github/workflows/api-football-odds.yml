@@ -1,0 +1,43 @@
+name: API-Football Odds
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture_id:
+        description: "API-Football fixture ID"
+        required: true
+        type: string
+
+jobs:
+  fetch-odds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch odds JSON
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          FIXTURE_ID: ${{ inputs.fixture_id }}
+        run: |
+          set -euo pipefail
+          test -n "$API_FOOTBALL_KEY"
+          curl --fail-with-body --silent --show-error \
+            --get "https://v3.football.api-sports.io/odds" \
+            --header "x-apisports-key: ${API_FOOTBALL_KEY}" \
+            --data-urlencode "fixture=${FIXTURE_ID}" \
+            --output api-football-odds.json
+          python -m json.tool api-football-odds.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("api-football-odds.json").read_text())
+          if payload.get("errors"):
+              raise SystemExit(f"API-Football returned errors: {payload['errors']}")
+          print(f"Received {payload.get('results', 0)} result(s).")
+          PY
+      - name: Upload raw response
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-football-odds-${{ inputs.fixture_id }}
+          path: api-football-odds.json
+          if-no-files-found: error
+          retention-days: 7
