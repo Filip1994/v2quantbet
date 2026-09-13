@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,7 +31,7 @@ def test_adapts_api_football_btts_quote(adapter: ApiFootballQuoteAdapter) -> Non
     assert quote.market is Market.BTTS
     assert quote.selection is Selection.YES
     assert quote.odd == 2.20
-    assert quote.observed_at == datetime(2026, 9, 13, 20, 3, 16, tzinfo=timezone.utc)
+    assert quote.observed_at == datetime(2026, 9, 13, 20, 3, 16, tzinfo=UTC)
     assert quote.source == "api-football"
 
 
