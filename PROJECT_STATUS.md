@@ -1,42 +1,65 @@
-# Project Status
+# QuantBet — Completed Work
 
-## Current task
-C5 — odds domain and canonical quote pipeline
+Ovaj dokument sadrži samo proverene, do sada završene radove. Ne predstavlja tvrdnju da je ceo sistem production-ready.
 
-## Completed
-- A1 — repository skeleton.
-- A2 — development tooling and minimal test setup.
-- A3.1 — standard local quality checker used by CI.
-- A3.2 — local Python version pinned to 3.11.
-- A3.3 — dependency lockfile (`uv.lock`) created and committed.
-- A3.4 — CI verified with the locked dependency environment.
-- A4.1 — minimal configuration contract implemented and tested.
-- A4.2 — configuration representation redacts database/API secrets and is tested.
-- B1 — Railway PostgreSQL production infrastructure verified.
-- B2 — legacy PostgreSQL application tables identified and removed; empty state verified.
-- B3.1 — PostgreSQL read readiness verified with `SELECT 1`.
-- B3.2 — database identity verified (`railway` / `postgres`).
-- B3.3 — no application tables remain in `public`.
-- B3.4 — Railway PostgreSQL service, replica, and persistent volume verified.
-- C1 baseline — legacy quant reference commit and regression anchors recorded in `docs/quant-golden-master.md`.
-- C2 — deterministic executable golden-master fixture and Dixon–Coles regression tests added.
-- C3 — quant boundary, edge-case, numerical-stability, market-invariant, and determinism tests added; CI verified green at 2026-09-12T21:45:47Z in run 64 (`8cbe89807f5d61087089b7391c28ebc2e3630f0f`).
-- Quant namespace consolidation — canonical `h2h` namespace selected and duplicate domain namespace removed.
-- C4.1 — public quant API exports verified; CI verified green in run 69 (`5b0314abe24a67a009087d786ecf5a3133fb3b0c`).
-- C4.2 — public quant API behavior contract documented and tested, including inputs, outputs, error boundaries, numerical invariants, determinism, and golden-master compatibility; CI verified green at 2026-09-12T22:45:58Z in run 72 (`ea4d1f28215a7988312d2d4d8712d008bb`).
-- C5.1 — canonical market snapshots cover OU_25 and BTTS two-sided invariants; CI verified green in run 77 (`85007ecdee2aea1f08cd854603fe5aeef8c3e553`).
-- C5.2 — canonical quotes reject non-finite odds (`NaN`, positive infinity, and negative infinity); CI verified green in run 78 (`e4bcbbf3181020743423969ea7affc84bbc3be69`).
-- C5.3 — canonical quotes reject blank required text fields; CI verified green at 2026-09-12T23:01:02Z in run 82 (`aba96ea0daf09d9bb7951c93268f610010b8d127`).
-- C5.4 — canonical quote identity and timestamp validation coverage added; CI verified green at 2026-09-12T23:02:54Z in run 84 (`a0dbb402b2240a51a1e58aab6059824eb4bc3731`).
-- No API keys or secrets included.
+## A — Osnovna struktura i alati
 
-## Next
-C5 — odds domain and canonical quote pipeline
+- Postavljen je kanonski repozitorijum `Filip1994/v2quantbet`.
+- Postavljena je osnovna `src`/`tests` struktura.
+- Uvedeni su razvojni alati, minimalni test setup i standardna lokalna provera kvaliteta (`ruff` i `pytest`).
+- Python je lokalno fiksiran na 3.11.
+- Dodat je i zaključan dependency fajl `uv.lock`.
 
-## Non-negotiable rules
-1. One small task at a time.
-2. Tests before moving to the next task.
-3. Quant mathematics is frozen until golden-master tests exist.
-4. Do not introduce odds-provider-specific structures into the quant layer.
-5. Do not put secrets in Git.
-6. No claim of completion without a verified test result.
+## B — Konfiguracija i PostgreSQL infrastruktura
+
+- Implementiran je i testiran minimalni konfiguracioni ugovor.
+- Konfiguraciona reprezentacija rediguje database/API tajne.
+- Verifikovana je Railway PostgreSQL infrastruktura, uključujući servis, repliku i persistent volume.
+- Identifikovane su i uklonjene legacy aplikacione tabele.
+- Verifikovani su read readiness preko `SELECT 1`, identitet baze `railway` / `postgres` i odsustvo aplikacionih tabela u `public` šemi.
+
+> Infrastruktura je proverena, ali aplikacioni persistence sloj još nije implementiran kao celina.
+
+## C — Quant baseline i stabilizacija
+
+- Dixon–Coles model je prenet u V2.
+- Zabeležen je legacy quant referentni commit i dodati regression anchor-i u `docs/quant-golden-master.md`.
+- Dodat je deterministički, izvršivi golden-master fixture/test.
+- Usklađena je zaključana referenca za `rho` sa legacy numeričkim baseline-om.
+- Dodati su testovi za boundary uslove, edge cases, numeričku stabilnost, market invariants i determinism.
+- Javna quant API izloženost i behavior contract su provereni i testirani.
+- Quant namespace je konsolidovan na kanonski `h2h`; uklonjeni su duplirani `quantbet` domain namespace fajlovi.
+- Quant matematika je zaštićena golden-master testovima.
+
+## D — Canonical odds/domain sloj
+
+- Uveden je immutable `CanonicalQuote` za jednu kvotu konkretne selekcije.
+- Definisani su identitet i validacija quote-a: fixture, bookmaker, market, selection, odd, observed timestamp i source.
+- Uveden je `MarketSnapshot` za kompletan snapshot jednog fixture/bookmaker/market/timestamp konteksta.
+- Definisani su market invariants: `OU_25` mora sadržati `OVER` i `UNDER`, a `BTTS` mora sadržati `YES` i `NO`.
+- `opposite_odd` nije dodat u osnovni quote zapis; suprotna kvota se dobija iz druge quote-observacije u snapshot-u.
+- Lifecycle checkpoint-i su definisani kao uloge nad immutable istorijom, a ne kao četiri duplirana osnovna zapisa.
+- Uveden je centralni `validate_quotes()` validator.
+- Dodati su testovi za validne i nevalidne kolekcije, prazne ulaze, mešane fixture-e, nevalidne tipove i market invariants.
+
+## E — Quote normalizacija
+
+- Dodat je provider-neutral `normalize_quote()` sloj.
+- Uveden je `QuoteNormalizationError`.
+- Provider-neutral ulaz se mapira na postojeće `Market` i `Selection` vrednosti.
+- Aktivni scope ostaje `OU_25` (`OVER`, `UNDER`) i `BTTS` (`YES`, `NO`).
+- Podržan je alias `TOTALS_2_5` za `OU_25`.
+- Svaki izlaz konstruiše se kao `CanonicalQuote`, tako da domen-validacija ostaje konačna zaštitna granica.
+- Dodati su testovi za validne kombinacije, alias, nepoznat market/selekciju, nedostajuća polja, nevalidne kvote i pogrešne tipove ulaza.
+
+## F — CI i usvojene odluke
+
+- CI je verifikovan kao zelen nakon quant/domain izmena.
+- Dependency set je ostao minimalan.
+- Nisu dodati API ključevi niti drugi secret-i u Git.
+- Usvojeno je pravilo: jedna mala celina po koraku, testovi pre prelaska dalje, bez provider-specific struktura u quant sloju, bez širokih refaktora bez razloga i bez širenja market scope-a bez eksplicitne odluke.
+- `peak_quote` koncept se ne koristi.
+
+## Trenutna granica
+
+Do sada je izgrađen i testiran quant/domain foundation, uključujući canonical quote validaciju i provider-neutral normalizaciju. Production ingestion, persistence, fixture lifecycle, decision/risk, pick lifecycle, CLV, bulletin, API/dashboard i operativni monitoring još nisu završeni kao end-to-end sistem.
