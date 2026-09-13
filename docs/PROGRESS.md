@@ -14,10 +14,12 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Formiranje snapshot-a delegira validaciju na `MarketSnapshot.from_quotes()`.
 - Dodat je test za kompletan OU_25 par, nekompletan market i prazan input.
 - Builder je eksportovan kroz `h2h.odds`.
+- Definisan je provider-neutral ingestion ugovor u `docs/ODDS_INGESTION_CONTRACT.md`.
+- Precizirani su fixture/bookmaker identity, canonical market mapping, `observed_at`, idempotency, duplicate/conflict i rejection pravila.
 
 ## Sledeći korak
 
-Precizirati i dokumentovati ingestion semantiku pre konkretnog API-Football adaptera: fixture identity, bookmaker identity, market/selection mapping, timestamp polja, duplicate/idempotency pravila i ponašanje za nepotpune provider vrednosti.
+Implementirati i testirati prvi konkretan provider adapter za API-Football, uz reprezentativne payload fixture-e i strogo odvajanje provider-specific strukture od canonical domain sloja.
 
 ## Pravila rada
 
