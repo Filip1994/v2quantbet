@@ -3,6 +3,7 @@
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from h2h.domain.market_snapshot import MarketSnapshot
 from h2h.domain.odds import CanonicalQuote
 
 from .api_football_adapter import ApiFootballQuoteAdapter
@@ -74,3 +75,23 @@ def ingest_api_football_odds(
         quote_adapter.adapt(payload)
         for payload in iter_api_football_quote_payloads(response)
     )
+
+
+def build_api_football_market_snapshots(
+    response: Mapping[str, Any],
+    *,
+    adapter: ApiFootballQuoteAdapter | None = None,
+) -> tuple[MarketSnapshot, ...]:
+    """Build validated snapshots grouped by fixture, bookmaker, market and time."""
+    quotes = ingest_api_football_odds(response, adapter=adapter)
+    groups: dict[tuple[str, int, object, object], list[CanonicalQuote]] = {}
+    for quote in quotes:
+        key = (
+            quote.fixture_id,
+            quote.bookmaker_id,
+            quote.market,
+            quote.observed_at,
+        )
+        groups.setdefault(key, []).append(quote)
+
+    return tuple(MarketSnapshot.from_quotes(group) for group in groups.values())
