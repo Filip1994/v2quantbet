@@ -21,10 +21,13 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat `InMemoryQuoteRepository` sa idempotentnim save ponašanjem i atomskim conflict handling-om.
 - Dodati testovi za čuvanje, query po fixture-u, identične duplikate i konflikt bez parcijalnog upisa.
 - Dodat `docs/PERSISTENCE_BOUNDARY.md` sa pravilima persistence sloja.
+- Dodat `QuoteIngestionService` kao provider-neutral read/write application use case.
+- Dodati testovi za ingestiju, fixture-scoped read i full read ponašanje servisa.
+- Dodat `docs/QUOTE_USE_CASES.md` sa granicama odgovornosti application sloja.
 
 ## Sledeći korak
 
-Proveriti CI za persistence boundary celinu. Nakon toga razmotriti read/write use-case sloj ili database-backed adapter; quant sloj ostaje odvojen od provider-specific struktura.
+Proveriti CI za quote application use-case celinu. Nakon toga razmotriti database-backed adapter; quant sloj ostaje odvojen od provider-specific struktura.
 
 ## Pravila rada
 
