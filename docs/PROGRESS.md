@@ -6,34 +6,33 @@ Ovaj dokument sadrži samo ono što je još potrebno da bi QuantBet postao produ
 
 Quant/domain foundation je izgrađen i testiran: Dixon–Coles baseline, golden-master zaštita, javni quant API, canonical quote modeli, market snapshot validacija i provider-neutral quote normalizacija.
 
+Provider-neutral quote adapter contract je sada definisan, eksportovan i pokriven testovima. Poslednji CI run za ovu celinu je `completed` / `success`.
+
 Production sistem još nije završen kao end-to-end celina.
 
 ## 1. Završiti canonical odds pipeline
 
-- Završiti ugovor za formiranje `MarketSnapshot` iz normalizovanih `CanonicalQuote` observacija.
-- Definisati i testirati provider adapter interfejs.
-- Uvesti konkretan API-Football adapter tek iza provider-neutral boundary-ja.
-- Precizno definisati:
+- [x] Definisan provider-neutral `ProviderQuoteAdapter` contract.
+- [x] Dodata početna `NormalizingProviderQuoteAdapter` implementacija.
+- [x] Dodat test koji proverava canonical quote rezultat i propagaciju validacije.
+- [ ] Završiti ugovor za formiranje `MarketSnapshot` iz normalizovanih `CanonicalQuote` observacija.
+- [ ] Uvesti konkretan API-Football adapter tek iza provider-neutral boundary-ja.
+- [ ] Precizno definisati:
   - fixture identity;
   - bookmaker identity;
   - market/selection mapping;
   - `observed_at`, provider timestamp i `ingested_at` semantiku;
   - duplicate observation i idempotency pravila;
   - ponašanje za nepoznate ili nepotpune provider vrednosti.
-- Dodati integration testove sa reprezentativnim provider payload-ima.
+- [ ] Dodati integration testove sa reprezentativnim provider payload-ima.
 
 ## 2. Implementirati persistence sloj
 
 - Definisati PostgreSQL schema i migracije.
 - Implementirati repository interfejse i PostgreSQL adapter.
 - Sačuvati immutable odds observations bez gubitka istorije.
-- Omogućiti efikasno čitanje:
-  - trenutne kvote;
-  - `first_seen` kvote;
-  - istorije kvota;
-  - poslednje pre-kickoff kvote;
-  - market snapshot-a.
-- Uvesti unique constraints/indexe koji podržavaju identity i idempotentni ingestion.
+- Omogućiti efikasno čitanje trenutnih, istorijskih i closing kvota.
+- Uvesti unique constraints/indexe za identity i idempotentni ingestion.
 - Dodati repository/integration testove protiv PostgreSQL-a.
 - Definisati backup, restore i migration procedure.
 
@@ -51,12 +50,7 @@ Production sistem još nije završen kao end-to-end celina.
 
 - Povezati validne market snapshot-e sa quant modelom.
 - Definisati precizan obračun implied probability i value.
-- Razdvojiti:
-  - model probability;
-  - implied probability;
-  - value;
-  - expected CLV;
-  - realized CLV.
+- Razdvojiti model probability, implied probability, value, expected CLV i realized CLV.
 - Uvesti verzionisanje modela i konfiguracije.
 - Dodati testove za granice, rounding, determinism i market-specific pravila.
 
@@ -64,27 +58,14 @@ Production sistem još nije završen kao end-to-end celina.
 
 - Definisati decision contract za prihvatanje/odbijanje kandidata.
 - Implementirati eksplicitne risk filtere i limite.
-- Definisati immutable pick zapis koji čuva najmanje:
-  - fixture i market identitet;
-  - model/config verziju;
-  - model probability;
-  - odds i value u trenutku pick-a;
-  - `pick_quote` referencu;
-  - expected-CLV metod/verziju;
-  - decision/risk metadata.
+- Definisati immutable pick zapis sa model/config verzijom, kvotom, value i risk metapodacima.
 - Uvesti idempotency i zaštitu od duplog kreiranja pick-a.
 - Dodati unit i integration testove za decision/risk/pick lifecycle.
 
 ## 6. Implementirati praćenje pick-a i CLV
 
 - Uvesti periodično praćenje kvota nakon objave pick-a.
-- Definisati cadence i ponašanje pri nedostupnosti podataka.
-- Iz immutable odds history izvesti:
-  - `first_seen_quote`;
-  - `pick_quote`;
-  - `current_quote`;
-  - `closing_quote`.
-- Definisati validnu closing referencu i cutoff pravilo.
+- Definisati closing cutoff i validnu closing referencu.
 - Implementirati realized CLV tek nakon dostupne i validne closing reference.
 - Obezbediti audit trail i reproducibilan obračun.
 
@@ -93,7 +74,7 @@ Production sistem još nije završen kao end-to-end celina.
 - Implementirati dnevni bulletin sa jasnim statusima, timestamp-ima i verzijama.
 - Definisati read/query service sloj iznad persistence-a.
 - Implementirati API za fixture-e, market state, picks, odds history, CLV i health status.
-- Dashboard napraviti kao read-side klijent API-ja, ne kao deo ingestion logike.
+- Dashboard napraviti kao read-side klijent API-ja.
 - Dodati API contract testove i autentikaciju/autorizaciju gde je potrebna.
 
 ## 8. Operativna production spremnost
