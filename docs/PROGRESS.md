@@ -24,10 +24,13 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat `QuoteIngestionService` kao provider-neutral read/write application use case.
 - Dodati testovi za ingestiju, fixture-scoped read i full read ponašanje servisa.
 - Dodat `docs/QUOTE_USE_CASES.md` sa granicama odgovornosti application sloja.
+- Dodat `SQLiteQuoteRepository` sa automatskom šemom, round-trip rekonstrukcijom, idempotentnim upisom i atomskim odbijanjem konflikata.
+- Dodati testovi za SQLite round-trip, query po fixture-u, idempotentne duplikate, atomic conflict handling i ponovno otvaranje baze.
+- Dodat `docs/SQLITE_PERSISTENCE.md` sa ugovorom i načinom korišćenja SQLite adaptera.
 
 ## Sledeći korak
 
-Proveriti CI za quote application use-case celinu. Nakon toga razmotriti database-backed adapter; quant sloj ostaje odvojen od provider-specific struktura.
+Proveriti CI za SQLite persistence celinu. Nakon zelenog CI-ja razmotriti integraciju repository adaptera u širi application composition sloj.
 
 ## Pravila rada
 
