@@ -1,99 +1,144 @@
-# QuantBet — Progress Log
+# QuantBet — Production Readiness Roadmap
 
-Ovaj dokument beleži usvojene odluke, izvršene korake i sledeći mali implementacioni zadatak. Ne predstavlja tvrdnju da je ceo roadmap završen.
+Ovaj dokument sadrži samo ono što je još potrebno da bi QuantBet postao production-ready u skladu sa `docs/QUANTBET_GOALS.md`.
 
-## Poslednje ažuriranje
+## Trenutna granica
 
-- Datum i vreme: **2026-09-13**
-- Ažurirano: C5.8 normalizator je implementiran kao mali provider-neutral sloj; dodati su testovi, a domen i dalje ostaje završna validaciona granica.
+Quant/domain foundation je izgrađen i testiran: Dixon–Coles baseline, golden-master zaštita, javni quant API, canonical quote modeli, market snapshot validacija i provider-neutral quote normalizacija.
 
-## Trenutno stanje
+Production sistem još nije završen kao end-to-end celina.
 
-- Rad se vodi na repozitorijumu `Filip1994/v2quantbet`, grana `main`.
-- V2 je trenutno arhitektonski i quant baseline; produkcioni ingestion, persistence i lifecycle slojevi još nisu implementirani kao celina.
-- Legacy `Filip1994/h2h` koristi se samo kao referentni materijal, ne kao arhitektonski šablon.
+## 1. Završiti canonical odds pipeline
 
-## Šta je urađeno
+- Završiti ugovor za formiranje `MarketSnapshot` iz normalizovanih `CanonicalQuote` observacija.
+- Definisati i testirati provider adapter interfejs.
+- Uvesti konkretan API-Football adapter tek iza provider-neutral boundary-ja.
+- Precizno definisati:
+  - fixture identity;
+  - bookmaker identity;
+  - market/selection mapping;
+  - `observed_at`, provider timestamp i `ingested_at` semantiku;
+  - duplicate observation i idempotency pravila;
+  - ponašanje za nepoznate ili nepotpune provider vrednosti.
+- Dodati integration testove sa reprezentativnim provider payload-ima.
 
-### 1. Quant baseline
+## 2. Implementirati persistence sloj
 
-- Dixon–Coles model je prenet u V2.
-- Matematička logika je proverena prema legacy implementaciji.
-- Dodat je golden-master regression test.
-- Baseline je zaključan testovima i verzijama NumPy/SciPy.
+- Definisati PostgreSQL schema i migracije.
+- Implementirati repository interfejse i PostgreSQL adapter.
+- Sačuvati immutable odds observations bez gubitka istorije.
+- Omogućiti efikasno čitanje:
+  - trenutne kvote;
+  - `first_seen` kvote;
+  - istorije kvota;
+  - poslednje pre-kickoff kvote;
+  - market snapshot-a.
+- Uvesti unique constraints/indexe koji podržavaju identity i idempotentni ingestion.
+- Dodati repository/integration testove protiv PostgreSQL-a.
+- Definisati backup, restore i migration procedure.
 
-### 2. Product ciljevi i CLV semantika
+## 3. Implementirati fixture i odds ingestion
 
-- Dokumentovani su ciljevi sistema u `docs/QUANTBET_GOALS.md`.
-- Razdvojeni su value, expected CLV i realized CLV.
-- Realized CLV se računa naknadno, uz validnu closing referencu.
-- Definisani su odds checkpoint-i: `first_seen_quote`, `pick_quote`, `current_quote` i `closing_quote`.
+- Preuzimati relevantne fixture-e za narednih 72 sata.
+- Uvesti scheduling i kontrolisani polling.
+- Razdvojiti fixture ingestion od odds ingestion-a.
+- Uvesti timeout, retry, backoff i rate-limit ponašanje.
+- Uvesti idempotentno ponavljanje job-ova.
+- Sačuvati raw provider response ili definisati odvojenu arhivsku strategiju.
+- Uvesti data-quality kontrole za stale, missing i contradictory podatke.
 
-### 3. Arhitektura
+## 4. Implementirati quant evaluation i value engine
 
-- Planirani tok je:
+- Povezati validne market snapshot-e sa quant modelom.
+- Definisati precizan obračun implied probability i value.
+- Razdvojiti:
+  - model probability;
+  - implied probability;
+  - value;
+  - expected CLV;
+  - realized CLV.
+- Uvesti verzionisanje modela i konfiguracije.
+- Dodati testove za granice, rounding, determinism i market-specific pravila.
 
-  `Provider -> Raw Odds -> Normalizer -> Canonical Quote -> Validation -> Market Snapshot -> Quant -> Decision -> Risk -> Bet lifecycle -> Settlement`
+## 5. Implementirati decision, risk i pick registry
 
-- `pick_quote` znači validnu kvotu u trenutku objave tipa/biltena i predstavlja referentnu ponuđenu cenu za pick.
+- Definisati decision contract za prihvatanje/odbijanje kandidata.
+- Implementirati eksplicitne risk filtere i limite.
+- Definisati immutable pick zapis koji čuva najmanje:
+  - fixture i market identitet;
+  - model/config verziju;
+  - model probability;
+  - odds i value u trenutku pick-a;
+  - `pick_quote` referencu;
+  - expected-CLV metod/verziju;
+  - decision/risk metadata.
+- Uvesti idempotency i zaštitu od duplog kreiranja pick-a.
+- Dodati unit i integration testove za decision/risk/pick lifecycle.
 
-### 4. Scope tržišta
+## 6. Implementirati praćenje pick-a i CLV
 
-Za sada ostajemo striktno na dva tržišta:
+- Uvesti periodično praćenje kvota nakon objave pick-a.
+- Definisati cadence i ponašanje pri nedostupnosti podataka.
+- Iz immutable odds history izvesti:
+  - `first_seen_quote`;
+  - `pick_quote`;
+  - `current_quote`;
+  - `closing_quote`.
+- Definisati validnu closing referencu i cutoff pravilo.
+- Implementirati realized CLV tek nakon dostupne i validne closing reference.
+- Obezbediti audit trail i reproducibilan obračun.
 
-- `OU_25` — ukupno golova 2.5, selekcije `OVER` i `UNDER`;
-- `BTTS` — oba tima daju gol, selekcije `YES` i `NO`.
+## 7. Bulletin i read-side API
 
-Dodatna tržišta nisu deo trenutne implementacije.
+- Implementirati dnevni bulletin sa jasnim statusima, timestamp-ima i verzijama.
+- Definisati read/query service sloj iznad persistence-a.
+- Implementirati API za fixture-e, market state, picks, odds history, CLV i health status.
+- Dashboard napraviti kao read-side klijent API-ja, ne kao deo ingestion logike.
+- Dodati API contract testove i autentikaciju/autorizaciju gde je potrebna.
 
-### 5. Plan proširenja tržišta — nije aktivni scope
+## 8. Operativna production spremnost
 
-1. Faza A — sada: `OU_25` i `BTTS`.
-2. Faza B — nakon stabilizacije osnovnog ugovora i podataka: `OU_15` i `OU_35`.
-3. Faza C — nakon provere modela za tri ishoda: `MATCH_RESULT` sa selekcijama `HOME`, `DRAW`, `AWAY`.
-4. Asian Handicap, corners, cards, player props i slična tržišta ostaju van plana dok ne postoji poseban model i dovoljan kvalitet podataka.
+- Implementirati health/readiness endpoint-e.
+- Uvesti strukturisane logove, metrike i error reporting.
+- Pratiti ingestion lag, provider errors, stale data, job failures i database health.
+- Uvesti alerting za kritične kvarove.
+- Definisati secrets/config management van Git-a.
+- Uvesti deployment proceduru, rollback i migracije bez gubitka podataka.
+- Proveriti Railway resource limits, persistent storage i backup/restore.
+- Dodati end-to-end smoke test u deployment pipeline.
+- Definisati runbook za oporavak od provider, worker i database problema.
 
-Svako aktiviranje nove faze zahteva novu eksplicitnu odluku.
+## 9. Production acceptance kriterijumi
 
-### 6. Kanonski modeli
+Pre proglašenja production readiness-a moraju biti dokazani:
 
-- `CanonicalQuote` je immutable zapis jedne kvote konkretne selekcije.
-- Sadrži identifikator utakmice i kladionice, tržište, selekciju, kvotu, vreme opažanja i izvor.
-- `MarketSnapshot` predstavlja kompletan binarni snapshot za jedan fixture, bookmaker, market i timestamp.
-- Za `OU_25` snapshot mora sadržati tačno `OVER` i `UNDER`.
-- Za `BTTS` snapshot mora sadržati tačno `YES` i `NO`.
-- `opposite_odd` nije deo osnovnog `CanonicalQuote` zapisa; suprotna kvota se dobija iz odgovarajuće druge quote-observacije u snapshot-u.
-- Lifecycle checkpoint-i su uloge nad istorijom immutable quote-observacija, a ne četiri različita osnovna zapisa.
+- end-to-end tok od provider payload-a do sačuvanog canonical snapshot-a;
+- reproducibilno čitanje odds istorije;
+- idempotentan ingestion i bezbedni retry-i;
+- validan pick lifecycle;
+- reproducibilan realized CLV obračun;
+- testirana PostgreSQL migracija i restore procedura;
+- funkcionalni health/metrics/alerting mehanizmi;
+- zeleni unit, integration i end-to-end testovi;
+- dokumentovan deployment i incident recovery postupak;
+- bez tajni u repozitorijumu.
 
-### 7. Validacioni sloj — C5.7
+## Redosled rada
 
-- Dodat je `validate_quotes()` u `src/h2h/domain/quote_validation.py`.
-- Validator zahteva nepraznu kolekciju isključivo `CanonicalQuote` objekata.
-- Proverava tačno kompletan skup selekcija za podržano tržište i zajednički fixture, bookmaker, market i timestamp.
-- `MarketSnapshot` koristi validator pre daljih provera konteksta.
-- Dodati su testovi za validnu kolekciju, praznu kolekciju, mešani fixture i nevalidne tipove.
-- CI run #93 i #94 su završeni sa statusom `success`.
-- CI run #89 je bio neuspešan zbog neispravne tvrdnje o duplicate identity testu; test je uklonjen jer `selection` jeste deo identity-ja.
+1. MarketSnapshot contract.
+2. Provider adapter contract i test payload-i.
+3. PostgreSQL schema, migracije i repository.
+4. Fixture/odds ingestion sa retry/idempotency pravilima.
+5. Quant evaluation i value engine.
+6. Decision/risk/pick registry.
+7. Pick monitoring i realized CLV.
+8. Bulletin i API.
+9. Observability, deployment hardening i production acceptance testovi.
 
-### 8. Normalizacija quote-a — C5.8
+## Pravila za nastavak
 
-- Dodat je `normalize_quote()` u `src/h2h/domain/quote_normalizer.py`.
-- Uveden je `QuoteNormalizationError` za neuspešnu normalizaciju.
-- Provider-neutral ulaz je mapiran na postojeće `Market` i `Selection` vrednosti.
-- Podržani marketi ostaju samo `OU_25` i `BTTS`; podržan je i eksplicitni alias `TOTALS_2_5` za `OU_25`.
-- Svaki izlaz se konstruiše kao `CanonicalQuote`, pa postojeća domen-validacija ostaje konačna zaštitna granica.
-- Dodati su testovi za validne market/selection kombinacije, alias, nepoznat market, nepoznatu selekciju, nedostajuće polje, nevalidnu kvotu i pogrešan tip ulaza.
-
-## Važne odluke
-
-- Ne koristiti `peak_quote`.
-- Ne širiti aktivni scope tržišta bez eksplicitnog dogovora.
-- Ne prosleđivati provider-specific odds strukture direktno u quant sloj.
-- Ne mešati immutable observations sa lifecycle ulogama i izvedenim metrikama.
-- Ne raditi široke refaktore; implementirati jednu malu celinu uz testove.
-- Normalizator ostaje provider-neutral dok ne uvedemo konkretan adapter.
-- Sve buduće izmene ovog dokumenta moraju imati datum i vreme.
-
-## Sledeći korak
-
-Proveriti CI za C5.8 i, ako je zelen, napraviti sledeći mali ugovor za formiranje `MarketSnapshot` iz normalizovanih `CanonicalQuote` observacija. Provider adaptere, persistence, workere, lifecycle checkpoint-e i CLV ostaviti za odvojene korake.
+- Jedna mala implementaciona celina po koraku.
+- Testovi i CI verifikacija pre prelaska na sledeći korak.
+- Quant matematika ostaje zaključana bez nove golden-master/regresione verifikacije.
+- Provider-specific strukture ne ulaze u quant sloj.
+- Research infrastruktura i dodatna tržišta ostaju van aktivnog production scope-a dok ne postoji eksplicitna odluka.
