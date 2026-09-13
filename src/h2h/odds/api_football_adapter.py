@@ -85,4 +85,4 @@ class ApiFootballQuoteAdapter:
     def _parse_datetime(value: Any) -> datetime:
         if not isinstance(value, str) or not value.strip():
             raise TypeError("observed_at or update must be an ISO datetime string")
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
