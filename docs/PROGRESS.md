@@ -17,10 +17,14 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat `deduplicate_quotes()` za idempotentno uklanjanje identičnih ponovljenih quote-ova.
 - Dodat `QuoteConflictError` za eksplicitno odbijanje različitih opažanja sa istim canonical identity ključem.
 - Dodat test za identične duplikate, različite identitete i konfliktne quote-ove.
+- Dodat provider-neutral `QuoteRepository` contract.
+- Dodat `InMemoryQuoteRepository` sa idempotentnim save ponašanjem i atomskim conflict handling-om.
+- Dodati testovi za čuvanje, query po fixture-u, identične duplikate i konflikt bez parcijalnog upisa.
+- Dodat `docs/PERSISTENCE_BOUNDARY.md` sa pravilima persistence sloja.
 
 ## Sledeći korak
 
-Proveriti CI za duplicate/conflict celinu. Nakon toga razmotriti persistence boundary; quant sloj ostaje odvojen od provider-specific struktura.
+Proveriti CI za persistence boundary celinu. Nakon toga razmotriti read/write use-case sloj ili database-backed adapter; quant sloj ostaje odvojen od provider-specific struktura.
 
 ## Pravila rada
 
