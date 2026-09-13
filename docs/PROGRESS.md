@@ -6,6 +6,8 @@ Quant/domain foundation je izgrađen i testiran: Dixon–Coles baseline, golden-
 
 Provider-neutral quote adapter contract je definisan, eksportovan i pokriven testovima. CI za tu celinu je uspešan.
 
+Prvi API-Football quote adapter je implementiran na osnovu stvarnog `/odds` odgovora, uz izolovane adapter testove. CI verifikacija ove nove celine je još potrebna.
+
 ## Završeno u aktuelnoj celini
 
 - Dodat `build_market_snapshot()` kao mali orchestration sloj između provider payload-a i domena.
@@ -16,10 +18,13 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Builder je eksportovan kroz `h2h.odds`.
 - Definisan je provider-neutral ingestion ugovor u `docs/ODDS_INGESTION_CONTRACT.md`.
 - Precizirani su fixture/bookmaker identity, canonical market mapping, `observed_at`, idempotency, duplicate/conflict i rejection pravila.
+- Dodat `ApiFootballQuoteAdapter` za BTTS i OU 2.5 quote vrednosti.
+- Dodat test za stvarni API-Football format: fixture, bookmaker, bet, value i update polja.
+- Adapter je eksportovan kroz `h2h.odds`.
 
 ## Sledeći korak
 
-Implementirati i testirati prvi konkretan provider adapter za API-Football, uz reprezentativne payload fixture-e i strogo odvajanje provider-specific strukture od canonical domain sloja.
+Pokrenuti i potvrditi CI za API-Football adapter, zatim dodati ingestion funkciju koja iz kompletnog API-Football `/odds` odgovora izdvaja podržane bookmaker/bet/value kombinacije.
 
 ## Pravila rada
 
