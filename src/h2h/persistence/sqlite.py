@@ -1,9 +1,9 @@
 """SQLite-backed persistence for canonical quote observations."""
 
+import sqlite3
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-import sqlite3
 
 from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.odds.quote_deduplication import QuoteConflictError
