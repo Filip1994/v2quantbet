@@ -1,6 +1,7 @@
 """SQLite-backed persistence for canonical quote observations."""
 
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 import sqlite3
 
@@ -102,6 +103,6 @@ class SQLiteQuoteRepository:
             market=Market(row["market"]),
             selection=Selection(row["selection"]),
             odd=row["odd"],
-            observed_at=__import__("datetime").datetime.fromisoformat(row["observed_at"]),
+            observed_at=datetime.fromisoformat(row["observed_at"]),
             source=row["source"],
         )
