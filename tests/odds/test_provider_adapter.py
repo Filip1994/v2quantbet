@@ -5,7 +5,6 @@ import pytest
 from h2h.domain.odds import Market, Selection
 from h2h.odds import NormalizingProviderQuoteAdapter
 
-
 OBSERVED_AT = datetime(2026, 9, 13, 10, 0, tzinfo=UTC)
 
 
