@@ -1,5 +1,6 @@
 """Validated market snapshots built from canonical quote observations."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -36,6 +37,22 @@ class MarketSnapshot:
                 raise ValueError("all quotes must belong to the same market")
             if quote.observed_at != self.observed_at:
                 raise ValueError("all quotes must have the snapshot timestamp")
+
+    @classmethod
+    def from_quotes(cls, quotes: Iterable[CanonicalQuote]) -> "MarketSnapshot":
+        """Build a snapshot by deriving its shared context from canonical quotes."""
+        normalized = tuple(quotes)
+        if not normalized:
+            raise ValueError("quotes must not be empty")
+
+        first = normalized[0]
+        return cls(
+            fixture_id=first.fixture_id,
+            bookmaker_id=first.bookmaker_id,
+            market=first.market,
+            observed_at=first.observed_at,
+            quotes=normalized,
+        )
 
     def quote_for(self, selection: Selection) -> CanonicalQuote:
         """Return the quote for a selection in this snapshot."""
