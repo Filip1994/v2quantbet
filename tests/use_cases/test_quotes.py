@@ -4,7 +4,6 @@ from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.persistence import InMemoryQuoteRepository
 from h2h.use_cases import QuoteIngestionService
 
-
 OBSERVED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
