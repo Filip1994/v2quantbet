@@ -45,17 +45,17 @@ class FakeCursor:
 
     def execute(self, sql: str, params=None) -> None:
         self.connection.executed.append((sql, params))
-        if "FROM quote_series WHERE series_id" in sql:
+        if sql.startswith("SELECT 1 FROM quote_series"):
+            self.result = (1,) if params[0] in self.connection.series_by_id else None
+        elif "FROM quote_series WHERE series_id" in sql:
             self.result = self.connection.series_by_id.get(params[0])
         elif "FROM quote_snapshots WHERE snapshot_id" in sql:
             self.result = self.connection.snapshots_by_id.get(params[0])
-        elif sql.startswith("SELECT 1 FROM quote_series"):
-            self.result = (1,) if params[0] in self.connection.series_by_id else None
         elif sql.startswith("INSERT INTO quote_series"):
-            self.connection.series_by_id[params[0]] = params
+            self.connection.series_by_id[params[0]] = params[1:]
             self.result = None
         elif sql.startswith("INSERT INTO quote_snapshots"):
-            self.connection.snapshots_by_id[params[0]] = params
+            self.connection.snapshots_by_id[params[0]] = params[1:]
             self.result = None
 
     def fetchone(self):
@@ -96,10 +96,24 @@ def test_row_conversion_reconstructs_domain_objects() -> None:
     snapshot = make_snapshot()
 
     restored_series = PostgreSQLQuoteHistoryRepository._row_to_series(
-        (series.series_id, series.fixture_id, series.bookmaker_id, series.market.value, series.selection.value, series.created_at)
+        (
+            series.series_id,
+            series.fixture_id,
+            series.bookmaker_id,
+            series.market.value,
+            series.selection.value,
+            series.created_at,
+        )
     )
     restored_snapshot = PostgreSQLQuoteHistoryRepository._row_to_snapshot(
-        (snapshot.snapshot_id, snapshot.series_id, snapshot.odd, snapshot.observed_at, snapshot.captured_at, snapshot.source)
+        (
+            snapshot.snapshot_id,
+            snapshot.series_id,
+            snapshot.odd,
+            snapshot.observed_at,
+            snapshot.captured_at,
+            snapshot.source,
+        )
     )
 
     assert restored_series == series
