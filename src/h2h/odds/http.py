@@ -54,7 +54,7 @@ class UrllibJsonTransport:
         request_headers = {"User-Agent": self.user_agent, **(headers or {})}
         request = Request(url, headers=request_headers, method="GET")
         try:
-            with urlopen(request, timeout=timeout) as response:  # noqa: S310
+            with urlopen(request, timeout=timeout) as response:
                 raw = response.read()
         except TimeoutError as exc:
             raise TransportTimeoutError(f"request timed out: {url}") from exc
