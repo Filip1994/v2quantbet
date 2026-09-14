@@ -10,6 +10,7 @@ from .api_football_ingestion import (
 from .api_football_service import ApiFootballOddsService
 from .provider_adapter import NormalizingProviderQuoteAdapter, ProviderQuoteAdapter
 from .quote_deduplication import QuoteConflictError, deduplicate_quotes
+from .retry import RetryingJsonTransport
 from .snapshot_builder import build_market_snapshot
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "NormalizingProviderQuoteAdapter",
     "ProviderQuoteAdapter",
     "QuoteConflictError",
+    "RetryingJsonTransport",
     "build_api_football_market_snapshots",
     "build_market_snapshot",
     "deduplicate_quotes",
