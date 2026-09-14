@@ -22,4 +22,5 @@ jobs:
       - name: Lint
         run: uv run python -m ruff check .
       - name: Tests
+        if: always()
         run: uv run python -m pytest
