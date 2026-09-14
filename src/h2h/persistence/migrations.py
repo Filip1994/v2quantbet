@@ -1,7 +1,7 @@
 """Small, provider-neutral migration runner for SQL files."""
 
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 
 
 _MIGRATION_TABLE_SQL = """
