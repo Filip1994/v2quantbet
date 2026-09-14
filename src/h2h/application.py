@@ -7,6 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from h2h.config import ApplicationSettings
 from h2h.persistence import SQLiteQuoteRepository
 from h2h.use_cases import QuoteIngestionService
 
@@ -43,6 +44,13 @@ def build_sqlite_quote_application(
         repository=repository,
         service=QuoteIngestionService(repository),
     )
+
+
+def build_sqlite_quote_application_from_settings(
+    settings: ApplicationSettings,
+) -> SQLiteQuoteApplication:
+    """Build the application from validated infrastructure settings."""
+    return build_sqlite_quote_application(settings.database_path)
 
 
 def build_sqlite_quote_service(database_path: str | Path) -> QuoteIngestionService:
