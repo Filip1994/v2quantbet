@@ -21,6 +21,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `RetryingJsonTransport` sa ograničenim brojem pokušaja i eksponencijalnim backoff-om.
 - HTTP 429 klasifikacija kroz `TransportRateLimitError` sa očuvanim `Retry-After` intervalom.
 - Dnevni `DailyApiBudget` sa operativnom rezervom i `BudgetedJsonTransport` zaštitom.
+- Fixture-level in-memory TTL cache za API-Football odgovore, sa eksplicitnim invalidiranjem.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -34,10 +35,11 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `docs/API_FOOTBALL_SERVICE.md`
 - `docs/RETRY_POLICY.md`
 - `docs/API_BUDGET.md`
+- `docs/API_FOOTBALL_CACHE.md`
 
 ## Sledeći korak
 
-Uvesti keširanje odgovora po `fixture_id` kako bi se dodatno smanjila potrošnja API kvote, uz eksplicitnu TTL politiku i testove.
+Uvesti observability boundary: strukturisano logovanje API poziva, cache hit/miss, retry pokušaja, rate-limit događaja i odbijenih budget poziva, bez zapisivanja API ključa ili poverljivog payload-a.
 
 ## Pravila rada
 
