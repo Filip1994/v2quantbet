@@ -66,3 +66,11 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Документовано је да Durable Volume није backup PostgreSQL-а и да SQLite није део циљане production архитектуре.
 - Тестови, CI, backup/restore и production worker startup нису потврђени овом документационом изменом.
 - Commit: `70eed0e8458331a26644d7d843a487e8a0b9808b`.
+
+## 2026-09-15T04:00:00+02:00 — PostgreSQL runtime dependency commit i Durable Barrel terminologija
+
+- `pyproject.toml` i `uv.lock` sada eksplicitno sadrže PostgreSQL runtime dependency `psycopg[binary]`.
+- Lokalna verifikacija nakon instalacije: `uv run pytest` → `208 passed`; `uv run ruff check .` → `All checks passed!`.
+- Dependency promena je commitovana i pushovana na `main` kao `8daf196`.
+- `docs/DATA_STORAGE_ARCHITECTURE.md` je ispravljen tako da koristi tačan Railway termin **Durable Barrel** umesto prethodnog pogrešnog naziva Durable Volume.
+- Ova dokumentaciona korekcija je commitovana kao `16d2572`.
