@@ -53,7 +53,13 @@ class FakeCursor:
         elif "FROM quote_series WHERE fixture_id" in sql:
             self.rows = [row for row in self.connection.series_rows if row[1] == params[0]]
         elif "FROM quote_snapshots WHERE snapshot_id" in sql:
-            self.result = self.connection.snapshots_by_id.get(params[0])
+            stored = self.connection.snapshots_by_id.get(params[0])
+            if stored is None:
+                self.result = None
+            elif "SELECT snapshot_id" in sql:
+                self.result = (params[0], *stored)
+            else:
+                self.result = stored
         elif "FROM quote_snapshots WHERE series_id" in sql:
             self.rows = [row for row in self.connection.snapshot_rows if row[1] == params[0]]
         elif sql.startswith("INSERT INTO quote_series"):
