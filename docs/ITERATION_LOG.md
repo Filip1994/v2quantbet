@@ -50,7 +50,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - `QuoteSnapshot` čuva jednu nepromenljivu opservaciju sa `observed_at`, `captured_at`, kvotom i izvorom.
 - Uvedena je validacija obaveznih identifikatora, kvote i timezone-aware timestamp-a.
 - Dodat je `tests/domain/test_quote_history.py` sa testovima za validaciju i immutability.
-- Pokušaj ažурирања `src/h2h/domain/__init__.py` nije uspeo zbog SHA mismatch-a; export modela još nije završen.
+- Pokušaj ažурирања `src/h2h/domain/__init__.py` није успео због SHA mismatch-а; export modela još nije završen.
 - CI nije proveravan u ovoj iteraciji.
 - Commit modela: `c0c52785afd82f1502800b500dc04f3a92f638f1`.
 - Commit testova: `013d384d8543888e11ab12eacd6f38518d4d9726`.
@@ -74,3 +74,15 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Pokrivena je atomicnost pri konfliktu snapshot ID-ja.
 - Testovi i CI još nisu provereni.
 - Commit testova: `b79241889f80a469a0c803dd11826c0f2d57f236`.
+
+## 2026-09-14T15:00:00+02:00 — Ojačan ugovor quote history repository-ja
+
+- `QuoteHistoryRepository` sada eksplicitno izlaže `series_for_fixture`.
+- Snapshot može biti upisan samo ako prethodno postoji odgovarajući `QuoteSeries`.
+- Dodata je zaštita od upisa snapshot-a sa nepoznatim `series_id`.
+- Očuvana je atomicnost batch upisa: nijedan snapshot se ne upisuje ako batch sadrži konflikt ili nepoznatu seriju.
+- Testovi su usklađeni sa novim ugovorom i prošireni proverom nepoznate serije i pretrage serija po fixture-u.
+- Izmenjeni fajlovi: `src/h2h/persistence/quote_history.py`, `tests/persistence/test_quote_history.py`.
+- Testovi i CI nisu izvršeni u ovom okruženju.
+- Commit implementacije: `0c5b230d8b254723f140f5149a4576529fd7ed7e`.
+- Commit testova: `afb04a114ac8915c7304f51837ceadb7b5be9757`.
