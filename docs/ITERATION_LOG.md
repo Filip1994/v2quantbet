@@ -111,3 +111,13 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - CI rezultat nije potvrđen; GitHub Actions za poslednji commit nije vratio workflow run.
 - Commit testova: `31d5729de9ebdd3e5adfc72d308cdf45ade9477e`.
 - Commit dodatne idempotency/conflict pokrivenosti: `85b52ad11deeac0ab2e0c0c99238d52df4be2118`.
+
+## 2026-09-14T16:20:00-04:00 — Prošireni PostgreSQL read-path testovi
+
+- Ažuriran je `tests/persistence/test_postgres_quote_history.py`.
+- Fake connection sloj sada čuva redove u obliku koji odgovara SQL adapteru, umesto da meša primarne ključeve sa payload kolonama.
+- Dodati su testovi za `series_for_fixture`, `snapshots_for_series` i `get_snapshot`.
+- Zadržani su postojeći testovi za upis, idempotentnost i detekciju konflikata.
+- Runtime PostgreSQL adapter nije menjan.
+- Lokalno izvršavanje testova i CI nisu potvrđeni u ovom okruženju.
+- Commit: `bf3d62b7cf6f60a90b331cfd6e7d678a9ca69a54`.
