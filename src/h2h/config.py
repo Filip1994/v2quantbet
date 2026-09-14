@@ -32,13 +32,21 @@ class Config:
 
 @dataclass(frozen=True, repr=False)
 class ApplicationSettings:
-    """Validated settings for the quote application boundary."""
+    """Validated settings for the quote application boundary.
+
+    ``database_path`` remains for legacy SQLite consumers. New PostgreSQL
+    composition should use ``database_url`` when it is configured.
+    """
 
     database_path: Path
     api_football_key: str = field(repr=False)
+    database_url: str | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
-        return f"ApplicationSettings(database_path={str(self.database_path)!r}, api_football_key='[REDACTED]')"
+        return (
+            f"ApplicationSettings(database_path={str(self.database_path)!r}, "
+            "database_url='[REDACTED]', api_football_key='[REDACTED]')"
+        )
 
 
 def _required(name: str) -> str:
@@ -74,7 +82,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> ApplicationSettin
     if not database_path:
         raise ConfigError("QUANTBET_DATABASE_PATH must not be blank")
 
+    database_url = values.get("DATABASE_URL", "").strip() or None
+
     return ApplicationSettings(
         database_path=Path(database_path),
         api_football_key=api_key,
+        database_url=database_url,
     )
