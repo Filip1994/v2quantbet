@@ -30,10 +30,13 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - SQLite persistence celina je proverena kroz CI; nakon ispravke Ruff import reda CI je zelen.
 - Dodat `build_sqlite_quote_service()` kao application composition root koji povezuje SQLite repository i `QuoteIngestionService` bez provider coupling-a.
 - Dodat test composition root-a i `docs/APPLICATION_COMPOSITION.md`.
+- Dodat `SQLiteQuoteApplication` sa eksplicitnim `close()` lifecycle ugovorom i context-manager podrškom.
+- Dodati testovi za zatvaranje konekcije, automatsko zatvaranje kroz `with` blok i ponovno otvaranje baze.
+- Ažurirana dokumentacija application composition sloja sa production-facing lifecycle primerom.
 
 ## Sledeći korak
 
-Proveriti CI za application composition celinu. Nakon zelenog CI-ja dodati lifecycle/close ugovor za SQLite repository u composition sloju pre production deployment-a.
+Proveriti CI za lifecycle celinu. Nakon zelenog CI-ja preći na sledeću production-readiness granicu.
 
 ## Pravila rada
 
