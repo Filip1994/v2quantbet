@@ -36,6 +36,7 @@ class FakeCursor:
     def __init__(self, connection: "FakeConnection") -> None:
         self.connection = connection
         self.result: tuple | None = None
+        self.rows: list[tuple] = []
 
     def __enter__(self) -> "FakeCursor":
         return self
@@ -49,26 +50,42 @@ class FakeCursor:
             self.result = (1,) if params[0] in self.connection.series_by_id else None
         elif "FROM quote_series WHERE series_id" in sql:
             self.result = self.connection.series_by_id.get(params[0])
+        elif "FROM quote_series WHERE fixture_id" in sql:
+            self.rows = [
+                row
+                for row in self.connection.series_rows
+                if row[1] == params[0]
+            ]
         elif "FROM quote_snapshots WHERE snapshot_id" in sql:
             self.result = self.connection.snapshots_by_id.get(params[0])
+        elif "FROM quote_snapshots WHERE series_id" in sql:
+            self.rows = [
+                row
+                for row in self.connection.snapshot_rows
+                if row[1] == params[0]
+            ]
         elif sql.startswith("INSERT INTO quote_series"):
             self.connection.series_by_id[params[0]] = params[1:]
+            self.connection.series_rows.append((params[0], *params[1:]))
             self.result = None
         elif sql.startswith("INSERT INTO quote_snapshots"):
             self.connection.snapshots_by_id[params[0]] = params[1:]
+            self.connection.snapshot_rows.append((params[0], *params[1:]))
             self.result = None
 
     def fetchone(self):
         return self.result
 
     def fetchall(self):
-        return []
+        return self.rows
 
 
 class FakeConnection:
     def __init__(self) -> None:
         self.series_by_id: dict[str, tuple] = {}
         self.snapshots_by_id: dict[str, tuple] = {}
+        self.series_rows: list[tuple] = []
+        self.snapshot_rows: list[tuple] = []
         self.executed: list[tuple[str, object]] = []
 
     def __enter__(self) -> "FakeConnection":
@@ -79,6 +96,50 @@ class FakeConnection:
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
+
+
+def seed_series(connection: FakeConnection) -> QuoteSeries:
+    series = make_series()
+    connection.series_by_id[series.series_id] = (
+        series.fixture_id,
+        series.bookmaker_id,
+        series.market.value,
+        series.selection.value,
+        series.created_at,
+    )
+    connection.series_rows.append(
+        (
+            series.series_id,
+            series.fixture_id,
+            series.bookmaker_id,
+            series.market.value,
+            series.selection.value,
+            series.created_at,
+        )
+    )
+    return series
+
+
+def seed_snapshot(connection: FakeConnection) -> QuoteSnapshot:
+    snapshot = make_snapshot()
+    connection.snapshots_by_id[snapshot.snapshot_id] = (
+        snapshot.series_id,
+        snapshot.odd,
+        snapshot.observed_at,
+        snapshot.captured_at,
+        snapshot.source,
+    )
+    connection.snapshot_rows.append(
+        (
+            snapshot.snapshot_id,
+            snapshot.series_id,
+            snapshot.odd,
+            snapshot.observed_at,
+            snapshot.captured_at,
+            snapshot.source,
+        )
+    )
+    return snapshot
 
 
 def test_requires_database_url_without_injected_connection() -> None:
@@ -155,6 +216,14 @@ def test_ensure_series_rejects_conflicting_existing_series() -> None:
         repository.ensure_series(series)
 
 
+def test_series_for_fixture_reconstructs_rows() -> None:
+    connection = FakeConnection()
+    series = seed_series(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    assert repository.series_for_fixture(series.fixture_id) == (series,)
+
+
 def test_append_snapshots_rejects_unknown_series() -> None:
     connection = FakeConnection()
     repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
@@ -164,16 +233,10 @@ def test_append_snapshots_rejects_unknown_series() -> None:
 
 
 def test_append_snapshots_inserts_snapshot_for_known_series() -> None:
-    series = make_series()
-    snapshot = make_snapshot()
     connection = FakeConnection()
-    connection.series_by_id[series.series_id] = (
-        series.fixture_id,
-        series.bookmaker_id,
-        series.market.value,
-        series.selection.value,
-        series.created_at,
-    )
+    series = seed_series(connection)
+    snapshot = make_snapshot()
+    assert snapshot.series_id == series.series_id
     repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
 
     repository.append_snapshots((snapshot,))
@@ -182,23 +245,9 @@ def test_append_snapshots_inserts_snapshot_for_known_series() -> None:
 
 
 def test_append_snapshots_is_idempotent_for_matching_snapshot() -> None:
-    series = make_series()
-    snapshot = make_snapshot()
     connection = FakeConnection()
-    connection.series_by_id[series.series_id] = (
-        series.fixture_id,
-        series.bookmaker_id,
-        series.market.value,
-        series.selection.value,
-        series.created_at,
-    )
-    connection.snapshots_by_id[snapshot.snapshot_id] = (
-        snapshot.series_id,
-        snapshot.odd,
-        snapshot.observed_at,
-        snapshot.captured_at,
-        snapshot.source,
-    )
+    seed_series(connection)
+    snapshot = seed_snapshot(connection)
     repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
 
     repository.append_snapshots((snapshot,))
@@ -207,16 +256,9 @@ def test_append_snapshots_is_idempotent_for_matching_snapshot() -> None:
 
 
 def test_append_snapshots_rejects_conflicting_snapshot() -> None:
-    series = make_series()
-    snapshot = make_snapshot()
     connection = FakeConnection()
-    connection.series_by_id[series.series_id] = (
-        series.fixture_id,
-        series.bookmaker_id,
-        series.market.value,
-        series.selection.value,
-        series.created_at,
-    )
+    seed_series(connection)
+    snapshot = seed_snapshot(connection)
     connection.snapshots_by_id[snapshot.snapshot_id] = (
         snapshot.series_id,
         2.20,
@@ -228,3 +270,28 @@ def test_append_snapshots_rejects_conflicting_snapshot() -> None:
 
     with pytest.raises(QuoteHistoryConflictError, match="conflicting observation"):
         repository.append_snapshots((snapshot,))
+
+
+def test_snapshots_for_series_reconstructs_rows() -> None:
+    connection = FakeConnection()
+    seed_series(connection)
+    snapshot = seed_snapshot(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    assert repository.snapshots_for_series(snapshot.series_id) == (snapshot,)
+
+
+def test_get_snapshot_returns_snapshot_when_present() -> None:
+    connection = FakeConnection()
+    seed_series(connection)
+    snapshot = seed_snapshot(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    assert repository.get_snapshot(snapshot.snapshot_id) == snapshot
+
+
+def test_get_snapshot_returns_none_when_missing() -> None:
+    connection = FakeConnection()
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    assert repository.get_snapshot("missing") is None
