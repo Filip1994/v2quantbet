@@ -32,9 +32,10 @@ def test_invalid_json_raises_response_error() -> None:
     response.__enter__ = lambda: response
     response.__exit__ = lambda *args: None
 
-    with patch("h2h.odds.http.urlopen", return_value=response):
-        with pytest.raises(TransportResponseError, match="invalid JSON"):
-            UrllibJsonTransport().get_json("https://example.test/odds")
+    with patch("h2h.odds.http.urlopen", return_value=response), pytest.raises(
+        TransportResponseError, match="invalid JSON"
+    ):
+        UrllibJsonTransport().get_json("https://example.test/odds")
 
 
 def test_non_object_json_raises_response_error() -> None:
@@ -42,15 +43,17 @@ def test_non_object_json_raises_response_error() -> None:
     response.__enter__ = lambda: response
     response.__exit__ = lambda *args: None
 
-    with patch("h2h.odds.http.urlopen", return_value=response):
-        with pytest.raises(TransportResponseError, match="must be an object"):
-            UrllibJsonTransport().get_json("https://example.test/odds")
+    with patch("h2h.odds.http.urlopen", return_value=response), pytest.raises(
+        TransportResponseError, match="must be an object"
+    ):
+        UrllibJsonTransport().get_json("https://example.test/odds")
 
 
 def test_timeout_is_mapped() -> None:
-    with patch("h2h.odds.http.urlopen", side_effect=TimeoutError):
-        with pytest.raises(TransportTimeoutError):
-            UrllibJsonTransport().get_json("https://example.test/odds")
+    with patch("h2h.odds.http.urlopen", side_effect=TimeoutError), pytest.raises(
+        TransportTimeoutError
+    ):
+        UrllibJsonTransport().get_json("https://example.test/odds")
 
 
 def test_timeout_must_be_positive() -> None:
