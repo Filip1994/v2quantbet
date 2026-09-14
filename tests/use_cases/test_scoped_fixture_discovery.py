@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 
@@ -7,8 +9,10 @@ from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 class StubDiscovery:
     def __init__(self, fixtures: tuple[Fixture, ...]) -> None:
         self.fixtures = fixtures
+        self.calls: list[tuple[datetime, datetime]] = []
 
     def discover(self, start_at: datetime, end_at: datetime) -> tuple[Fixture, ...]:
+        self.calls.append((start_at, end_at))
         return self.fixtures
 
 
@@ -38,8 +42,31 @@ def test_scoped_discovery_keeps_eligible_and_rejects_out_of_scope() -> None:
     assert result == (fixtures[0],)
 
 
+def test_scoped_discovery_delegates_window_and_preserves_order() -> None:
+    fixtures = (
+        make_fixture("Spain", "La Liga"),
+        make_fixture("Italy", "Serie A"),
+    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 1, 2, tzinfo=UTC)
+    stub = StubDiscovery(fixtures)
+
+    result = ScopedFixtureDiscovery(stub).discover(start, end)
+
+    assert stub.calls == [(start, end)]
+    assert result == fixtures
+    assert isinstance(result, tuple)
+
+
 def test_scoped_discovery_rejects_invalid_window() -> None:
     discovery = ScopedFixtureDiscovery(StubDiscovery(()))
     start = datetime(2026, 1, 2, tzinfo=UTC)
-    with __import__("pytest").raises(ValueError):
+    with pytest.raises(ValueError):
         discovery.discover(start, start - timedelta(minutes=1))
+
+
+def test_scoped_discovery_rejects_equal_window() -> None:
+    discovery = ScopedFixtureDiscovery(StubDiscovery(()))
+    start = datetime(2026, 1, 2, tzinfo=UTC)
+    with pytest.raises(ValueError):
+        discovery.discover(start, start)
