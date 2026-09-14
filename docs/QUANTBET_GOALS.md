@@ -103,7 +103,94 @@ The bulletin should include, at minimum:
 
 The bulletin must clearly distinguish opportunities that are currently actionable from historical, already published, or expired picks.
 
-## 10. Dashboard
+The operational screening flow is:
+
+```text
+fixture discovery
+→ competition/universe filter
+→ model probability
+→ bookmaker odds
+→ value comparison
+→ ranking
+→ bulletin generation
+```
+
+This screening layer must remain deterministic, production-oriented, and focused on finding current opportunities. It must not perform uncontrolled experimentation or silently alter model/ranking rules.
+
+## 10. Research sector
+
+The Research sector is a separate analytical and experimental layer. Its purpose is to determine **when, why, and under which conditions a detected value signal is reliable**. It is not another name for the Daily Bulletin screening pipeline.
+
+Research must investigate, among other things:
+
+- model calibration and systematic over/underestimation;
+- signal quality by market, competition, bookmaker, and time-to-kickoff;
+- relationship between initial value, odds movement, and realized CLV;
+- bookmaker disagreement and its predictive usefulness;
+- effects of lineups, injuries, weather, and other contextual data;
+- false-positive value signals and extreme outliers;
+- stability of signals across time periods and competitions;
+- differences between in-sample, out-of-sample, and walk-forward results;
+- model-version and feature-version comparisons;
+- whether proposed filters improve signal quality without introducing selection bias.
+
+### 10.1 Research inputs
+
+Research may consume immutable, historically reconstructable data, including:
+
+- fixture and competition records;
+- raw and normalized odds snapshots;
+- model probabilities and model metadata;
+- published pick decision contexts;
+- odds trajectories and closing references;
+- match outcomes and settlement data;
+- lineup, injury, weather, and other contextual observations where available.
+
+Raw observations must be retained separately from derived research metrics.
+
+### 10.2 Research outputs
+
+Research outputs are analytical artifacts, not direct production decisions. They may include:
+
+- calibration reports;
+- signal-quality reports;
+- CLV and odds-movement analyses;
+- backtests and walk-forward evaluations;
+- experiment datasets and reproducible notebooks/jobs;
+- model or rule proposals;
+- documented limitations, biases, and confidence levels.
+
+Every experiment must identify its dataset period, inclusion rules, feature/model versions, evaluation methodology, and result status.
+
+### 10.3 Production boundary
+
+Research must not directly mutate Daily Bulletin behavior. Any change proposed by Research must pass through:
+
+```text
+research hypothesis
+→ versioned experiment
+→ statistical evaluation
+→ out-of-sample or walk-forward validation
+→ documented acceptance decision
+→ explicit production change
+→ regression and CI verification
+```
+
+Experimental code, datasets, and configurations must be distinguishable from production code and configuration. A research result is not considered production-ready merely because it improves an in-sample metric.
+
+### 10.4 Research acceptance principles
+
+A research proposal should be accepted only when the evidence addresses, as applicable:
+
+- calibration and discrimination quality;
+- robustness across time and relevant subgroups;
+- leakage and look-ahead bias;
+- multiple-testing and overfitting risk;
+- data completeness and survivorship bias;
+- economic relevance to value and/or CLV;
+- reproducibility using stored inputs and explicit versions.
+
+## 11. Dashboard
 
 The dashboard is the operational “eyes” of the system. It must make the complete lifecycle of a pick observable:
 
@@ -115,11 +202,12 @@ The dashboard is the operational “eyes” of the system. It must make the comp
 - expected CLV at decision time, where available;
 - realized CLV calculated after the event using the valid closing reference;
 - data freshness and ingestion health;
-- model/version and decision provenance.
+- model/version and decision provenance;
+- research-derived annotations only when their methodology and version are explicit.
 
 The dashboard should be based on the useful concepts and workflows of the legacy dashboard, but implemented against the new QuantBet data model and production architecture.
 
-## 11. Production requirements
+## 12. Production requirements
 
 The production system will require, in stages:
 
@@ -137,18 +225,28 @@ The production system will require, in stages:
 - observability, retries, and data-quality checks;
 - deployment and operational configuration.
 
-## 12. Non-goals for the immediate next step
+The research platform will additionally require, in a later stage:
 
-The immediate next step is **not** to expand model mathematics or perform broad refactoring.
+- immutable analytical datasets;
+- reproducible experiment execution;
+- dataset and feature versioning;
+- backtesting and walk-forward evaluation;
+- calibration and CLV reporting;
+- explicit promotion records from research to production.
 
-The next implementation step should establish the canonical quote/odds-snapshot contract that later ingestion, persistence, value calculation, monitoring, reporting, and dashboard components can share.
+## 13. Non-goals for the immediate next step
 
-## 13. Guiding principles
+The immediate next step is **not** to expand model mathematics, build the Research platform, or perform broad refactoring.
+
+The next implementation step should establish the canonical quote/odds-snapshot contract that later ingestion, persistence, value calculation, monitoring, reporting, research, and dashboard components can share.
+
+## 14. Guiding principles
 
 - Preserve raw observations before deriving metrics.
 - Make every decision reproducible from stored inputs and model versions.
-- Separate current value, expected CLV, and realized CLV.
+- Separate current value, expected CLV, realized CLV, and research conclusions.
 - Calculate realized CLV only after the event lifecycle provides a valid closing reference.
 - Never overwrite odds history when a new snapshot arrives.
 - Prefer explicit schemas and contracts over implicit data assumptions.
+- Keep Research experimentally isolated from production decision logic.
 - Implement one small vertical slice at a time, with tests before moving on.
