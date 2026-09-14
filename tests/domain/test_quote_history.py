@@ -1,12 +1,9 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from h2h.domain.odds import Market, Selection
 from h2h.domain.quote_history import QuoteSeries, QuoteSnapshot
-
-
-UTC = timezone.utc
 
 
 def test_quote_series_requires_timezone_aware_created_at() -> None:
@@ -17,7 +14,7 @@ def test_quote_series_requires_timezone_aware_created_at() -> None:
             bookmaker_id=10,
             market=Market.OU_25,
             selection=Selection.OVER,
-            created_at=datetime(2026, 9, 14, 12, 0),
+            created_at=datetime(2026, 9, 14, 12, 0),  # noqa: DTZ001
         )
 
 
