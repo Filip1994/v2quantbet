@@ -22,8 +22,8 @@ class ApiFootballFixtureAdapter:
         league = self._mapping(payload, "league")
 
         fixture_id = self._positive_int(fixture.get("id"), "fixture.id")
-        home_id = self._positive_int(home.get("id"), "teams.home.id")
-        away_id = self._positive_int(away.get("id"), "teams.away.id")
+        self._positive_int(home.get("id"), "teams.home.id")
+        self._positive_int(away.get("id"), "teams.away.id")
         competition_id = self._positive_int(league.get("id"), "league.id")
 
         return Fixture(
