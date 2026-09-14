@@ -38,3 +38,13 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - PostgreSQL dependency (`psycopg`) i `uv.lock` namerno nisu menjani; lokalna `uv` regeneracija je i dalje potrebna.
 - Testovi i CI nisu pokrenuti u ovom okruženju.
 - Commitovi: `22891b7222e3303d776c967a0ddde326d632823d`, `8c5442d08420c6c3cb621c94181f69fd024f0872`.
+
+## 2026-09-15T02:00:00+02:00 — Eksplicitna PostgreSQL production composition putanja
+
+- Ažuriran je `src/h2h/application.py`.
+- Dodat je `build_postgres_quote_history_application_from_settings(settings)` builder.
+- Builder zahteva `ApplicationSettings.database_url` i eksplicitno odbija nastavak bez `DATABASE_URL`; `database_path` se ne koristi kao fallback.
+- SQLite builderi su zadržani samo kao legacy compatibility granica dok se ne uklone sve aktivne reference.
+- PostgreSQL production composition koristi postojeći `application_postgres` modul i ne uvodi novi persistence sloj.
+- Testovi i CI nisu pokrenuti u ovom okruženju.
+- Commit: `30175fef3cb8dce261bf667b1882ebe593ecd46d`.
