@@ -41,13 +41,28 @@ class QuoteHistoryIngestionService:
         )
         return "snapshot-" + sha256(value.encode("utf-8")).hexdigest()
 
+    def _existing_series(self, quote: CanonicalQuote) -> QuoteSeries | None:
+        for series in self._repository.series_for_fixture(str(quote.fixture_id)):
+            if (
+                series.bookmaker_id == quote.bookmaker_id
+                and series.market == quote.market
+                and series.selection == quote.selection
+            ):
+                return series
+        return None
+
     def ingest(self, quotes: Iterable[CanonicalQuote]) -> int:
         """Persist one collection cycle and return the number of observations."""
         captured_at = self._capture_clock()
         snapshots: list[QuoteSnapshot] = []
         for quote in quotes:
             series_id = self._series_id(quote)
-            created_at = self._series_created_at.setdefault(series_id, captured_at)
+            existing = self._existing_series(quote)
+            created_at = (
+                existing.created_at
+                if existing is not None
+                else self._series_created_at.setdefault(series_id, captured_at)
+            )
             self._repository.ensure_series(
                 QuoteSeries(
                     series_id=series_id,
