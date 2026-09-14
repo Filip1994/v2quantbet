@@ -45,12 +45,12 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 ## 2026-09-14T14:43:00+02:00 — Implementirani osnovni istorijski quote domen modeli
 
 - Dodat je `src/h2h/domain/quote_history.py`.
-- Uvedeni su immutable modeli `QuoteSeries` i `QuoteSnapshot`.
+- Uведени су immutable modeli `QuoteSeries` i `QuoteSnapshot`.
 - `QuoteSeries` čuva stabilni identitet fixture/bookmaker/market/selection kombinacije.
 - `QuoteSnapshot` čuva jednu nepromenljivu opservaciju sa `observed_at`, `captured_at`, kvotom i izvorom.
 - Uvedena je validacija obaveznih identifikatora, kvote i timezone-aware timestamp-a.
 - Dodat je `tests/domain/test_quote_history.py` sa testovima za validaciju i immutability.
-- Pokušaj ažурирања `src/h2h/domain/__init__.py` није успео због SHA mismatch-а; export modela još nije završen.
+- Pokušaj ažuriranja `src/h2h/domain/__init__.py` nije uspeo zbog SHA mismatch-a; export modela još nije završen.
 - CI nije proveravan u ovoj iteraciji.
 - Commit modela: `c0c52785afd82f1502800b500dc04f3a92f638f1`.
 - Commit testova: `013d384d8543888e11ab12eacd6f38518d4d9726`.
@@ -75,7 +75,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Testovi i CI još nisu provereni.
 - Commit testova: `b79241889f80a469a0c803dd11826c0f2d57f236`.
 
-## 2026-09-14T15:00:00+02:00 — Ojačan ugovor quote history repository-ja
+## 2026-09-14T15:00:00Z — Ojačan ugovor quote history repository-ja
 
 - `QuoteHistoryRepository` sada eksplicitno izlaže `series_for_fixture`.
 - Snapshot može biti upisan samo ako prethodno postoji odgovarajući `QuoteSeries`.
@@ -87,7 +87,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Commit implementacije: `0c5b230d8b254723f140f5149a4576529fd7ed7e`.
 - Commit testova: `afb04a114ac8915c7304f51837ceadb7b5be9757`.
 
-## 2026-09-14T15:15:00+02:00 — Dodat PostgreSQL schema migration za quote history
+## 2026-09-14T15:15:00Z — Dodat PostgreSQL schema migration za quote history
 
 - Dodat je `migrations/001_quote_history.sql` za Railway PostgreSQL.
 - Definisane su tabele `quote_series` i `quote_snapshots`.
@@ -104,8 +104,8 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Prošireni su testovi za `PostgreSQLQuoteHistoryRepository`.
 - Pokriven je upis nove `QuoteSeries` instance.
 - Pokriven je konflikt postojeće serije sa istim `series_id`.
-- Pokriveno je odbijanje snapshot-a za nepoznatu seriju.
-- Pokriven je upis snapshot-a, idempotentni ponovni upis i konflikt snapshot-a sa istim ID-em.
+- Покривено је одбијање snapshot-а за непознату серију.
+- Покривен је упис snapshot-а, idempotentni ponovni upis i konflikt snapshot-a sa istim ID-em.
 - Testovi koriste injektovanu connection factory funkciju, bez zahteva za aktivnim PostgreSQL serverom.
 - Izmenjeni fajl: `tests/persistence/test_postgres_quote_history.py`.
 - CI rezultat nije potvrđen; GitHub Actions za poslednji commit nije vratio workflow run.
@@ -121,3 +121,13 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Runtime PostgreSQL adapter nije menjan.
 - Lokalno izvršavanje testova i CI nisu potvrđeni u ovom okruženju.
 - Commit: `bf3d62b7cf6f60a90b331cfd6e7d678a9ca69a54`.
+
+## 2026-09-15T00:00:00+02:00 — Rekonstruisана history-aware polling implementacija
+
+- Naknadно су евидентирани претходно изведени кораци који нису били одмах уписани у овај дневник.
+- Додат је `src/h2h/workers/history_quote_polling.py` са provider-neutral `HistoricalQuoteSource` уговором и `HistoryQuotePollingJob` оркестрацијом.
+- Додат је `tests/workers/test_history_quote_polling.py` са провером обраде више fixture-а и одбијања невалидних fixture идентификатора.
+- `src/h2h/workers/__init__.py` је ажуриран да извози нови polling job и source contract.
+- Извршене су и документоване промене у одвојеним commit-овима: `9f19120969dabda7a1be24daeb6ce7437801b59a`, `301c48e4a0adf5d6deb7057c9d8bd6888d0b8ae4`, `29a7c214d85da9118fc52b064f552069bb47f43a`.
+- Ова итерација не тврди да је production runtime composition или Railway entrypoint завршен.
+- CI за ову реконструисану целину још није потврђен у овом уносу.
