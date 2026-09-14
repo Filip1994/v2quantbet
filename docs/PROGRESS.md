@@ -33,10 +33,14 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat `SQLiteQuoteApplication` sa eksplicitnim `close()` lifecycle ugovorom i context-manager podrškom.
 - Dodati testovi za zatvaranje konekcije, automatsko zatvaranje kroz `with` blok i ponovno otvaranje baze.
 - Ažurirana dokumentacija application composition sloja sa production-facing lifecycle primerom.
+- Dodat `ApplicationSettings` i `load_settings()` za validaciju `API_FOOTBALL_KEY` i SQLite putanje iz environment-a.
+- Dodat settings-based application builder bez unošenja provider tajni u quant ili persistence sloj.
+- Dodati testovi za default putanju, praznu/nedostajuću tajnu, trimovanje vrednosti i redaction kroz `repr()`.
+- Dodat `docs/CONFIGURATION.md` sa production konfiguracionim ugovorom.
 
 ## Sledeći korak
 
-Proveriti CI za lifecycle celinu. Nakon zelenog CI-ja preći na sledeću production-readiness granicu.
+Proveriti CI za configuration/startup boundary celinu. Nakon zelenog CI-ja preći na sledeću production-readiness granicu.
 
 ## Pravila rada
 
