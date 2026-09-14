@@ -27,7 +27,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dokument definiše quote series, immutable quote snapshots, eksplicitnu entry snapshot referencu, first-seen/current/closing pre-match checkpoint-e, kickoff granicu, monitoring boundary i CLV-ready podatke.
 - Live/in-play kvote su eksplicitno izvan obuhvata.
 - Nije menjano runtime ponašanje, nisu menjani modeli, repository interfejsi niti PostgreSQL šema.
-- Commit: `0c49185495acf8779424e71583442e5cd137fe9d`.
+- Commit: `0c49185495acf8779424e71583442e5cd1379fe9d`.
 - CI rezultat: nije proveravan u ovoj iteraciji.
 
 ## 2026-09-14T14:43:00+02:00 — Uvedena mapa podataka i timestamp pravila
@@ -97,3 +97,17 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - PostgreSQL adapter, runtime povezivanje, migracioni runner, integracioni testovi i CI provera još nisu implementirani.
 - Testovi i CI nisu izvršeni u ovom okruženju.
 - Commit: `dc461bf76896ffcbff0d4c1b3869b3018e14db11`.
+
+## 2026-09-14T18:45:00Z — Proširena PostgreSQL quote-history test pokrivenost
+
+- Provereno je da migration runner validira postojanje migration direktorijuma i odbija fajl prosleđen umesto direktorijuma.
+- Prošireni su testovi za `PostgreSQLQuoteHistoryRepository`.
+- Pokriven je upis nove `QuoteSeries` instance.
+- Pokriven je konflikt postojeće serije sa istim `series_id`.
+- Pokriveno je odbijanje snapshot-a za nepoznatu seriju.
+- Pokriven je upis snapshot-a, idempotentni ponovni upis i konflikt snapshot-a sa istim ID-em.
+- Testovi koriste injektovanu connection factory funkciju, bez zahteva za aktivnim PostgreSQL serverom.
+- Izmenjeni fajl: `tests/persistence/test_postgres_quote_history.py`.
+- CI rezultat nije potvrđen; GitHub Actions za poslednji commit nije vratio workflow run.
+- Commit testova: `31d5729de9ebdd3e5adfc72d308cdf45ade9477e`.
+- Commit dodatne idempotency/conflict pokrivenosti: `85b52ad11deeac0ab2e0c0c99238d52df4be2118`.
