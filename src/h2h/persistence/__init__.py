@@ -1,5 +1,6 @@
 """Provider-neutral persistence boundaries."""
 
+from .postgres_quote_history import PostgreSQLQuoteHistoryRepository
 from .quote_history import (
     InMemoryQuoteHistoryRepository,
     QuoteHistoryConflictError,
@@ -11,6 +12,7 @@ from .sqlite import SQLiteQuoteRepository
 __all__ = [
     "InMemoryQuoteHistoryRepository",
     "InMemoryQuoteRepository",
+    "PostgreSQLQuoteHistoryRepository",
     "QuoteHistoryConflictError",
     "QuoteHistoryRepository",
     "QuoteRepository",
