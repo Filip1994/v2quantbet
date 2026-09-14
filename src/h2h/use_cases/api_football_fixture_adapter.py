@@ -12,34 +12,31 @@ class ApiFootballFixtureAdapter:
 
     def adapt(self, payload: Mapping[str, Any]) -> Fixture:
         """Translate a provider fixture payload without leaking provider fields."""
+        if not isinstance(payload, Mapping):
+            raise TypeError("payload must be an object")
+
         fixture = self._mapping(payload, "fixture")
         teams = self._mapping(payload, "teams")
         home = self._mapping(teams, "home")
         away = self._mapping(teams, "away")
         league = self._mapping(payload, "league")
 
-        kickoff = fixture.get("date")
-        if not isinstance(kickoff, str) or not kickoff.strip():
-            raise ValueError("fixture.date must be a non-empty ISO datetime string")
-
-        fixture_id = fixture.get("id")
-        home_id = home.get("id")
-        away_id = away.get("id")
-        competition_id = league.get("id")
-        if any(value is None for value in (fixture_id, home_id, away_id, competition_id)):
-            raise ValueError("fixture and team/league identifiers are required")
+        fixture_id = self._positive_int(fixture.get("id"), "fixture.id")
+        home_id = self._positive_int(home.get("id"), "teams.home.id")
+        away_id = self._positive_int(away.get("id"), "teams.away.id")
+        competition_id = self._positive_int(league.get("id"), "league.id")
 
         return Fixture(
             fixture_id=f"api-football:{fixture_id}",
             home_team=self._text(home, "name"),
             away_team=self._text(away, "name"),
-            competition_id=int(competition_id),
+            competition_id=competition_id,
             competition_name=self._text(league, "name"),
             country=self._text(league, "country"),
-            kickoff_at=datetime.fromisoformat(kickoff.replace("Z", "+00:00")),
-            competition_type=str(league.get("type") or "league"),
-            season=int(league["season"]) if league.get("season") is not None else None,
-            status=str(fixture.get("status", {}).get("short", "scheduled")),
+            kickoff_at=self._kickoff(fixture.get("date")),
+            competition_type=self._competition_type(league),
+            season=self._optional_int(league.get("season"), "league.season"),
+            status=self._status(fixture),
             provider="api-football",
             provider_fixture_id=str(fixture_id),
         )
@@ -48,7 +45,7 @@ class ApiFootballFixtureAdapter:
     def _mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
         nested = value.get(key)
         if not isinstance(nested, Mapping):
-            raise ValueError(f"{key} must be an object")
+            raise TypeError(f"{key} must be an object")
         return nested
 
     @staticmethod
@@ -57,3 +54,48 @@ class ApiFootballFixtureAdapter:
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f"{key} must be a non-empty string")
         return text
+
+    @staticmethod
+    def _positive_int(value: Any, field: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+        return value
+
+    @classmethod
+    def _optional_int(cls, value: Any, field: str) -> int | None:
+        if value is None:
+            return None
+        return cls._positive_int(value, field)
+
+    @staticmethod
+    def _kickoff(value: Any) -> datetime:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("fixture.date must be a non-empty ISO datetime string")
+        try:
+            kickoff = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("fixture.date must be a valid ISO datetime string") from exc
+        if kickoff.tzinfo is None or kickoff.utcoffset() is None:
+            raise ValueError("fixture.date must include a timezone offset")
+        return kickoff
+
+    @staticmethod
+    def _competition_type(league: Mapping[str, Any]) -> str:
+        value = league.get("type")
+        if value is None:
+            return "league"
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("league.type must be a non-empty string")
+        return value
+
+    @staticmethod
+    def _status(fixture: Mapping[str, Any]) -> str:
+        value = fixture.get("status")
+        if value is None:
+            return "scheduled"
+        if not isinstance(value, Mapping):
+            raise TypeError("fixture.status must be an object")
+        short = value.get("short")
+        if not isinstance(short, str) or not short.strip():
+            raise ValueError("fixture.status.short must be a non-empty string")
+        return short
