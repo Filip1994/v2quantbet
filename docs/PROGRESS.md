@@ -42,6 +42,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
 - CI potvrđen kao zelen za poslednju implementacionu ispravku: run `34819806932`.
 - Uveden detaljni ljudski čitljiv dnevnik manjih iteracija u `docs/ITERATION_LOG.md`.
+- Dodat dizajn istorijskih pre-match quote snapshot-a u `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`.
 
 ## Arhitektonske odluke
 
@@ -52,6 +53,8 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - SQLite ostaje privremeni postojeći adapter dok PostgreSQL implementacija i testovi ne budu završeni.
 - SQLite se neće brisati pre uspešne PostgreSQL zamene i CI verifikacije.
 - Detaljan plan je u `docs/POSTGRESQL_PERSISTENCE_PLAN.md`.
+- Istorijski pre-match quote model mora koristiti quote series i immutable snapshots; postojeći single-row identity model nije dovoljan.
+- Live/in-play kvote nisu deo QuantBet obuhvata.
 
 ## Dokumentacija
 
@@ -59,6 +62,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - `docs/PERSISTENCE_BOUNDARY.md`
 - `docs/SQLITE_PERSISTENCE.md`
 - `docs/POSTGRESQL_PERSISTENCE_PLAN.md`
+- `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`
 - `docs/ITERATION_LOG.md`
 - `docs/APPLICATION_COMPOSITION.md`
 - `docs/CONFIGURATION.md`
@@ -77,22 +81,23 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 
 ## Sledeći korak
 
-Pre prvog bulletin vertical slice-a potrebno je:
+Pre implementacije istorijskih quote snapshot-a potrebno je eksplicitno odobriti dizajn iz `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`, naročito:
 
-1. definisati persistence boundary za `PickRegistration`;
-2. dodati idempotentno čuvanje i dohvat registrovanih pickova;
-3. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
+1. history-aware repository contract;
+2. snapshot deduplication ključ;
+3. kickoff/closing policy;
+4. tretman zakašnelo pristiglih observacija;
+5. veza između `PickRegistration` i `QuoteSnapshot`;
+6. PostgreSQL šema i transaction strategija.
 
-Pre implementacije PostgreSQL adaptera potrebno je sprovesti korak po korak plan iz `docs/POSTGRESQL_PERSISTENCE_PLAN.md`.
-
-Research platforma se ne implementira pre stabilizacije production data foundation-a. Njeni planirani koraci su definisani u `docs/RESEARCH_SECTOR_PLAN.md`.
+Nakon odobrenja sledi implementacija → testovi → dokumentacija → CI verifikacija.
 
 ## Pravila rada
 
 - Jedna mala implementaciona celina po koraku.
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
 - Svaka završena celina mora imati odgovarajuću `.md` dokumentaciju.
-- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudski čitljivim opisom.
+- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudski čitljivim opisom i timestamp-om.
 - `docs/PROGRESS.md` sadrži sažetak većih završenih celina, dok `docs/ITERATION_LOG.md` sadrži detalje manjih koraka.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
