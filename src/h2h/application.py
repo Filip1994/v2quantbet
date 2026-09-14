@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import Self
 
 from h2h.persistence import SQLiteQuoteRepository
 from h2h.use_cases import QuoteIngestionService
@@ -21,7 +22,7 @@ class SQLiteQuoteApplication:
         """Close the application's SQLite connection."""
         self.repository.close()
 
-    def __enter__(self) -> SQLiteQuoteApplication:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
