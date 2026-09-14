@@ -86,3 +86,14 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Testovi i CI nisu izvršeni u ovom okruženju.
 - Commit implementacije: `0c5b230d8b254723f140f5149a4576529fd7ed7e`.
 - Commit testova: `afb04a114ac8915c7304f51837ceadb7b5be9757`.
+
+## 2026-09-14T15:15:00+02:00 — Dodat PostgreSQL schema migration za quote history
+
+- Dodat je `migrations/001_quote_history.sql` za Railway PostgreSQL.
+- Definisane su tabele `quote_series` i `quote_snapshots`.
+- `quote_series` ima stabilan `series_id`, fixture/bookmaker/market/selection identitet, vremensku oznaku kreiranja i jedinstveno ograničenje po seriji.
+- `quote_snapshots` je append-only tabela sa FK vezom ka seriji, validacijom kvote, timestamp kolonama i zaštitom od dupliranja identične opservacije.
+- Dodati su indeksi za pretragu serija po fixture-u i snapshot-a po seriji/vremenu.
+- PostgreSQL adapter, runtime povezivanje, migracioni runner, integracioni testovi i CI provera još nisu implementirani.
+- Testovi i CI nisu izvršeni u ovom okruženju.
+- Commit: `dc461bf76896ffcbff0d4c1b3869b3018e14db11`.
