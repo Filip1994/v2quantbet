@@ -19,3 +19,12 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Променом није уведен live Railway deployment нити production worker entrypoint.
 - Тестови и CI за ову измену нису потврђени у овом окружењу.
 - Commit: `e8389e56dbf914c134b37c109e65e670997be227`.
+
+## 2026-09-15T01:10:00+02:00 — Тестови PostgreSQL application lifecycle-а
+
+- Проверен је актуелни `src/h2h/application_postgres.py` и постојећи application test pattern.
+- Додат је `tests/test_application_postgres.py`.
+- Покривено је креирање PostgreSQL application composition-а, прослеђивање connection-а migration runner-у, коришћење подразумеваног migration директоријума, безбедан `close()` и context-manager lifecycle.
+- Тестови су додати, али нису локално покренути у овом окружењу.
+- CI није проверен; не postoji potvrda o uspešnom ili neuspešnom workflow run-u za ovaj commit.
+- Commit: `925da26461b80e579b64877f45a5aecd10cbe801`.
