@@ -28,3 +28,13 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Тестови су додати, али нису локално покренути у овом окружењу.
 - CI није проверен; не postoji potvrda o uspešnom ili neuspešnom workflow run-u za ovaj commit.
 - Commit: `925da26461b80e579b64877f45a5aecd10cbe801`.
+
+## 2026-09-15T01:35:00+02:00 — PostgreSQL URL u ApplicationSettings
+
+- Ažuriran je `src/h2h/config.py`.
+- `ApplicationSettings` sada opcionalno izlaže `database_url`, uz zadržavanje `database_path` radi kompatibilnosti sa postojećim SQLite potrošačima.
+- `load_settings()` čita `DATABASE_URL` kada je prisutan i uklanja spoljašnje razmake.
+- Ažuriran je `tests/test_config.py` sa proverama učitavanja URL-a i redakcije poverljivih vrednosti u `repr()` izlazu.
+- PostgreSQL dependency (`psycopg`) i `uv.lock` namerno nisu menjani; lokalna `uv` regeneracija je i dalje potrebna.
+- Testovi i CI nisu pokrenuti u ovom okruženju.
+- Commitovi: `22891b7222e3303d776c967a0ddde326d632823d`, `8c5442d08420c6c3cb621c94181f69fd024f0872`.
