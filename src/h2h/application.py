@@ -8,6 +8,8 @@ from types import TracebackType
 from typing import Self
 
 from h2h.config import ApplicationSettings
+from h2h.odds import ApiFootballClient, BudgetedJsonTransport, DailyApiBudget
+from h2h.odds.http import JsonTransport
 from h2h.persistence import SQLiteQuoteRepository
 from h2h.use_cases import QuoteIngestionService
 
@@ -57,3 +59,19 @@ def build_sqlite_quote_service(database_path: str | Path) -> QuoteIngestionServi
     """Build the application service backed by a SQLite quote repository."""
     repository = SQLiteQuoteRepository(database_path)
     return QuoteIngestionService(repository)
+
+
+def build_api_football_client(
+    transport: JsonTransport,
+    settings: ApplicationSettings,
+    *,
+    daily_limit: int = 7500,
+    reserve: int = 1500,
+) -> ApiFootballClient:
+    """Build an API-Football client protected by a shared daily call budget."""
+    budget = DailyApiBudget(daily_limit=daily_limit, reserve=reserve)
+    guarded_transport = BudgetedJsonTransport(transport=transport, budget=budget)
+    return ApiFootballClient(
+        transport=guarded_transport,
+        api_key=settings.api_football_key,
+    )
