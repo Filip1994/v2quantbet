@@ -4,8 +4,8 @@ The PostgreSQL driver is imported lazily so provider-neutral code remains
 usable in environments that do not install production database dependencies.
 """
 
-from collections.abc import Callable, Iterable
 import os
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from h2h.domain.odds import Market, Selection
