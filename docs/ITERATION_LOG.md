@@ -41,3 +41,16 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Runtime kod nije menjan.
 - Testovi i CI nisu pokretani.
 - Commit dokumenta: `f50a46051bded75886050cb3005afcc9dd1931c7`.
+
+## 2026-09-14T14:43:00+02:00 — Implementirani osnovni istorijski quote domen modeli
+
+- Dodat je `src/h2h/domain/quote_history.py`.
+- Uvedeni su immutable modeli `QuoteSeries` i `QuoteSnapshot`.
+- `QuoteSeries` čuva stabilni identitet fixture/bookmaker/market/selection kombinacije.
+- `QuoteSnapshot` čuva jednu nepromenljivu opservaciju sa `observed_at`, `captured_at`, kvotom i izvorom.
+- Uvedena je validacija obaveznih identifikatora, kvote i timezone-aware timestamp-a.
+- Dodat je `tests/domain/test_quote_history.py` sa testovima za validaciju i immutability.
+- Pokušaj ažuriranja `src/h2h/domain/__init__.py` nije uspeo zbog SHA mismatch-a; export modela još nije završen.
+- CI nije proveravan u ovoj iteraciji.
+- Commit modela: `c0c52785afd82f1502800b500dc04f3a92f638f1`.
+- Commit testova: `013d384d8543888e11ab12eacd6f38518d4d9726`.
