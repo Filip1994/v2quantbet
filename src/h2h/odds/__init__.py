@@ -7,12 +7,14 @@ from .api_football_ingestion import (
     ingest_api_football_odds,
     iter_api_football_quote_payloads,
 )
+from .api_football_service import ApiFootballOddsService
 from .provider_adapter import NormalizingProviderQuoteAdapter, ProviderQuoteAdapter
 from .quote_deduplication import QuoteConflictError, deduplicate_quotes
 from .snapshot_builder import build_market_snapshot
 
 __all__ = [
     "ApiFootballClient",
+    "ApiFootballOddsService",
     "ApiFootballQuoteAdapter",
     "NormalizingProviderQuoteAdapter",
     "ProviderQuoteAdapter",
