@@ -12,6 +12,8 @@ Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-
 
 Dodatno je definisana jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
 
+Uveden je i prvi history-aware ingestion sloj koji canonical quote opažanja pretvara u stabilne `QuoteSeries` entitete i immutable `QuoteSnapshot` zapise. Worker/polling orkestracija još nije povezana sa ovom komponentom.
+
 ## Završeno
 
 - Quant/domain foundation i regresiona zaštita.
@@ -37,10 +39,11 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
 - Hardening validacija fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
 - Immutable `PickRegistration` model sa `PickStatus` lifecycle enumeracijom.
+- Istorijski quote domain modeli, repository contract i PostgreSQL adapter foundation.
+- History-aware quote ingestion servis sa stabilnim series ID-jevima i idempotentnim snapshot ID-jevima.
 - Testovi i dokumentacija za navedene celine.
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
-- CI potvrđen kao zelen za poslednju implementacionu ispravku: run `34819806932`.
 - Uveden detaljni ljudski čitljiv dnevnik manjih iteracija u `docs/ITERATION_LOG.md`.
 - Dodat dizajn istorijskih pre-match quote snapshot-a u `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`.
 
@@ -81,16 +84,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 
 ## Sledeći korak
 
-Pre implementacije istorijskih quote snapshot-a potrebno je eksplicitno odobriti dizajn iz `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`, naročito:
-
-1. history-aware repository contract;
-2. snapshot deduplication ključ;
-3. kickoff/closing policy;
-4. tretman zakašnelo pristiglih observacija;
-5. veza između `PickRegistration` i `QuoteSnapshot`;
-6. PostgreSQL šema i transaction strategija.
-
-Nakon odobrenja sledi implementacija → testovi → dokumentacija → CI verifikacija.
+Povezati history-aware ingestion sa polling workerom, zatim završiti PostgreSQL runtime composition i Railway worker entrypoint. Nakon toga sledi kickoff/closing politika i prvi end-to-end Daily Bulletin pipeline.
 
 ## Pravila rada
 
