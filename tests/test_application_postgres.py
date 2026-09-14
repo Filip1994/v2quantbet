@@ -68,8 +68,7 @@ def test_close_is_safe_when_repository_connections_are_operation_scoped() -> Non
 def test_context_manager_calls_close() -> None:
     application = PostgreSQLQuoteHistoryApplication(repository=Mock(), service=Mock())
 
-    with patch.object(application, "close") as close:
-        with application as entered:
-            assert entered is application
+    with patch.object(application, "close") as close, application as entered:
+        assert entered is application
 
     close.assert_called_once_with()
