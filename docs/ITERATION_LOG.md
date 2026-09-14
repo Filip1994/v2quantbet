@@ -54,3 +54,12 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - CI nije proveravan u ovoj iteraciji.
 - Commit modela: `c0c52785afd82f1502800b500dc04f3a92f638f1`.
 - Commit testova: `013d384d8543888e11ab12eacd6f38518d4d9726`.
+
+## 2026-09-14T14:43:00+02:00 — Završen export quote history modela
+
+- Ažuriran je `src/h2h/domain/__init__.py`.
+- `QuoteSeries` i `QuoteSnapshot` sada su dostupni i kroz centralni `h2h.domain` import.
+- Prethodni SHA mismatch je rešen korišćenjem aktuelnog sadržaja fajla.
+- Runtime logika modela nije menjana; promenjen je samo javni domen export.
+- Testovi i CI nisu pokretani u ovoj iteraciji.
+- Commit: `7ec565d2a3909dc25373c8a6ea27e8970cc40071`.
