@@ -29,4 +29,15 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Nije menjano runtime ponašanje, nisu menjani modeli, repository interfejsi niti PostgreSQL šema.
 - Commit: `0c49185495acf8779424e71583442e5cd137fe9d`.
 - CI rezultat: nije proveravan u ovoj iteraciji.
-- Sledeći korak zahteva eksplicitno odobrenje dizajnerskih odluka pre implementacije.
+
+## 2026-09-14T14:43:00+02:00 — Uvedena mapa podataka i timestamp pravila
+
+- Dodat je `docs/DATA_CLARIFICATION.md` kao centralna mapa podataka projekta.
+- Dokument jednostavnim jezikom objašnjava šta QuantBet prima iz API-ja, kroz koje slojeve prolazi, gde se čuva i u kom trenutku nastaje.
+- Posebno su objašnjeni fixture podaci, quote podaci, canonical modeli, istorijski snapshot-i, pick registracija, background monitoring, closing quote i CLV.
+- Dodat je pregled informacija koje još nisu production-persisted.
+- Dodat je indeks koji povezuje vrste podataka sa odgovarajućim `.md` dokumentima.
+- Uvedeno je pravilo da svaka buduća informacija pre implementacije mora imati definisan izvor, model, mesto čuvanja, timestamp pravilo i lifecycle trenutak.
+- Runtime kod nije menjan.
+- Testovi i CI nisu pokretani.
+- Commit dokumenta: `f50a46051bded75886050cb3005afcc9dd1931c7`.
