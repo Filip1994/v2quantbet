@@ -11,7 +11,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Svaki unos sadrži timestamp u ISO 8601 formatu.
 - `docs/PROGRESS.md` ostaje sažeti pregled većih završenih celina; ovaj dokument čuva detalje manjih koraka.
 
-## 2026-09-14T00:00:00Z — Uveden dnevnik iteracija
+## 2026-09-14T00:00:00Z — Uведен дневник iteracija
 
 - Pregledan je postojeći `docs/PROGRESS.md`.
 - Dogovoreno je da se velike završene celine i dalje evidentiraju u `docs/PROGRESS.md`.
@@ -50,7 +50,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - `QuoteSnapshot` čuva jednu nepromenljivu opservaciju sa `observed_at`, `captured_at`, kvotom i izvorom.
 - Uvedena je validacija obaveznih identifikatora, kvote i timezone-aware timestamp-a.
 - Dodat je `tests/domain/test_quote_history.py` sa testovima za validaciju i immutability.
-- Pokušaj ažuriranja `src/h2h/domain/__init__.py` nije uspeo zbog SHA mismatch-a; export modela još nije završen.
+- Pokušaj ažурирања `src/h2h/domain/__init__.py` nije uspeo zbog SHA mismatch-a; export modela još nije završen.
 - CI nije proveravan u ovoj iteraciji.
 - Commit modela: `c0c52785afd82f1502800b500dc04f3a92f638f1`.
 - Commit testova: `013d384d8543888e11ab12eacd6f38518d4d9726`.
@@ -63,3 +63,14 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Runtime logika modela nije menjana; promenjen je samo javni domen export.
 - Testovi i CI nisu pokretani u ovoj iteraciji.
 - Commit: `7ec565d2a3909dc25373c8a6ea27e8970cc40071`.
+
+## 2026-09-14T14:43:00+02:00 — Dodati testovi za quote history repository
+
+- Dodat je `tests/persistence/test_quote_history.py`.
+- Pokrivena je idempotentnost `ensure_series` operacije.
+- Pokriveno je odbijanje konflikta pri ponovnoj upotrebi `series_id`.
+- Pokriveno je čuvanje istorije snapshot-a i redosled upisa.
+- Pokrivena je idempotentnost `append_snapshots` operacije.
+- Pokrivena je atomicnost pri konfliktu snapshot ID-ja.
+- Testovi i CI još nisu provereni.
+- Commit testova: `b79241889f80a469a0c803dd11826c0f2d57f236`.
