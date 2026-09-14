@@ -35,18 +35,29 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - Provider-neutral `FixtureDiscovery` contract.
 - `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
 - API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
-- Hardening validacije fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
+- Hardening validacija fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
 - Immutable `PickRegistration` model sa `PickStatus` lifecycle enumeracijom.
 - Testovi i dokumentacija za navedene celine.
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
 - CI potvrđen kao zelen za poslednju implementacionu ispravku: run `34819806932`.
 
+## Arhitektonske odluke
+
+- Railway PostgreSQL je potvrđena ciljna production baza.
+- `QuoteRepository` ugovor ostaje provider-neutral i ne menja se zbog izbora baze.
+- `InMemoryQuoteRepository` ostaje za testove i lokalni razvoj.
+- PostgreSQL adapter će biti uveden kao `PostgreSQLQuoteRepository` iza postojećeg ugovora.
+- SQLite ostaje privremeni postojeći adapter dok PostgreSQL implementacija i testovi ne budu završeni.
+- SQLite se neće brisati pre uspešne PostgreSQL zamene i CI verifikacije.
+- Detaljan plan je u `docs/POSTGRESQL_PERSISTENCE_PLAN.md`.
+
 ## Dokumentacija
 
 - `docs/QUOTE_USE_CASES.md`
 - `docs/PERSISTENCE_BOUNDARY.md`
 - `docs/SQLITE_PERSISTENCE.md`
+- `docs/POSTGRESQL_PERSISTENCE_PLAN.md`
 - `docs/APPLICATION_COMPOSITION.md`
 - `docs/CONFIGURATION.md`
 - `docs/HTTP_TRANSPORT.md`
@@ -69,6 +80,8 @@ Pre prvog bulletin vertical slice-a potrebno je:
 1. definisati persistence boundary za `PickRegistration`;
 2. dodati idempotentno čuvanje i dohvat registrovanih pickova;
 3. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
+
+Pre implementacije PostgreSQL adaptera potrebno je sprovesti korak po korak plan iz `docs/POSTGRESQL_PERSISTENCE_PLAN.md`.
 
 Research platforma se ne implementira pre stabilizacije production data foundation-a. Njeni planirani koraci su definisani u `docs/RESEARCH_SECTOR_PLAN.md`.
 
