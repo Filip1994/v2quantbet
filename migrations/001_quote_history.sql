@@ -1,4 +1,4 @@
--- QuantBet quote-history schema
+-- QuantBet — quote-history schema
 -- PostgreSQL / Railway
 -- This migration is intentionally append-only for quote observations.
 
@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_quote_series_fixture
 CREATE TABLE IF NOT EXISTS quote_snapshots (
     snapshot_id TEXT PRIMARY KEY,
     series_id TEXT NOT NULL REFERENCES quote_series(series_id),
-    odd DOUBLE PRECISION NOT NULL CHECK (odd > 1.0),
+    odd DOUBLE PRECISION NOT NULL CHECK (odd > 1.0 AND odd <> 'NaN'::double precision),
     observed_at TIMESTAMPTZ NOT NULL,
     captured_at TIMESTAMPTZ NOT NULL,
     source TEXT NOT NULL CHECK (length(trim(source)) > 0),
