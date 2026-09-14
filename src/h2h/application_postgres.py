@@ -5,10 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Self
 
 from h2h.persistence import PostgreSQLQuoteHistoryRepository
+from h2h.persistence.migrations import apply_migrations
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
+
+
+_DEFAULT_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
 @dataclass
@@ -17,6 +22,11 @@ class PostgreSQLQuoteHistoryApplication:
 
     repository: PostgreSQLQuoteHistoryRepository
     service: QuoteHistoryIngestionService
+
+    def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
+        """Apply pending database migrations using the repository connection factory."""
+        connection = self.repository._connect()  # noqa: SLF001 - composition-root lifecycle hook
+        return apply_migrations(connection, migration_dir)
 
     def close(self) -> None:
         """Release application-owned resources.
