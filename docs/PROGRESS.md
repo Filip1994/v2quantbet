@@ -37,10 +37,14 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat settings-based application builder bez unošenja provider tajni u quant ili persistence sloj.
 - Dodati testovi za default putanju, praznu/nedostajuću tajnu, trimovanje vrednosti i redaction kroz `repr()`.
 - Dodat `docs/CONFIGURATION.md` sa production konfiguracionim ugovorom.
+- Dodat `JsonTransport` protocol i stdlib `UrllibJsonTransport` za izolaciju HTTP I/O od provider adaptera.
+- Dodat eksplicitan timeout ugovor i mapiranje timeout, HTTP, URL i JSON grešaka u transport exception hijerarhiju.
+- Dodati testovi transporta bez stvarnih mrežnih poziva.
+- Dodat `docs/HTTP_TRANSPORT.md` sa granicama odgovornosti i pravilima grešaka.
 
 ## Sledeći korak
 
-Proveriti CI za configuration/startup boundary celinu. Nakon zelenog CI-ja preći na sledeću production-readiness granicu.
+Proveriti CI za provider HTTP transport boundary. Nakon zelenog CI-ja integrisati `JsonTransport` u API-Football provider adapter i dodati retry policy kao zasebnu, testiranu celinu.
 
 ## Pravila rada
 
