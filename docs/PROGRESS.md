@@ -22,6 +22,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - HTTP 429 klasifikacija kroz `TransportRateLimitError` sa očuvanim `Retry-After` intervalom.
 - Dnevni `DailyApiBudget` sa operativnom rezervom i `BudgetedJsonTransport` zaštitom.
 - Fixture-level in-memory TTL cache za API-Football odgovore, sa eksplicitnim invalidiranjem.
+- Definisan Phase I scope takmičenja i pravila za isključivanje afričkih, omladinskih, nižerazrednih engleskih/nemačkih i kup takmičenja.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -36,10 +37,11 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `docs/RETRY_POLICY.md`
 - `docs/API_BUDGET.md`
 - `docs/API_FOOTBALL_CACHE.md`
+- `docs/PHASE_I_UNIVERSE_SCOPE.md`
 
 ## Sledeći korak
 
-Uvesti observability boundary: strukturisano logovanje API poziva, cache hit/miss, retry pokušaja, rate-limit događaja i odbijenih budget poziva, bez zapisivanja API ključa ili poverljivog payload-a.
+Implementirati deterministički fixture-universe filter za Phase I, sa stabilnim rejection reason kodovima i testovima za sve definisane izuzetke. Nakon toga nastaviti ka prvom bulletin vertical slice-u.
 
 ## Pravila rada
 
@@ -47,3 +49,4 @@ Uvesti observability boundary: strukturisano logovanje API poziva, cache hit/mis
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
+- Fixture-universe politika ostaje odvojena od quant izračunavanja i quote normalizacije.
