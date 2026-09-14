@@ -20,6 +20,7 @@ class QuoteHistoryIngestionService:
     ) -> None:
         self._repository = repository
         self._capture_clock = capture_clock
+        self._series_created_at: dict[str, datetime] = {}
 
     @staticmethod
     def _series_id(quote: CanonicalQuote) -> str:
@@ -46,6 +47,7 @@ class QuoteHistoryIngestionService:
         snapshots: list[QuoteSnapshot] = []
         for quote in quotes:
             series_id = self._series_id(quote)
+            created_at = self._series_created_at.setdefault(series_id, captured_at)
             self._repository.ensure_series(
                 QuoteSeries(
                     series_id=series_id,
@@ -53,7 +55,7 @@ class QuoteHistoryIngestionService:
                     bookmaker_id=quote.bookmaker_id,
                     market=quote.market,
                     selection=quote.selection,
-                    created_at=captured_at,
+                    created_at=created_at,
                 )
             )
             snapshots.append(
