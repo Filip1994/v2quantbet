@@ -1,6 +1,5 @@
 """Small, provider-neutral migration runner for SQL files."""
 
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,17 @@ def apply_migrations(connection: Any, migration_dir: str | Path) -> tuple[str, .
 
     The supplied connection must support context-manager transactions and a
     DB-API cursor. Each migration is recorded only after its SQL succeeds.
+
+    Raises:
+        FileNotFoundError: if ``migration_dir`` does not exist.
+        NotADirectoryError: if ``migration_dir`` is not a directory.
     """
     directory = Path(migration_dir)
+    if not directory.exists():
+        raise FileNotFoundError(f"migration directory does not exist: {directory}")
+    if not directory.is_dir():
+        raise NotADirectoryError(f"migration path is not a directory: {directory}")
+
     migrations = tuple(sorted(directory.glob("*.sql")))
     applied: list[str] = []
 
