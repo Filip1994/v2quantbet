@@ -13,8 +13,12 @@ class QuoteHistoryRepository(Protocol):
         """Create a series or reject a conflicting definition."""
         ...
 
+    def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
+        """Return registered quote series for one fixture in insertion order."""
+        ...
+
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
-        """Append snapshots idempotently, rejecting conflicting snapshot IDs."""
+        """Append snapshots idempotently, rejecting conflicts and unknown series."""
         ...
 
     def snapshots_for_series(self, series_id: str) -> tuple[QuoteSnapshot, ...]:
@@ -35,22 +39,37 @@ class InMemoryQuoteHistoryRepository:
 
     def __init__(self) -> None:
         self._series: dict[str, QuoteSeries] = {}
+        self._series_order: list[str] = []
         self._snapshots: dict[str, QuoteSnapshot] = {}
         self._snapshot_order: list[str] = []
 
     def ensure_series(self, series: QuoteSeries) -> None:
         existing = self._series.get(series.series_id)
-        if existing is not None and existing != series:
-            raise QuoteHistoryConflictError(
-                f"conflicting definition for series ID {series.series_id!r}"
-            )
+        if existing is not None:
+            if existing != series:
+                raise QuoteHistoryConflictError(
+                    f"conflicting definition for series ID {series.series_id!r}"
+                )
+            return
         self._series[series.series_id] = series
+        self._series_order.append(series.series_id)
+
+    def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
+        return tuple(
+            self._series[series_id]
+            for series_id in self._series_order
+            if self._series[series_id].fixture_id == fixture_id
+        )
 
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
         incoming = tuple(snapshots)
         pending = dict(self._snapshots)
         pending_order = list(self._snapshot_order)
         for snapshot in incoming:
+            if snapshot.series_id not in self._series:
+                raise QuoteHistoryConflictError(
+                    f"unknown series ID {snapshot.series_id!r}"
+                )
             existing = pending.get(snapshot.snapshot_id)
             if existing is None:
                 pending[snapshot.snapshot_id] = snapshot
