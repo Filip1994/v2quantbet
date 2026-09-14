@@ -10,7 +10,7 @@ The production project consists of three distinct resource types:
 
 1. **QuantBet application service** — executes ingestion, validation, calculations, workers and reporting jobs.
 2. **Railway PostgreSQL** — durable structured persistence and the authoritative business-data store.
-3. **Railway Durable Volume** — durable file storage for explicitly approved artifacts, caches and large local files.
+3. **Railway Durable Barrel** — durable file storage for explicitly approved artifacts, caches and large local files.
 
 RAM/Memory and CPU are execution resources, not storage systems.
 
@@ -20,7 +20,7 @@ RAM/Memory and CPU are execution resources, not storage systems.
 
 The application service is compute-only: it may process data, but its local filesystem, RAM, logs and generated files are not authoritative records.
 
-The Durable Volume is not a second database and must not become an untracked source of truth.
+The Durable Barrel is not a second database and must not become an untracked source of truth.
 
 ## Storage ownership
 
@@ -33,26 +33,26 @@ The Durable Volume is not a second database and must not become an untracked sou
 | Daily bulletin records | PostgreSQL | Generated files may be exported separately, but the underlying records remain in PostgreSQL. |
 | Research findings and derived metrics | PostgreSQL | Files are secondary artifacts, not the canonical dataset. |
 | Job runs, ingestion status and errors requiring audit | PostgreSQL | Operational logs may supplement this, but audited state belongs in the database. |
-| Secrets and connection strings | Railway environment variables/secrets | Never store them in PostgreSQL, the repository or the Durable Volume. |
-| Temporary cache | Durable Volume, if needed | Must be rebuildable and safe to delete. |
-| Large model/data artifacts | Durable Volume, if needed | Must have version, checksum and provenance recorded in PostgreSQL. |
-| Generated CSV/JSON/Markdown/PDF exports | Durable Volume or external artifact storage | Treat as disposable/reproducible unless explicitly versioned. |
+| Secrets and connection strings | Railway environment variables/secrets | Never store them in PostgreSQL, the repository or the Durable Barrel. |
+| Temporary cache | Durable Barrel, if needed | Must be rebuildable and safe to delete. |
+| Large model/data artifacts | Durable Barrel, if needed | Must have version, checksum and provenance recorded in PostgreSQL. |
+| Generated CSV/JSON/Markdown/PDF exports | Durable Barrel or external artifact storage | Treat as disposable/reproducible unless explicitly versioned. |
 | Application logs | Railway logging system | Do not use logs as the business database. |
 | Runtime RAM | Application process memory | Ephemeral; never persistent. |
 
-## Durable Volume rules
+## Durable Barrel rules
 
-The Durable Volume may be used only when all of the following are true:
+The Durable Barrel may be used only when all of the following are true:
 
 - the data is file-shaped or too large/inefficient for PostgreSQL;
 - the application can identify its owner and lifecycle;
 - the file can be regenerated or is backed up independently;
 - its version, checksum or metadata is recorded in PostgreSQL when reproducibility matters;
-- deleting the volume would not silently destroy the canonical business dataset.
+- deleting the barrel would not silently destroy the canonical business dataset.
 
-Do not store the only copy of quotes, bets, signals, fixtures or audit records on the volume.
+Do not store the only copy of quotes, bets, signals, fixtures or audit records on the barrel.
 
-A Durable Volume is not automatically a PostgreSQL backup. Backup and restore must use the database provider's supported mechanisms and must be tested separately.
+A Durable Barrel is not automatically a PostgreSQL backup. Backup and restore must use the database provider's supported mechanisms and must be tested separately.
 
 ## Application deployment rules
 
@@ -61,7 +61,7 @@ A Durable Volume is not automatically a PostgreSQL backup. Backup and restore mu
 - Database migrations must run through an explicit startup/deployment procedure.
 - Workers must write durable business state to PostgreSQL.
 - Restarts and redeployments must be safe because business data is external to the application container.
-- Any volume-backed cache must tolerate loss, corruption and rebuild.
+- Any barrel-backed cache must tolerate loss, corruption and rebuild.
 
 ## SQLite policy
 
