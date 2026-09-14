@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from threading import Lock
 from typing import Any
 
@@ -21,7 +21,7 @@ class DailyApiBudget:
 
     daily_limit: int = 7500
     reserve: int = 1500
-    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     _day: date = field(init=False)
     _used: int = field(default=0, init=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False)
