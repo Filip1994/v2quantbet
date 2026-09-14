@@ -165,3 +165,52 @@ def test_append_snapshots_inserts_snapshot_for_known_series() -> None:
     repository.append_snapshots((snapshot,))
 
     assert "snapshot-1" in connection.snapshots_by_id
+
+
+def test_append_snapshots_is_idempotent_for_matching_snapshot() -> None:
+    series = make_series()
+    snapshot = make_snapshot()
+    connection = FakeConnection()
+    connection.series_by_id[series.series_id] = (
+        series.fixture_id,
+        series.bookmaker_id,
+        series.market.value,
+        series.selection.value,
+        series.created_at,
+    )
+    connection.snapshots_by_id[snapshot.snapshot_id] = (
+        snapshot.series_id,
+        snapshot.odd,
+        snapshot.observed_at,
+        snapshot.captured_at,
+        snapshot.source,
+    )
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    repository.append_snapshots((snapshot,))
+
+    assert sum("INSERT INTO quote_snapshots" in sql for sql, _ in connection.executed) == 0
+
+
+def test_append_snapshots_rejects_conflicting_snapshot() -> None:
+    series = make_series()
+    snapshot = make_snapshot()
+    connection = FakeConnection()
+    connection.series_by_id[series.series_id] = (
+        series.fixture_id,
+        series.bookmaker_id,
+        series.market.value,
+        series.selection.value,
+        series.source if hasattr(series, "source") else "api-football",
+    )
+    connection.snapshots_by_id[snapshot.snapshot_id] = (
+        snapshot.series_id,
+        2.20,
+        snapshot.observed_at,
+        snapshot.captured_at,
+        snapshot.source,
+    )
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+
+    with pytest.raises(QuoteHistoryConflictError, match="conflicting observation"):
+        repository.append_snapshots((snapshot,))
