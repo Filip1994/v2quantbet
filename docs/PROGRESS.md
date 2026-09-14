@@ -19,6 +19,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `ApiFootballClient` sa pravilnim `/odds?fixture=<id>` zahtevom.
 - `ApiFootballOddsService` koji povezuje client sa ingestion i snapshot slojem.
 - `RetryingJsonTransport` sa ograničenim brojem pokušaja i eksponencijalnim backoff-om.
+- HTTP 429 klasifikacija kroz `TransportRateLimitError` sa očuvanim `Retry-After` intervalom.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -34,7 +35,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 
 ## Sledeći korak
 
-Proveriti CI za service/retry celinu. Nakon zelenog CI-ja nastaviti sa production hardening-om: provider response validation, rate-limit handling i observability bez prodiranja provider detalja u quant sloj.
+Dodati dnevni API budget guard sa keširanjem i kontrolisanim odbijanjem novih poziva pre prelaska provider kvote.
 
 ## Pravila rada
 
