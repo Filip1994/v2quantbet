@@ -41,6 +41,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
 - CI potvrđen kao zelen za poslednju implementacionu ispravku: run `34819806932`.
+- Uveden detaljni ljudski čitljiv dnevnik manjih iteracija u `docs/ITERATION_LOG.md`.
 
 ## Arhitektonske odluke
 
@@ -58,6 +59,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - `docs/PERSISTENCE_BOUNDARY.md`
 - `docs/SQLITE_PERSISTENCE.md`
 - `docs/POSTGRESQL_PERSISTENCE_PLAN.md`
+- `docs/ITERATION_LOG.md`
 - `docs/APPLICATION_COMPOSITION.md`
 - `docs/CONFIGURATION.md`
 - `docs/HTTP_TRANSPORT.md`
@@ -90,6 +92,8 @@ Research platforma se ne implementira pre stabilizacije production data foundati
 - Jedna mala implementaciona celina po koraku.
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
 - Svaka završena celina mora imati odgovarajuću `.md` dokumentaciju.
+- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudski čitljivim opisom.
+- `docs/PROGRESS.md` sadrži sažetak većih završenih celina, dok `docs/ITERATION_LOG.md` sadrži detalje manjih koraka.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
 - Fixture-universe politika ostaje odvojena od quant izračunavanja i quote normalizacije.
