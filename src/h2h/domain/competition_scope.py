@@ -1,8 +1,8 @@
 """Deterministic Phase I competition-universe policy."""
 
-from dataclasses import dataclass
 import re
 import unicodedata
+from dataclasses import dataclass
 
 
 class RejectionReason:
@@ -73,8 +73,10 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
         if metadata.level is not None and metadata.level >= 4:
             return ScopeDecision(False, RejectionReason.ENGLISH_TIER)
 
-    if country == "germany":
-        if "regionalliga" in name or (metadata.level is not None and metadata.level >= 4):
-            return ScopeDecision(False, RejectionReason.GERMAN_TIER)
+    if country == "germany" and (
+        "regionalliga" in name
+        or (metadata.level is not None and metadata.level >= 4)
+    ):
+        return ScopeDecision(False, RejectionReason.GERMAN_TIER)
 
     return ScopeDecision(True)
