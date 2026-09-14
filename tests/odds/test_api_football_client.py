@@ -13,7 +13,7 @@ def test_fetch_odds_uses_injected_transport() -> None:
 
     assert result == {"response": [{"fixture": {"id": 42}}]}
     transport.get_json.assert_called_once_with(
-        "https://v3.football.api-sports.io/odds",
+        "https://v3.football.api-sports.io/odds?fixture=42",
         headers={"x-apisports-key": "secret"},
         timeout=10.0,
     )
