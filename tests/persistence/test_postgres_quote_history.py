@@ -137,7 +137,8 @@ def test_requires_database_url_without_injected_connection() -> None:
 
 def test_injected_connection_factory_takes_precedence() -> None:
     connection = object()
-    assert PostgreSQLQuoteHistoryRepository(connect=lambda: connection)._connect() is connection
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+    assert repository.connect() is connection
 
 
 def test_row_conversion_reconstructs_domain_objects() -> None:
