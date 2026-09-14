@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
@@ -23,10 +23,10 @@ def test_budget_keeps_operational_reserve() -> None:
 
 
 def test_budget_resets_on_next_utc_day() -> None:
-    now = [datetime(2026, 9, 14, tzinfo=timezone.utc)]
+    now = [datetime(2026, 9, 14, tzinfo=UTC)]
     budget = DailyApiBudget(daily_limit=2, reserve=0, clock=lambda: now[0])
     budget.acquire()
-    now[0] = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    now[0] = datetime(2026, 9, 15, tzinfo=UTC)
 
     budget.acquire()
 
