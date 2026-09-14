@@ -1,6 +1,5 @@
 """Application service for discovering fixtures inside the Phase I universe."""
 
-from collections.abc import Sequence
 from datetime import datetime
 
 from h2h.domain.competition_scope import CompetitionMetadata, classify_phase_i
@@ -19,14 +18,13 @@ class ScopedFixtureDiscovery:
         if start_at >= end_at:
             raise ValueError("start_at must be earlier than end_at")
 
-        fixtures = self._discovery.discover(start_at, end_at)
         eligible: list[Fixture] = []
-        for fixture in fixtures:
+        for fixture in self._discovery.discover(start_at, end_at):
             decision = classify_phase_i(
                 CompetitionMetadata(
                     country=fixture.country,
                     name=fixture.competition_name,
-                    type=fixture.status,
+                    type=fixture.competition_type,
                     level=None,
                 )
             )
