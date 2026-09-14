@@ -36,7 +36,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - `load_settings()` čita `DATABASE_URL` kada je prisutan i uklanja spoljašnje razmake.
 - Ažuriran je `tests/test_config.py` sa proverama učitavanja URL-a i redakcije poverljivih vrednosti u `repr()` izlazu.
 - PostgreSQL dependency (`psycopg`) i `uv.lock` namerno nisu menjani; lokalna `uv` regeneracija je i dalje potrebna.
-- Testovi i CI nisu pokrenuti u ovom okruženju.
+- Testovi i CI nisu pokrenuti u овом окружењу.
 - Commitovi: `22891b7222e3303d776c967a0ddde326d632823d`, `8c5442d08420c6c3cb621c94181f69fd024f0872`.
 
 ## 2026-09-15T02:00:00+02:00 — Eksplicitna PostgreSQL production composition putanja
@@ -48,3 +48,11 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - PostgreSQL production composition koristi postojeći `application_postgres` modul i ne uvodi novi persistence sloj.
 - Testovi i CI nisu pokrenuti u ovom okruženju.
 - Commit: `30175fef3cb8dce261bf667b1882ebe593ecd46d`.
+
+## 2026-09-15T03:00:00+02:00 — Документација production PostgreSQL границе
+
+- Ажурирани су `docs/CONFIGURATION.md` и `docs/APPLICATION_COMPOSITION.md`.
+- Документација сада јасно дефинише `DATABASE_URL` као обавезан за production и Railway.
+- `QUANTBET_DATABASE_PATH` и SQLite composition су означени као привремени legacy/test-only слој; нису production fallback.
+- Документација намерно не тврди да су dependency, локални тестови или CI већ проверени.
+- Commitovi: `389b7559ab4d7fae0b7538a66413047c8153b5f8`, `2a19ef586e95e9221b38e8ce2e87fad8e3b1b07c`.
