@@ -1,5 +1,6 @@
 """Provider-neutral persistence boundaries."""
 
+from .migrations import apply_migrations
 from .postgres_quote_history import PostgreSQLQuoteHistoryRepository
 from .quote_history import (
     InMemoryQuoteHistoryRepository,
@@ -17,4 +18,5 @@ __all__ = [
     "QuoteHistoryRepository",
     "QuoteRepository",
     "SQLiteQuoteRepository",
+    "apply_migrations",
 ]
