@@ -1,6 +1,6 @@
 import pytest
 
-from h2h.config import ConfigError, load_config
+from h2h.config import ApplicationSettings, ConfigError, load_config, load_settings
 
 
 def _set_valid_config(monkeypatch):
@@ -44,4 +44,38 @@ def test_config_repr_redacts_secrets(monkeypatch):
 
     assert "postgresql://example" not in rendered
     assert "test-key" not in rendered
+    assert "[REDACTED]" in rendered
+
+
+def test_load_settings_reads_api_key_and_database_path() -> None:
+    settings = load_settings(
+        {
+            "API_FOOTBALL_KEY": "  test-football-key  ",
+            "QUANTBET_DATABASE_PATH": "tmp/quotes.sqlite3",
+        }
+    )
+
+    assert isinstance(settings, ApplicationSettings)
+    assert settings.api_football_key == "test-football-key"
+    assert settings.database_path.as_posix() == "tmp/quotes.sqlite3"
+
+
+def test_load_settings_uses_default_database_path() -> None:
+    settings = load_settings({"API_FOOTBALL_KEY": "test-football-key"})
+
+    assert settings.database_path.as_posix() == "data/quantbet.sqlite3"
+
+
+@pytest.mark.parametrize("environment", [{}, {"API_FOOTBALL_KEY": "   "}])
+def test_load_settings_requires_api_football_key(environment) -> None:
+    with pytest.raises(ConfigError, match="API_FOOTBALL_KEY"):
+        load_settings(environment)
+
+
+def test_application_settings_repr_redacts_api_key() -> None:
+    settings = ApplicationSettings(database_path="quotes.sqlite3", api_football_key="secret")
+
+    rendered = repr(settings)
+
+    assert "secret" not in rendered
     assert "[REDACTED]" in rendered
