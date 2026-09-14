@@ -8,7 +8,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 
 Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa implied probability, probability gap i expected value uz validaciju model probability granica.
 
-Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-neutral `FixtureDiscovery` contract i `ScopedFixtureDiscovery` use-case koji primenjuje Phase I competition-scope politiku.
+Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-neutral `FixtureDiscovery` contract, `ScopedFixtureDiscovery` use-case i API-Football fixture adapter sa hardening validacijom.
 
 Dodatno je definisana jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
 
@@ -34,9 +34,12 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - Canonical immutable `Fixture` model.
 - Provider-neutral `FixtureDiscovery` contract.
 - `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
+- API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
+- Hardening validacije fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
 - Testovi i dokumentacija za navedene celine.
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
+- CI potvrđen kao zelen za poslednju implementacionu ispravku: run `34819806932`.
 
 ## Dokumentacija
 
@@ -54,16 +57,16 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - `docs/VALUE_PICK_EVALUATION.md`
 - `docs/FIXTURE_DISCOVERY_CONTRACT.md`
 - `docs/SCOPED_FIXTURE_DISCOVERY.md`
+- `docs/API_FOOTBALL_FIXTURE_ADAPTER.md`
 - `docs/RESEARCH_SECTOR_PLAN.md`
 
 ## Sledeći korak
 
 Pre prvog bulletin vertical slice-a potrebno je:
 
-1. potvrditi CI za fixture-discovery celinu;
-2. dodati provider adapter koji API-Football payload prevodi u canonical `Fixture` objekte;
-3. uvesti immutable pick-registration model sa jasnim identitetom i statusom;
-4. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
+1. uvesti immutable pick-registration model sa jasnim identitetom i statusom;
+2. definisati registraciju odluke tako da čuva fixture, quote, model probability, value metrike, timestamp i verziju modela;
+3. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
 
 Research platforma se ne implementira pre stabilizacije production data foundation-a. Njeni planirani koraci su definisani u `docs/RESEARCH_SECTOR_PLAN.md`.
 
