@@ -1,6 +1,7 @@
 """Odds acquisition, normalization and validation."""
 
 from .api_football_adapter import ApiFootballQuoteAdapter
+from .api_football_client import ApiFootballClient
 from .api_football_ingestion import (
     build_api_football_market_snapshots,
     ingest_api_football_odds,
@@ -11,6 +12,7 @@ from .quote_deduplication import QuoteConflictError, deduplicate_quotes
 from .snapshot_builder import build_market_snapshot
 
 __all__ = [
+    "ApiFootballClient",
     "ApiFootballQuoteAdapter",
     "NormalizingProviderQuoteAdapter",
     "ProviderQuoteAdapter",
