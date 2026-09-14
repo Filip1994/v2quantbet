@@ -8,6 +8,8 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 
 Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa implied probability, probability gap i expected value uz validaciju model probability granica.
 
+Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-neutral `FixtureDiscovery` contract i `ScopedFixtureDiscovery` use-case koji primenjuje Phase I competition-scope politiku.
+
 ## Završeno
 
 - Quant/domain foundation i regresiona zaštita.
@@ -27,7 +29,10 @@ Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa 
 - Definisan Phase I scope takmičenja i pravila za isključivanje afričkih, omladinskih, nižerazrednih engleskih/nemačkih i kup takmičenja.
 - Deterministički Phase I competition-scope filter sa stabilnim rejection reason kodovima.
 - Deterministička ValuePick evaluacija: implied probability, probability gap i expected value.
-- Testovi i dokumentacija za svaku navedenu celinu.
+- Canonical immutable `Fixture` model.
+- Provider-neutral `FixtureDiscovery` contract.
+- `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
+- Testovi i dokumentacija za navedene celine.
 
 ## Dokumentacija
 
@@ -43,15 +48,22 @@ Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa 
 - `docs/API_FOOTBALL_CACHE.md`
 - `docs/PHASE_I_UNIVERSE_SCOPE.md`
 - `docs/VALUE_PICK_EVALUATION.md`
+- `docs/FIXTURE_DISCOVERY_CONTRACT.md`
 
 ## Sledeći korak
 
-Povezati competition-scope filter sa fixture discovery/use-case slojem, zatim implementirati immutable pick registration i generisanje dnevnog biltena kao prvi bulletin vertical slice.
+Pre prvog bulletin vertical slice-a potrebno je:
+
+1. potvrditi CI za fixture-discovery celinu;
+2. dodati provider adapter koji API-Football payload prevodi u canonical `Fixture` objekte;
+3. uvesti immutable pick-registration model sa jasnim identitetom i statusom;
+4. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
 
 ## Pravila rada
 
 - Jedna mala implementaciona celina po koraku.
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
+- Svaka završena celina mora imati odgovarajuću `.md` dokumentaciju.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
 - Fixture-universe politika ostaje odvojena od quant izračunavanja i quote normalizacije.
