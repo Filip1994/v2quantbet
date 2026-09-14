@@ -23,6 +23,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+lint.ignore = ["PYI034", "UP017"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["h2h"]
