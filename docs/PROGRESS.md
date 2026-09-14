@@ -10,6 +10,8 @@ Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa 
 
 Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-neutral `FixtureDiscovery` contract i `ScopedFixtureDiscovery` use-case koji primenjuje Phase I competition-scope politiku.
 
+Dodatno je definisana jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
+
 ## Završeno
 
 - Quant/domain foundation i regresiona zaštita.
@@ -33,6 +35,8 @@ Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-
 - Provider-neutral `FixtureDiscovery` contract.
 - `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
 - Testovi i dokumentacija za navedene celine.
+- Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
+- Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
 
 ## Dokumentacija
 
@@ -49,6 +53,8 @@ Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-
 - `docs/PHASE_I_UNIVERSE_SCOPE.md`
 - `docs/VALUE_PICK_EVALUATION.md`
 - `docs/FIXTURE_DISCOVERY_CONTRACT.md`
+- `docs/SCOPED_FIXTURE_DISCOVERY.md`
+- `docs/RESEARCH_SECTOR_PLAN.md`
 
 ## Sledeći korak
 
@@ -59,6 +65,8 @@ Pre prvog bulletin vertical slice-a potrebno je:
 3. uvesti immutable pick-registration model sa jasnim identitetom i statusom;
 4. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
 
+Research platforma se ne implementira pre stabilizacije production data foundation-a. Njeni planirani koraci su definisani u `docs/RESEARCH_SECTOR_PLAN.md`.
+
 ## Pravila rada
 
 - Jedna mala implementaciona celina po koraku.
@@ -67,3 +75,4 @@ Pre prvog bulletin vertical slice-a potrebno je:
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
 - Fixture-universe politika ostaje odvojena od quant izračunavanja i quote normalizacije.
+- Research eksperimenti ne menjaju production logiku implicitno; svaka promena mora biti verzionisana, validirana i eksplicitno promovisana.
