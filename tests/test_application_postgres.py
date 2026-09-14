@@ -1,7 +1,7 @@
 """Tests for PostgreSQL application composition and lifecycle."""
 
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from h2h.application_postgres import (
     PostgreSQLQuoteHistoryApplication,
@@ -24,7 +24,7 @@ def test_builder_creates_postgresql_repository_and_ingestion_service() -> None:
 def test_migrate_uses_repository_connection_and_migration_directory(
     tmp_path: Path,
 ) -> None:
-    connection = Mock()
+    connection = MagicMock()
     connection.__enter__.return_value = connection
     connection.__exit__.return_value = False
     repository = Mock()
@@ -41,7 +41,7 @@ def test_migrate_uses_repository_connection_and_migration_directory(
 
 
 def test_migrate_uses_default_directory_when_not_provided() -> None:
-    connection = Mock()
+    connection = MagicMock()
     connection.__enter__.return_value = connection
     connection.__exit__.return_value = False
     repository = Mock()
