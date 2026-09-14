@@ -58,6 +58,18 @@ def test_load_settings_reads_api_key_and_database_path() -> None:
     assert isinstance(settings, ApplicationSettings)
     assert settings.api_football_key == "test-football-key"
     assert settings.database_path.as_posix() == "tmp/quotes.sqlite3"
+    assert settings.database_url is None
+
+
+def test_load_settings_reads_optional_database_url() -> None:
+    settings = load_settings(
+        {
+            "API_FOOTBALL_KEY": "test-football-key",
+            "DATABASE_URL": " postgresql://example/quantbet ",
+        }
+    )
+
+    assert settings.database_url == "postgresql://example/quantbet"
 
 
 def test_load_settings_uses_default_database_path() -> None:
@@ -72,10 +84,15 @@ def test_load_settings_requires_api_football_key(environment) -> None:
         load_settings(environment)
 
 
-def test_application_settings_repr_redacts_api_key() -> None:
-    settings = ApplicationSettings(database_path="quotes.sqlite3", api_football_key="secret")
+def test_application_settings_repr_redacts_api_key_and_database_url() -> None:
+    settings = ApplicationSettings(
+        database_path="quotes.sqlite3",
+        api_football_key="secret",
+        database_url="postgresql://secret-host/quantbet",
+    )
 
     rendered = repr(settings)
 
     assert "secret" not in rendered
+    assert "postgresql://secret-host/quantbet" not in rendered
     assert "[REDACTED]" in rendered
