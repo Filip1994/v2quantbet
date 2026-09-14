@@ -8,6 +8,7 @@ from .api_football_ingestion import (
     iter_api_football_quote_payloads,
 )
 from .api_football_service import ApiFootballOddsService
+from .budget import ApiBudgetExceededError, BudgetedJsonTransport, DailyApiBudget
 from .http import TransportRateLimitError
 from .provider_adapter import NormalizingProviderQuoteAdapter, ProviderQuoteAdapter
 from .quote_deduplication import QuoteConflictError, deduplicate_quotes
@@ -15,9 +16,12 @@ from .retry import RetryingJsonTransport
 from .snapshot_builder import build_market_snapshot
 
 __all__ = [
+    "ApiBudgetExceededError",
     "ApiFootballClient",
     "ApiFootballOddsService",
     "ApiFootballQuoteAdapter",
+    "BudgetedJsonTransport",
+    "DailyApiBudget",
     "NormalizingProviderQuoteAdapter",
     "ProviderQuoteAdapter",
     "QuoteConflictError",
