@@ -4,51 +4,37 @@
 
 Quant/domain foundation je izgrađen i testiran: Dixon–Coles baseline, golden-master zaštita, javni quant API, canonical quote modeli, market snapshot validacija i provider-neutral quote normalizacija.
 
-Provider-neutral quote adapter contract je definisan, eksportovan i pokriven testovima. API-Football adapter i ingestion sloj su implementirani i provereni kroz CI.
+Provider-neutral quote adapter contract, API-Football adapter, ingestion, persistence, configuration, HTTP transport, API-Football client i application service su implementirani kao odvojeni slojevi.
 
-## Završeno u aktuelnoj celini
+## Završeno
 
-- Dodat `iter_api_football_quote_payloads()` za flattenovanje kompletnog API-Football `/odds` odgovora.
-- Dodat `ingest_api_football_odds()` koji provider payload-e pretvara u `CanonicalQuote` objekte.
-- Dodat `build_api_football_market_snapshots()` koji quote-ove grupiše po fixture/bookmaker/market/observation timestamp kontekstu.
-- Formiranje snapshot-a delegira validaciju na `MarketSnapshot.from_quotes()`.
-- API-Football ingestion funkcije su eksportovane kroz `h2h.odds`.
-- Dodati testovi za flattenovanje, ingestiju, snapshot construction i malformed provider grane.
-- Dodat `deduplicate_quotes()` za idempotentno uklanjanje identičnih ponovljenih quote-ova.
-- Dodat `QuoteConflictError` za eksplicitno odbijanje različitih opažanja sa istim canonical identity ključem.
-- Dodat test za identične duplikate, različite identitete i konfliktne quote-ove.
-- Dodat provider-neutral `QuoteRepository` contract.
-- Dodat `InMemoryQuoteRepository` sa idempotentnim save ponašanjem i atomskim conflict handling-om.
-- Dodati testovi za čuvanje, query po fixture-u, identične duplikate i konflikt bez parcijalnog upisa.
-- Dodat `docs/PERSISTENCE_BOUNDARY.md` sa pravilima persistence sloja.
-- Dodat `QuoteIngestionService` kao provider-neutral read/write application use case.
-- Dodati testovi za ingestiju, fixture-scoped read i full read ponašanje servisa.
-- Dodat `docs/QUOTE_USE_CASES.md` sa granicama odgovornosti application sloja.
-- Dodat `SQLiteQuoteRepository` sa automatskom šemom, round-trip rekonstrukcijom, idempotentnim upisom i atomskim odbijanjem konflikata.
-- Dodati testovi za SQLite round-trip, query po fixture-u, identične duplikate, atomic conflict handling i ponovno otvaranje baze.
-- Dodat `docs/SQLITE_PERSISTENCE.md` sa ugovorom i načinom korišćenja SQLite adaptera.
-- SQLite persistence celina je proverena kroz CI; nakon ispravke Ruff import reda CI je zelen.
-- Dodat `build_sqlite_quote_service()` kao application composition root koji povezuje SQLite repository i `QuoteIngestionService` bez provider coupling-a.
-- Dodat test composition root-a i `docs/APPLICATION_COMPOSITION.md`.
-- Dodat `SQLiteQuoteApplication` sa eksplicitnim `close()` lifecycle ugovorom i context-manager podrškom.
-- Dodati testovi za zatvaranje konekcije, automatsko zatvaranje kroz `with` blok i ponovno otvaranje baze.
-- Ažurirana dokumentacija application composition sloja sa production-facing lifecycle primerom.
-- Dodat `ApplicationSettings` i `load_settings()` za validaciju `API_FOOTBALL_KEY` i SQLite putanje iz environment-a.
-- Dodat settings-based application builder bez unošenja provider tajni u quant ili persistence sloj.
-- Dodati testovi za default putanju, praznu/nedostajuću tajnu, trimovanje vrednosti i redaction kroz `repr()`.
-- Dodat `docs/CONFIGURATION.md` sa production konfiguracionim ugovorom.
-- Dodat `JsonTransport` protocol i stdlib `UrllibJsonTransport` za izolaciju HTTP I/O od provider adaptera.
-- Dodat eksplicitan timeout ugovor i mapiranje timeout, HTTP, URL i JSON grešaka u transport exception hijerarhiju.
-- Dodati testovi transporta bez stvarnih mrežnih poziva.
-- Dodat `docs/HTTP_TRANSPORT.md` sa granicama odgovornosti i pravilima grešaka.
-- Dodat `ApiFootballClient` sa injektovanim `JsonTransport` slojem i API ključem iz konfiguracije.
-- Ispravljen API-Football `/odds` zahtev tako da fixture ID ide kao `?fixture=<id>` query parametar.
-- Dodat test koji eksplicitno proverava fixture query parametar.
-- `ApiFootballClient` eksportovan kroz `h2h.odds`.
+- Quant/domain foundation i regresiona zaštita.
+- Canonical quote modeli i market snapshot validacija.
+- Provider-neutral quote adapter contract.
+- API-Football flattening, normalization, deduplication i conflict handling.
+- In-memory i SQLite persistence sa idempotentnim upisom i atomskim odbijanjem konflikata.
+- Quote ingestion use case i SQLite application composition/lifecycle.
+- Environment konfiguracija sa obaveznim `API_FOOTBALL_KEY` i podrazumevanom SQLite putanjom.
+- Provider-neutral `JsonTransport` i `UrllibJsonTransport` sa timeout/error mapiranjem.
+- `ApiFootballClient` sa pravilnim `/odds?fixture=<id>` zahtevom.
+- `ApiFootballOddsService` koji povezuje client sa ingestion i snapshot slojem.
+- `RetryingJsonTransport` sa ograničenim brojem pokušaja i eksponencijalnim backoff-om.
+- Testovi i dokumentacija za svaku navedenu celinu.
+
+## Dokumentacija
+
+- `docs/QUOTE_USE_CASES.md`
+- `docs/PERSISTENCE_BOUNDARY.md`
+- `docs/SQLITE_PERSISTENCE.md`
+- `docs/APPLICATION_COMPOSITION.md`
+- `docs/CONFIGURATION.md`
+- `docs/HTTP_TRANSPORT.md`
+- `docs/API_FOOTBALL_SERVICE.md`
+- `docs/RETRY_POLICY.md`
 
 ## Sledeći korak
 
-Proveriti CI za API-Football client korekciju. Nakon zelenog CI-ja dodati retry policy kao zasebnu, testiranu celinu.
+Proveriti CI za service/retry celinu. Nakon zelenog CI-ja nastaviti sa production hardening-om: provider response validation, rate-limit handling i observability bez prodiranja provider detalja u quant sloj.
 
 ## Pravila rada
 
