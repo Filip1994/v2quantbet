@@ -25,8 +25,8 @@ class PostgreSQLQuoteHistoryApplication:
 
     def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
         """Apply pending database migrations using the repository connection factory."""
-        connection = self.repository._connect()  # noqa: SLF001 - composition-root lifecycle hook
-        return apply_migrations(connection, migration_dir)
+        with self.repository.connect() as connection:
+            return apply_migrations(connection, migration_dir)
 
     def close(self) -> None:
         """Release application-owned resources.
