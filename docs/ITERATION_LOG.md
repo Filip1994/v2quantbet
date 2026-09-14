@@ -8,12 +8,25 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Unos se piše ljudski čitljivim jezikom.
 - Navodi se šta je provereno ili urađeno, bez predstavljanja planiranog rada kao završenog.
 - Za implementacione iteracije beleže se izmenjeni fajlovi, testovi, CI rezultat i commit kada su dostupni.
+- Svaki unos sadrži timestamp u ISO 8601 formatu.
 - `docs/PROGRESS.md` ostaje sažeti pregled većih završenih celina; ovaj dokument čuva detalje manjih koraka.
 
-## 2026-09-14 — Uveden dnevnik iteracija
+## 2026-09-14T00:00:00Z — Uveden dnevnik iteracija
 
 - Pregledan je postojeći `docs/PROGRESS.md`.
 - Dogovoreno je da se velike završene celine i dalje evidentiraju u `docs/PROGRESS.md`.
 - Za manje korake uvodi se ovaj detaljni dnevnik.
 - Od sada će se posle svake relevantne iteracije beležiti šta je provereno, šta je promenjeno i kakav je rezultat provere.
 - Ova izmena je dokumentaciona i ne menja runtime ponašanje sistema.
+
+## 2026-09-14T00:00:00Z — Dizajn istorijskih pre-match quote snapshot-a
+
+- Read-only pregledani su `docs/QUOTE_USE_CASES.md`, `docs/PICK_REGISTRATION.md`, `docs/PERSISTENCE_BOUNDARY.md` i `docs/QUANTBET_EXECUTION_PLAN.md`.
+- Potvrđeno je da postojeći identitet quote-a omogućava samo jednu vrednost po market/selection kombinaciji i nije dovoljan za istoriju snapshot-a.
+- Dodat je novi dizajn dokument `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`.
+- Dokument definiše quote series, immutable quote snapshots, eksplicitnu entry snapshot referencu, first-seen/current/closing pre-match checkpoint-e, kickoff granicu, monitoring boundary i CLV-ready podatke.
+- Live/in-play kvote su eksplicitno izvan obuhvata.
+- Nije menjano runtime ponašanje, nisu menjani modeli, repository interfejsi niti PostgreSQL šema.
+- Commit: `0c49185495acf8779424e71583442e5cd137fe9d`.
+- CI rezultat: nije proveravan u ovoj iteraciji.
+- Sledeći korak zahteva eksplicitno odobrenje dizajnerskih odluka pre implementacije.
