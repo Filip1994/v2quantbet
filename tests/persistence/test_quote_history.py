@@ -34,12 +34,12 @@ def make_snapshot(snapshot_id: str, odd: float = 2.10, series_id: str = "series-
     )
 
 
-def test_ensure_series_is_idempotent_for_identical_definition() -> None:
+def test_ensure_series_is_idempotent_and_queryable_by_fixture() -> None:
     repository = InMemoryQuoteHistoryRepository()
     series = make_series()
     repository.ensure_series(series)
     repository.ensure_series(series)
-    assert repository.snapshots_for_series(series.series_id) == ()
+    assert repository.series_for_fixture("fixture-1") == (series,)
 
 
 def test_ensure_series_rejects_conflicting_definition() -> None:
@@ -51,6 +51,7 @@ def test_ensure_series_rejects_conflicting_definition() -> None:
 
 def test_append_snapshots_preserves_history_and_is_idempotent() -> None:
     repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
     first = make_snapshot("snapshot-1", odd=2.10)
     second = make_snapshot("snapshot-2", odd=2.25)
     repository.append_snapshots([first, second])
@@ -62,6 +63,8 @@ def test_append_snapshots_preserves_history_and_is_idempotent() -> None:
 
 def test_snapshots_for_series_filters_other_series() -> None:
     repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series("series-1"))
+    repository.ensure_series(make_series("series-2"))
     first = make_snapshot("snapshot-1", series_id="series-1")
     other = make_snapshot("snapshot-2", series_id="series-2")
     repository.append_snapshots([first, other])
@@ -69,8 +72,15 @@ def test_snapshots_for_series_filters_other_series() -> None:
     assert repository.snapshots_for_series("series-2") == (other,)
 
 
-def test_append_snapshots_is_atomic_on_conflict_with_existing_snapshot() -> None:
+def test_append_snapshots_rejects_unknown_series() -> None:
     repository = InMemoryQuoteHistoryRepository()
+    with pytest.raises(QuoteHistoryConflictError, match="unknown series ID"):
+        repository.append_snapshots([make_snapshot("snapshot-1")])
+
+
+def test_append_snapshots_is_atomic_on_conflict() -> None:
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
     first = make_snapshot("snapshot-1", odd=2.10)
     repository.append_snapshots([first])
     with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
@@ -84,6 +94,7 @@ def test_append_snapshots_is_atomic_on_conflict_with_existing_snapshot() -> None
 
 def test_append_snapshots_rejects_conflicting_duplicate_ids_in_same_batch() -> None:
     repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
     first = make_snapshot("snapshot-1", odd=2.10)
     conflicting = make_snapshot("snapshot-1", odd=2.20)
     with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
