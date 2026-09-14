@@ -201,7 +201,7 @@ def test_append_snapshots_rejects_conflicting_snapshot() -> None:
         series.bookmaker_id,
         series.market.value,
         series.selection.value,
-        series.source if hasattr(series, "source") else "api-football",
+        series.created_at,
     )
     connection.snapshots_by_id[snapshot.snapshot_id] = (
         snapshot.series_id,
