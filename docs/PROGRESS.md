@@ -27,10 +27,11 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat `SQLiteQuoteRepository` sa automatskom šemom, round-trip rekonstrukcijom, idempotentnim upisom i atomskim odbijanjem konflikata.
 - Dodati testovi za SQLite round-trip, query po fixture-u, idempotentne duplikate, atomic conflict handling i ponovno otvaranje baze.
 - Dodat `docs/SQLITE_PERSISTENCE.md` sa ugovorom i načinom korišćenja SQLite adaptera.
+- SQLite persistence celina je proverena kroz CI; nakon ispravke Ruff import reda CI je zelen.
 
 ## Sledeći korak
 
-Proveriti CI za SQLite persistence celinu. Nakon zelenog CI-ja razmotriti integraciju repository adaptera u širi application composition sloj.
+Integrisati repository adapter kroz širi application composition sloj, tako da `QuoteIngestionService` može da koristi InMemory ili SQLite implementaciju bez promene application logike.
 
 ## Pravila rada
 
