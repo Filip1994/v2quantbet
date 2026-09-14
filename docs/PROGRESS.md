@@ -41,10 +41,14 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodat eksplicitan timeout ugovor i mapiranje timeout, HTTP, URL i JSON grešaka u transport exception hijerarhiju.
 - Dodati testovi transporta bez stvarnih mrežnih poziva.
 - Dodat `docs/HTTP_TRANSPORT.md` sa granicama odgovornosti i pravilima grešaka.
+- Dodat `ApiFootballClient` sa injektovanim `JsonTransport` slojem i API ključem iz konfiguracije.
+- Ispravljen API-Football `/odds` zahtev tako da fixture ID ide kao `?fixture=<id>` query parametar.
+- Dodat test koji eksplicitno proverava fixture query parametar.
+- `ApiFootballClient` eksportovan kroz `h2h.odds`.
 
 ## Sledeći korak
 
-Proveriti CI za provider HTTP transport boundary. Nakon zelenog CI-ja integrisati `JsonTransport` u API-Football provider adapter i dodati retry policy kao zasebnu, testiranu celinu.
+Proveriti CI za API-Football client korekciju. Nakon zelenog CI-ja dodati retry policy kao zasebnu, testiranu celinu.
 
 ## Pravila rada
 
