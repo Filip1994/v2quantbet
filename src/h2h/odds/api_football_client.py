@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlencode
 
 from h2h.odds.http import JsonTransport
