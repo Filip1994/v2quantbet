@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from h2h.persistence.migrations import apply_migrations
 
 
@@ -59,3 +61,23 @@ def test_apply_migrations_skips_already_recorded_files(tmp_path: Path) -> None:
 
     assert apply_migrations(connection, tmp_path) == ()
     assert "SELECT 1;" not in [sql for sql, _ in connection.executed]
+
+
+def test_apply_migrations_requires_existing_directory(tmp_path: Path) -> None:
+    connection = FakeConnection()
+
+    with pytest.raises(FileNotFoundError):
+        apply_migrations(connection, tmp_path / "missing")
+
+    assert connection.executed == []
+
+
+def test_apply_migrations_rejects_file_as_directory(tmp_path: Path) -> None:
+    migration_file = tmp_path / "migration.sql"
+    migration_file.write_text("SELECT 1;", encoding="utf-8")
+    connection = FakeConnection()
+
+    with pytest.raises(NotADirectoryError):
+        apply_migrations(connection, migration_file)
+
+    assert connection.executed == []
