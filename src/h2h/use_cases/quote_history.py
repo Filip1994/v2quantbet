@@ -36,9 +36,7 @@ class QuoteHistoryIngestionService:
 
     @staticmethod
     def _snapshot_id(series_id: str, quote: CanonicalQuote, captured_at: datetime) -> str:
-        value = "|".join(
-            (series_id, quote.observed_at.isoformat(), captured_at.isoformat(), quote.source)
-        )
+        value = f"{series_id}|{quote.observed_at.isoformat()}|{captured_at.isoformat()}|{quote.source}"
         return "snapshot-" + sha256(value.encode("utf-8")).hexdigest()
 
     def _existing_series(self, quote: CanonicalQuote) -> QuoteSeries | None:
