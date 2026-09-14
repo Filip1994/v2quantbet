@@ -30,7 +30,8 @@ class PostgreSQLQuoteHistoryRepository:
             raise ValueError("DATABASE_URL is required")
         self._connect_factory = connect
 
-    def _connect(self) -> Any:
+    def connect(self) -> Any:
+        """Open a database connection for an application-level operation."""
         if self._connect_factory is not None:
             return self._connect_factory()
         try:
@@ -42,7 +43,7 @@ class PostgreSQLQuoteHistoryRepository:
         return psycopg.connect(self._database_url)
 
     def ensure_series(self, series: QuoteSeries) -> None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT fixture_id, bookmaker_id, market, selection, created_at "
                 "FROM quote_series WHERE series_id = %s",
@@ -51,11 +52,8 @@ class PostgreSQLQuoteHistoryRepository:
             row = cursor.fetchone()
             if row is not None:
                 expected = (
-                    series.fixture_id,
-                    series.bookmaker_id,
-                    series.market.value,
-                    series.selection.value,
-                    series.created_at,
+                    series.fixture_id, series.bookmaker_id, series.market.value,
+                    series.selection.value, series.created_at,
                 )
                 if tuple(row) != expected:
                     raise QuoteHistoryConflictError(
@@ -66,18 +64,12 @@ class PostgreSQLQuoteHistoryRepository:
                 "INSERT INTO quote_series "
                 "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",
-                (
-                    series.series_id,
-                    series.fixture_id,
-                    series.bookmaker_id,
-                    series.market.value,
-                    series.selection.value,
-                    series.created_at,
-                ),
+                (series.series_id, series.fixture_id, series.bookmaker_id,
+                 series.market.value, series.selection.value, series.created_at),
             )
 
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT series_id, fixture_id, bookmaker_id, market, selection, created_at "
                 "FROM quote_series WHERE fixture_id = %s ORDER BY created_at, series_id",
@@ -86,16 +78,11 @@ class PostgreSQLQuoteHistoryRepository:
             return tuple(self._row_to_series(row) for row in cursor.fetchall())
 
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.connect() as connection, connection.cursor() as cursor:
             for snapshot in tuple(snapshots):
-                cursor.execute(
-                    "SELECT 1 FROM quote_series WHERE series_id = %s",
-                    (snapshot.series_id,),
-                )
+                cursor.execute("SELECT 1 FROM quote_series WHERE series_id = %s", (snapshot.series_id,))
                 if cursor.fetchone() is None:
-                    raise QuoteHistoryConflictError(
-                        f"unknown series ID {snapshot.series_id!r}"
-                    )
+                    raise QuoteHistoryConflictError(f"unknown series ID {snapshot.series_id!r}")
                 cursor.execute(
                     "SELECT series_id, odd, observed_at, captured_at, source "
                     "FROM quote_snapshots WHERE snapshot_id = %s",
@@ -103,13 +90,8 @@ class PostgreSQLQuoteHistoryRepository:
                 )
                 row = cursor.fetchone()
                 if row is not None:
-                    expected = (
-                        snapshot.series_id,
-                        snapshot.odd,
-                        snapshot.observed_at,
-                        snapshot.captured_at,
-                        snapshot.source,
-                    )
+                    expected = (snapshot.series_id, snapshot.odd, snapshot.observed_at,
+                                snapshot.captured_at, snapshot.source)
                     if tuple(row) != expected:
                         raise QuoteHistoryConflictError(
                             f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
@@ -119,18 +101,12 @@ class PostgreSQLQuoteHistoryRepository:
                     "INSERT INTO quote_snapshots "
                     "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (
-                        snapshot.snapshot_id,
-                        snapshot.series_id,
-                        snapshot.odd,
-                        snapshot.observed_at,
-                        snapshot.captured_at,
-                        snapshot.source,
-                    ),
+                    (snapshot.snapshot_id, snapshot.series_id, snapshot.odd,
+                     snapshot.observed_at, snapshot.captured_at, snapshot.source),
                 )
 
     def snapshots_for_series(self, series_id: str) -> tuple[QuoteSnapshot, ...]:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
                 "FROM quote_snapshots WHERE series_id = %s "
@@ -140,7 +116,7 @@ class PostgreSQLQuoteHistoryRepository:
             return tuple(self._row_to_snapshot(row) for row in cursor.fetchall())
 
     def get_snapshot(self, snapshot_id: str) -> QuoteSnapshot | None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
                 "FROM quote_snapshots WHERE snapshot_id = %s",
@@ -151,9 +127,7 @@ class PostgreSQLQuoteHistoryRepository:
 
     @staticmethod
     def _row_to_series(row: tuple[Any, ...]) -> QuoteSeries:
-        return QuoteSeries(
-            row[0], row[1], row[2], Market(row[3]), Selection(row[4]), row[5]
-        )
+        return QuoteSeries(row[0], row[1], row[2], Market(row[3]), Selection(row[4]), row[5])
 
     @staticmethod
     def _row_to_snapshot(row: tuple[Any, ...]) -> QuoteSnapshot:
