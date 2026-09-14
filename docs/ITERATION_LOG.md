@@ -64,7 +64,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Testovi i CI nisu pokretani u ovoj iteraciji.
 - Commit: `7ec565d2a3909dc25373c8a6ea27e8970cc40071`.
 
-## 2026-09-14T14:43:00+02:00 — Dodati testovi za quote history repository
+## 2026-09-14T14:43:00Z — Dodati testovi za quote history repository
 
 - Dodat je `tests/persistence/test_quote_history.py`.
 - Pokrivena je idempotentnost `ensure_series` operacije.
@@ -98,14 +98,14 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Testovi i CI nisu izvršeni u ovom okruženju.
 - Commit: `dc461bf76896ffcbff0d4c1b3869b3018e14db11`.
 
-## 2026-09-14T18:45:00Z — Proširena PostgreSQL quote-history test pokrivenost
+## 2026-09-14T18:45:00Z — Proširена PostgreSQL quote-history test pokrivenost
 
 - Provereno je da migration runner validira postojanje migration direktorijuma i odbija fajl prosleđen umesto direktorijuma.
 - Prošireni su testovi za `PostgreSQLQuoteHistoryRepository`.
 - Pokriven je upis nove `QuoteSeries` instance.
 - Pokriven je konflikt postojeće serije sa istim `series_id`.
-- Покривено је одбијање snapshot-а за непознату серију.
-- Покривен је упис snapshot-а, idempotentni ponovni upis i konflikt snapshot-a sa istim ID-em.
+- Pokriveno је odbijanje snapshot-a za nepoznatu seriju.
+- Pokriven je upis snapshot-a, idempotentni ponovni upis i konflikt snapshot-a sa istim ID-em.
 - Testovi koriste injektovanu connection factory funkciju, bez zahteva za aktivnim PostgreSQL serverom.
 - Izmenjeni fajl: `tests/persistence/test_postgres_quote_history.py`.
 - CI rezultat nije potvrđen; GitHub Actions za poslednji commit nije vratio workflow run.
@@ -122,12 +122,21 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Lokalno izvršavanje testova i CI nisu potvrđeni u ovom okruženju.
 - Commit: `bf3d62b7cf6f60a90b331cfd6e7d678a9ca69a54`.
 
-## 2026-09-15T00:00:00+02:00 — Rekonstruisана history-aware polling implementacija
+## 2026-09-15T00:00:00+02:00 — Rekonstruisana history-aware polling implementacija
 
-- Naknadно су евидентирани претходно изведени кораци који нису били одмах уписани у овај дневник.
+- Naknadno su evidentirani претходно изведени кораци који нису били одмах уписани у овај дневник.
 - Додат је `src/h2h/workers/history_quote_polling.py` са provider-neutral `HistoricalQuoteSource` уговором и `HistoryQuotePollingJob` оркестрацијом.
 - Додат је `tests/workers/test_history_quote_polling.py` са провером обраде више fixture-а и одбијања невалидних fixture идентификатора.
 - `src/h2h/workers/__init__.py` је ажуриран да извози нови polling job и source contract.
 - Извршене су и документоване промене у одвојеним commit-овима: `9f19120969dabda7a1be24daeb6ce7437801b59a`, `301c48e4a0adf5d6deb7057c9d8bd6888d0b8ae4`, `29a7c214d85da9118fc52b064f552069bb47f43a`.
 - Ова итерација не тврди да је production runtime composition или Railway entrypoint завршен.
 - CI за ову реконструисану целину још није потврђен у овом уносу.
+
+## 2026-09-15T00:00:00+02:00 — Додат PostgreSQL application composition
+
+- Додат је `src/h2h/application_postgres.py`.
+- Уведен је `PostgreSQLQuoteHistoryApplication` као lifecycle wrapper за PostgreSQL history repository и `QuoteHistoryIngestionService`.
+- Додат је `build_postgres_quote_history_application()` који користи `DATABASE_URL` преко PostgreSQL adapter-а и UTC capture clock по default-у.
+- Ово још није production Railway entrypoint: миграције, fixture discovery, API-Football polling source и runtime dependency `psycopg` нису повезани.
+- Тестови и CI за ову малу целину нису покренути у овом окружењу.
+- Commit: `5ad0131d4ba944ac6b80445fd49236a44ce7ce0f`.
