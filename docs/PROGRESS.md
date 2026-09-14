@@ -6,6 +6,8 @@ Quant/domain foundation je izgrađen i testiran: Dixon–Coles baseline, golden-
 
 Provider-neutral quote adapter contract, API-Football adapter, ingestion, persistence, configuration, HTTP transport, API-Football client i application service su implementirani kao odvojeni slojevi.
 
+Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa implied probability, probability gap i expected value uz validaciju model probability granica.
+
 ## Završeno
 
 - Quant/domain foundation i regresiona zaštita.
@@ -24,6 +26,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - Fixture-level in-memory TTL cache za API-Football odgovore, sa eksplicitnim invalidiranjem.
 - Definisan Phase I scope takmičenja i pravila za isključivanje afričkih, omladinskih, nižerazrednih engleskih/nemačkih i kup takmičenja.
 - Deterministički Phase I competition-scope filter sa stabilnim rejection reason kodovima.
+- Deterministička ValuePick evaluacija: implied probability, probability gap i expected value.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -39,10 +42,11 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `docs/API_BUDGET.md`
 - `docs/API_FOOTBALL_CACHE.md`
 - `docs/PHASE_I_UNIVERSE_SCOPE.md`
+- `docs/VALUE_PICK_EVALUATION.md`
 
 ## Sledeći korak
 
-Povezati competition-scope filter sa fixture discovery/use-case slojem, zatim implementirati prvi bulletin vertical slice: value evaluation, immutable pick registration i generisanje dnevnog biltena.
+Povezati competition-scope filter sa fixture discovery/use-case slojem, zatim implementirati immutable pick registration i generisanje dnevnog biltena kao prvi bulletin vertical slice.
 
 ## Pravila rada
 
