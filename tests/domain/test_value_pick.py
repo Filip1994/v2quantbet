@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ def make_quote(odd: float = 1.90) -> CanonicalQuote:
         market=Market.OU_25,
         selection=Selection.OVER,
         odd=odd,
-        observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         source="test",
     )
 
