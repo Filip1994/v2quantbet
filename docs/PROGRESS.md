@@ -12,12 +12,12 @@ Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-
 
 Dodatno je definisana jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
 
-Uveden je i prvi history-aware ingestion sloj koji canonical quote opažanja pretvara u stabilne `QuoteSeries` entitete i immutable `QuoteSnapshot` zapise. Worker/polling orkestracija još nije povezana sa ovom komponentom.
+Uveden je history-aware ingestion sloj koji canonical quote opažanja pretvara u stabilne `QuoteSeries` entitete i immutable `QuoteSnapshot` zapise. Dodat је provider-neutral polling job који тај ingestion позива за више fixture-а. Production runtime composition, restart-safe series lookup и Railway worker entrypoint још нису завршени.
 
-## Završeno
+## Завршено
 
-- Quant/domain foundation i regresiona zaštita.
-- Canonical quote modeli i market snapshot validacija.
+- Quant/domain foundation и регресиона заштита.
+- Canonical quote модели и market snapshot validacija.
 - Provider-neutral quote adapter contract.
 - API-Football flattening, normalization, deduplication i conflict handling.
 - In-memory i SQLite persistence sa idempotentnim upisom i atomskim odbijanjem konflikata.
@@ -37,10 +37,11 @@ Uveden je i prvi history-aware ingestion sloj koji canonical quote opažanja pre
 - Provider-neutral `FixtureDiscovery` contract.
 - `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
 - API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
-- Hardening validacija fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
+- Hardening validacija fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, идентификаторе и датуме.
 - Immutable `PickRegistration` model sa `PickStatus` lifecycle enumeracijom.
 - Istorijski quote domain modeli, repository contract i PostgreSQL adapter foundation.
 - History-aware quote ingestion servis sa stabilnim series ID-jevima i idempotentnim snapshot ID-jevima.
+- Provider-neutral `HistoryQuotePollingJob` sa `HistoricalQuoteSource` ugovorom i testovima za više fixture-а и nevalidne fixture identifikatore.
 - Testovi i dokumentacija za navedene celine.
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
@@ -84,14 +85,14 @@ Uveden je i prvi history-aware ingestion sloj koji canonical quote opažanja pre
 
 ## Sledeći korak
 
-Povezati history-aware ingestion sa polling workerom, zatim završiti PostgreSQL runtime composition i Railway worker entrypoint. Nakon toga sledi kickoff/closing politika i prvi end-to-end Daily Bulletin pipeline.
+Implementirati restart-safe lookup postojećeg `QuoteSeries` zapisa po prirodnom ključu (fixture/bookmaker/market/selection), zatim povezati history-aware polling sa production runtime composition i završiti PostgreSQL/Railway worker entrypoint. Nakon toga sledi kickoff/closing politika i prvi end-to-end Daily Bulletin pipeline.
 
 ## Pravila rada
 
 - Jedna mala implementaciona celina po koraku.
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
 - Svaka završena celina mora imati odgovarajuću `.md` dokumentaciju.
-- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudski čitljivim opisom i timestamp-om.
+- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudски čitljivim opisom i timestamp-om.
 - `docs/PROGRESS.md` sadrži sažetak većih završenih celina, dok `docs/ITERATION_LOG.md` sadrži detalje manjih koraka.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
