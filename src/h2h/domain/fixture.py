@@ -15,6 +15,7 @@ class Fixture:
     competition_name: str
     country: str
     kickoff_at: datetime
+    competition_type: str = "league"
     season: int | None = None
     status: str = "scheduled"
     provider: str = "unknown"
@@ -29,6 +30,8 @@ class Fixture:
             raise ValueError("competition_id must be positive")
         if not self.competition_name.strip() or not self.country.strip():
             raise ValueError("competition_name and country must not be empty")
+        if not self.competition_type.strip():
+            raise ValueError("competition_type must not be empty")
         if not isinstance(self.kickoff_at, datetime):
             raise TypeError("kickoff_at must be a datetime")
         if not self.provider.strip():
