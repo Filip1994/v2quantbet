@@ -36,6 +36,7 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
 - API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
 - Hardening validacije fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, identifikatore i datume.
+- Immutable `PickRegistration` model sa `PickStatus` lifecycle enumeracijom.
 - Testovi i dokumentacija za navedene celine.
 - Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
 - Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
@@ -58,14 +59,15 @@ Dodatno je definisana jasna granica između operativnog Daily Bulletin screening
 - `docs/FIXTURE_DISCOVERY_CONTRACT.md`
 - `docs/SCOPED_FIXTURE_DISCOVERY.md`
 - `docs/API_FOOTBALL_FIXTURE_ADAPTER.md`
+- `docs/PICK_REGISTRATION.md`
 - `docs/RESEARCH_SECTOR_PLAN.md`
 
 ## Sledeći korak
 
 Pre prvog bulletin vertical slice-a potrebno je:
 
-1. uvesti immutable pick-registration model sa jasnim identitetom i statusom;
-2. definisati registraciju odluke tako da čuva fixture, quote, model probability, value metrike, timestamp i verziju modela;
+1. definisati persistence boundary za `PickRegistration`;
+2. dodati idempotentno čuvanje i dohvat registrovanih pickova;
 3. tek nakon toga povezati model probability, canonical quotes i ValuePick evaluaciju u dnevni bulletin pipeline.
 
 Research platforma se ne implementira pre stabilizacije production data foundation-a. Njeni planirani koraci su definisani u `docs/RESEARCH_SECTOR_PLAN.md`.
