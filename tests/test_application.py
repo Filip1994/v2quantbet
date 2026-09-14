@@ -5,8 +5,10 @@ from pathlib import Path
 
 from h2h.application import (
     build_sqlite_quote_application,
+    build_sqlite_quote_application_from_settings,
     build_sqlite_quote_service,
 )
+from h2h.config import ApplicationSettings
 from h2h.use_cases import QuoteIngestionService
 
 
@@ -42,3 +44,14 @@ def test_closed_application_database_can_be_reopened(tmp_path: Path) -> None:
         assert reopened.service.read_all() == ()
     finally:
         reopened.close()
+
+
+def test_build_application_from_settings_uses_database_path(tmp_path: Path) -> None:
+    settings = ApplicationSettings(
+        database_path=tmp_path / "configured.sqlite3",
+        api_football_key="test-only-key",
+    )
+
+    with build_sqlite_quote_application_from_settings(settings) as application:
+        assert application.service.read_all() == ()
+    assert settings.api_football_key == "test-only-key"
