@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+from time import time
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -20,6 +22,28 @@ class TransportTimeoutError(TransportError):
 
 class TransportResponseError(TransportError):
     """Raised when the provider returns an invalid HTTP or JSON response."""
+
+
+class TransportRateLimitError(TransportResponseError):
+    """Raised for HTTP 429, retaining the optional retry delay in seconds."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse Retry-After seconds or an HTTP date into a non-negative delay."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value).timestamp()
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return max(0.0, retry_at - time())
 
 
 class JsonTransport(Protocol):
@@ -59,6 +83,12 @@ class UrllibJsonTransport:
         except TimeoutError as exc:
             raise TransportTimeoutError(f"request timed out: {url}") from exc
         except HTTPError as exc:
+            if exc.code == 429:
+                retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
+                raise TransportRateLimitError(
+                    f"provider rate limit reached for {url}",
+                    retry_after=retry_after,
+                ) from exc
             raise TransportResponseError(
                 f"provider returned HTTP {exc.code} for {url}"
             ) from exc
