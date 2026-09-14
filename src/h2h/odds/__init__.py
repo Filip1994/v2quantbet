@@ -8,6 +8,7 @@ from .api_football_ingestion import (
     iter_api_football_quote_payloads,
 )
 from .api_football_service import ApiFootballOddsService
+from .http import TransportRateLimitError
 from .provider_adapter import NormalizingProviderQuoteAdapter, ProviderQuoteAdapter
 from .quote_deduplication import QuoteConflictError, deduplicate_quotes
 from .retry import RetryingJsonTransport
@@ -21,6 +22,7 @@ __all__ = [
     "ProviderQuoteAdapter",
     "QuoteConflictError",
     "RetryingJsonTransport",
+    "TransportRateLimitError",
     "build_api_football_market_snapshots",
     "build_market_snapshot",
     "deduplicate_quotes",
