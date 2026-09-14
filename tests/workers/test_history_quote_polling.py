@@ -20,7 +20,7 @@ class FakeSource:
 
 def quote(fixture_id: int, odd: float) -> CanonicalQuote:
     return CanonicalQuote(
-        fixture_id=fixture_id,
+        fixture_id=str(fixture_id),
         bookmaker_id=10,
         bookmaker_name="Bookmaker",
         market=Market.OU_25,
