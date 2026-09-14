@@ -25,13 +25,15 @@ Provider-neutral quote adapter contract je definisan, eksportovan i pokriven tes
 - Dodati testovi za ingestiju, fixture-scoped read i full read ponašanje servisa.
 - Dodat `docs/QUOTE_USE_CASES.md` sa granicama odgovornosti application sloja.
 - Dodat `SQLiteQuoteRepository` sa automatskom šemom, round-trip rekonstrukcijom, idempotentnim upisom i atomskim odbijanjem konflikata.
-- Dodati testovi za SQLite round-trip, query po fixture-u, idempotentne duplikate, atomic conflict handling i ponovno otvaranje baze.
+- Dodati testovi za SQLite round-trip, query po fixture-u, identične duplikate, atomic conflict handling i ponovno otvaranje baze.
 - Dodat `docs/SQLITE_PERSISTENCE.md` sa ugovorom i načinom korišćenja SQLite adaptera.
 - SQLite persistence celina je proverena kroz CI; nakon ispravke Ruff import reda CI je zelen.
+- Dodat `build_sqlite_quote_service()` kao application composition root koji povezuje SQLite repository i `QuoteIngestionService` bez provider coupling-a.
+- Dodat test composition root-a i `docs/APPLICATION_COMPOSITION.md`.
 
 ## Sledeći korak
 
-Integrisati repository adapter kroz širi application composition sloj, tako da `QuoteIngestionService` može da koristi InMemory ili SQLite implementaciju bez promene application logike.
+Proveriti CI za application composition celinu. Nakon zelenog CI-ja dodati lifecycle/close ugovor za SQLite repository u composition sloju pre production deployment-a.
 
 ## Pravila rada
 
