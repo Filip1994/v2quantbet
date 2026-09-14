@@ -23,6 +23,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - Dnevni `DailyApiBudget` sa operativnom rezervom i `BudgetedJsonTransport` zaštitom.
 - Fixture-level in-memory TTL cache za API-Football odgovore, sa eksplicitnim invalidiranjem.
 - Definisan Phase I scope takmičenja i pravila za isključivanje afričkih, omladinskih, nižerazrednih engleskih/nemačkih i kup takmičenja.
+- Deterministički Phase I competition-scope filter sa stabilnim rejection reason kodovima.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -41,7 +42,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 
 ## Sledeći korak
 
-Implementirati deterministički fixture-universe filter za Phase I, sa stabilnim rejection reason kodovima i testovima za sve definisane izuzetke. Nakon toga nastaviti ka prvom bulletin vertical slice-u.
+Povezati competition-scope filter sa fixture discovery/use-case slojem, zatim implementirati prvi bulletin vertical slice: value evaluation, immutable pick registration i generisanje dnevnog biltena.
 
 ## Pravila rada
 
