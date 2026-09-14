@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 from h2h.odds.http import JsonTransport
 
@@ -27,8 +28,10 @@ class ApiFootballClient:
         if self.timeout <= 0:
             raise ValueError("timeout must be greater than zero")
 
+        query = urlencode({"fixture": fixture_id})
+        url = f"{self.base_url.rstrip('/')}/odds?{query}"
         return self.transport.get_json(
-            f"{self.base_url.rstrip('/')}/odds",
+            url,
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
