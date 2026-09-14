@@ -20,6 +20,7 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `ApiFootballOddsService` koji povezuje client sa ingestion i snapshot slojem.
 - `RetryingJsonTransport` sa ograničenim brojem pokušaja i eksponencijalnim backoff-om.
 - HTTP 429 klasifikacija kroz `TransportRateLimitError` sa očuvanim `Retry-After` intervalom.
+- Dnevni `DailyApiBudget` sa operativnom rezervom i `BudgetedJsonTransport` zaštitom.
 - Testovi i dokumentacija za svaku navedenu celinu.
 
 ## Dokumentacija
@@ -32,10 +33,11 @@ Provider-neutral quote adapter contract, API-Football adapter, ingestion, persis
 - `docs/HTTP_TRANSPORT.md`
 - `docs/API_FOOTBALL_SERVICE.md`
 - `docs/RETRY_POLICY.md`
+- `docs/API_BUDGET.md`
 
 ## Sledeći korak
 
-Dodati dnevni API budget guard sa keširanjem i kontrolisanim odbijanjem novih poziva pre prelaska provider kvote.
+Uvesti keširanje odgovora po `fixture_id` kako bi se dodatno smanjila potrošnja API kvote, uz eksplicitnu TTL politiku i testove.
 
 ## Pravila rada
 
