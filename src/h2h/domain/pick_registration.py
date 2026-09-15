@@ -25,10 +25,14 @@ class PickRegistration:
     status: PickStatus = PickStatus.REGISTERED
 
     def __post_init__(self) -> None:
+        if not isinstance(self.pick_id, str):
+            raise TypeError("pick_id must be a string")
         if not self.pick_id.strip():
             raise ValueError("pick_id must not be empty")
         if not isinstance(self.registered_at, datetime):
             raise TypeError("registered_at must be a datetime")
+        if self.registered_at.tzinfo is None or self.registered_at.utcoffset() is None:
+            raise ValueError("registered_at must be timezone-aware")
         if not isinstance(self.status, PickStatus):
             raise TypeError("status must be a PickStatus")
 
