@@ -46,7 +46,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Builder zahteva `ApplicationSettings.database_url` i eksplicitno odbija nastavak bez `DATABASE_URL`; `database_path` se ne koristi kao fallback.
 - SQLite builderi su zadržani samo kao legacy compatibility granica dok se ne uklone sve aktivne reference.
 - PostgreSQL production composition koristi postojeći `application_postgres` modul i ne uvodi novi persistence sloj.
-- Testovi и CI нису покrenuti у овом окружењу.
+- Testovi и CI нису покrenути у овом окружењу.
 - Commit: `30175fef3cb8dce261bf667b1882ebe593ecd46d`.
 
 ## 2026-09-15T03:00:00+02:00 — Документација production PostgreSQL границе
@@ -160,3 +160,15 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Metoda zahteva keyword-only argument `fixture_id`, pa je poziv promenjen u `remove(fixture_id=fixture_id)`.
 - Korisnik je lokalno potvrdio uspešnu verifikaciju: `249 passed` i `uv run ruff check .` bez grešaka.
 - Commit: `17e582fec78c1d510e1493f6963a438aa330a129`.
+
+## 2026-09-15T14:00:00+02:00 — Real PostgreSQL integration coverage za quote history
+
+- Dodat je `tests/integration/test_postgres_quote_history_integration.py`.
+- Testovi koriste stvarni PostgreSQL kada je postavljen `QUANTBET_TEST_DATABASE_URL`; bez te promenljive se automatski preskaču.
+- Pokriveni su:
+  - konflikt prirodnog ključa za `quote_series`;
+  - idempotentni ponovljeni upis iste serije;
+  - konflikt sadržaja za postojeći `snapshot_id`;
+  - konflikt prirodnog ključa za snapshot-e.
+- Testovi nisu pokrenuti u ovom okruženju i nema potvrde da su prošli protiv stvarne baze.
+- Commit: `f05effa718e46dfc17e4461ab6dbc8236c6a1560`.
