@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -40,13 +40,19 @@ def _series(*, series_id: str, fixture_id: str) -> QuoteSeries:
     )
 
 
-def _snapshot(*, snapshot_id: str, series_id: str, odd: float = 2.1) -> QuoteSnapshot:
+def _snapshot(
+    *,
+    snapshot_id: str,
+    series_id: str,
+    odd: float = 2.1,
+    captured_at: datetime | None = None,
+) -> QuoteSnapshot:
     return QuoteSnapshot(
         snapshot_id=snapshot_id,
         series_id=series_id,
         odd=odd,
         observed_at=datetime(2026, 9, 15, 12, 0, tzinfo=UTC),
-        captured_at=datetime(2026, 9, 15, 12, 0, 1, tzinfo=UTC),
+        captured_at=captured_at or datetime(2026, 9, 15, 12, 0, 1, tzinfo=UTC),
         source="integration-test",
     )
 
@@ -61,7 +67,6 @@ def repository():
     repo = PostgreSQLQuoteHistoryRepository(database_url=DATABASE_URL)
     prefix = f"it-{uuid4()}"
     created_series: list[str] = []
-    created_fixtures: list[str] = []
     created_snapshots: list[str] = []
 
     class Context:
@@ -71,7 +76,6 @@ def repository():
     context.repo = repo
     context.prefix = prefix
     context.created_series = created_series
-    context.created_fixtures = created_fixtures
     context.created_snapshots = created_snapshots
     yield context
 
@@ -124,7 +128,7 @@ def test_snapshot_conflict_is_rejected(repository) -> None:
         repository.repo.append_snapshots((conflicting,))
 
 
-def test_duplicate_snapshot_natural_key_is_idempotent(repository) -> None:
+def test_duplicate_snapshot_natural_key_is_rejected(repository) -> None:
     series = _series(series_id=f"{repository.prefix}-series", fixture_id=f"{repository.prefix}-fixture")
     first = _snapshot(snapshot_id=f"{repository.prefix}-snapshot-a", series_id=series.series_id)
     second = _snapshot(snapshot_id=f"{repository.prefix}-snapshot-b", series_id=series.series_id)
@@ -135,3 +139,19 @@ def test_duplicate_snapshot_natural_key_is_idempotent(repository) -> None:
 
     with pytest.raises(QuoteHistoryConflictError):
         repository.repo.append_snapshots((second,))
+
+
+def test_snapshot_natural_key_includes_captured_at(repository) -> None:
+    series = _series(series_id=f"{repository.prefix}-series", fixture_id=f"{repository.prefix}-fixture")
+    first = _snapshot(snapshot_id=f"{repository.prefix}-snapshot-a", series_id=series.series_id)
+    second = _snapshot(
+        snapshot_id=f"{repository.prefix}-snapshot-b",
+        series_id=series.series_id,
+        captured_at=first.captured_at + timedelta(seconds=1),
+    )
+    repository.repo.ensure_series(series)
+    repository.created_series.append(series.series_id)
+    repository.repo.append_snapshots((first, second))
+    repository.created_snapshots.extend([first.snapshot_id, second.snapshot_id])
+
+    assert repository.repo.snapshots_for_series(series.series_id) == (first, second)
