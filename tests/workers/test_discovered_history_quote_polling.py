@@ -1,0 +1,81 @@
+from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
+
+from h2h.domain.fixture import Fixture
+from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
+
+
+def fixture(provider_fixture_id: str | None) -> Fixture:
+    return Fixture(
+        fixture_id=f"api-football:{provider_fixture_id or 'missing'}",
+        home_team="Home FC",
+        away_team="Away FC",
+        competition_id=39,
+        competition_name="Premier League",
+        country="England",
+        kickoff_at=datetime(2026, 9, 15, 18, tzinfo=UTC),
+        provider="api-football",
+        provider_fixture_id=provider_fixture_id,
+    )
+
+
+def test_discovers_and_polls_unique_provider_fixture_ids() -> None:
+    discovery = Mock()
+    discovery.discover.return_value = [fixture("42"), fixture("42"), fixture("7")]
+    source = Mock()
+    source.fetch_quotes.side_effect = [(), ()]
+    ingestion = Mock()
+    ingestion.ingest.side_effect = [3, 5]
+    clock = lambda: datetime(2026, 9, 15, 12, tzinfo=UTC)
+
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=clock,
+        lookahead=timedelta(hours=24),
+    )
+
+    assert job.run_once() == 8
+    discovery.discover.assert_called_once_with(
+        datetime(2026, 9, 15, 12, tzinfo=UTC),
+        datetime(2026, 9, 16, 12, tzinfo=UTC),
+    )
+    assert source.fetch_quotes.call_args_list == [
+        Mock.call(fixture_id=42),
+        Mock.call(fixture_id=7),
+    ]
+
+
+def test_ignores_missing_or_invalid_provider_fixture_ids() -> None:
+    discovery = Mock()
+    discovery.discover.return_value = [fixture(None), fixture("not-an-int"), fixture("0")]
+    source = Mock()
+    ingestion = Mock()
+
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=lambda: datetime(2026, 9, 15, 12, tzinfo=UTC),
+    )
+
+    assert job.run_once() == 0
+    source.fetch_quotes.assert_not_called()
+    ingestion.ingest.assert_not_called()
+
+
+def test_requires_timezone_aware_clock() -> None:
+    job = DiscoveredHistoryQuotePollingJob(
+        Mock(),
+        Mock(),
+        Mock(),
+        clock=lambda: datetime(2026, 9, 15, 12),
+    )
+
+    try:
+        job.run_once()
+    except ValueError as exc:
+        assert "timezone-aware" in str(exc)
+    else:
+        raise AssertionError("expected timezone validation")
