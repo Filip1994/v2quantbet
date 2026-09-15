@@ -97,4 +97,7 @@ class ApiFootballQuoteAdapter:
     def _parse_datetime(value: Any) -> datetime:
         if not isinstance(value, str) or not value.strip():
             raise TypeError("observed_at or update must be an ISO datetime string")
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            raise ValueError("observed_at or update must be timezone-aware")
+        return parsed
