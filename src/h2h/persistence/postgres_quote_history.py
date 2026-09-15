@@ -54,8 +54,6 @@ class PostgreSQLQuoteHistoryRepository:
                 self._require_same_series(row, series)
                 return
 
-            # DO NOTHING on any unique constraint makes concurrent creation
-            # safe both for series_id and for the natural series identity.
             cursor.execute(
                 "INSERT INTO quote_series "
                 "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
@@ -81,6 +79,25 @@ class PostgreSQLQuoteHistoryRepository:
                     f"conflicting definition for series ID {series.series_id!r}"
                 )
             self._require_same_series(row, series)
+
+    def find_series(
+        self,
+        *,
+        fixture_id: str,
+        bookmaker_id: int,
+        market: str,
+        selection: str,
+    ) -> QuoteSeries | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT series_id, fixture_id, bookmaker_id, market, selection, created_at "
+                "FROM quote_series "
+                "WHERE fixture_id = %s AND bookmaker_id = %s "
+                "AND market = %s AND selection = %s",
+                (fixture_id, bookmaker_id, market, selection),
+            )
+            row = cursor.fetchone()
+            return None if row is None else self._row_to_series(row)
 
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -154,6 +171,10 @@ class PostgreSQLQuoteHistoryRepository:
                 f"conflicting definition for series ID {series.series_id!r}"
             )
 
+    @staticmethod
+    def _row_to_series(row: tuple[Any, ...]) -> QuoteSeries:
+        return QuoteSeries(row[0], row[1], row[2], Market(row[3]), Selection(row[4]), row[5])
+
     def snapshots_for_series(self, series_id: str) -> tuple[QuoteSnapshot, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -173,10 +194,6 @@ class PostgreSQLQuoteHistoryRepository:
             )
             row = cursor.fetchone()
             return None if row is None else self._row_to_snapshot(row)
-
-    @staticmethod
-    def _row_to_series(row: tuple[Any, ...]) -> QuoteSeries:
-        return QuoteSeries(row[0], row[1], row[2], Market(row[3]), Selection(row[4]), row[5])
 
     @staticmethod
     def _row_to_snapshot(row: tuple[Any, ...]) -> QuoteSnapshot:
