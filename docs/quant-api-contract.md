@@ -28,6 +28,8 @@ The package exports are aliases of the canonical module objects.
 
 Only records with `record.date < reference_time` are used. The quant layer expects records to represent completed matches and expects team identifiers to be stable integers. Provider-specific objects must be adapted before entering this interface.
 
+`Fixture.provider_home_team_id` and `Fixture.provider_away_team_id` retain ordered, provider-qualified identifiers from fixture discovery. They may be used as Dixon–Coles `home_id` and `away_id` only when the fitted training records are explicitly known to use the same provider namespace. Their presence alone does not prove that namespace association, and the quant layer does not perform provider-team entity resolution.
+
 The method returns a fitted `DixonColesModel` or raises `DixonColesFitError` if the training sample is insufficient or optimization does not converge.
 
 ## Model output

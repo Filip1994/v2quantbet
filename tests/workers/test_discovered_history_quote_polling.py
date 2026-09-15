@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, call
 
 from h2h.domain.fixture import Fixture
+from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
 from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
 
 
@@ -36,6 +37,40 @@ def test_discovers_and_polls_unique_provider_fixture_ids() -> None:
         datetime(2026, 9, 16, 12, tzinfo=UTC),
     )
     assert source.fetch_quotes.call_args_list == [call(fixture_id=42), call(fixture_id=7)]
+
+
+def test_adapted_fixture_keeps_numeric_api_football_transport_lookup() -> None:
+    adapted = ApiFootballFixtureAdapter().adapt(
+        {
+            "fixture": {"id": 42, "date": "2026-09-15T18:00:00+00:00"},
+            "teams": {
+                "home": {"id": 10, "name": "Home FC"},
+                "away": {"id": 20, "name": "Away FC"},
+            },
+            "league": {
+                "id": 39,
+                "name": "Premier League",
+                "country": "England",
+                "type": "League",
+                "season": 2026,
+            },
+        }
+    )
+    discovery = Mock()
+    discovery.discover.return_value = [adapted]
+    source = Mock()
+    source.fetch_quotes.return_value = ()
+    ingestion = Mock()
+    ingestion.ingest.return_value = 0
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=lambda: datetime(2026, 9, 15, 12, tzinfo=UTC),
+    )
+
+    assert job.run_once() == 0
+    source.fetch_quotes.assert_called_once_with(fixture_id=42)
 
 
 def test_does_not_refresh_known_fixture_before_next_due_time() -> None:

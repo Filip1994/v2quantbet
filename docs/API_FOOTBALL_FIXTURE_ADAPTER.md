@@ -9,6 +9,8 @@
 - `fixture.id` → `provider_fixture_id` i canonical ID `api-football:<id>`
 - `teams.home.name` → `home_team`
 - `teams.away.name` → `away_team`
+- `teams.home.id` → `provider_home_team_id`
+- `teams.away.id` → `provider_away_team_id`
 - `league.id` → `competition_id`
 - `league.name` → `competition_name`
 - `league.country` → `country`
@@ -22,6 +24,10 @@
 Adapter je provider-specific sloj. Canonical domain model ne zna za API-Football strukturu, ključeve ili response envelope.
 
 Adapter ne primenjuje competition-scope politiku; to ostaje odgovornost `ScopedFixtureDiscovery` use-case-a.
+
+Canonical `fixture_id` i provider lookup identitet imaju odvojene uloge. Za fixture poreklom iz API-Football-a canonical identitet je `api-football:<provider_fixture_id>`, dok `provider_fixture_id` zadržava sirovi provider ID koji polling/transport sloj pretvara u pozitivan ceo broj za API-Football poziv. Ova faza ne menja postojeći raw-ID ugovor za `CanonicalQuote.fixture_id` niti perzistirane quote identitete.
+
+`provider_home_team_id` i `provider_away_team_id` čuvaju originalni redosled iz provider payload-a i eksplicitno su kvalifikovani vrednošću `Fixture.provider`. Nisu globalni, provider-neutralni team identiteti. Mogu se proslediti Dixon–Coles modelu samo kada je eksplicitno utvrđeno da fitted training skup koristi isti provider namespace; adapter sam ne uspostavlja tu vezu.
 
 ## Validacija i hardening
 
@@ -42,6 +48,8 @@ Validacija se izvršava pre kreiranja canonical objekta, čime se sprečava da p
 Testovi pokrivaju:
 
 - uspešno mapiranje validnog API-Football fixture payload-a;
+- očuvanje provider home/away team ID-jeva i njihovog redosleda;
+- očuvanje numeričkog API-Football fixture ID-ja na polling/transport granici;
 - nedostajuće obavezne sekcije i polja;
 - nevalidne ili nepozitivne identifikatore;
 - prazne nazive timova i takmičenja;

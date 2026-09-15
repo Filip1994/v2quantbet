@@ -33,10 +33,23 @@ def test_adapts_api_football_fixture_to_canonical_model() -> None:
     assert fixture.provider_fixture_id == "123"
     assert fixture.home_team == "Home FC"
     assert fixture.away_team == "Away FC"
+    assert fixture.provider_home_team_id == 10
+    assert fixture.provider_away_team_id == 20
     assert fixture.competition_id == 39
     assert fixture.competition_type == "League"
     assert fixture.kickoff_at.tzinfo == UTC
     assert fixture.status == "NS"
+
+
+def test_preserves_provider_team_id_home_away_order() -> None:
+    value = payload()
+    value["teams"]["home"] = {"id": 20, "name": "Home FC"}
+    value["teams"]["away"] = {"id": 10, "name": "Away FC"}
+
+    fixture = ApiFootballFixtureAdapter().adapt(value)
+
+    assert fixture.provider_home_team_id == 20
+    assert fixture.provider_away_team_id == 10
 
 
 @pytest.mark.parametrize("path", [("fixture",), ("teams",), ("league",)])

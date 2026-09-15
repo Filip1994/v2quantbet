@@ -17,6 +17,8 @@ def make_fixture() -> Fixture:
         season=2026,
         provider="api-football",
         provider_fixture_id="123",
+        provider_home_team_id=10,
+        provider_away_team_id=20,
     )
 
 
@@ -26,8 +28,25 @@ def test_fixture_is_immutable_and_preserves_canonical_fields() -> None:
     assert fixture.fixture_id == "fixture-1"
     assert fixture.home_team == "Home FC"
     assert fixture.provider_fixture_id == "123"
+    assert fixture.provider_home_team_id == 10
+    assert fixture.provider_away_team_id == 20
     with pytest.raises(AttributeError):
         fixture.home_team = "Changed FC"  # type: ignore[misc]
+
+
+def test_fixture_allows_missing_provider_team_ids_for_existing_callers() -> None:
+    fixture = Fixture(
+        fixture_id="fixture-1",
+        home_team="Home FC",
+        away_team="Away FC",
+        competition_id=1,
+        competition_name="Example League",
+        country="Exampleland",
+        kickoff_at=datetime(2026, 9, 15, 18, 0, tzinfo=UTC),
+    )
+
+    assert fixture.provider_home_team_id is None
+    assert fixture.provider_away_team_id is None
 
 
 @pytest.mark.parametrize(
@@ -70,3 +89,39 @@ def test_fixture_rejects_non_positive_competition_id() -> None:
             country="Exampleland",
             kickoff_at=datetime(2026, 9, 15, 18, 0, tzinfo=UTC),
         )
+
+
+@pytest.mark.parametrize("field", ["provider_home_team_id", "provider_away_team_id"])
+@pytest.mark.parametrize("value", [True, "10"])
+def test_fixture_rejects_non_integer_provider_team_ids(field: str, value: object) -> None:
+    kwargs = {
+        "fixture_id": "fixture-1",
+        "home_team": "Home FC",
+        "away_team": "Away FC",
+        "competition_id": 1,
+        "competition_name": "Example League",
+        "country": "Exampleland",
+        "kickoff_at": datetime(2026, 9, 15, 18, 0, tzinfo=UTC),
+        field: value,
+    }
+
+    with pytest.raises(TypeError, match=field):
+        Fixture(**kwargs)
+
+
+@pytest.mark.parametrize("field", ["provider_home_team_id", "provider_away_team_id"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_fixture_rejects_non_positive_provider_team_ids(field: str, value: int) -> None:
+    kwargs = {
+        "fixture_id": "fixture-1",
+        "home_team": "Home FC",
+        "away_team": "Away FC",
+        "competition_id": 1,
+        "competition_name": "Example League",
+        "country": "Exampleland",
+        "kickoff_at": datetime(2026, 9, 15, 18, 0, tzinfo=UTC),
+        field: value,
+    }
+
+    with pytest.raises(ValueError, match=field):
+        Fixture(**kwargs)
