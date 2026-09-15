@@ -46,7 +46,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Builder zahteva `ApplicationSettings.database_url` i eksplicitno odbija nastavak bez `DATABASE_URL`; `database_path` se ne koristi kao fallback.
 - SQLite builderi su zadržani samo kao legacy compatibility granica dok se ne uklone sve aktivne reference.
 - PostgreSQL production composition koristi postojeći `application_postgres` modul i ne uvodi novi persistence sloj.
-- Testovi и CI нису покренути у овом окружењу.
+- Testovi и CI нису покrenuti у овом окружењу.
 - Commit: `30175fef3cb8dce261bf667b1882ebe593ecd46d`.
 
 ## 2026-09-15T03:00:00+02:00 — Документација production PostgreSQL границе
@@ -75,7 +75,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - `docs/DATA_STORAGE_ARCHITECTURE.md` je ispravljen tako da koristi tačan Railway termin **Durable Barrel** umesto prethodnog pogrešnog naziva Durable Volume.
 - Ova dokumentaciona korekcija je commitovana kao `16d2572`.
 
-## 2026-09-15T05:00:00+02:00 — Kooperativno gašenje worker runtime-a
+## 2026-09-15T05:00:00+02:00 — Коoperativно gašenje worker runtime-a
 
 - Ažuriran je `src/h2h/workers/runtime.py`.
 - Dodat je `should_stop` predicate kako bi production supervisor mogao kontrolisano da zaustavi worker pre sledeće iteracije.
@@ -137,3 +137,26 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dodat je `tests/workers/test_quote_refresh_schedule.py` sa proverama svih granica, prošlih fixture-a, 72h lookahead-a i timezone validacije.
 - Testovi, Ruff i CI nisu pokrenuti u ovom okruženju.
 - Commitovi: `402127765e4ba39cac7a594b10bc7ac03427b15e`, `b678d6b31bbc00454f1b989179517eb87c19a062`.
+
+## 2026-09-15T12:30:00+02:00 — Production integracija kickoff-aware refresh scheduler-a
+
+- `DiscoveredHistoryQuotePollingJob` sada koristi `QuoteRefreshScheduler` za selektivno osvežavanje kvota prema vremenu do kickoff-a.
+- Discovery lookahead je postavljen na 72 sata.
+- Novi fixture-i se odmah osvežavaju i registruju za naredni ciklus; poznati fixture-i se osvežavaju samo kada postanu due.
+- Promena kickoff-a ponovo registruje fixture i računa novu cadence tačku.
+- Greška jednog fixture-a ne prekida obradu ostalih fixture-a.
+- Commitovi: `4f19c31c12c19dc818b765bd50ea9c49e1694af2`, `74c29742d2d6f054209bfdf42dfd41055168aa2e`.
+
+## 2026-09-15T13:00:00+02:00 — Retry nakon neuspešnog prvog quote refresh-a
+
+- Ispravljen je slučaj u kome neuspešan prvi refresh ostavlja fixture u memorijskom rasporedu i time sprečava retry u sledećem discovery ciklusu.
+- Nakon greške uklanjaju se `known kickoff` marker i scheduler zapis, pa fixture ostaje ponovo podoban za inicijalni pokušaj.
+- Dodat je/aktiviran test `test_retries_fixture_after_failed_refresh`.
+- Commit: `e923015ea464f6fa82920bcefd018febf80dbec2`.
+
+## 2026-09-15T13:20:00+02:00 — Keyword-only korekcija scheduler cleanup-a
+
+- Ispravljen je poziv `QuoteRefreshScheduler.remove()` u `src/h2h/workers/discovered_history_quote_polling.py`.
+- Metoda zahteva keyword-only argument `fixture_id`, pa je poziv promenjen u `remove(fixture_id=fixture_id)`.
+- Korisnik je lokalno potvrdio uspešnu verifikaciju: `249 passed` i `uv run ruff check .` bez grešaka.
+- Commit: `17e582fec78c1d510e1493f6963a438aa330a129`.
