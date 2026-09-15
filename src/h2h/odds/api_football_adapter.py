@@ -70,9 +70,19 @@ class ApiFootballQuoteAdapter:
 
     @staticmethod
     def _finite_float(value: Any, field: str) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if isinstance(value, bool):
             raise TypeError(f"{field} must be numeric")
-        result = float(value)
+        if isinstance(value, str):
+            if not value.strip():
+                raise TypeError(f"{field} must be numeric")
+            try:
+                result = float(value)
+            except ValueError as exc:
+                raise TypeError(f"{field} must be numeric") from exc
+        elif isinstance(value, (int, float)):
+            result = float(value)
+        else:
+            raise TypeError(f"{field} must be numeric")
         if not math.isfinite(result):
             raise ValueError(f"{field} must be finite")
         return result
@@ -97,7 +107,10 @@ class ApiFootballQuoteAdapter:
     def _parse_datetime(value: Any) -> datetime:
         if not isinstance(value, str) or not value.strip():
             raise TypeError("observed_at or update must be an ISO datetime string")
-        parsed = datetime.fromisoformat(value)
-        if parsed.tzinfo is None:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("observed_at or update must be a valid ISO datetime string") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError("observed_at or update must be timezone-aware")
         return parsed
