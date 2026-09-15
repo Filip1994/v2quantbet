@@ -9,12 +9,12 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from h2h.domain.odds import Market, Selection  # noqa: E402
-from h2h.domain.quote_history import QuoteSeries, QuoteSnapshot  # noqa: E402
-from h2h.persistence.postgres_quote_history import (  # noqa: E402
+from h2h.domain.odds import Market, Selection
+from h2h.domain.quote_history import QuoteSeries, QuoteSnapshot
+from h2h.persistence.postgres_quote_history import (
     PostgreSQLQuoteHistoryRepository,
 )
-from h2h.persistence.quote_history import QuoteHistoryConflictError  # noqa: E402
+from h2h.persistence.quote_history import QuoteHistoryConflictError
 
 
 DATABASE_URL = os.environ.get("QUANTBET_TEST_DATABASE_URL")
@@ -60,9 +60,8 @@ def _snapshot(
 @pytest.fixture
 def repository():
     assert DATABASE_URL is not None
-    with psycopg.connect(DATABASE_URL) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(_migration_sql())
+    with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+        cursor.execute(_migration_sql())
 
     repo = PostgreSQLQuoteHistoryRepository(database_url=DATABASE_URL)
     prefix = f"it-{uuid4()}"
@@ -79,18 +78,17 @@ def repository():
     context.created_snapshots = created_snapshots
     yield context
 
-    with psycopg.connect(DATABASE_URL) as connection:
-        with connection.cursor() as cursor:
-            if created_snapshots:
-                cursor.execute(
-                    "DELETE FROM quote_snapshots WHERE snapshot_id = ANY(%s)",
-                    (created_snapshots,),
-                )
-            if created_series:
-                cursor.execute(
-                    "DELETE FROM quote_series WHERE series_id = ANY(%s)",
-                    (created_series,),
-                )
+    with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+        if created_snapshots:
+            cursor.execute(
+                "DELETE FROM quote_snapshots WHERE snapshot_id = ANY(%s)",
+                (created_snapshots,),
+            )
+        if created_series:
+            cursor.execute(
+                "DELETE FROM quote_series WHERE series_id = ANY(%s)",
+                (created_series,),
+            )
 
 
 def test_natural_series_conflict_is_detected(repository) -> None:
