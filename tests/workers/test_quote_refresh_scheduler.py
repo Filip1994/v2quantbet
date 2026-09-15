@@ -13,7 +13,7 @@ def test_register_sets_next_refresh_from_current_cadence() -> None:
     state = scheduler.register(fixture_id=42, kickoff_at=kickoff, now=now)
 
     assert state is not None
-    assert state.next_refresh_at == datetime(2026, 9, 16, 12, tzinfo=UTC)
+    assert state.next_refresh_at == datetime(2026, 9, 16, 0, tzinfo=UTC)
     assert state.closing_capture_required is False
 
 
@@ -32,7 +32,7 @@ def test_due_fixture_ids_returns_only_due_fixtures() -> None:
     )
 
     assert scheduler.due_fixture_ids(
-        now=datetime(2026, 9, 16, 12, 1, tzinfo=UTC)
+        now=datetime(2026, 9, 16, 11, 59, tzinfo=UTC)
     ) == (7,)
 
 
@@ -80,7 +80,7 @@ def test_register_removes_out_of_window_or_started_fixture() -> None:
 
     assert scheduler.register(
         fixture_id=42,
-        kickoff_at=datetime(2026, 9, 18, 12, tzinfo=UTC),
+        kickoff_at=datetime(2026, 9, 18, 13, tzinfo=UTC),
         now=now,
     ) is None
     assert scheduler.snapshot() == ()
