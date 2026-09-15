@@ -54,8 +54,27 @@ SQLite is treated as an existing transitional adapter. It must not be deleted un
 8. Added PostgreSQL application composition and an explicit migration lifecycle hook.
 9. Updated configuration and storage architecture documentation.
 
+## Restart and concurrency hardening decision
+
+The natural identity of a quote series is:
+
+```text
+(fixture_id, bookmaker_id, market, selection)
+```
+
+A caller must not assume that its generated `series_id` remains authoritative after a process restart or concurrent creation by another worker. The PostgreSQL adapter must therefore resolve the natural identity before treating a series as newly created:
+
+1. Look up the series by the natural unique key.
+2. If found, validate its immutable definition and reuse the persisted `series_id`.
+3. If absent, attempt an insert with the caller's proposed `series_id`.
+4. On any concurrent unique-key race, resolve the row again by the natural key.
+5. Reject only genuine immutable-definition conflicts; never create a second series for the same natural identity.
+
+This is a required hardening rule for the next implementation step. It must be exposed through the provider-neutral repository contract rather than hidden in PostgreSQL-specific application code. Until that contract change is implemented and verified, `ensure_series()` remains a write/validation operation and callers must not infer restart-safe ID resolution from it.
+
 ## Remaining work
 
+- Implement and test restart-safe natural-key series resolution.
 - Execute the integration suite against a real PostgreSQL instance.
 - Confirm the exact migration/bootstrap procedure in the deployed Railway environment.
 - Finish production runtime wiring for all required history-aware use cases.
