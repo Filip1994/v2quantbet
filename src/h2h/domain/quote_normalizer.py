@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from .bookmaker_policy import resolve_api_football_bookmaker
 from .odds import CanonicalQuote, Market, Selection
 
 _MARKET_MAP = {
@@ -49,10 +50,14 @@ def normalize_quote(payload: Mapping[str, object]) -> CanonicalQuote:
         ) from exc
 
     try:
+        bookmaker = resolve_api_football_bookmaker(
+            int(_required(payload, "bookmaker_id")),
+            str(_required(payload, "bookmaker_name")),
+        )
         return CanonicalQuote(
             fixture_id=str(_required(payload, "fixture_id")),
-            bookmaker_id=int(_required(payload, "bookmaker_id")),
-            bookmaker_name=str(_required(payload, "bookmaker_name")),
+            bookmaker_id=bookmaker.provider_id,
+            bookmaker_name=bookmaker.provider_name,
             market=market,
             selection=selection,
             odd=float(_required(payload, "odd")),
