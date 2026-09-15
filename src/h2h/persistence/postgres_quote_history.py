@@ -1,8 +1,4 @@
-"""PostgreSQL persistence for immutable quote history.
-
-The PostgreSQL driver is imported lazily so provider-neutral code remains
-usable in environments that do not install production database dependencies.
-"""
+"""PostgreSQL persistence for immutable quote history."""
 
 import os
 from collections.abc import Callable, Iterable
@@ -53,12 +49,10 @@ class PostgreSQLQuoteHistoryRepository:
             if row is not None:
                 self._require_same_series(row, series)
                 return
-
             cursor.execute(
                 "INSERT INTO quote_series "
                 "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT DO NOTHING",
+                "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
                 (
                     series.series_id,
                     series.fixture_id,
@@ -80,19 +74,11 @@ class PostgreSQLQuoteHistoryRepository:
                 )
             self._require_same_series(row, series)
 
-    def find_series(
-        self,
-        *,
-        fixture_id: str,
-        bookmaker_id: int,
-        market: str,
-        selection: str,
-    ) -> QuoteSeries | None:
+    def find_series(self, *, fixture_id: str, bookmaker_id: int, market: str, selection: str) -> QuoteSeries | None:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT series_id, fixture_id, bookmaker_id, market, selection, created_at "
-                "FROM quote_series "
-                "WHERE fixture_id = %s AND bookmaker_id = %s "
+                "FROM quote_series WHERE fixture_id = %s AND bookmaker_id = %s "
                 "AND market = %s AND selection = %s",
                 (fixture_id, bookmaker_id, market, selection),
             )
@@ -109,7 +95,12 @@ class PostgreSQLQuoteHistoryRepository:
             return tuple(self._row_to_series(row) for row in cursor.fetchall())
 
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
-        """Append a batch atomically and tolerate concurrent identical inserts."""
+        """Append snapshots atomically using semantic observation identity.
+
+        The natural key is (series_id, observed_at, source). captured_at is
+        metadata only. An identical replay is accepted; a changed odd for the
+        same natural key is rejected.
+        """
         incoming = tuple(snapshots)
         if not incoming:
             return
@@ -126,10 +117,31 @@ class PostgreSQLQuoteHistoryRepository:
 
             for snapshot in incoming:
                 cursor.execute(
+                    "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
+                    "FROM quote_snapshots WHERE series_id = %s AND observed_at = %s AND source = %s",
+                    (snapshot.series_id, snapshot.observed_at, snapshot.source),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    existing = tuple(row)
+                    expected = (
+                        snapshot.snapshot_id,
+                        snapshot.series_id,
+                        snapshot.odd,
+                        snapshot.observed_at,
+                        snapshot.captured_at,
+                        snapshot.source,
+                    )
+                    if existing[1] != snapshot.series_id or existing[2] != snapshot.odd:
+                        raise QuoteHistoryConflictError(
+                            "conflicting observation for semantic quote identity"
+                        )
+                    continue
+
+                cursor.execute(
                     "INSERT INTO quote_snapshots "
                     "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT DO NOTHING",
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
                     (
                         snapshot.snapshot_id,
                         snapshot.series_id,
@@ -139,23 +151,6 @@ class PostgreSQLQuoteHistoryRepository:
                         snapshot.source,
                     ),
                 )
-                cursor.execute(
-                    "SELECT series_id, odd, observed_at, captured_at, source "
-                    "FROM quote_snapshots WHERE snapshot_id = %s",
-                    (snapshot.snapshot_id,),
-                )
-                row = cursor.fetchone()
-                expected = (
-                    snapshot.series_id,
-                    snapshot.odd,
-                    snapshot.observed_at,
-                    snapshot.captured_at,
-                    snapshot.source,
-                )
-                if row is None or tuple(row) != expected:
-                    raise QuoteHistoryConflictError(
-                        f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
-                    )
 
     @staticmethod
     def _require_same_series(row: tuple[Any, ...], series: QuoteSeries) -> None:
@@ -179,8 +174,7 @@ class PostgreSQLQuoteHistoryRepository:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
-                "FROM quote_snapshots WHERE series_id = %s "
-                "ORDER BY observed_at, captured_at, snapshot_id",
+                "FROM quote_snapshots WHERE series_id = %s ORDER BY observed_at, captured_at, snapshot_id",
                 (series_id,),
             )
             return tuple(self._row_to_snapshot(row) for row in cursor.fetchall())
