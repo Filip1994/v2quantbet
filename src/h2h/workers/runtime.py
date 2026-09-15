@@ -9,15 +9,17 @@ from dataclasses import dataclass
 
 Job = Callable[[], None]
 Sleeper = Callable[[float], None]
+StopPredicate = Callable[[], bool]
 
 
 @dataclass(frozen=True)
 class WorkerRuntime:
-    """Execute a job repeatedly with an injectable clock boundary."""
+    """Execute a job repeatedly with an injectable shutdown boundary."""
 
     job: Job
     interval_seconds: float = 60.0
     sleep: Sleeper = time.sleep
+    should_stop: StopPredicate = lambda: False
 
     def __post_init__(self) -> None:
         if self.interval_seconds <= 0:
@@ -28,8 +30,8 @@ class WorkerRuntime:
         self.job()
 
     def run_forever(self) -> None:
-        """Run until the process receives an external termination signal."""
-        while True:
+        """Run until the shutdown predicate returns true or an external signal stops it."""
+        while not self.should_stop():
             self.run_once()
             self.sleep(self.interval_seconds)
 
