@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from threading import Event
 
 from h2h.application import build_api_football_client
@@ -11,6 +12,9 @@ from h2h.application import build_postgres_quote_history_application_from_settin
 from h2h.config import load_settings
 from h2h.odds import ApiFootballOddsService
 from h2h.odds.http import UrllibJsonTransport
+from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
+from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
+from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
 from h2h.workers.history_quote_polling import HistoryQuotePollingJob
 from h2h.workers.runtime import WorkerRuntime, install_shutdown_handlers
 
@@ -31,6 +35,17 @@ def _fixture_ids_from_environment() -> tuple[int, ...]:
     return fixture_ids
 
 
+def _positive_seconds(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
+
+
 def main() -> None:
     """Initialize PostgreSQL and run the configured pre-match polling worker."""
     logging.basicConfig(
@@ -38,33 +53,59 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = load_settings()
-    fixture_ids = _fixture_ids_from_environment()
+    manual_fixture_ids = _fixture_ids_from_environment()
     application = build_postgres_quote_history_application_from_settings(settings)
     applied = application.migrate()
     LOGGER.info("PostgreSQL ready; migrations applied: %s", applied)
 
+    client = build_api_football_client(UrllibJsonTransport(), settings)
+    source = ApiFootballOddsService(client)
     stopped = Event()
     install_shutdown_handlers(stopped.set)
 
-    if not fixture_ids:
+    poll_interval = _positive_seconds("QUANTBET_POLL_INTERVAL_SECONDS", 60.0)
+    discovery_interval = _positive_seconds("QUANTBET_DISCOVERY_INTERVAL_SECONDS", 900.0)
+    lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 24.0)
+
+    if manual_fixture_ids:
+        job = HistoryQuotePollingJob(source, application.service, manual_fixture_ids)
         LOGGER.warning(
-            "QUANTBET_FIXTURE_IDS is not configured; worker is idle until fixture discovery is wired"
+            "QUANTBET_FIXTURE_IDS is configured; using manual fixture allowlist instead of discovery"
+        )
+    else:
+        discovery = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
+        job = DiscoveredHistoryQuotePollingJob(
+            source,
+            application.service,
+            discovery,
+            lookahead=timedelta(hours=lookahead_hours),
+        )
+        LOGGER.info(
+            "Starting discovery-driven worker: poll=%ss discovery=%ss lookahead=%sh",
+            poll_interval,
+            discovery_interval,
+            lookahead_hours,
         )
 
-        def idle_job() -> None:
-            LOGGER.info("Worker idle: no fixture IDs configured")
+    last_discovery_at: float | None = None
+    monotonic = __import__("time").monotonic
 
-        job_callback = idle_job
-    else:
-        client = build_api_football_client(UrllibJsonTransport(), settings)
-        source = ApiFootballOddsService(client)
-        job = HistoryQuotePollingJob(source, application.service, fixture_ids)
-        LOGGER.info("Starting QuantBet worker for fixtures: %s", fixture_ids)
-        job_callback = job.run_once
+    def run_cycle() -> None:
+        nonlocal last_discovery_at
+        now = monotonic()
+        if last_discovery_at is None or manual_fixture_ids or now - last_discovery_at >= discovery_interval:
+            if manual_fixture_ids:
+                total = job.run_once()
+            else:
+                total = job.run_once()
+            last_discovery_at = now
+            LOGGER.info("Worker cycle persisted %s snapshots", total)
+        else:
+            LOGGER.debug("Skipping discovery cycle; next refresh due in %.1fs", discovery_interval - (now - last_discovery_at))
 
     WorkerRuntime(
-        job=job_callback,
-        interval_seconds=float(os.getenv("QUANTBET_POLL_INTERVAL_SECONDS", "60")),
+        job=run_cycle,
+        interval_seconds=poll_interval,
         should_stop=stopped.is_set,
     ).run_forever()
     LOGGER.info("QuantBet worker stopped")
