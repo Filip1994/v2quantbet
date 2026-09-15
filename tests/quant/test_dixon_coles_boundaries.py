@@ -41,10 +41,37 @@ def records_for_teams(team_ids: tuple[int, ...], count: int = 20) -> list[Record
 def fitted_model() -> DixonColesModel:
     return DixonColesModel.fit(
         records_for_teams((1, 2, 3, 4), count=40),
+        team_id_namespace="synthetic-test",
         reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         xi=0.0015,
         min_matches=1,
     )
+
+
+def test_fit_requires_explicit_team_id_namespace() -> None:
+    records = records_for_teams((1, 2, 3, 4), count=12)
+
+    with pytest.raises(TypeError, match="team_id_namespace"):
+        DixonColesModel.fit(  # type: ignore[call-arg]
+            records,
+            reference_time=datetime(2025, 1, 1, tzinfo=UTC),
+            xi=0.0015,
+            min_matches=1,
+        )
+
+
+@pytest.mark.parametrize("namespace", ["", "   ", None, 123])
+def test_fit_rejects_invalid_team_id_namespace(namespace: object) -> None:
+    records = records_for_teams((1, 2, 3, 4), count=12)
+
+    with pytest.raises((TypeError, ValueError), match="team_id_namespace"):
+        DixonColesModel.fit(
+            records,
+            team_id_namespace=namespace,  # type: ignore[arg-type]
+            reference_time=datetime(2025, 1, 1, tzinfo=UTC),
+            xi=0.0015,
+            min_matches=1,
+        )
 
 
 def test_fit_rejects_insufficient_training_matches() -> None:
@@ -52,6 +79,7 @@ def test_fit_rejects_insufficient_training_matches() -> None:
     with pytest.raises(DixonColesFitError, match="Premalo trening mečeva"):
         DixonColesModel.fit(
             records,
+            team_id_namespace="synthetic-test",
             reference_time=datetime(2025, 1, 1, tzinfo=UTC),
             xi=0.0015,
             min_matches=4,
@@ -63,6 +91,7 @@ def test_fit_rejects_fewer_than_four_teams() -> None:
     with pytest.raises(DixonColesFitError, match="najmanje četiri povezana tima"):
         DixonColesModel.fit(
             records,
+            team_id_namespace="synthetic-test",
             reference_time=datetime(2025, 1, 1, tzinfo=UTC),
             xi=0.0015,
             min_matches=1,
@@ -74,6 +103,7 @@ def test_fit_excludes_matches_at_or_after_reference_time() -> None:
     reference_time = records[-1].date
     model = DixonColesModel.fit(
         records,
+        team_id_namespace="synthetic-test",
         reference_time=reference_time,
         xi=0.0015,
         min_matches=1,

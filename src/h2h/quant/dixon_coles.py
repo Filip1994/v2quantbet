@@ -41,6 +41,7 @@ def dixon_coles_tau(
 @dataclass(slots=True)
 class DixonColesModel:
     team_ids: tuple[int, ...]
+    team_id_namespace: str
     attacks: np.ndarray
     defenses: np.ndarray
     intercept: float
@@ -50,16 +51,28 @@ class DixonColesModel:
     fitted_matches: int
     objective: float
 
+    def __post_init__(self) -> None:
+        self._validate_team_id_namespace(self.team_id_namespace)
+
+    @staticmethod
+    def _validate_team_id_namespace(value: str) -> None:
+        if not isinstance(value, str):
+            raise TypeError("team_id_namespace must be a string")
+        if not value.strip():
+            raise ValueError("team_id_namespace must not be blank")
+
     @classmethod
     def fit(
         cls,
         records: list[Any],
         *,
+        team_id_namespace: str,
         reference_time: datetime,
         xi: float,
         ridge: float = 0.01,
         min_matches: int = 80,
     ) -> DixonColesModel:
+        cls._validate_team_id_namespace(team_id_namespace)
         records = [record for record in records if record.date < reference_time]
         if len(records) < min_matches:
             raise DixonColesFitError(
@@ -183,6 +196,7 @@ class DixonColesModel:
         attacks, defenses, intercept, home_advantage, rho = unpack(result.x)
         return cls(
             team_ids=team_ids,
+            team_id_namespace=team_id_namespace,
             attacks=attacks,
             defenses=defenses,
             intercept=intercept,

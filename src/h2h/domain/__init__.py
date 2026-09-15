@@ -10,6 +10,7 @@ from .fixture_identity import (
 from .market_snapshot import MarketSnapshot
 from .odds import CanonicalQuote, Market, Selection
 from .pick_registration import PickRegistration, PickStatus
+from .prediction import FixturePrediction, PredictionTarget
 from .quote_history import QuoteSeries, QuoteSnapshot
 from .quote_normalizer import QuoteNormalizationError, normalize_quote
 from .quote_validation import validate_quotes
@@ -17,10 +18,12 @@ from .quote_validation import validate_quotes
 __all__ = [
     "CanonicalQuote",
     "Fixture",
+    "FixturePrediction",
     "Market",
     "MarketSnapshot",
     "PickRegistration",
     "PickStatus",
+    "PredictionTarget",
     "ProviderFixtureReference",
     "QuoteNormalizationError",
     "QuoteSeries",

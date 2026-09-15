@@ -33,6 +33,8 @@ Produkcioni PostgreSQL je pre ovog cutover-a potvrđen kao prazan, pa nema legac
 
 `provider_home_team_id` i `provider_away_team_id` čuvaju originalni redosled iz provider payload-a i eksplicitno su kvalifikovani vrednošću `Fixture.provider`. Nisu globalni, provider-neutralni team identiteti. Mogu se proslediti Dixon–Coles modelu samo kada je eksplicitno utvrđeno da fitted training skup koristi isti provider namespace; adapter sam ne uspostavlja tu vezu.
 
+Production prediction boundary sada iz `Fixture` objekta interno gradi immutable target, izlaže ga kroz read-only `PredictionTarget` interfejs, proverava canonical/provider fixture konzistentnost, odbija jednake home/away team ID vrednosti i čuva isti home/away redosled. Read-only `FixturePrediction` rezultat nema podržan javni konstruktor i identity-safe valuation prihvata samo konkretan rezultat koji je proizveo `DixonColesFixturePredictor`. Predictor odbija model čiji `team_id_namespace` nije `api-football` pre numeričkog prediction poziva. Namespace na modelu je eksplicitna tvrdnja fit caller-a, ne dokaz porekla trening podataka; production acquisition istorijskih API-Football rezultata još nije implementiran.
+
 ## Validacija i hardening
 
 Adapter odbacuje payload-e koji nemaju obavezne sekcije ili validne vrednosti za:

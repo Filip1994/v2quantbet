@@ -78,7 +78,13 @@ def synthetic_records() -> list[SyntheticRecord]:
 def test_golden_master_values_are_locked() -> None:
     records = synthetic_records()
     reference = records[-1].date + timedelta(days=1)
-    model = DixonColesModel.fit(records, reference_time=reference, xi=0.0015, min_matches=80)
+    model = DixonColesModel.fit(
+        records,
+        team_id_namespace="synthetic-golden-master",
+        reference_time=reference,
+        xi=0.0015,
+        min_matches=80,
+    )
     probabilities = model.market_probabilities(1, 2, max_goals=10)
     expected_goals = model.expected_goals(1, 2)
 

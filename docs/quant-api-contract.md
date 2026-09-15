@@ -18,7 +18,7 @@ The package exports are aliases of the canonical module objects.
 
 ## Training input
 
-`DixonColesModel.fit(records, *, reference_time, xi, ridge=0.01, min_matches=80)` accepts a list of record-like objects. Each record must provide:
+`DixonColesModel.fit(records, *, team_id_namespace, reference_time, xi, ridge=0.01, min_matches=80)` accepts a list of record-like objects. Each record must provide:
 
 - `date: datetime`
 - `home_id: int`
@@ -27,6 +27,8 @@ The package exports are aliases of the canonical module objects.
 - `away_goals: int`
 
 Only records with `record.date < reference_time` are used. The quant layer expects records to represent completed matches and expects team identifiers to be stable integers. Provider-specific objects must be adapted before entering this interface.
+
+`team_id_namespace` is a required nonblank string retained by the fitted model. It is the caller's explicit claim about the namespace shared by every training-record team ID. The field makes namespace compatibility enforceable at prediction time; it does not prove where the records came from or that the claim is truthful. Production API-Football historical-results acquisition and training adaptation are not implemented.
 
 `Fixture.provider_home_team_id` and `Fixture.provider_away_team_id` retain ordered, provider-qualified identifiers from fixture discovery. They may be used as Dixon–Coles `home_id` and `away_id` only when the fitted training records are explicitly known to use the same provider namespace. Their presence alone does not prove that namespace association, and the quant layer does not perform provider-team entity resolution.
 
@@ -37,6 +39,7 @@ The method returns a fitted `DixonColesModel` or raises `DixonColesFitError` if 
 The fitted model exposes these stable attributes:
 
 - `team_ids: tuple[int, ...]`
+- `team_id_namespace: str`
 - `attacks: numpy.ndarray`
 - `defenses: numpy.ndarray`
 - `intercept: float`
@@ -47,6 +50,18 @@ The fitted model exposes these stable attributes:
 - `objective: float`
 
 These attributes are model state, not a provider or persistence schema.
+
+## Production-facing fixture prediction
+
+Low-level numerical methods remain available for model tests and internal calculation. Production-facing fixture execution uses `DixonColesFixturePredictor.predict(fixture, *, max_goals=10)`.
+
+The predictor derives an internal immutable target from the authoritative `Fixture` and exposes it through the read-only `PredictionTarget` interface. The target reuses `ResolvedFixtureIdentity`, retains ordered provider home/away team IDs, and derives their namespace from the provider fixture reference. Construction fails when provider fixture identity or either provider team ID is missing, when the home and away IDs are equal, or when canonical and provider fixture identity contradict one another. `PredictionTarget` has no supported public constructor or factory.
+
+Before invoking `market_probabilities()`, the predictor requires the model's `team_id_namespace` to equal the target's team-ID namespace. It then passes the target home ID as home and target away ID as away. The returned read-only `FixturePrediction` interface is backed by an internal immutable result that retains that exact execution target and a defensive, read-only copy of the produced probabilities. Neither the target interface nor the result interface is publicly constructible, and the predictor has no fixture-ID override argument.
+
+`evaluate_prediction_quote(prediction, quote)` is the identity-safe valuation gateway. It accepts only the internal result form produced by `DixonColesFixturePredictor`, then requires exact canonical fixture-ID equality before delegating selection mapping to `model_probability_for_selection()` and numerical valuation to unchanged `evaluate_value()`. Supported public APIs therefore cannot rebind arbitrary or fixture-A probabilities to a fixture-B target. Raw provider IDs and canonical IDs are not interchangeable, and cross-provider equivalence is never inferred. This supported-API boundary does not attempt to defend against deliberate private-module imports or reflection.
+
+This target-binding boundary is implemented, but no production component currently acquires completed API-Football results or fits an API-Football-namespaced model.
 
 ## Prediction methods
 

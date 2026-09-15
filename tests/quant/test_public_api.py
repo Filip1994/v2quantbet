@@ -48,6 +48,7 @@ def test_fit_signature_is_keyword_only_after_records() -> None:
     signature = inspect.signature(DixonColesModel.fit)
     assert list(signature.parameters) == [
         "records",
+        "team_id_namespace",
         "reference_time",
         "xi",
         "ridge",
@@ -60,12 +61,14 @@ def test_fit_signature_is_keyword_only_after_records() -> None:
 def test_fitted_model_exposes_contract_attributes_and_prediction_shapes() -> None:
     model = DixonColesModel.fit(
         _records(),
+        team_id_namespace="synthetic-test",
         reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         xi=0.001,
         min_matches=80,
     )
 
     assert isinstance(model.team_ids, tuple)
+    assert model.team_id_namespace == "synthetic-test"
     assert model.fitted_matches == 80
     assert np.isfinite(model.objective)
     assert model.attacks.shape == model.defenses.shape == (4,)
@@ -89,6 +92,7 @@ def test_fitted_model_exposes_contract_attributes_and_prediction_shapes() -> Non
 def test_prediction_for_unknown_team_uses_public_fit_error() -> None:
     model = DixonColesModel.fit(
         _records(),
+        team_id_namespace="synthetic-test",
         reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         xi=0.001,
         min_matches=80,

@@ -105,7 +105,18 @@ def test_real_scalar_returns_float_without_rounding_or_renormalization(value):
 def matrix_model(monkeypatch):
     # Rows: home goals; columns: away goals. Total mass is one.
     matrix = np.array([[0.05, 0.10, 0.15], [0.20, 0.10, 0.05], [0.10, 0.15, 0.10]])
-    model = DixonColesModel((1, 2), np.zeros(2), np.zeros(2), 0.0, 0.0, 0.0, 0.0, 0, 0.0)
+    model = DixonColesModel(
+        (1, 2),
+        "synthetic-test",
+        np.zeros(2),
+        np.zeros(2),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0,
+        0.0,
+    )
 
     def score_matrix(self, home_id, away_id, max_goals=10):
         assert self is model
