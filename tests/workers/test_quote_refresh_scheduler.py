@@ -27,7 +27,7 @@ def test_due_fixture_ids_returns_only_due_fixtures() -> None:
     )
     scheduler.register(
         fixture_id=42,
-        kickoff_at=datetime(2026, 9, 17, 12, tzinfo=UTC),
+        kickoff_at=datetime(2026, 9, 18, 12, tzinfo=UTC),
         now=now,
     )
 
