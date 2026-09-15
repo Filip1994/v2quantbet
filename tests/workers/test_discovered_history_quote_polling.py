@@ -70,6 +70,24 @@ def test_continues_after_fixture_failure() -> None:
     ingestion.ingest.assert_called_once_with(())
 
 
+def test_returns_zero_when_discovery_fails() -> None:
+    discovery = Mock()
+    discovery.discover.side_effect = RuntimeError("provider unavailable")
+    source = Mock()
+    ingestion = Mock()
+
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=lambda: datetime(2026, 9, 15, 12, tzinfo=UTC),
+    )
+
+    assert job.run_once() == 0
+    source.fetch_quotes.assert_not_called()
+    ingestion.ingest.assert_not_called()
+
+
 def test_ignores_missing_or_invalid_provider_fixture_ids() -> None:
     discovery = Mock()
     discovery.discover.return_value = [fixture(None), fixture("not-an-int"), fixture("0")]
