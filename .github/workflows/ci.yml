@@ -8,6 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quantbet
+          POSTGRES_PASSWORD: quantbet
+          POSTGRES_DB: quantbet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quantbet -d quantbet_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      QUANTBET_TEST_DATABASE_URL: postgresql://quantbet:quantbet@localhost:5432/quantbet_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,5 +38,4 @@ jobs:
       - name: Lint
         run: uv run python -m ruff check .
       - name: Tests
-        if: always()
         run: uv run python -m pytest
