@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from h2h.domain.fixture import Fixture
 from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
@@ -42,8 +42,8 @@ def test_discovers_and_polls_unique_provider_fixture_ids() -> None:
         datetime(2026, 9, 16, 12, tzinfo=UTC),
     )
     assert source.fetch_quotes.call_args_list == [
-        Mock.call(fixture_id=42),
-        Mock.call(fixture_id=7),
+        call(fixture_id=42),
+        call(fixture_id=7),
     ]
 
 
