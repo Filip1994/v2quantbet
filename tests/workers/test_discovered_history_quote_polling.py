@@ -47,6 +47,29 @@ def test_discovers_and_polls_unique_provider_fixture_ids() -> None:
     ]
 
 
+def test_continues_after_fixture_failure() -> None:
+    discovery = Mock()
+    discovery.discover.return_value = [fixture("42"), fixture("7")]
+    source = Mock()
+    source.fetch_quotes.side_effect = [RuntimeError("provider unavailable"), ()]
+    ingestion = Mock()
+    ingestion.ingest.return_value = 5
+
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=lambda: datetime(2026, 9, 15, 12, tzinfo=UTC),
+    )
+
+    assert job.run_once() == 5
+    assert source.fetch_quotes.call_args_list == [
+        call(fixture_id=42),
+        call(fixture_id=7),
+    ]
+    ingestion.ingest.assert_called_once_with(())
+
+
 def test_ignores_missing_or_invalid_provider_fixture_ids() -> None:
     discovery = Mock()
     discovery.discover.return_value = [fixture(None), fixture("not-an-int"), fixture("0")]
