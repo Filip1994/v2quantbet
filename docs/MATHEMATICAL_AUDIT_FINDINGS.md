@@ -144,3 +144,51 @@ Do not modify the Dixon–Coles mathematics at this stage. Proceed with the valu
 - No production eligibility decision is represented by `ValuePick` itself; positive EV is therefore only a valuation result, not an approval to publish or bet.
 - No dedicated provider-neutral eligibility service or stable rejection-code contract was found during this checkpoint.
 - The next implementation step is to define the smallest explicit eligibility boundary without inventing undocumented thresholds or silently changing the existing value mathematics.
+
+## Repository implementation and verification log — 2026-09-15
+
+The following implementation areas were audited and hardened during this pass:
+
+- bookmaker identity policy and API-Football mapping (`8=bet365`, `11=1xBet`, `34=superbet`);
+- canonical quote and quote-history validation;
+- SQLite canonical quote persistence;
+- PostgreSQL quote-history schema and natural-key conflict handling;
+- API-Football HTTP transport error classification and retry-after parsing;
+- API-Football client configuration and fixture-ID validation;
+- API-Football fixture and odds payload validation;
+- ingestion handling for malformed provider branches and provider-level errors.
+
+Relevant implementation commits:
+
+- `1a70fdee80a592669e90a1d02f431a9a1622b479`
+- `c21553e01887e0f4f6692a787fe2af2d5f6ddf34`
+- `a7fe3bdfd0b044e36cc2d0fd29cba9c3dab9e957`
+- `099d87c8ca1c1276d015f2c5b72311b6c3167cd5`
+- `5f2e430b8d390c1f21a455a4fd3af2a4062a6d2a`
+- `a8e293281e66de15a4e79651dedd0f3524b4df5e`
+- `ea7effabea4333c88f19b8a9dc24138f9968af02`
+- `162eff83b4a04b6c0f48ef2a9afd5dcce4950bdf`
+- `688b686f647aaa2c30656f14d00e0d5ae189ae25`
+- `aa14730b76623e457ddc9cfa82914e9d9346ef87`
+- `348ee0b22b51ea8baf6061d72b3e3f6a854e6f11`
+- `b031a8afc4719f0ec3f760a8b7794787a2c376b8`
+- `2db8f203fe047d2e5e807f5b6a77c966d6610432`
+- `68854f11e6302220573a402d086cd96595675a67`
+- `c3b24db210e719af6ba4c54372438711f9a35455`
+- `2576d6da6cbda59c73cc8f895cbf7cefe9c2b27c`
+- `b13c1518b922f1359762fd5ffa94206baa44c53a`
+- `edcf42eae28213c442a28edb197014ae7f23321e`
+
+### Verification status
+
+- Tests were expanded alongside the relevant changes, including validation, malformed payload, transport, natural-key conflict, and PostgreSQL integration coverage.
+- **Local test execution has not been performed in this environment.** Therefore, no local green-test claim is made.
+- PostgreSQL integration remains dependent on a real PostgreSQL service; the CI service configuration was added, but CI execution still needs to be checked explicitly.
+
+### Open verification items
+
+1. Run the complete test suite in CI or a reproducible local environment.
+2. Confirm the PostgreSQL service job actually passes integration tests.
+3. Add/verify explicit `URLError` transport coverage.
+4. Complete the fixture-discovery/client timezone audit.
+5. Continue with the provider-neutral value-eligibility boundary and its rejection-code contract.
