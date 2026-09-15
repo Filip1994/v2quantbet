@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 
-from h2h.odds.api_football_client import ApiFootballClient
 from h2h.domain.fixture import Fixture
+from h2h.odds.api_football_client import ApiFootballClient
 from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
 
 
