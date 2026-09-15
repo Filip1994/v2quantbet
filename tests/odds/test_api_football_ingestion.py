@@ -13,8 +13,8 @@ def test_flattens_api_football_odds_response() -> None:
                 "fixture": {"id": 1493129},
                 "bookmakers": [
                     {
-                        "id": 7,
-                        "name": "William Hill",
+                        "id": 8,
+                        "name": "bet365",
                         "bets": [
                             {
                                 "id": 8,
@@ -36,7 +36,7 @@ def test_flattens_api_football_odds_response() -> None:
     assert len(payloads) == 2
     assert payloads[0] == {
         "fixture": {"id": 1493129},
-        "bookmaker": {"id": 7, "name": "William Hill"},
+        "bookmaker": {"id": 8, "name": "bet365"},
         "bet": {"id": 8, "name": "Both Teams Score"},
         "value": {"value": "Yes", "odd": "2.20"},
         "update": None,
@@ -51,8 +51,8 @@ def test_ingests_api_football_quotes() -> None:
                 "fixture": {"id": 1493129},
                 "bookmakers": [
                     {
-                        "id": 7,
-                        "name": "William Hill",
+                        "id": 8,
+                        "name": "bet365",
                         "update": "2026-09-13T20:03:16+00:00",
                         "bets": [
                             {
@@ -84,8 +84,8 @@ def test_builds_api_football_market_snapshot() -> None:
                 "fixture": {"id": 1493129},
                 "bookmakers": [
                     {
-                        "id": 7,
-                        "name": "William Hill",
+                        "id": 8,
+                        "name": "bet365",
                         "update": "2026-09-13T20:03:16+00:00",
                         "bets": [
                             {
@@ -106,7 +106,7 @@ def test_builds_api_football_market_snapshot() -> None:
 
     assert len(snapshots) == 1
     assert snapshots[0].fixture_id == "1493129"
-    assert snapshots[0].bookmaker_id == 7
+    assert snapshots[0].bookmaker_id == 8
     assert snapshots[0].market is Market.BTTS
     assert len(snapshots[0].quotes) == 2
 
