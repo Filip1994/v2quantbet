@@ -50,6 +50,11 @@ class ApiFootballClient:
         if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
             raise ValueError("fixture_id must be a positive integer")
 
+    @staticmethod
+    def _validate_datetime(value: datetime, field: str) -> None:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"{field} must be timezone-aware")
+
     def fetch_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
         """Fetch odds for one fixture, serving a fresh cached response when enabled."""
         self._validate_fixture_id(fixture_id)
@@ -81,6 +86,8 @@ class ApiFootballClient:
         self._validate()
         if not isinstance(start_at, datetime) or not isinstance(end_at, datetime):
             raise TypeError("start_at and end_at must be datetime values")
+        self._validate_datetime(start_at, "start_at")
+        self._validate_datetime(end_at, "end_at")
         if start_at >= end_at:
             raise ValueError("start_at must be before end_at")
         query = urlencode({"from": start_at.date().isoformat(), "to": end_at.date().isoformat()})
