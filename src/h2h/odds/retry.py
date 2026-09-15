@@ -10,6 +10,7 @@ from typing import Any
 from .http import (
     JsonTransport,
     TransportError,
+    TransportRateLimitError,
     TransportResponseError,
     TransportTimeoutError,
 )
@@ -17,7 +18,7 @@ from .http import (
 
 @dataclass(frozen=True)
 class RetryingJsonTransport:
-    """Retry timeout and generic transport failures with bounded attempts."""
+    """Retry transient transport failures with bounded attempts."""
 
     transport: JsonTransport
     max_attempts: int = 3
@@ -45,6 +46,13 @@ class RetryingJsonTransport:
                     headers=headers,
                     timeout=timeout,
                 )
+            except TransportRateLimitError as exc:
+                last_error = exc
+                if attempt + 1 < self.max_attempts:
+                    delay = self.backoff_seconds * (2**attempt)
+                    if exc.retry_after is not None:
+                        delay = max(delay, exc.retry_after)
+                    self.sleeper(delay)
             except TransportResponseError:
                 raise
             except (TransportTimeoutError, TransportError) as exc:
