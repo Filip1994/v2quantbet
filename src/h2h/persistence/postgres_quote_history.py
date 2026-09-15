@@ -63,10 +63,25 @@ class PostgreSQLQuoteHistoryRepository:
             cursor.execute(
                 "INSERT INTO quote_series "
                 "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (series_id) DO NOTHING",
                 (series.series_id, series.fixture_id, series.bookmaker_id,
                  series.market.value, series.selection.value, series.created_at),
             )
+            cursor.execute(
+                "SELECT fixture_id, bookmaker_id, market, selection, created_at "
+                "FROM quote_series WHERE series_id = %s",
+                (series.series_id,),
+            )
+            row = cursor.fetchone()
+            expected = (
+                series.fixture_id, series.bookmaker_id, series.market.value,
+                series.selection.value, series.created_at,
+            )
+            if row is None or tuple(row) != expected:
+                raise QuoteHistoryConflictError(
+                    f"conflicting definition for series ID {series.series_id!r}"
+                )
 
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -78,32 +93,42 @@ class PostgreSQLQuoteHistoryRepository:
             return tuple(self._row_to_series(row) for row in cursor.fetchall())
 
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
+        """Append a batch atomically and tolerate concurrent identical inserts."""
+        incoming = tuple(snapshots)
+        if not incoming:
+            return
         with self.connect() as connection, connection.cursor() as cursor:
-            for snapshot in tuple(snapshots):
-                cursor.execute("SELECT 1 FROM quote_series WHERE series_id = %s", (snapshot.series_id,))
-                if cursor.fetchone() is None:
-                    raise QuoteHistoryConflictError(f"unknown series ID {snapshot.series_id!r}")
+            series_ids = tuple({snapshot.series_id for snapshot in incoming})
+            cursor.execute(
+                "SELECT series_id FROM quote_series WHERE series_id = ANY(%s)",
+                (list(series_ids),),
+            )
+            known_series = {row[0] for row in cursor.fetchall()}
+            for series_id in series_ids:
+                if series_id not in known_series:
+                    raise QuoteHistoryConflictError(f"unknown series ID {series_id!r}")
+
+            for snapshot in incoming:
+                cursor.execute(
+                    "INSERT INTO quote_snapshots "
+                    "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (snapshot_id) DO NOTHING",
+                    (snapshot.snapshot_id, snapshot.series_id, snapshot.odd,
+                     snapshot.observed_at, snapshot.captured_at, snapshot.source),
+                )
                 cursor.execute(
                     "SELECT series_id, odd, observed_at, captured_at, source "
                     "FROM quote_snapshots WHERE snapshot_id = %s",
                     (snapshot.snapshot_id,),
                 )
                 row = cursor.fetchone()
-                if row is not None:
-                    expected = (snapshot.series_id, snapshot.odd, snapshot.observed_at,
-                                snapshot.captured_at, snapshot.source)
-                    if tuple(row) != expected:
-                        raise QuoteHistoryConflictError(
-                            f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
-                        )
-                    continue
-                cursor.execute(
-                    "INSERT INTO quote_snapshots "
-                    "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (snapshot.snapshot_id, snapshot.series_id, snapshot.odd,
-                     snapshot.observed_at, snapshot.captured_at, snapshot.source),
-                )
+                expected = (snapshot.series_id, snapshot.odd, snapshot.observed_at,
+                            snapshot.captured_at, snapshot.source)
+                if row is None or tuple(row) != expected:
+                    raise QuoteHistoryConflictError(
+                        f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
+                    )
 
     def snapshots_for_series(self, series_id: str) -> tuple[QuoteSnapshot, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
