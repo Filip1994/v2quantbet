@@ -120,3 +120,65 @@ The concrete next step is to provision PostgreSQL 16 (matching CI), set
 and intentionally update the stale test fixtures/doubles and decide the
 adapter exception contract before modifying any production code.  No claim is
 made that the system is fully correct merely because the passing subset passed.
+
+## Triage / remediation
+
+**Remediated at:** 2026-09-15 14:23:45 +02:00 (Europe/Belgrade)
+
+The initial failure count was triaged against the current implementation and
+its contracts.  Each row below accounts for one of the original 18 failed test
+nodes.  No bookmaker allowlist, numeric bookmaker identity, quote-history
+natural identity, mathematical model, or CI workflow was changed.
+
+| Initial failure | Status and category | Root cause / remediation | Production code changed | Relevant test |
+| --- | --- | --- | --- | --- |
+| `test_unsupported_market_is_rejected` | Fixed — **A: stale/incorrect test** | `CanonicalQuote` explicitly requires a `Market`; the test now asserts its documented `TypeError`. | No | `test_untyped_market_is_rejected` |
+| `test_rejects_unsupported_api_football_bookmaker` | Fixed — **D: genuine production bug** | Policy rejection was unintentionally caught through the `ValueError` base class and wrapped. | Yes: re-raise `UnsupportedBookmakerError`. | Existing policy-boundary regression test |
+| `test_rejects_api_football_bookmaker_name_mismatch` | Fixed — **D: genuine production bug** | Same unintended catch-and-wrap behavior as the unsupported-ID case. | Yes: same minimal re-raise. | Existing policy-boundary regression test |
+| `test_accepts_valid_numeric_odd_forms[2]` | Fixed — **A: stale/incorrect test** | Integer input `2` correctly normalizes to `2.0`, not `2.2`; parameterized expected values now express each input. | No | `test_accepts_valid_numeric_odd_forms` |
+| `test_ingests_api_football_response_into_canonical_quotes` | Fixed — **B: stale test fixture** | Fixture used rejected id 7 / William Hill despite the documented allowlist and mapping. It now uses mapped id 8 / Bet365. | No | `test_ingests_api_football_response_into_canonical_quotes` |
+| `test_timeout_must_be_positive` | Fixed — **A: stale/incorrect test** | Runtime correctly rejects zero; only its asserted message had drifted to `positive number`. | No | `test_timeout_must_be_positive` |
+| `test_normalizing_adapter_returns_canonical_quote` | Fixed — **B: stale test fixture** | Generic fixture used non-allowlisted `Example Bookmaker`, preventing the test from exercising normalization. | No | `test_normalizing_adapter_returns_canonical_quote` |
+| `test_normalizing_adapter_preserves_normalizer_validation` | Fixed — **B: stale test fixture** | Same invalid fixture masked the intended odds validation assertion. | No | `test_normalizing_adapter_preserves_normalizer_validation` |
+| `test_build_market_snapshot_adapts_all_payloads` | Fixed — **B: stale test fixture** | Snapshot fixture used a rejected bookmaker instead of an allowlisted canonical name. | No | `test_build_market_snapshot_adapts_all_payloads` |
+| `test_build_market_snapshot_rejects_incomplete_market` | Fixed — **B: stale test fixture** | Same rejected fixture prevented evaluation of incomplete-market behavior. | No | `test_build_market_snapshot_rejects_incomplete_market` |
+| `test_series_for_fixture_reconstructs_rows` | Fixed — **C: obsolete fake/mock** | `FakeCursor` assumed a four-parameter natural lookup while production now performs a one-parameter fixture query. | No | `test_series_for_fixture_reconstructs_rows` |
+| `test_append_snapshots_rejects_unknown_series` | Fixed — **C: obsolete fake/mock** | `FakeCursor` did not model the repository's batched `series_id = ANY(%s)` lookup. | No | `test_append_snapshots_rejects_unknown_series` |
+| `test_append_and_read_snapshot` | Fixed — **C: obsolete fake/mock** | Fake did not model the full snapshot natural-key read after insert. | No | `test_append_and_read_snapshot` |
+| `test_append_snapshots_is_idempotent_for_matching_snapshot` | Fixed — **C: obsolete fake/mock** | Same `ANY(%s)` fake mismatch prevented idempotency behavior from being reached. | No | `test_append_snapshots_is_idempotent_for_matching_snapshot` |
+| `test_append_snapshots_rejects_conflicting_snapshot` | Fixed — **C: obsolete fake/mock** | Fake was updated for the current query contract; its assertion now matches the production `snapshot ID` conflict contract. | No | `test_append_snapshots_rejects_conflicting_snapshot` |
+| `test_append_snapshots_preserves_history_and_is_idempotent` | Fixed — **A: stale/incorrect test** | Two observations accidentally shared the documented snapshot natural key. The second now uses a distinct capture time. | No | `test_append_snapshots_preserves_history_and_is_idempotent` |
+| `test_snapshots_for_series_filters_other_series` | Fixed — **A: stale/incorrect test** | The second series reused the documented series natural identity. It now uses `Selection.UNDER`. | No | `test_snapshots_for_series_filters_other_series` |
+| `test_append_snapshots_is_atomic_on_conflict` | Fixed — **A: stale/incorrect test** | The batch first collided on natural identity, masking its intended snapshot-ID atomicity check. Its first candidate now has a unique capture time. | No | `test_append_snapshots_is_atomic_on_conflict` |
+
+### Adapter exception contract decision
+
+`UnsupportedBookmakerError` propagation is an established contract, not an
+unresolved design choice.  The allowlist document requires rejection before a
+quote enters the canonical model, and the policy-boundary tests were introduced
+with the API-Football mapping specifically to assert this exception type.  The
+adapter's broad `ValueError` handler accidentally captured that policy error.
+`ApiFootballQuoteAdapter.adapt()` now re-raises `UnsupportedBookmakerError` and
+continues to translate malformed payload and mapping errors into
+`QuoteNormalizationError`.
+
+### Final verification
+
+Commands run after remediation:
+
+```text
+uv run python -m pytest [changed-area targets] --basetemp .verification-tmp/targeted
+uv run python -m ruff check .
+uv run python -m pytest --basetemp .verification-tmp/pytest
+```
+
+| Check | Result |
+| --- | --- |
+| Targeted changed-area tests | `101 passed, 6 skipped` |
+| Ruff | `All checks passed!` |
+| Full pytest suite | `306 passed, 6 skipped, 0 failed, 0 errors` |
+| PostgreSQL integration | Not executed: all six tests skipped because `QUANTBET_TEST_DATABASE_URL` is unset and no local PostgreSQL/Docker service is available. |
+
+The only remaining blocker is real PostgreSQL 16 execution.  The local pytest
+run also emitted a non-failing `PytestCacheWarning` because this environment
+cannot write `.pytest_cache`; it does not affect collection or test outcomes.

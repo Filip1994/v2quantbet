@@ -172,3 +172,14 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
   - konflikt prirodnog ključa za snapshot-e.
 - Testovi nisu pokrenuti u ovom okruženju i nema potvrde da su prošli protiv stvarne baze.
 - Commit: `f05effa718e46dfc17e4461ab6dbc8236c6a1560`.
+
+## 2026-09-15T14:23:45+02:00 — Triage i remedijacija verification failure-a
+
+- Scope je bio ograničen na 18 prethodno reprodukovanih verification failure-a i 7 Ruff nalaza; nije rađen novi repo-wide audit niti su menjani matematika, CI, bookmaker allowlist ili quote-history natural identity.
+- Dva API-Football bookmaker failure-a potvrđena su kao production contract bug: `UnsupportedBookmakerError` je podklasa `ValueError` i adapter ga je nehotično prevodio u `QuoteNormalizationError`. Postojeći policy-boundary testovi, uvedeni uz mapping, potvrđuju da se policy exception propagira. Dodat je minimalni re-raise.
+- Stale testovi i fixture-i su usklađeni sa aktuelnim enum, bookmaker, numeric-odd, timeout i natural-identity ugovorima; PostgreSQL fake cursor je ažuriran za `ANY(%s)`, one-parameter fixture query i snapshot natural-key read.
+- Svih 7 Ruff nalaza u testovima je uklonjeno bez automatskog autofix-a: naive datetime test vrednost je formirana preko ISO parse-a, obsolete `noqa` direktive su uklonjene, a context manager-i su spojeni.
+- Ciljani testovi: `101 passed, 6 skipped`.
+- Konačna lokalna verifikacija: `uv run python -m ruff check .` → `All checks passed!`; `uv run python -m pytest --basetemp .verification-tmp/pytest` → `306 passed, 6 skipped, 0 failed, 0 errors`.
+- PostgreSQL nije izvršen: nema `QUANTBET_TEST_DATABASE_URL` ni dostupnog lokalnog PostgreSQL/Docker servisa; šest integration testova ostaje očekivano preskočeno.
+- Commitovi: `2e5ac1d25a8a13ed144a53f3593e2a19aaa20722`, `4386c6f8e674b6f01856f0b03934a922fd3d3f90`, `afeaea7f571aff4d345f19c553da8cd2b0eaee2a`, `002fca9881d3d13722b0f7b66aab508cffb411cb`.
