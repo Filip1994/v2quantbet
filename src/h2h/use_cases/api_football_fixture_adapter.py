@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from h2h.domain.fixture import Fixture
+from h2h.domain.fixture_identity import api_football_fixture_identity
 
 
 class ApiFootballFixtureAdapter:
@@ -22,12 +23,13 @@ class ApiFootballFixtureAdapter:
         league = self._mapping(payload, "league")
 
         fixture_id = self._positive_int(fixture.get("id"), "fixture.id")
+        identity = api_football_fixture_identity(fixture_id)
         home_team_id = self._positive_int(home.get("id"), "teams.home.id")
         away_team_id = self._positive_int(away.get("id"), "teams.away.id")
         competition_id = self._positive_int(league.get("id"), "league.id")
 
         return Fixture(
-            fixture_id=f"api-football:{fixture_id}",
+            fixture_id=identity.fixture_id,
             home_team=self._text(home, "name"),
             away_team=self._text(away, "name"),
             competition_id=competition_id,
@@ -37,8 +39,8 @@ class ApiFootballFixtureAdapter:
             competition_type=self._competition_type(league),
             season=self._optional_int(league.get("season"), "league.season"),
             status=self._status(fixture),
-            provider="api-football",
-            provider_fixture_id=str(fixture_id),
+            provider=identity.provider_reference.provider,
+            provider_fixture_id=identity.provider_reference.provider_fixture_id,
             provider_home_team_id=home_team_id,
             provider_away_team_id=away_team_id,
         )

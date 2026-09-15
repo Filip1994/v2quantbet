@@ -19,6 +19,19 @@ The identity must be stable across repeated ingestion runs. A provider name, dis
 
 If a provider cannot resolve a stable fixture or bookmaker identity, the payload must be rejected rather than silently assigned a guessed identity.
 
+### API-Football identity boundary
+
+For API-Football, four identity roles remain distinct:
+
+- canonical fixture identity: opaque `api-football:<provider_fixture_id>` used by `CanonicalQuote` and history;
+- provider lookup identity: the pair `("api-football", "<provider_fixture_id>")`;
+- transport identity: the positive numeric ID sent as `fixture=<id>`;
+- provider team identity: ordered home/away IDs qualified by the `api-football` namespace.
+
+Discovery allocates the canonical fixture ID through the shared provider-reference boundary. Odds collection carries that resolved identity while converting only the provider lookup component to the numeric transport ID. Before any bookmaker, bet or value filtering or quote flattening, the ingestion boundary verifies that every response record's fixture ID equals the requested provider fixture ID. The odds adapter repeats the check for each flattened payload, then assigns the already-resolved canonical identity to every quote. Neither layer may stringify the response ID into an independent raw quote identity.
+
+Canonical IDs are compared as opaque strings. Numeric equality, names, teams or kickoff timestamps do not establish fixture equivalence across provider namespaces.
+
 ## Market and selection mapping
 
 Adapters must translate provider-specific market labels into canonical `Market` and `Selection` values before creating `CanonicalQuote` objects. Unknown or unsupported mappings are rejected explicitly.
@@ -41,7 +54,7 @@ Repeated delivery of the same canonical identity is expected in ingestion system
 - conflicting quote data for the same identity must not be silently overwritten;
 - conflict handling must be explicit (for example, versioning by `observed_at`, quarantine, or a domain-specific conflict error).
 
-The current domain layer validates quote structure and consistency; persistence-level deduplication and conflict resolution remain future work.
+The domain layer validates quote structure and consistency. History persistence uses the existing quote-series and observation-identity contracts; canonical fixture identity is an input to those unchanged algorithms.
 
 ## Incomplete or contradictory data
 
@@ -57,4 +70,4 @@ No adapter may silently invent defaults for identity, timestamps, selections, or
 
 ## Implementation boundary
 
-The next concrete adapter may parse API-Football payloads, but it must output only the canonical provider-neutral contract. Quant/domain code must not depend on API-Football response structures.
+Provider adapters may parse API-Football payloads, but they output only the canonical provider-neutral contract. Quant/domain code does not depend on API-Football response structures.

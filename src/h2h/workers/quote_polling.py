@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from h2h.domain.fixture_identity import ResolvedFixtureIdentity
 from h2h.domain.odds import CanonicalQuote
 from h2h.use_cases import QuoteIngestionService
 
@@ -12,7 +13,11 @@ from h2h.use_cases import QuoteIngestionService
 class QuoteSource(Protocol):
     """Fetch normalized quotes for a fixture."""
 
-    def fetch_quotes(self, *, fixture_id: int) -> tuple[CanonicalQuote, ...]:
+    def fetch_quotes(
+        self,
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+    ) -> tuple[CanonicalQuote, ...]:
         """Return the currently observed quotes for one fixture."""
 
 
@@ -28,19 +33,24 @@ class QuotePollingJob:
         self,
         source: QuoteSource,
         ingestion: QuoteIngestionService,
-        fixture_ids: Iterable[int],
+        fixture_identities: Iterable[ResolvedFixtureIdentity],
     ) -> None:
         self._source = source
         self._ingestion = ingestion
-        self._fixture_ids = tuple(fixture_ids)
-        if any(fixture_id <= 0 for fixture_id in self._fixture_ids):
-            raise ValueError("fixture_ids must contain positive integers")
+        self._fixture_identities = tuple(fixture_identities)
+        if not all(
+            isinstance(identity, ResolvedFixtureIdentity)
+            for identity in self._fixture_identities
+        ):
+            raise TypeError(
+                "fixture_identities must contain ResolvedFixtureIdentity instances"
+            )
 
     def run_once(self) -> int:
         """Ingest one cycle and return the number of quotes written."""
         total = 0
-        for fixture_id in self._fixture_ids:
-            quotes = self._source.fetch_quotes(fixture_id=fixture_id)
+        for fixture_identity in self._fixture_identities:
+            quotes = self._source.fetch_quotes(fixture_identity=fixture_identity)
             self._ingestion.ingest(quotes)
             total += len(quotes)
         return total

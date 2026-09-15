@@ -4,7 +4,12 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from h2h.domain.market_snapshot import MarketSnapshot
+from h2h.domain.fixture_identity import (
+    ResolvedFixtureIdentity,
+    api_football_provider_fixture_id,
+)
 from h2h.domain.odds import CanonicalQuote
+from h2h.domain.quote_normalizer import QuoteNormalizationError
 
 from .api_football_adapter import ApiFootballQuoteAdapter
 from .quote_deduplication import deduplicate_quotes
@@ -12,8 +17,15 @@ from .quote_deduplication import deduplicate_quotes
 
 def iter_api_football_quote_payloads(
     response: Mapping[str, Any],
+    *,
+    fixture_identity: ResolvedFixtureIdentity,
 ) -> Iterator[dict[str, Any]]:
     """Yield one flattened payload for each bookmaker/bet/value combination.
+
+    Every response record's fixture identity is validated before any quote is
+    yielded. This prevents empty or unsupported records from bypassing the
+    requested-fixture boundary and prevents partially accepting mixed-fixture
+    responses.
 
     Unsupported or incomplete branches are skipped. The provider-specific
     response shape remains isolated in this ingestion layer; the resulting
@@ -30,12 +42,35 @@ def iter_api_football_quote_payloads(
     if not isinstance(fixtures, list):
         raise TypeError("API-Football odds response must contain a list")
 
-    for fixture in fixtures:
-        if not isinstance(fixture, Mapping):
-            continue
-        fixture_data = fixture.get("fixture")
+    requested_fixture_id = api_football_provider_fixture_id(fixture_identity)
+    validated_fixtures: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for index, fixture in enumerate(fixtures):
+        try:
+            if not isinstance(fixture, Mapping):
+                raise TypeError("response record must be a mapping")
+            fixture_data = fixture.get("fixture")
+            if not isinstance(fixture_data, Mapping):
+                raise TypeError("fixture must be a mapping")
+            response_fixture_id = fixture_data.get("id")
+            if (
+                isinstance(response_fixture_id, bool)
+                or not isinstance(response_fixture_id, int)
+                or response_fixture_id <= 0
+            ):
+                raise TypeError("fixture.id must be a positive integer")
+            if response_fixture_id != requested_fixture_id:
+                raise ValueError(
+                    "fixture.id does not match the requested API-Football fixture"
+                )
+        except (TypeError, ValueError) as exc:
+            raise QuoteNormalizationError(
+                f"invalid API-Football odds response record at index {index}: {exc}"
+            ) from exc
+        validated_fixtures.append((fixture, fixture_data))
+
+    for fixture, fixture_data in validated_fixtures:
         bookmakers = fixture.get("bookmakers", [])
-        if not isinstance(fixture_data, Mapping) or not isinstance(bookmakers, list):
+        if not isinstance(bookmakers, list):
             continue
 
         for bookmaker in bookmakers:
@@ -75,23 +110,32 @@ def iter_api_football_quote_payloads(
 def ingest_api_football_odds(
     response: Mapping[str, Any],
     *,
+    fixture_identity: ResolvedFixtureIdentity,
     adapter: ApiFootballQuoteAdapter | None = None,
 ) -> tuple[CanonicalQuote, ...]:
     """Convert a complete API-Football odds response into canonical quotes."""
     quote_adapter = adapter or ApiFootballQuoteAdapter()
     return deduplicate_quotes(
-        quote_adapter.adapt(payload)
-        for payload in iter_api_football_quote_payloads(response)
+        quote_adapter.adapt(payload, fixture_identity=fixture_identity)
+        for payload in iter_api_football_quote_payloads(
+            response,
+            fixture_identity=fixture_identity,
+        )
     )
 
 
 def build_api_football_market_snapshots(
     response: Mapping[str, Any],
     *,
+    fixture_identity: ResolvedFixtureIdentity,
     adapter: ApiFootballQuoteAdapter | None = None,
 ) -> tuple[MarketSnapshot, ...]:
     """Build validated snapshots grouped by fixture, bookmaker, market and time."""
-    quotes = ingest_api_football_odds(response, adapter=adapter)
+    quotes = ingest_api_football_odds(
+        response,
+        fixture_identity=fixture_identity,
+        adapter=adapter,
+    )
     groups: dict[tuple[str, int, object, object], list[CanonicalQuote]] = {}
     for quote in quotes:
         key = (

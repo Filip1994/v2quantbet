@@ -1,6 +1,12 @@
 """Canonical domain objects for fixtures, markets, quotes, and snapshots."""
 
 from .fixture import Fixture
+from .fixture_identity import (
+    ProviderFixtureReference,
+    ResolvedFixtureIdentity,
+    api_football_fixture_identity,
+    api_football_provider_fixture_id,
+)
 from .market_snapshot import MarketSnapshot
 from .odds import CanonicalQuote, Market, Selection
 from .pick_registration import PickRegistration, PickStatus
@@ -15,10 +21,14 @@ __all__ = [
     "MarketSnapshot",
     "PickRegistration",
     "PickStatus",
+    "ProviderFixtureReference",
     "QuoteNormalizationError",
     "QuoteSeries",
     "QuoteSnapshot",
+    "ResolvedFixtureIdentity",
     "Selection",
+    "api_football_fixture_identity",
+    "api_football_provider_fixture_id",
     "normalize_quote",
     "validate_quotes",
 ]

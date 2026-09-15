@@ -25,7 +25,11 @@ Adapter je provider-specific sloj. Canonical domain model ne zna za API-Football
 
 Adapter ne primenjuje competition-scope politiku; to ostaje odgovornost `ScopedFixtureDiscovery` use-case-a.
 
-Canonical `fixture_id` i provider lookup identitet imaju odvojene uloge. Za fixture poreklom iz API-Football-a canonical identitet je `api-football:<provider_fixture_id>`, dok `provider_fixture_id` zadržava sirovi provider ID koji polling/transport sloj pretvara u pozitivan ceo broj za API-Football poziv. Ova faza ne menja postojeći raw-ID ugovor za `CanonicalQuote.fixture_id` niti perzistirane quote identitete.
+Canonical `fixture_id` i provider lookup identitet imaju odvojene uloge. Za fixture poreklom iz API-Football-a canonical identitet je `api-football:<provider_fixture_id>`, dok `provider_fixture_id` zadržava sirovi provider ID koji polling/transport sloj pretvara u pozitivan ceo broj za API-Football poziv. `CanonicalQuote.fixture_id` sada koristi isti canonical identitet; raw provider ID više nije quote identitet.
+
+`ProviderFixtureReference` predstavlja provider namespace i provider fixture ID kao odvojen immutable par. `ResolvedFixtureIdentity` ga vezuje za canonical `fixture_id`, a centralna API-Football alokacija je jedino mesto koje formira `api-football:<id>`. Discovery i odds ingestion koriste isti resolved identitet; downstream poslovna logika tretira canonical ID kao opaque string i ne parsira ga.
+
+Produkcioni PostgreSQL je pre ovog cutover-a potvrđen kao prazan, pa nema legacy raw quote ID-jeva ili istorijskih serija za aliasiranje. Quote adapter više ne konstruiše raw `CanonicalQuote.fixture_id`. Odgovor odds API-ja mora sadržati isti provider fixture ID koji je transport zahtevao ili se odbacuje.
 
 `provider_home_team_id` i `provider_away_team_id` čuvaju originalni redosled iz provider payload-a i eksplicitno su kvalifikovani vrednošću `Fixture.provider`. Nisu globalni, provider-neutralni team identiteti. Mogu se proslediti Dixon–Coles modelu samo kada je eksplicitno utvrđeno da fitted training skup koristi isti provider namespace; adapter sam ne uspostavlja tu vezu.
 

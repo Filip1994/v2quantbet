@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from h2h.domain.fixture_identity import (
+    ResolvedFixtureIdentity,
+    api_football_provider_fixture_id,
+)
 from h2h.domain.market_snapshot import MarketSnapshot
 from h2h.domain.odds import CanonicalQuote
 
@@ -20,16 +24,28 @@ class ApiFootballOddsService:
 
     client: ApiFootballClient
 
-    def fetch_quotes(self, *, fixture_id: int) -> tuple[CanonicalQuote, ...]:
+    def fetch_quotes(
+        self,
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+    ) -> tuple[CanonicalQuote, ...]:
         """Fetch and normalize all supported quotes for one fixture."""
-        response = self.client.fetch_odds(fixture_id=fixture_id)
-        return ingest_api_football_odds(response)
+        provider_fixture_id = api_football_provider_fixture_id(fixture_identity)
+        response = self.client.fetch_odds(fixture_id=provider_fixture_id)
+        return ingest_api_football_odds(
+            response,
+            fixture_identity=fixture_identity,
+        )
 
     def fetch_market_snapshots(
         self,
         *,
-        fixture_id: int,
+        fixture_identity: ResolvedFixtureIdentity,
     ) -> tuple[MarketSnapshot, ...]:
         """Fetch, normalize and validate market snapshots for one fixture."""
-        response = self.client.fetch_odds(fixture_id=fixture_id)
-        return build_api_football_market_snapshots(response)
+        provider_fixture_id = api_football_provider_fixture_id(fixture_identity)
+        response = self.client.fetch_odds(fixture_id=provider_fixture_id)
+        return build_api_football_market_snapshots(
+            response,
+            fixture_identity=fixture_identity,
+        )

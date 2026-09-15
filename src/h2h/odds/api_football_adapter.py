@@ -9,6 +9,10 @@ from h2h.domain.bookmaker_policy import (
     UnsupportedBookmakerError,
     resolve_api_football_bookmaker,
 )
+from h2h.domain.fixture_identity import (
+    ResolvedFixtureIdentity,
+    api_football_provider_fixture_id,
+)
 from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 
@@ -19,7 +23,12 @@ class ApiFootballQuoteAdapter:
     _BTTS_BET_ID = 8
     _OU25_BET_IDS = frozenset({5})
 
-    def adapt(self, payload: Mapping[str, Any]) -> CanonicalQuote:
+    def adapt(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+    ) -> CanonicalQuote:
         """Convert one flattened API-Football quote into ``CanonicalQuote``."""
         try:
             if not isinstance(payload, Mapping):
@@ -30,6 +39,11 @@ class ApiFootballQuoteAdapter:
             value = self._mapping(payload, "value")
 
             fixture_id = self._positive_int(fixture.get("id"), "fixture.id")
+            requested_fixture_id = api_football_provider_fixture_id(fixture_identity)
+            if fixture_id != requested_fixture_id:
+                raise ValueError(
+                    "fixture.id does not match the requested API-Football fixture"
+                )
             bookmaker_id = self._positive_int(bookmaker.get("id"), "bookmaker.id")
             bookmaker_name = self._nonempty_string(bookmaker.get("name"), "bookmaker.name")
             bookmaker_identity = resolve_api_football_bookmaker(bookmaker_id, bookmaker_name)
@@ -40,7 +54,7 @@ class ApiFootballQuoteAdapter:
 
             market, selection = self._map_market_selection(bet_id, selection_value)
             return CanonicalQuote(
-                fixture_id=str(fixture_id),
+                fixture_id=fixture_identity.fixture_id,
                 bookmaker_id=bookmaker_identity.provider_id,
                 bookmaker_name=bookmaker_identity.provider_name,
                 market=market,

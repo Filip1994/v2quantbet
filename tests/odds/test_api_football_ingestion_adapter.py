@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from h2h.domain.fixture_identity import api_football_fixture_identity
 from h2h.domain.odds import Market, Selection
 from h2h.odds import ingest_api_football_odds
 
@@ -30,10 +31,13 @@ def test_ingests_api_football_response_into_canonical_quotes() -> None:
         ]
     }
 
-    quotes = ingest_api_football_odds(response)
+    quotes = ingest_api_football_odds(
+        response,
+        fixture_identity=api_football_fixture_identity(1493129),
+    )
 
     assert len(quotes) == 2
-    assert quotes[0].fixture_id == "1493129"
+    assert quotes[0].fixture_id == "api-football:1493129"
     assert quotes[0].bookmaker_id == 8
     assert quotes[0].bookmaker_name == "Bet365"
     assert quotes[0].market is Market.BTTS

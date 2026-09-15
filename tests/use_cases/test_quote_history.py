@@ -7,9 +7,13 @@ from h2h.persistence.quote_history import InMemoryQuoteHistoryRepository, QuoteH
 from h2h.use_cases import QuoteHistoryIngestionService
 
 
-def make_quote(odd: float = 2.1) -> CanonicalQuote:
+def make_quote(
+    odd: float = 2.1,
+    *,
+    fixture_id: str = "fixture-1",
+) -> CanonicalQuote:
     return CanonicalQuote(
-        fixture_id="fixture-1",
+        fixture_id=fixture_id,
         bookmaker_id=7,
         bookmaker_name="Bookmaker",
         market=Market.OU_25,
@@ -68,3 +72,24 @@ def test_changed_odd_conflicts_even_when_capture_changes() -> None:
     assert len(snapshots) == 1
     assert snapshots[0].odd == 2.1
     assert snapshots[0].captured_at == datetime(2026, 9, 15, 12, 1, tzinfo=UTC)
+
+
+def test_canonical_fixture_id_flows_through_unchanged_history_hashing() -> None:
+    repository = InMemoryQuoteHistoryRepository()
+    service = QuoteHistoryIngestionService(
+        repository,
+        capture_clock=lambda: datetime(2026, 9, 15, 12, 1, tzinfo=UTC),
+    )
+
+    service.ingest([make_quote(fixture_id="api-football:123")])
+
+    series = repository.series_for_fixture("api-football:123")
+    assert len(series) == 1
+    assert series[0].series_id == (
+        "series-1cb7f716332a558035795ac53f0ba40c15e8984eb69d40aee54435a22f7c24c8"
+    )
+    snapshots = repository.snapshots_for_series(series[0].series_id)
+    assert len(snapshots) == 1
+    assert snapshots[0].snapshot_id == (
+        "snapshot-6502dee18fa5965714ef2559c6811adc8ca83f0c4310f3da99ecb9cebcb9ccfc"
+    )

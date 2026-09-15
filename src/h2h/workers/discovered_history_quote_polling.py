@@ -8,6 +8,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from h2h.domain.fixture import Fixture
+from h2h.domain.fixture_identity import (
+    ProviderFixtureReference,
+    ResolvedFixtureIdentity,
+    api_football_provider_fixture_id,
+)
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.workers.history_quote_polling import HistoricalQuoteSource
 from h2h.workers.quote_refresh_scheduler import QuoteRefreshScheduler
@@ -62,13 +67,20 @@ class DiscoveredHistoryQuotePollingJob:
             return 0
 
         due_ids = set(self._scheduler.due_fixture_ids(now=start_at))
-        candidates: dict[int, Fixture] = {}
+        candidates: dict[int, ResolvedFixtureIdentity] = {}
         for fixture in fixtures:
             provider_fixture_id = fixture.provider_fixture_id
             if provider_fixture_id is None:
                 continue
             try:
-                fixture_id = int(provider_fixture_id)
+                fixture_identity = ResolvedFixtureIdentity(
+                    fixture_id=fixture.fixture_id,
+                    provider_reference=ProviderFixtureReference(
+                        provider=fixture.provider,
+                        provider_fixture_id=provider_fixture_id,
+                    ),
+                )
+                fixture_id = api_football_provider_fixture_id(fixture_identity)
             except (TypeError, ValueError):
                 continue
             if fixture_id <= 0 or fixture_id in candidates:
@@ -86,15 +98,15 @@ class DiscoveredHistoryQuotePollingJob:
                     now=start_at,
                 )
                 if scheduled is not None:
-                    candidates[fixture_id] = fixture
+                    candidates[fixture_id] = fixture_identity
             elif fixture_id in due_ids:
-                candidates[fixture_id] = fixture
+                candidates[fixture_id] = fixture_identity
 
         total = 0
-        for fixture_id, fixture in candidates.items():
+        for fixture_id, fixture_identity in candidates.items():
             try:
                 total += self._ingestion.ingest(
-                    self._source.fetch_quotes(fixture_id=fixture_id)
+                    self._source.fetch_quotes(fixture_identity=fixture_identity)
                 )
             except Exception:
                 LOGGER.exception(

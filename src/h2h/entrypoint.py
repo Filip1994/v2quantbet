@@ -11,6 +11,10 @@ from threading import Event
 from h2h.application import build_api_football_client
 from h2h.application import build_postgres_quote_history_application_from_settings
 from h2h.config import load_settings
+from h2h.domain.fixture_identity import (
+    ResolvedFixtureIdentity,
+    api_football_fixture_identity,
+)
 from h2h.odds import ApiFootballOddsService
 from h2h.odds.http import UrllibJsonTransport
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
@@ -22,8 +26,8 @@ from h2h.workers.runtime import WorkerRuntime, install_shutdown_handlers
 LOGGER = logging.getLogger("quantbet.worker")
 
 
-def _fixture_ids_from_environment() -> tuple[int, ...]:
-    """Read the optional comma-separated fixture allowlist."""
+def _fixture_identities_from_environment() -> tuple[ResolvedFixtureIdentity, ...]:
+    """Read the optional API-Football allowlist as resolved fixture identities."""
     raw = os.getenv("QUANTBET_FIXTURE_IDS", "").strip()
     if not raw:
         return ()
@@ -33,7 +37,7 @@ def _fixture_ids_from_environment() -> tuple[int, ...]:
         raise ValueError("QUANTBET_FIXTURE_IDS must contain integers") from exc
     if not fixture_ids or any(fixture_id <= 0 for fixture_id in fixture_ids):
         raise ValueError("QUANTBET_FIXTURE_IDS must contain positive integers")
-    return fixture_ids
+    return tuple(api_football_fixture_identity(fixture_id) for fixture_id in fixture_ids)
 
 
 def _positive_seconds(name: str, default: float) -> float:
@@ -54,7 +58,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = load_settings()
-    manual_fixture_ids = _fixture_ids_from_environment()
+    manual_fixture_identities = _fixture_identities_from_environment()
     application = build_postgres_quote_history_application_from_settings(settings)
     applied = application.migrate()
     LOGGER.info("PostgreSQL ready; migrations applied: %s", applied)
@@ -68,8 +72,12 @@ def main() -> None:
     discovery_interval = _positive_seconds("QUANTBET_DISCOVERY_INTERVAL_SECONDS", 900.0)
     lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 72.0)
 
-    if manual_fixture_ids:
-        poll_job = HistoryQuotePollingJob(source, application.service, manual_fixture_ids)
+    if manual_fixture_identities:
+        poll_job = HistoryQuotePollingJob(
+            source,
+            application.service,
+            manual_fixture_identities,
+        )
         LOGGER.warning(
             "QUANTBET_FIXTURE_IDS is configured; using manual fixture allowlist instead of discovery"
         )
