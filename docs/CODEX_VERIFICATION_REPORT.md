@@ -1,0 +1,122 @@
+# Codex Verification Report
+
+## Scope and environment
+
+- **Checked at:** 2026-09-15 13:43:21 +02:00 (Europe/Belgrade)
+- **Repository / branch:** `Filip1994/v2quantbet`, `main`
+- **Checked commit:** `4d61b8bc33274af82a0c072d951c9e01d189677c` — *Test pick registration identity and timestamp validation*
+- **Working tree before adding this report:** clean and aligned with `origin/main`.
+- **Python requested by project:** `.python-version` contains `3.11`; `pyproject.toml` requires `>=3.11`.
+- **Python used:** CPython 3.11.16 (managed by uv).
+- **uv:** 0.12.14 (`ce3bd7931`, 2026-09-14).
+
+The project is a `src/`-layout Python package (`h2h-v2`) with 312 collected
+pytest tests, SQL migrations, SQLite and PostgreSQL persistence implementations,
+and three GitHub Actions workflows (`ci.yml`, `api-football-odds.yml`, and
+`api-football-discovery.yml`).  `pyproject.toml` locks runtime numerical and
+PostgreSQL dependencies through `uv.lock`; its `dev` extra provides pytest and
+ruff.
+
+## Commands executed
+
+```text
+git clone --branch main --single-branch https://github.com/Filip1994/v2quantbet.git v2quantbet
+python --version                         # not on initial PATH
+uv --version                             # not on initial PATH
+uv sync --locked --extra dev
+uv run python --version
+uv run python -m ruff check .
+uv run python -m pytest
+uv run python -m pytest --basetemp .verification-tmp/pytest
+```
+
+The first pytest invocation used pytest's default Windows temporary directory
+and exposed an access-denied environment problem.  It produced 10 setup errors
+unrelated to the tests themselves.  The second invocation uses an explicit
+writable base temp directory and is the authoritative test result below.
+
+## Dependency installation
+
+`uv sync --locked --extra dev` **passed**.  It downloaded CPython 3.11.16,
+created `.venv`, resolved 14 locked packages, built `h2h-v2`, and installed all
+dependencies.  The initial environment did not have a usable Python launcher or
+uv on PATH; uv was installed solely to perform this requested verification.
+
+## Ruff
+
+`uv run python -m ruff check .` **failed: 7 findings**.  No autofix was run.
+All findings are in test files, not production modules:
+
+| Count | Location | Finding | Classification |
+| ---: | --- | --- | --- |
+| 1 | `tests/domain/test_pick_registration.py:62` | `DTZ001`: naive `datetime()` | Test-quality lint failure |
+| 4 | `tests/integration/test_postgres_quote_history_integration.py:12-17` | `RUF100`: unused `# noqa: E402` | Stale test lint directives |
+| 2 | `tests/integration/test_postgres_quote_history_integration.py:63,82` | `SIM117`: nested context managers | Test-style lint failure |
+
+## Test suite
+
+Authoritative command: `uv run python -m pytest --basetemp .verification-tmp/pytest`
+
+| Collected | Passed | Failed | Skipped | Errors |
+| ---: | ---: | ---: | ---: | ---: |
+| 312 | 288 | 18 | 6 | 0 |
+
+The six skipped tests are exactly the PostgreSQL integration tests.  The
+initial, unmodified command required by the task had the intermediate result
+`278 passed, 18 failed, 6 skipped, 10 errors`; each error was a
+`PermissionError: [WinError 5] Access is denied` while pytest attempted to scan
+`C:\Users\User\AppData\Local\Temp\pytest-of-User`.  Re-running with a
+writable base temp made all 10 affected tests pass, so this is classified as an
+**environment problem**, not an application failure.
+
+### Reproduced failures
+
+The failure summaries below retain the relevant exception chain and assertion.
+They are grouped where one cause produces several tests.  No source, test, or
+configuration change was made during this verification.
+
+| Tests | Reproduced summary | Classification / production assessment |
+| --- | --- | --- |
+| `tests/domain/test_canonical_quote.py::test_unsupported_market_is_rejected` | `CanonicalQuote(..., market="CORRECT_SCORE")` raises `TypeError: market must be a Market`; the test expects any `ValueError`. | **Stale/incorrect test expectation**, not a reproduced production bug. The current domain contract requires a `Market` enum before validation. |
+| `tests/odds/test_api_football_adapter.py::test_rejects_unsupported_api_football_bookmaker`; `...::test_rejects_api_football_bookmaker_name_mismatch` | `resolve_api_football_bookmaker` correctly raises `UnsupportedBookmakerError`, but `ApiFootballQuoteAdapter.adapt()` catches it through `ValueError` and rethrows `QuoteNormalizationError: invalid API-Football odds payload: ...`. Tests expect `UnsupportedBookmakerError`. | **Potential production/API-contract regression.** The rejection is correct, so bookmaker mapping is enforced; however, callers cannot catch the documented policy exception at this adapter boundary. Requires an intentional contract decision before any change. |
+| `tests/odds/test_api_football_adapter.py::test_accepts_valid_numeric_odd_forms[2]` | With input `odd=2`, adapted value is `2.0`; assertion expects `2.2`. | **Incorrect parametrized test**, not a production bug. An integer 2 cannot validly normalize to 2.2. |
+| `tests/odds/test_api_football_ingestion_adapter.py::test_ingests_api_football_response_into_canonical_quotes` | Test fixture sends API-Football bookmaker id 7 / `William Hill`; mapping rejects it with `QuoteNormalizationError` wrapping `UnsupportedBookmakerError: unsupported API-Football bookmaker id: 7`. | **Stale test fixture** under the current API-Football allowlist; no evidence that mapping itself is wrong. |
+| `tests/odds/test_http.py::test_timeout_must_be_positive` | Code raises `ValueError: timeout must be a positive number`; test regex expects `greater than zero`. | **Stale assertion text**, not a production bug: timeout zero is rejected correctly. |
+| `tests/odds/test_provider_adapter.py::test_normalizing_adapter_returns_canonical_quote`; `...::test_normalizing_adapter_preserves_normalizer_validation`; `tests/odds/test_snapshot_builder.py::test_build_market_snapshot_adapts_all_payloads`; `...::test_build_market_snapshot_rejects_incomplete_market` | Shared test payload contains `bookmaker_name="Example Bookmaker"`; generic normalization rejects it: `QuoteNormalizationError: unsupported bookmaker: 'example bookmaker'; supported values: ['1xbet', 'bet365', 'superbet']`. The intended odd/incomplete-market assertions are never reached. | **Stale test fixtures / masked tests**, not a reproduced production bug. The existing bookmaker policy tests pass. |
+| `tests/persistence/test_postgres_quote_history.py::test_series_for_fixture_reconstructs_rows`; `...::test_append_snapshots_rejects_unknown_series`; `...::test_append_and_read_snapshot`; `...::test_append_snapshots_is_idempotent_for_matching_snapshot`; `...::test_append_snapshots_rejects_conflicting_snapshot` | `FakeCursor` assumes `series_for_fixture` has four query parameters and assumes `series_id` lookup receives a hashable scalar. Production code now uses a one-parameter fixture query and `ANY(%s)` with a list. Consequences are `IndexError: tuple index out of range` and `TypeError: unhashable type: 'list'` in the fake cursor. | **Outdated unit-test double**, not evidence of a PostgreSQL production bug. Actual PostgreSQL integration remains unexecuted (see below). |
+| `tests/persistence/test_quote_history.py::test_append_snapshots_preserves_history_and_is_idempotent`; `...::test_snapshots_for_series_filters_other_series`; `...::test_append_snapshots_is_atomic_on_conflict` | In-memory repository rejects the tests' duplicate natural identities with `QuoteHistoryConflictError: conflicting observation for snapshot natural identity` or `conflicting definition for quote series natural identity`; final test then mismatches expected `snapshot ID` wording. | **Tests inconsistent with current quote-history natural-identity semantics.** Not classified as a production bug: current in-memory behavior matches the documented PostgreSQL uniqueness shape, but parity still requires an integration run. |
+
+## Specific consistency checks
+
+- **Bookmaker mapping / API-Football odds path:** Existing `test_bookmaker_policy.py` (11 tests) and most API-Football adapter/client tests passed.  The failures show strict mapping rejection works.  The exception-type wrapping described above is the sole potential boundary-contract issue.
+- **CanonicalQuote:** 33 of 34 canonical-quote tests passed.  The sole failure is an exception-class expectation rather than acceptance of an invalid market.
+- **Ingestion and SQLite persistence:** SQLite persistence, migrations, application construction, quote ingestion, HTTP transport behavior, and API-Football client tests passed after the temp-directory environment correction.
+- **PostgreSQL quote history:** Unit tests using an obsolete fake connection fail; actual integration tests were skipped, so real-database parity is not verified.
+- **PickRegistration:** All six tests passed.  The latest commit's new timezone-aware validation test is also the source of the one Ruff `DTZ001` test lint finding.
+- **CI:** `.github/workflows/ci.yml` correctly provisions PostgreSQL 16, supplies `QUANTBET_TEST_DATABASE_URL`, runs the locked sync, Ruff, and pytest.  In its current checked state, CI should fail at least on the seven Ruff findings and the reproduced 18 test failures until the code/test-contract discrepancies are intentionally resolved.
+
+## PostgreSQL status
+
+PostgreSQL 16 integration tests were **not executed**.  This workstation has no
+`docker` command, no detected `postgres*` service, no `psql`, and no
+`QUANTBET_TEST_DATABASE_URL`.  Therefore no database was started and the six
+tests in `tests/integration/test_postgres_quote_history_integration.py` were
+skipped for their declared reason.  This is an **environment/configuration
+blocker**, not a test failure or a claim about PostgreSQL correctness.
+
+## Conclusion and next step
+
+The repository is **not currently fully verified**: dependency installation
+works, 288 tests pass, but Ruff fails and 18 tests reproducibly fail.  Most
+failures are stale fixtures, assertions, or fake-database test infrastructure
+after stricter bookmaker and natural-identity contracts; they should not be
+silently changed without reviewing the intended contract.  One item needs
+explicit attention as a possible production API regression: whether
+`ApiFootballQuoteAdapter` must preserve `UnsupportedBookmakerError` rather than
+wrap it as `QuoteNormalizationError`.
+
+The concrete next step is to provision PostgreSQL 16 (matching CI), set
+`QUANTBET_TEST_DATABASE_URL`, and run the six integration tests.  Then review
+and intentionally update the stale test fixtures/doubles and decide the
+adapter exception contract before modifying any production code.  No claim is
+made that the system is fully correct merely because the passing subset passed.
