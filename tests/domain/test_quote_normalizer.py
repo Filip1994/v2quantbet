@@ -34,6 +34,15 @@ def test_normalize_quote_maps_supported_market_and_selection() -> None:
     assert quote.odd == 1.95
 
 
+def test_normalize_quote_preserves_provider_neutral_numeric_id() -> None:
+    quote = normalize_quote(
+        payload(bookmaker_id=10, bookmaker_name="bet365", source="provider-x")
+    )
+
+    assert quote.bookmaker_id == 10
+    assert quote.bookmaker_name == "bet365"
+
+
 @pytest.mark.parametrize(
     ("market", "selection", "expected_market", "expected_selection"),
     [
@@ -72,12 +81,7 @@ def test_normalize_quote_rejects_missing_required_field() -> None:
 
 def test_normalize_quote_rejects_unsupported_bookmaker() -> None:
     with pytest.raises(QuoteNormalizationError, match="unsupported bookmaker"):
-        normalize_quote(payload(bookmaker_id=999, bookmaker_name="Unknown"))
-
-
-def test_normalize_quote_rejects_bookmaker_id_name_mismatch() -> None:
-    with pytest.raises(QuoteNormalizationError, match="does not match"):
-        normalize_quote(payload(bookmaker_id=8, bookmaker_name="1xbet"))
+        normalize_quote(payload(bookmaker_name="Unknown"))
 
 
 def test_normalize_quote_reuses_canonical_quote_validation() -> None:
