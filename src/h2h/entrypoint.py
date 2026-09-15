@@ -18,10 +18,10 @@ LOGGER = logging.getLogger("quantbet.worker")
 
 
 def _fixture_ids_from_environment() -> tuple[int, ...]:
-    """Read the explicit comma-separated fixture allowlist."""
+    """Read the optional comma-separated fixture allowlist."""
     raw = os.getenv("QUANTBET_FIXTURE_IDS", "").strip()
     if not raw:
-        raise ValueError("QUANTBET_FIXTURE_IDS is required for the worker")
+        return ()
     try:
         fixture_ids = tuple(int(value.strip()) for value in raw.split(","))
     except ValueError as exc:
@@ -43,15 +43,27 @@ def main() -> None:
     applied = application.migrate()
     LOGGER.info("PostgreSQL ready; migrations applied: %s", applied)
 
-    client = build_api_football_client(UrllibJsonTransport(), settings)
-    source = ApiFootballOddsService(client)
-    job = HistoryQuotePollingJob(source, application.service, fixture_ids)
     stopped = Event()
     install_shutdown_handlers(stopped.set)
 
-    LOGGER.info("Starting QuantBet worker for fixtures: %s", fixture_ids)
+    if not fixture_ids:
+        LOGGER.warning(
+            "QUANTBET_FIXTURE_IDS is not configured; worker is idle until fixture discovery is wired"
+        )
+
+        def idle_job() -> None:
+            LOGGER.info("Worker idle: no fixture IDs configured")
+
+        job_callback = idle_job
+    else:
+        client = build_api_football_client(UrllibJsonTransport(), settings)
+        source = ApiFootballOddsService(client)
+        job = HistoryQuotePollingJob(source, application.service, fixture_ids)
+        LOGGER.info("Starting QuantBet worker for fixtures: %s", fixture_ids)
+        job_callback = job.run_once
+
     WorkerRuntime(
-        job=job.run_once,
+        job=job_callback,
         interval_seconds=float(os.getenv("QUANTBET_POLL_INTERVAL_SECONDS", "60")),
         should_stop=stopped.is_set,
     ).run_forever()
