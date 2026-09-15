@@ -11,7 +11,7 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Svaki unos sadrži timestamp u ISO 8601 formatu.
 - `docs/PROGRESS.md` ostaje sažeti pregled većih završenih celina; ovaj dokument čuva detalje manjih koraka.
 
-## 2026-09-15T00:00:00+02:00 — Додат PostgreSQL startup migration hook
+## 2026-09-15T00:00:00+02:00 — Дод PostgreSQL startup migration hook
 
 - Ажуриран је `src/h2h/application_postgres.py`.
 - PostgreSQL application composition сада има `migrate()` метод који користи постојећи migration runner и подразумевани `migrations/` директоријум.
@@ -91,3 +91,11 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dodat je test koji potvrđuje da se worker zaustavlja kooperativno i kroz convenience funkciju `run_worker()`.
 - Lokalni `pytest` i Ruff nisu pokrenuti u ovom okruženju; CI treba da potvrdi promenu.
 - Commitovi: `6c9fa851f853e87ddfa77fc20e1b66b4c38d25be`, `31c0cdb794f46d6fe59212475c03f2eacf07007`.
+
+## 2026-09-15T06:30:00+02:00 — Izolacija grešaka po fixture-u u discovery worker-u
+
+- Ažuriran je `src/h2h/workers/discovered_history_quote_polling.py`.
+- Greška pri provider fetch-u ili ingestion-u sada se loguje sa traceback-om i ne prekida obradu ostalih fixture-a u istom ciklusu.
+- Dodat je test `test_continues_after_fixture_failure`.
+- Lokalna verifikacija za ovu izmenu još nije izvršena; potrebno je pokrenuti `uv run pytest` i `uv run ruff check .`.
+- Commitovi: `134b60f5e4618839af06c1a2e0f17598aa70c5e7`, `51db83994d9efcc9903e8228965390e1734aa0c3`.
