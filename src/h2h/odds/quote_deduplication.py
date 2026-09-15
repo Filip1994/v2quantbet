@@ -6,24 +6,26 @@ from h2h.domain.odds import CanonicalQuote
 
 
 class QuoteConflictError(ValueError):
-    """Raised when one quote identity contains conflicting observations."""
+    """Raised when one observation identity contains conflicting data."""
 
 
 def deduplicate_quotes(quotes: Iterable[CanonicalQuote]) -> tuple[CanonicalQuote, ...]:
-    """Return idempotently deduplicated quotes, rejecting conflicting identities.
+    """Deduplicate replayed observations while preserving quote history.
 
-    Exact repeated observations are collapsed. Two observations with the same
-    canonical identity but different data are rejected instead of overwritten.
-    The first-seen order is preserved.
+    Repeated observations with the same series, provider timestamp and source
+    are collapsed. A changed odd for that same observation identity is
+    rejected rather than silently overwritten. Observations at different
+    provider timestamps remain distinct historical records.
     """
     unique: dict[tuple, CanonicalQuote] = {}
     for quote in quotes:
-        existing = unique.get(quote.identity)
+        key = quote.observation_identity
+        existing = unique.get(key)
         if existing is None:
-            unique[quote.identity] = quote
+            unique[key] = quote
             continue
         if existing != quote:
             raise QuoteConflictError(
-                f"conflicting observations for quote identity {quote.identity!r}"
+                f"conflicting observations for quote identity {key!r}"
             )
     return tuple(unique.values())
