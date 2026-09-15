@@ -81,7 +81,10 @@ class UrllibJsonTransport:
         if headers is not None:
             if not isinstance(headers, Mapping):
                 raise TypeError("headers must be a mapping")
-            if any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items()):
+            if any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in headers.items()
+            ):
                 raise TypeError("header names and values must be strings")
 
         request_headers = {"User-Agent": self.user_agent, **(headers or {})}
@@ -89,10 +92,6 @@ class UrllibJsonTransport:
         try:
             with urlopen(request, timeout=timeout) as response:
                 raw = response.read()
-        except (TimeoutError, OSError) as exc:
-            if isinstance(exc, TimeoutError):
-                raise TransportTimeoutError(f"request timed out: {url}") from exc
-            raise TransportError(f"transport request failed: {url}") from exc
         except HTTPError as exc:
             if exc.code == 429:
                 retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
@@ -103,6 +102,10 @@ class UrllibJsonTransport:
             raise TransportResponseError(
                 f"provider returned HTTP {exc.code} for {url}"
             ) from exc
+        except (TimeoutError, OSError) as exc:
+            if isinstance(exc, TimeoutError):
+                raise TransportTimeoutError(f"request timed out: {url}") from exc
+            raise TransportError(f"transport request failed: {url}") from exc
         except URLError as exc:
             raise TransportError(f"transport request failed: {url}") from exc
 
