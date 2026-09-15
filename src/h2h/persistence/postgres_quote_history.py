@@ -51,22 +51,24 @@ class PostgreSQLQuoteHistoryRepository:
             )
             row = cursor.fetchone()
             if row is not None:
-                expected = (
-                    series.fixture_id, series.bookmaker_id, series.market.value,
-                    series.selection.value, series.created_at,
-                )
-                if tuple(row) != expected:
-                    raise QuoteHistoryConflictError(
-                        f"conflicting definition for series ID {series.series_id!r}"
-                    )
+                self._require_same_series(row, series)
                 return
+
+            # DO NOTHING on any unique constraint makes concurrent creation
+            # safe both for series_id and for the natural series identity.
             cursor.execute(
                 "INSERT INTO quote_series "
                 "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (series_id) DO NOTHING",
-                (series.series_id, series.fixture_id, series.bookmaker_id,
-                 series.market.value, series.selection.value, series.created_at),
+                "ON CONFLICT DO NOTHING",
+                (
+                    series.series_id,
+                    series.fixture_id,
+                    series.bookmaker_id,
+                    series.market.value,
+                    series.selection.value,
+                    series.created_at,
+                ),
             )
             cursor.execute(
                 "SELECT fixture_id, bookmaker_id, market, selection, created_at "
@@ -74,14 +76,11 @@ class PostgreSQLQuoteHistoryRepository:
                 (series.series_id,),
             )
             row = cursor.fetchone()
-            expected = (
-                series.fixture_id, series.bookmaker_id, series.market.value,
-                series.selection.value, series.created_at,
-            )
-            if row is None or tuple(row) != expected:
+            if row is None:
                 raise QuoteHistoryConflictError(
                     f"conflicting definition for series ID {series.series_id!r}"
                 )
+            self._require_same_series(row, series)
 
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -113,9 +112,15 @@ class PostgreSQLQuoteHistoryRepository:
                     "INSERT INTO quote_snapshots "
                     "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
                     "VALUES (%s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (snapshot_id) DO NOTHING",
-                    (snapshot.snapshot_id, snapshot.series_id, snapshot.odd,
-                     snapshot.observed_at, snapshot.captured_at, snapshot.source),
+                    "ON CONFLICT DO NOTHING",
+                    (
+                        snapshot.snapshot_id,
+                        snapshot.series_id,
+                        snapshot.odd,
+                        snapshot.observed_at,
+                        snapshot.captured_at,
+                        snapshot.source,
+                    ),
                 )
                 cursor.execute(
                     "SELECT series_id, odd, observed_at, captured_at, source "
@@ -123,12 +128,31 @@ class PostgreSQLQuoteHistoryRepository:
                     (snapshot.snapshot_id,),
                 )
                 row = cursor.fetchone()
-                expected = (snapshot.series_id, snapshot.odd, snapshot.observed_at,
-                            snapshot.captured_at, snapshot.source)
+                expected = (
+                    snapshot.series_id,
+                    snapshot.odd,
+                    snapshot.observed_at,
+                    snapshot.captured_at,
+                    snapshot.source,
+                )
                 if row is None or tuple(row) != expected:
                     raise QuoteHistoryConflictError(
                         f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
                     )
+
+    @staticmethod
+    def _require_same_series(row: tuple[Any, ...], series: QuoteSeries) -> None:
+        expected = (
+            series.fixture_id,
+            series.bookmaker_id,
+            series.market.value,
+            series.selection.value,
+            series.created_at,
+        )
+        if tuple(row) != expected:
+            raise QuoteHistoryConflictError(
+                f"conflicting definition for series ID {series.series_id!r}"
+            )
 
     def snapshots_for_series(self, series_id: str) -> tuple[QuoteSnapshot, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
