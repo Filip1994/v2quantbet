@@ -25,17 +25,21 @@ class ApiFootballClient:
     _cache: dict[int, tuple[float, Mapping[str, Any]]] = field(default_factory=dict, init=False, repr=False)
 
     def _validate(self) -> None:
-        if not self.api_key.strip():
-            raise ValueError("api_key must not be empty")
-        if self.timeout <= 0:
+        if not isinstance(self.api_key, str) or not self.api_key.strip():
+            raise ValueError("api_key must be a non-empty string")
+        if isinstance(self.timeout, bool) or self.timeout <= 0:
             raise ValueError("timeout must be greater than zero")
-        if self.cache_ttl_seconds < 0:
+        if isinstance(self.cache_ttl_seconds, bool) or self.cache_ttl_seconds < 0:
             raise ValueError("cache_ttl_seconds must not be negative")
+
+    @staticmethod
+    def _validate_fixture_id(fixture_id: int) -> None:
+        if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
+            raise ValueError("fixture_id must be a positive integer")
 
     def fetch_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
         """Fetch odds for one fixture, serving a fresh cached response when enabled."""
-        if fixture_id <= 0:
-            raise ValueError("fixture_id must be greater than zero")
+        self._validate_fixture_id(fixture_id)
         self._validate()
         now = self.clock()
         cached = self._cache.get(fixture_id)
@@ -47,19 +51,32 @@ class ApiFootballClient:
 
         query = urlencode({"fixture": fixture_id})
         url = f"{self.base_url.rstrip('/')}/odds?{query}"
-        payload = self.transport.get_json(url, headers={"x-apisports-key": self.api_key}, timeout=self.timeout)
+        payload = self.transport.get_json(
+            url,
+            headers={"x-apisports-key": self.api_key},
+            timeout=self.timeout,
+        )
         if self.cache_ttl_seconds > 0:
-            self._cache[fixture_id] = (now + self.cache_ttl_seconds, payload)
+            self._cache[fixture_id] = (
+                self.clock() + self.cache_ttl_seconds,
+                payload,
+            )
         return payload
 
     def fetch_fixtures(self, *, start_at: datetime, end_at: datetime) -> Mapping[str, Any]:
         """Fetch fixtures in the inclusive provider date range covering the window."""
         self._validate()
+        if not isinstance(start_at, datetime) or not isinstance(end_at, datetime):
+            raise TypeError("start_at and end_at must be datetime values")
         if start_at >= end_at:
             raise ValueError("start_at must be before end_at")
         query = urlencode({"from": start_at.date().isoformat(), "to": end_at.date().isoformat()})
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        return self.transport.get_json(url, headers={"x-apisports-key": self.api_key}, timeout=self.timeout)
+        return self.transport.get_json(
+            url,
+            headers={"x-apisports-key": self.api_key},
+            timeout=self.timeout,
+        )
 
     def clear_cache(self) -> None:
         """Remove all cached fixture responses."""
