@@ -1,6 +1,8 @@
+import signal
+
 import pytest
 
-from h2h.workers.runtime import WorkerRuntime, run_worker
+from h2h.workers.runtime import WorkerRuntime, install_shutdown_handlers, run_worker
 
 
 def test_run_once_executes_job() -> None:
@@ -51,13 +53,27 @@ def test_run_worker_forwards_shutdown_predicate() -> None:
     calls: list[str] = []
     stop = iter([False, True]).__next__
 
-    run_worker(
-        lambda: calls.append("run"),
-        interval_seconds=5,
-        should_stop=stop,
-    )
+    run_worker(lambda: calls.append("run"), interval_seconds=5, should_stop=stop)
 
     assert calls == ["run"]
+
+
+def test_install_shutdown_handlers_routes_supported_signals(monkeypatch: pytest.MonkeyPatch) -> None:
+    registered: dict[signal.Signals, object] = {}
+    shutdowns: list[str] = []
+
+    def register(signum: signal.Signals, handler: object) -> object:
+        registered[signum] = handler
+        return signal.SIG_DFL
+
+    monkeypatch.setattr(signal, "signal", register)
+    install_shutdown_handlers(lambda: shutdowns.append("stop"))
+
+    assert set(registered) == {signal.SIGTERM, signal.SIGINT}
+    for handler in registered.values():
+        handler(signal.SIGTERM, None)  # type: ignore[operator]
+
+    assert shutdowns == ["stop", "stop"]
 
 
 def test_runtime_rejects_non_positive_interval() -> None:
