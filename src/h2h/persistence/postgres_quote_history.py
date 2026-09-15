@@ -94,6 +94,27 @@ class PostgreSQLQuoteHistoryRepository:
 
             for snapshot in incoming:
                 cursor.execute(
+                    "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
+                    "FROM quote_snapshots WHERE snapshot_id = %s",
+                    (snapshot.snapshot_id,),
+                )
+                existing_by_id = cursor.fetchone()
+                if existing_by_id is not None:
+                    existing_payload = tuple(existing_by_id[1:])
+                    incoming_payload = (
+                        snapshot.series_id,
+                        snapshot.odd,
+                        snapshot.observed_at,
+                        snapshot.captured_at,
+                        snapshot.source,
+                    )
+                    if existing_payload != incoming_payload:
+                        raise QuoteHistoryConflictError(
+                            "conflicting snapshot ID with different payload"
+                        )
+                    continue
+
+                cursor.execute(
                     "INSERT INTO quote_snapshots "
                     "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
                     "VALUES (%s, %s, %s, %s, %s, %s) "
