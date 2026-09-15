@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import isfinite
 from time import monotonic
 from typing import Any
 from urllib.parse import urlencode
@@ -27,10 +28,22 @@ class ApiFootballClient:
     def _validate(self) -> None:
         if not isinstance(self.api_key, str) or not self.api_key.strip():
             raise ValueError("api_key must be a non-empty string")
-        if isinstance(self.timeout, bool) or self.timeout <= 0:
-            raise ValueError("timeout must be greater than zero")
-        if isinstance(self.cache_ttl_seconds, bool) or self.cache_ttl_seconds < 0:
-            raise ValueError("cache_ttl_seconds must not be negative")
+        if not isinstance(self.base_url, str) or not self.base_url.strip():
+            raise ValueError("base_url must be a non-empty string")
+        if (
+            isinstance(self.timeout, bool)
+            or not isinstance(self.timeout, (int, float))
+            or not isfinite(self.timeout)
+            or self.timeout <= 0
+        ):
+            raise ValueError("timeout must be a positive finite number")
+        if (
+            isinstance(self.cache_ttl_seconds, bool)
+            or not isinstance(self.cache_ttl_seconds, (int, float))
+            or not isfinite(self.cache_ttl_seconds)
+            or self.cache_ttl_seconds < 0
+        ):
+            raise ValueError("cache_ttl_seconds must be a non-negative finite number")
 
     @staticmethod
     def _validate_fixture_id(fixture_id: int) -> None:
