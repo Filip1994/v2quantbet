@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from h2h.domain.bookmaker_policy import UnsupportedBookmakerError
 from h2h.domain.odds import Market, Selection
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 from h2h.odds import ApiFootballQuoteAdapter
@@ -12,10 +13,17 @@ def adapter() -> ApiFootballQuoteAdapter:
     return ApiFootballQuoteAdapter()
 
 
-def payload(*, bet_id: int = 8, selection: str = "Yes", odd: str = "2.20") -> dict:
+def payload(
+    *,
+    bookmaker_id: int = 8,
+    bookmaker_name: str = "Bet365",
+    bet_id: int = 8,
+    selection: str = "Yes",
+    odd: str = "2.20",
+) -> dict:
     return {
         "fixture": {"id": 1493129, "date": "2026-09-14T00:30:00+00:00"},
-        "bookmaker": {"id": 7, "name": "William Hill"},
+        "bookmaker": {"id": bookmaker_id, "name": bookmaker_name},
         "bet": {"id": bet_id, "name": "Both Teams Score"},
         "value": {"value": selection, "odd": odd},
         "update": "2026-09-13T20:03:16+00:00",
@@ -26,13 +34,44 @@ def test_adapts_api_football_btts_quote(adapter: ApiFootballQuoteAdapter) -> Non
     quote = adapter.adapt(payload())
 
     assert quote.fixture_id == "1493129"
-    assert quote.bookmaker_id == 7
-    assert quote.bookmaker_name == "William Hill"
+    assert quote.bookmaker_id == 8
+    assert quote.bookmaker_name == "Bet365"
     assert quote.market is Market.BTTS
     assert quote.selection is Selection.YES
     assert quote.odd == 2.20
     assert quote.observed_at == datetime(2026, 9, 13, 20, 3, 16, tzinfo=UTC)
     assert quote.source == "api-football"
+
+
+@pytest.mark.parametrize(
+    ("bookmaker_id", "bookmaker_name"),
+    [(8, "Bet365"), (11, "1xBet"), (34, "Superbet")],
+)
+def test_accepts_approved_api_football_bookmakers(
+    adapter: ApiFootballQuoteAdapter,
+    bookmaker_id: int,
+    bookmaker_name: str,
+) -> None:
+    quote = adapter.adapt(
+        payload(bookmaker_id=bookmaker_id, bookmaker_name=bookmaker_name)
+    )
+
+    assert quote.bookmaker_id == bookmaker_id
+    assert quote.bookmaker_name == bookmaker_name
+
+
+def test_rejects_unsupported_api_football_bookmaker(
+    adapter: ApiFootballQuoteAdapter,
+) -> None:
+    with pytest.raises(UnsupportedBookmakerError, match="unsupported API-Football"):
+        adapter.adapt(payload(bookmaker_id=7, bookmaker_name="William Hill"))
+
+
+def test_rejects_api_football_bookmaker_name_mismatch(
+    adapter: ApiFootballQuoteAdapter,
+) -> None:
+    with pytest.raises(UnsupportedBookmakerError, match="id/name mismatch"):
+        adapter.adapt(payload(bookmaker_id=8, bookmaker_name="William Hill"))
 
 
 def test_adapts_api_football_btts_no_selection(adapter: ApiFootballQuoteAdapter) -> None:
