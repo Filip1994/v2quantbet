@@ -38,7 +38,7 @@ def _parse_retry_after(value: str | None) -> float | None:
         return None
     try:
         return max(0.0, float(value))
-    except ValueError:
+    except (TypeError, ValueError):
         try:
             retry_at = parsedate_to_datetime(value).timestamp()
         except (TypeError, ValueError, OverflowError):
@@ -65,6 +65,10 @@ class UrllibJsonTransport:
 
     user_agent: str = "quantbet/1.0"
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.user_agent, str) or not self.user_agent.strip():
+            raise ValueError("user_agent must be a non-empty string")
+
     def get_json(
         self,
         url: str,
@@ -72,16 +76,23 @@ class UrllibJsonTransport:
         headers: Mapping[str, str] | None = None,
         timeout: float = 10.0,
     ) -> Mapping[str, Any]:
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than zero")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("timeout must be a positive number")
+        if headers is not None:
+            if not isinstance(headers, Mapping):
+                raise TypeError("headers must be a mapping")
+            if any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items()):
+                raise TypeError("header names and values must be strings")
 
         request_headers = {"User-Agent": self.user_agent, **(headers or {})}
         request = Request(url, headers=request_headers, method="GET")
         try:
             with urlopen(request, timeout=timeout) as response:
                 raw = response.read()
-        except TimeoutError as exc:
-            raise TransportTimeoutError(f"request timed out: {url}") from exc
+        except (TimeoutError, OSError) as exc:
+            if isinstance(exc, TimeoutError):
+                raise TransportTimeoutError(f"request timed out: {url}") from exc
+            raise TransportError(f"transport request failed: {url}") from exc
         except HTTPError as exc:
             if exc.code == 429:
                 retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
