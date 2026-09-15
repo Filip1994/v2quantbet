@@ -45,9 +45,21 @@ def test_registration_rejects_empty_pick_id(pick_id: str) -> None:
         PickRegistration(pick_id, registration.value_pick, registration.registered_at)
 
 
-def test_registration_requires_datetime_and_known_status() -> None:
+def test_registration_rejects_non_string_pick_id() -> None:
+    registration = make_registration()
+    with pytest.raises(TypeError):
+        PickRegistration(123, registration.value_pick, registration.registered_at)  # type: ignore[arg-type]
+
+
+def test_registration_requires_timezone_aware_datetime_and_known_status() -> None:
     registration = make_registration()
     with pytest.raises(TypeError):
         PickRegistration("pick-1", registration.value_pick, "not-a-date")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        PickRegistration(
+            "pick-1",
+            registration.value_pick,
+            datetime(2026, 9, 14, 12),
+        )
     with pytest.raises(TypeError):
         PickRegistration("pick-1", registration.value_pick, registration.registered_at, "registered")  # type: ignore[arg-type]
