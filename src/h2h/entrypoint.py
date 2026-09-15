@@ -66,7 +66,7 @@ def main() -> None:
 
     poll_interval = _positive_seconds("QUANTBET_POLL_INTERVAL_SECONDS", 60.0)
     discovery_interval = _positive_seconds("QUANTBET_DISCOVERY_INTERVAL_SECONDS", 900.0)
-    lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 24.0)
+    lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 72.0)
 
     if manual_fixture_ids:
         poll_job = HistoryQuotePollingJob(source, application.service, manual_fixture_ids)
