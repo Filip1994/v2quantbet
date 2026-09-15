@@ -46,12 +46,22 @@ class FakeCursor:
 
     def execute(self, sql: str, params=None) -> None:
         self.connection.executed.append((sql, params))
+        self.result = None
+        self.rows = []
         if sql.startswith("SELECT 1 FROM quote_series"):
             self.result = (1,) if params[0] in self.connection.series_by_id else None
         elif "FROM quote_series WHERE series_id" in sql:
             self.result = self.connection.series_by_id.get(params[0])
         elif "FROM quote_series WHERE fixture_id" in sql:
-            self.rows = [row for row in self.connection.series_rows if row[1] == params[0]]
+            self.rows = [
+                row
+                for row in self.connection.series_rows
+                if row[1] == params[0]
+                and row[2] == params[1]
+                and row[3] == params[2]
+                and row[4] == params[3]
+            ]
+            self.result = self.rows[0] if self.rows else None
         elif "FROM quote_snapshots WHERE snapshot_id" in sql:
             stored = self.connection.snapshots_by_id.get(params[0])
             if stored is None:
@@ -65,11 +75,9 @@ class FakeCursor:
         elif sql.startswith("INSERT INTO quote_series"):
             self.connection.series_by_id[params[0]] = params[1:]
             self.connection.series_rows.append((params[0], *params[1:]))
-            self.result = None
         elif sql.startswith("INSERT INTO quote_snapshots"):
             self.connection.snapshots_by_id[params[0]] = params[1:]
             self.connection.snapshot_rows.append((params[0], *params[1:]))
-            self.result = None
 
     def fetchone(self):
         return self.result
@@ -166,6 +174,37 @@ def test_ensure_series_rejects_conflict() -> None:
     )
     with pytest.raises(QuoteHistoryConflictError):
         repository(connection).ensure_series(series)
+
+
+def test_find_series_returns_matching_natural_identity() -> None:
+    connection = FakeConnection()
+    series = seed_series(connection)
+    assert repository(connection).find_series(
+        fixture_id=series.fixture_id,
+        bookmaker_id=series.bookmaker_id,
+        market=series.market,
+        selection=series.selection,
+    ) == series
+
+
+def test_find_series_returns_none_for_missing_identity() -> None:
+    assert repository(FakeConnection()).find_series(
+        fixture_id="missing",
+        bookmaker_id=10,
+        market=Market.OU_25,
+        selection=Selection.OVER,
+    ) is None
+
+
+def test_find_series_distinguishes_selection() -> None:
+    connection = FakeConnection()
+    seed_series(connection)
+    assert repository(connection).find_series(
+        fixture_id="fixture-1",
+        bookmaker_id=10,
+        market=Market.OU_25,
+        selection=Selection.UNDER,
+    ) is None
 
 
 def test_series_for_fixture_reconstructs_rows() -> None:
