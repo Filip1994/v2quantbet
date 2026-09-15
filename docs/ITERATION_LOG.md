@@ -83,3 +83,11 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dodat je test koji proverava da se nakon aktiviranja stop uslova ne pokreće naredna iteracija.
 - Testovi i Ruff nisu pokrenuti u ovom okruženju.
 - Commitovi: `909592dfbad80ffd019af5adaafad977d0560b8f`, `aa91ada060913d6e6005d27016a757bb826a0ebe`.
+
+## 2026-09-15T05:20:00+02:00 — Prosleđivanje shutdown predicate-a kroz javni worker API
+
+- Ažuriran je `src/h2h/workers/runtime.py`.
+- `run_worker()` sada prihvata `should_stop` i prosleđuje ga `WorkerRuntime` instanci.
+- Dodat je test koji potvrđuje da se worker zaustavlja kooperativno i kroz convenience funkciju `run_worker()`.
+- Lokalni `pytest` i Ruff nisu pokrenuti u ovom okruženju; CI treba da potvrdi promenu.
+- Commitovi: `6c9fa851f853e87ddfa77fc20e1b66b4c38d25be`, `31c0cdb794f46d6fe59212475c03f2eacf07007`.
