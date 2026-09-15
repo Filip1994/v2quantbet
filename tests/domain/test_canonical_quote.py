@@ -140,3 +140,36 @@ def test_observed_at_must_be_datetime():
             observed_at="2026-09-12T12:00:00Z",
             source="provider-x",
         )
+
+
+@pytest.mark.parametrize("bookmaker_id", [True, False, 8.0, "8"])
+def test_bookmaker_id_must_be_a_real_integer(bookmaker_id):
+    with pytest.raises(TypeError):
+        make_quote_with_overrides(bookmaker_id=bookmaker_id)
+
+
+@pytest.mark.parametrize("field", ["fixture_id", "bookmaker_name", "source"])
+def test_text_fields_must_be_strings(field):
+    with pytest.raises(TypeError):
+        make_quote_with_overrides(**{field: 123})
+
+
+@pytest.mark.parametrize("field", ["market", "selection"])
+def test_enum_fields_must_use_canonical_enum_types(field):
+    with pytest.raises(TypeError):
+        make_quote_with_overrides(**{field: "OU_25" if field == "market" else "OVER"})
+
+
+def make_quote_with_overrides(**overrides):
+    values = {
+        "fixture_id": "fixture-1",
+        "bookmaker_id": 8,
+        "bookmaker_name": "Example Bookmaker",
+        "market": Market.OU_25,
+        "selection": Selection.OVER,
+        "odd": 1.9,
+        "observed_at": OBSERVED_AT,
+        "source": "provider-x",
+    }
+    values.update(overrides)
+    return CanonicalQuote(**values)
