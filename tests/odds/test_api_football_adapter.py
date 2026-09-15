@@ -19,14 +19,15 @@ def payload(
     bookmaker_name: str = "Bet365",
     bet_id: int = 8,
     selection: str = "Yes",
-    odd: str = "2.20",
+    odd: object = "2.20",
+    update: object = "2026-09-13T20:03:16+00:00",
 ) -> dict:
     return {
         "fixture": {"id": 1493129, "date": "2026-09-14T00:30:00+00:00"},
         "bookmaker": {"id": bookmaker_id, "name": bookmaker_name},
         "bet": {"id": bet_id, "name": "Both Teams Score"},
         "value": {"value": selection, "odd": odd},
-        "update": "2026-09-13T20:03:16+00:00",
+        "update": update,
     }
 
 
@@ -82,11 +83,44 @@ def test_adapts_api_football_btts_no_selection(adapter: ApiFootballQuoteAdapter)
     assert quote.odd == 1.62
 
 
+@pytest.mark.parametrize("odd", [2.2, 2, "2.20", " 2.20 "])
+def test_accepts_valid_numeric_odd_forms(
+    adapter: ApiFootballQuoteAdapter,
+    odd: object,
+) -> None:
+    assert adapter.adapt(payload(odd=odd)).odd == 2.2
+
+
+@pytest.mark.parametrize("odd", [True, "", "not-a-number", "nan", "inf", float("nan"), float("inf")])
+def test_rejects_invalid_odd_forms(
+    adapter: ApiFootballQuoteAdapter,
+    odd: object,
+) -> None:
+    with pytest.raises(QuoteNormalizationError):
+        adapter.adapt(payload(odd=odd))
+
+
+@pytest.mark.parametrize("field_value", [True, 8.0, "8", 0, -1])
+def test_rejects_invalid_bookmaker_id(adapter: ApiFootballQuoteAdapter, field_value: object) -> None:
+    with pytest.raises(QuoteNormalizationError):
+        adapter.adapt(payload(bookmaker_id=field_value))  # type: ignore[arg-type]
+
+
+def test_rejects_empty_bookmaker_name(adapter: ApiFootballQuoteAdapter) -> None:
+    with pytest.raises(QuoteNormalizationError):
+        adapter.adapt(payload(bookmaker_name="   "))
+
+
+def test_rejects_naive_update_timestamp(adapter: ApiFootballQuoteAdapter) -> None:
+    with pytest.raises(QuoteNormalizationError, match="timezone-aware"):
+        adapter.adapt(payload(update="2026-09-13T20:03:16"))
+
+
+def test_rejects_invalid_payload_shape(adapter: ApiFootballQuoteAdapter) -> None:
+    with pytest.raises(QuoteNormalizationError):
+        adapter.adapt([])  # type: ignore[arg-type]
+
+
 def test_rejects_unsupported_bet(adapter: ApiFootballQuoteAdapter) -> None:
     with pytest.raises(QuoteNormalizationError, match="unsupported API-Football bet id"):
         adapter.adapt(payload(bet_id=1))
-
-
-def test_rejects_invalid_odd(adapter: ApiFootballQuoteAdapter) -> None:
-    with pytest.raises(QuoteNormalizationError):
-        adapter.adapt(payload(odd="not-a-number"))
