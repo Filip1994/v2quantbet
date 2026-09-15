@@ -1,5 +1,21 @@
 # QuantBet — Mathematical Audit Findings
 
+## PostgreSQL verification update — 2026-09-15, remediation branch
+
+The historical six-unexecuted-integration-test statements below are superseded
+for the observation-identity remediation, not for the unchanged live main branch.
+Classification F (fully migrated schema/repository incompatibility) was corrected
+on `codex/postgres-observation-identity`, based on `c934d8f`.
+Canonical observation identity remains `(series_id, observed_at, source)`;
+`captured_at` is preserved provenance, not identity. Migrations are unchanged.
+
+[CI run 35000997862](https://github.com/Filip1994/v2quantbet/actions/runs/35000997862)
+verified implementation head `cea53a990c602c9d53d7a62ec64d8c62c92ef359` against
+PostgreSQL 16.15: all 15 integration cases passed; full CI 372 passed, zero
+failed/skipped/errors; Ruff passed. This establishes tested sequential fully
+migrated database behavior, not live Railway deployment, concurrency guarantees,
+or any new mathematical/predictive/profitability conclusion. Main awaits review.
+
 **Status:** Audit record / implementation priorities
 **Date:** 2026-09-15
 
