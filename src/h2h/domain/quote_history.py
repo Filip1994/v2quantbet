@@ -7,6 +7,13 @@ from math import isfinite
 from .odds import Market, Selection
 
 
+def _require_non_empty_text(value: object, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a string")
+    if not value.strip():
+        raise ValueError(f"{field_name} must not be empty")
+
+
 def _require_aware(value: datetime, field_name: str) -> None:
     if not isinstance(value, datetime):
         raise TypeError(f"{field_name} must be a datetime")
@@ -26,10 +33,10 @@ class QuoteSeries:
     created_at: datetime
 
     def __post_init__(self) -> None:
-        if not self.series_id.strip():
-            raise ValueError("series_id must not be empty")
-        if not self.fixture_id.strip():
-            raise ValueError("fixture_id must not be empty")
+        _require_non_empty_text(self.series_id, "series_id")
+        _require_non_empty_text(self.fixture_id, "fixture_id")
+        if isinstance(self.bookmaker_id, bool) or not isinstance(self.bookmaker_id, int):
+            raise TypeError("bookmaker_id must be an int")
         if self.bookmaker_id <= 0:
             raise ValueError("bookmaker_id must be positive")
         if not isinstance(self.market, Market):
@@ -51,13 +58,12 @@ class QuoteSnapshot:
     source: str
 
     def __post_init__(self) -> None:
-        if not self.snapshot_id.strip():
-            raise ValueError("snapshot_id must not be empty")
-        if not self.series_id.strip():
-            raise ValueError("series_id must not be empty")
+        _require_non_empty_text(self.snapshot_id, "snapshot_id")
+        _require_non_empty_text(self.series_id, "series_id")
+        if isinstance(self.odd, bool) or not isinstance(self.odd, (int, float)):
+            raise TypeError("odd must be a number")
         if not isfinite(self.odd) or self.odd <= 1.0:
             raise ValueError("odd must be finite and greater than 1.0")
-        if not self.source.strip():
-            raise ValueError("source must not be empty")
+        _require_non_empty_text(self.source, "source")
         _require_aware(self.observed_at, "observed_at")
         _require_aware(self.captured_at, "captured_at")
