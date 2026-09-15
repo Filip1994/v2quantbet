@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from h2h.domain.bookmaker_policy import resolve_api_football_bookmaker
 from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 
@@ -31,6 +32,9 @@ class ApiFootballQuoteAdapter:
             fixture_id = str(fixture["id"])
             bookmaker_id = int(bookmaker["id"])
             bookmaker_name = str(bookmaker["name"])
+            bookmaker_identity = resolve_api_football_bookmaker(
+                bookmaker_id, bookmaker_name
+            )
             bet_id = int(bet["id"])
             selection_value = str(value["value"])
             odd = float(value["odd"])
@@ -41,8 +45,8 @@ class ApiFootballQuoteAdapter:
             market, selection = self._map_market_selection(bet_id, selection_value)
             return CanonicalQuote(
                 fixture_id=fixture_id,
-                bookmaker_id=bookmaker_id,
-                bookmaker_name=bookmaker_name,
+                bookmaker_id=bookmaker_identity.provider_id,
+                bookmaker_name=bookmaker_identity.provider_name,
                 market=market,
                 selection=selection,
                 odd=odd,
