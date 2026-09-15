@@ -109,7 +109,6 @@ class InMemoryQuoteHistoryRepository:
         return (
             snapshot.series_id,
             snapshot.observed_at,
-            snapshot.captured_at,
             snapshot.source,
         )
 
@@ -128,7 +127,10 @@ class InMemoryQuoteHistoryRepository:
                 )
             existing = pending.get(snapshot.snapshot_id)
             if existing is not None:
-                if existing != snapshot:
+                if (
+                    self._snapshot_natural_key(existing) != self._snapshot_natural_key(snapshot)
+                    or existing.odd != snapshot.odd
+                ):
                     raise QuoteHistoryConflictError(
                         f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
                     )
@@ -136,9 +138,11 @@ class InMemoryQuoteHistoryRepository:
             natural_key = self._snapshot_natural_key(snapshot)
             natural_match = natural_keys.get(natural_key)
             if natural_match is not None:
-                raise QuoteHistoryConflictError(
-                    "conflicting observation for snapshot natural identity"
-                )
+                if natural_match.odd != snapshot.odd:
+                    raise QuoteHistoryConflictError(
+                        "conflicting observation for snapshot natural identity"
+                    )
+                continue
             pending[snapshot.snapshot_id] = snapshot
             pending_order.append(snapshot.snapshot_id)
             natural_keys[natural_key] = snapshot

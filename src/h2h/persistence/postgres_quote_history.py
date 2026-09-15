@@ -80,7 +80,7 @@ class PostgreSQLQuoteHistoryRepository:
             return tuple(self._row_to_series(row) for row in cursor.fetchall())
 
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
-        """Append observations atomically using the schema's full natural key."""
+        """Append by (series_id, observed_at, source), preserving first provenance."""
         incoming = tuple(snapshots)
         if not incoming:
             return
@@ -100,12 +100,11 @@ class PostgreSQLQuoteHistoryRepository:
                 )
                 existing_by_id = cursor.fetchone()
                 if existing_by_id is not None:
-                    existing_payload = tuple(existing_by_id[1:])
+                    existing_payload = (existing_by_id[1], existing_by_id[2], existing_by_id[3], existing_by_id[5])
                     incoming_payload = (
                         snapshot.series_id,
                         snapshot.odd,
                         snapshot.observed_at,
-                        snapshot.captured_at,
                         snapshot.source,
                     )
                     if existing_payload != incoming_payload:
@@ -118,21 +117,20 @@ class PostgreSQLQuoteHistoryRepository:
                     "INSERT INTO quote_snapshots "
                     "(snapshot_id, series_id, odd, observed_at, captured_at, source) "
                     "VALUES (%s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (series_id, observed_at, captured_at, source) DO NOTHING",
+                    "ON CONFLICT (series_id, observed_at, source) DO NOTHING",
                     (snapshot.snapshot_id, snapshot.series_id, snapshot.odd, snapshot.observed_at, snapshot.captured_at, snapshot.source),
                 )
                 cursor.execute(
                     "SELECT snapshot_id, series_id, odd, observed_at, captured_at, source "
                     "FROM quote_snapshots "
-                    "WHERE series_id = %s AND observed_at = %s AND captured_at = %s AND source = %s",
-                    (snapshot.series_id, snapshot.observed_at, snapshot.captured_at, snapshot.source),
+                    "WHERE series_id = %s AND observed_at = %s AND source = %s",
+                    (snapshot.series_id, snapshot.observed_at, snapshot.source),
                 )
                 row = cursor.fetchone()
-                if row is None or tuple(row[1:]) != (
+                if row is None or (row[1], row[2], row[3], row[5]) != (
                     snapshot.series_id,
                     snapshot.odd,
                     snapshot.observed_at,
-                    snapshot.captured_at,
                     snapshot.source,
                 ):
                     raise QuoteHistoryConflictError(
