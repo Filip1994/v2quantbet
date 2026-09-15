@@ -19,9 +19,16 @@ def iter_api_football_quote_payloads(
     response shape remains isolated in this ingestion layer; the resulting
     payloads are consumed by ``ApiFootballQuoteAdapter``.
     """
+    if not isinstance(response, Mapping):
+        raise TypeError("API-Football odds response must be an object")
+
+    errors = response.get("errors")
+    if errors:
+        raise RuntimeError(f"API-Football returned errors: {errors}")
+
     fixtures = response.get("response", [])
     if not isinstance(fixtures, list):
-        return
+        raise TypeError("API-Football odds response must contain a list")
 
     for fixture in fixtures:
         if not isinstance(fixture, Mapping):
