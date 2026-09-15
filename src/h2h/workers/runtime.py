@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import FrameType
 
 
 Job = Callable[[], None]
 Sleeper = Callable[[float], None]
 StopPredicate = Callable[[], bool]
+ShutdownCallback = Callable[[], None]
+
+
+def install_shutdown_handlers(on_shutdown: ShutdownCallback) -> None:
+    """Route SIGTERM and SIGINT to a cooperative shutdown callback."""
+
+    def handle_shutdown(_signum: int, _frame: FrameType | None) -> None:
+        on_shutdown()
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
 
 
 @dataclass(frozen=True)
