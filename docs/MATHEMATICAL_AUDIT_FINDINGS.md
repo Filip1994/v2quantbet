@@ -126,8 +126,8 @@ The mathematical contracts should be documented incrementally alongside that ver
 | Predictive validity | Not demonstrated |
 | Calibration | Not sufficiently demonstrated |
 | Data-quality contract | Incomplete |
-| Value decision service | Key implementation gap |
-| Immutable pick registration | Key implementation gap |
+| Value decision service | Structural decision result and registration gate implemented; acceptance policy remains undefined |
+| Immutable pick registration | Domain record and gated use-case implemented; full decision provenance and persistence remain incomplete |
 | Quote lifecycle and closing reference | In progress |
 | PostgreSQL foundation | Unit-level baseline green; six real-DB integration tests remain unexecuted |
 | End-to-end bulletin-to-kickoff flow | Not yet demonstrated |
@@ -144,6 +144,23 @@ Do not modify the Dixon–Coles mathematics at this stage. Proceed with the valu
 - No production eligibility decision is represented by `ValuePick` itself; positive EV is therefore only a valuation result, not an approval to publish or bet.
 - No dedicated provider-neutral eligibility service or stable rejection-code contract was found during this checkpoint.
 - The next implementation step is to define the smallest explicit eligibility boundary without inventing undocumented thresholds or silently changing the existing value mathematics.
+
+## Structural decision boundary follow-up — 2026-09-15
+
+The earlier checkpoint's missing structural boundary is now implemented:
+`ValuePick -> EligibilityDecision -> register_pick() -> PickRegistration`.
+Decisions are immutable and bind the exact valuation; rejected decisions carry
+a machine-readable code and cannot pass the registration use-case. Registrations
+created there retain the decision ID. Direct domain construction remains available
+for compatibility and is not evidence that an eligibility gate was used.
+
+There is still no betting acceptance evaluator, threshold policy, model-to-quote
+orchestration, or complete decision provenance. This is a structural implementation,
+not validation of any strategy or a change to Dixon-Coles mathematics. Synthetic
+approval objects in tests do not establish production betting eligibility.
+
+Verification: 39 targeted tests passed; Ruff passed; the full suite ran once,
+with 336 passed, 6 PostgreSQL integration tests skipped, 0 failed and 0 errors.
 
 ## Repository implementation and verification log — 2026-09-15
 

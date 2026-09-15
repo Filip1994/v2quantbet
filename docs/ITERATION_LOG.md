@@ -183,3 +183,17 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Konačna lokalna verifikacija: `uv run python -m ruff check .` → `All checks passed!`; `uv run python -m pytest --basetemp .verification-tmp/pytest` → `306 passed, 6 skipped, 0 failed, 0 errors`.
 - PostgreSQL nije izvršen: nema `QUANTBET_TEST_DATABASE_URL` ni dostupnog lokalnog PostgreSQL/Docker servisa; šest integration testova ostaje očekivano preskočeno.
 - Commitovi: `2e5ac1d25a8a13ed144a53f3593e2a19aaa20722`, `4386c6f8e674b6f01856f0b03934a922fd3d3f90`, `afeaea7f571aff4d345f19c553da8cd2b0eaee2a`, `002fca9881d3d13722b0f7b66aab508cffb411cb`.
+
+## 2026-09-15T14:44:06+02:00 — Strukturna eligibility i registration granica
+
+- Implementirano: `ValuePick -> EligibilityDecision -> register_pick() -> PickRegistration`.
+- Dodati su `src/h2h/decisions/pick_eligibility.py` i `src/h2h/use_cases/register_pick.py`, sa testovima u `tests/decisions/test_pick_eligibility.py` i `tests/use_cases/test_register_pick.py`.
+- Odluka je immutable, vezana za tačan `ValuePick`, sa eksplicitnim ID-jem i enum ishodom. Odbijanje zahteva machine-readable kod oblika `[A-Z][A-Z0-9_]*`; odobrenje ne sme nositi razlog odbijanja. Vokabular kodova pripada budućoj acceptance politici.
+- Registracioni use-case odbija običan `ValuePick` i rejected odluku; approved odluka registruje isti objekat valuacije, bez mogućnosti zamene od strane pozivaoca.
+- `PickRegistration` dobija opcioni keyword-only `eligibility_decision_id`. Use-case uvek čuva ID odobrene odluke; direktni domen-konstruktor ostaje kompatibilan i ne predstavlja dokaz da je gate korišćen. Postojeća ID/time validacija ostaje aktivna.
+- Nije implementirano: acceptance politika, betting pragovi, de-vig, stake/risk pravila, povezivanje modela i quote-a, publisher ili persistencija odluka. Test approval objekti dokazuju strukturu, ne betting strategiju. Pun provenance iz decision contract-a ostaje budući posao.
+- Ciljani testovi: `uv run python -m pytest tests/domain/test_value_pick.py tests/decisions/test_pick_eligibility.py tests/domain/test_pick_registration.py tests/use_cases/test_register_pick.py --basetemp .verification-tmp/targeted -o cache_dir=.verification-tmp/cache` -> **39 passed**.
+- Ruff, jednom: `uv run python -m ruff check .` -> **All checks passed!**
+- Full suite, jednom nakon ciljanih testova i Ruff-a: `uv run python -m pytest --basetemp .verification-tmp/pytest -o cache_dir=.verification-tmp/cache` -> **336 passed, 6 skipped, 0 failed, 0 errors** (342 prikupljena testa). Roditeljski temp direktorijum je napravljen pre testova; cache je usmeren u writable test direktorijum.
+- Šest PostgreSQL integration testova ostaje preskočeno; PostgreSQL nije provisionovan. CI nije pokretan ovim zadatkom.
+- Implementacioni commit: `09250378c27eec646862e9cba42af58cb239832f`.
