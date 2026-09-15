@@ -1,6 +1,6 @@
 import pytest
 
-from h2h.workers.runtime import WorkerRuntime
+from h2h.workers.runtime import WorkerRuntime, run_worker
 
 
 def test_run_once_executes_job() -> None:
@@ -45,6 +45,19 @@ def test_run_forever_stops_cooperatively_before_next_iteration() -> None:
 
     assert calls == ["run"]
     assert sleeps == [15]
+
+
+def test_run_worker_forwards_shutdown_predicate() -> None:
+    calls: list[str] = []
+    stop = iter([False, True]).__next__
+
+    run_worker(
+        lambda: calls.append("run"),
+        interval_seconds=5,
+        should_stop=stop,
+    )
+
+    assert calls == ["run"]
 
 
 def test_runtime_rejects_non_positive_interval() -> None:
