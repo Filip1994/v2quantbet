@@ -56,6 +56,8 @@ Every supported market must define its outcome set, formula, matrix dependency, 
 - `UNDER_2.5`;
 - `BTTS_YES`.
 
+The repository documentation already identifies a market-probability derivation stage and specifies complementary over/under behavior. However, the audit has not yet established that this contract is enforced end-to-end at the production decision boundary. The next code audit must locate the concrete implementation, verify its numerical guards, and test that the market probability passed to value evaluation is the intended probability for the exact quote selection.
+
 ### 4. Value-calculation contract
 
 The system must distinguish raw implied probability from de-vig probability and explicitly define:
@@ -134,3 +136,11 @@ The mathematical contracts should be documented incrementally alongside that ver
 ## Decision
 
 Do not modify the Dixon–Coles mathematics at this stage. Proceed with the value-evaluation service, immutable pick registration, and an end-to-end testable bulletin-to-kickoff lifecycle. Any future model change requires a reproducible experiment, chronological out-of-sample evaluation, and comparison against this baseline.
+
+## Audit checkpoint — 2026-09-15
+
+- `CanonicalQuote` validates supported market/selection combinations and basic odds integrity.
+- `evaluate_value()` currently calculates raw implied probability, probability gap, and expected value deterministically.
+- No production eligibility decision is represented by `ValuePick` itself; positive EV is therefore only a valuation result, not an approval to publish or bet.
+- No dedicated provider-neutral eligibility service or stable rejection-code contract was found during this checkpoint.
+- The next implementation step is to define the smallest explicit eligibility boundary without inventing undocumented thresholds or silently changing the existing value mathematics.
