@@ -51,6 +51,19 @@ class CanonicalQuote:
         return (*self.series_identity, self.observed_at, self.source)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.fixture_id, str):
+            raise TypeError("fixture_id must be a string")
+        if isinstance(self.bookmaker_id, bool) or not isinstance(self.bookmaker_id, int):
+            raise TypeError("bookmaker_id must be an integer")
+        if not isinstance(self.bookmaker_name, str):
+            raise TypeError("bookmaker_name must be a string")
+        if not isinstance(self.market, Market):
+            raise TypeError("market must be a Market")
+        if not isinstance(self.selection, Selection):
+            raise TypeError("selection must be a Selection")
+        if not isinstance(self.source, str):
+            raise TypeError("source must be a string")
+
         if not self.fixture_id.strip():
             raise ValueError("fixture_id must not be empty")
         if self.bookmaker_id <= 0:
@@ -70,8 +83,6 @@ class CanonicalQuote:
             Market.OU_25: {Selection.OVER, Selection.UNDER},
             Market.BTTS: {Selection.YES, Selection.NO},
         }
-        if self.market not in valid_selections:
-            raise ValueError(f"unsupported market: {self.market!r}")
         if self.selection not in valid_selections[self.market]:
             raise ValueError(
                 f"selection {self.selection!r} is invalid for market {self.market!r}"
