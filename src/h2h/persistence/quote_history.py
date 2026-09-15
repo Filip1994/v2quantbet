@@ -42,7 +42,7 @@ class QuoteHistoryRepository(Protocol):
 
 
 class QuoteHistoryConflictError(ValueError):
-    """Raised when an immutable series or snapshot ID is reused inconsistently."""
+    """Raised when an immutable series or snapshot identity is reused inconsistently."""
 
 
 class InMemoryQuoteHistoryRepository:
@@ -104,23 +104,44 @@ class InMemoryQuoteHistoryRepository:
             if self._series[series_id].fixture_id == fixture_id
         )
 
+    @staticmethod
+    def _snapshot_natural_key(snapshot: QuoteSnapshot) -> tuple[object, ...]:
+        return (
+            snapshot.series_id,
+            snapshot.observed_at,
+            snapshot.captured_at,
+            snapshot.source,
+        )
+
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
         incoming = tuple(snapshots)
         pending = dict(self._snapshots)
         pending_order = list(self._snapshot_order)
+        natural_keys: dict[tuple[object, ...], QuoteSnapshot] = {
+            self._snapshot_natural_key(snapshot): snapshot
+            for snapshot in pending.values()
+        }
         for snapshot in incoming:
             if snapshot.series_id not in self._series:
                 raise QuoteHistoryConflictError(
                     f"unknown series ID {snapshot.series_id!r}"
                 )
             existing = pending.get(snapshot.snapshot_id)
-            if existing is None:
-                pending[snapshot.snapshot_id] = snapshot
-                pending_order.append(snapshot.snapshot_id)
-            elif existing != snapshot:
+            if existing is not None:
+                if existing != snapshot:
+                    raise QuoteHistoryConflictError(
+                        f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
+                    )
+                continue
+            natural_key = self._snapshot_natural_key(snapshot)
+            natural_match = natural_keys.get(natural_key)
+            if natural_match is not None:
                 raise QuoteHistoryConflictError(
-                    f"conflicting observation for snapshot ID {snapshot.snapshot_id!r}"
+                    "conflicting observation for snapshot natural identity"
                 )
+            pending[snapshot.snapshot_id] = snapshot
+            pending_order.append(snapshot.snapshot_id)
+            natural_keys[natural_key] = snapshot
         self._snapshots = pending
         self._snapshot_order = pending_order
 
