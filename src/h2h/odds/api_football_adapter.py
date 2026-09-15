@@ -5,7 +5,10 @@ from datetime import datetime
 import math
 from typing import Any
 
-from h2h.domain.bookmaker_policy import resolve_api_football_bookmaker
+from h2h.domain.bookmaker_policy import (
+    UnsupportedBookmakerError,
+    resolve_api_football_bookmaker,
+)
 from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 
@@ -46,6 +49,8 @@ class ApiFootballQuoteAdapter:
                 observed_at=observed_at,
                 source="api-football",
             )
+        except UnsupportedBookmakerError:
+            raise
         except (KeyError, TypeError, ValueError) as exc:
             raise QuoteNormalizationError(f"invalid API-Football odds payload: {exc}") from exc
 
