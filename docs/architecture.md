@@ -9,13 +9,26 @@ Provider -> Raw Odds -> Normalizer -> Canonical Quote -> Validation
 
 ## Odds cadence
 
-Planned cadence from the product requirements:
+The agreed product policy is deliberately conservative and separates fixture discovery from quote refresh:
 
-- Scan fixtures/markets up to 72 hours before kickoff.
-- Once an interesting candidate is identified, rescan approximately every 24 hours.
-- At 24 hours before kickoff, increase scan frequency.
-- At 6 hours before kickoff, increase frequency substantially.
-- Exact production intervals will be defined and tested before implementation.
+- **Fixture discovery:** scan fixtures and markets up to **72 hours before kickoff**, approximately every **15 minutes**.
+- **Early quote refresh (T−72h to T−48h):** approximately once per day.
+- **T−48h to T−24h:** approximately every **12 hours**.
+- **T−24h to T−6h:** approximately every **6 hours**.
+- **T−6h to T−2h:** approximately every **2 hours**.
+- **T−2h to kickoff:** approximately every **30 minutes**.
+- **T−15 minutes:** perform a dedicated final/closing capture.
+
+These are the agreed baseline intervals, not a mandate to refresh every fixture indiscriminately. Quote refresh is selective and should focus on relevant fixtures, markets, and bookmaker sources. Discovery must not automatically trigger a full quote collection for every discovered fixture.
+
+The system must preserve the distinction between:
+
+- inexpensive fixture discovery;
+- selective quote refresh;
+- intensified monitoring only for fixtures with meaningful betting potential;
+- the dedicated pre-kickoff closing capture.
+
+The previous global 60-second quote-polling approach is **not** the agreed policy.
 
 ## Bookmakers
 
