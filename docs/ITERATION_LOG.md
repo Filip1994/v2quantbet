@@ -99,3 +99,13 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dodat je test `test_continues_after_fixture_failure`.
 - Lokalna verifikacija za ovu izmenu još nije izvršena; potrebno je pokrenuti `uv run pytest` i `uv run ruff check .`.
 - Commitovi: `134b60f5e4618839af06c1a2e0f17598aa70c5e7`, `51db83994d9efcc9903e8228965390e1734aa0c3`.
+
+## 2026-09-15T09:00:00+02:00 — Centralni bookmaker allowlist guard
+
+- Dodat je `src/h2h/domain/bookmaker_policy.py`.
+- Uveden je centralni allowlist: `superbet`, `1xbet`, `bet365`.
+- Identifikatori se normalizuju trimovanjem i `casefold()` operacijom.
+- Nepoznati bookmaker-i se odbacuju kroz `UnsupportedBookmakerError`; prazne vrednosti i tipovi koji nisu string se odbacuju eksplicitno.
+- Dodat je `tests/test_bookmaker_policy.py` sa proverama dozvoljenih, nedozvoljenih, praznih i ne-string identifikatora.
+- Lokalni testovi, Ruff i CI nisu pokrenuti u ovom okruženju.
+- Commitovi: `08005a503b34033ca153decf24cf01ae7ab237e9`, `83f20660ca4df5ef98e460a5cb0ecbac3298e069`.
