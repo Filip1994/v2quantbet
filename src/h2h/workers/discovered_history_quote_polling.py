@@ -48,9 +48,19 @@ class DiscoveredHistoryQuotePollingJob:
             raise ValueError("clock must return a timezone-aware datetime")
         end_at = start_at + self._lookahead
 
+        try:
+            fixtures = self._discovery.discover(start_at, end_at)
+        except Exception:
+            LOGGER.exception(
+                "Fixture discovery failed for window %s to %s",
+                start_at,
+                end_at,
+            )
+            return 0
+
         total = 0
         seen: set[int] = set()
-        for fixture in self._discovery.discover(start_at, end_at):
+        for fixture in fixtures:
             provider_fixture_id = fixture.provider_fixture_id
             if provider_fixture_id is None:
                 continue
