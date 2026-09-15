@@ -10,6 +10,7 @@ from typing import Protocol
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.workers.history_quote_polling import HistoricalQuoteSource
+from h2h.workers.quote_refresh_scheduler import QuoteRefreshScheduler
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class ScopedFixtureDiscoveryPort(Protocol):
 
 
 class DiscoveredHistoryQuotePollingJob:
-    """Discover upcoming fixtures and collect quote history for them."""
+    """Discover upcoming fixtures and collect quotes on kickoff-aware cadence."""
 
     def __init__(
         self,
@@ -40,9 +41,11 @@ class DiscoveredHistoryQuotePollingJob:
         self._discovery = discovery
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lookahead = lookahead
+        self._scheduler = QuoteRefreshScheduler()
+        self._known_kickoffs: dict[int, datetime] = {}
 
     def run_once(self) -> int:
-        """Discover the current window and persist quotes for all provider fixture IDs."""
+        """Discover fixtures and refresh only new or currently due fixtures."""
         start_at = self._clock()
         if start_at.tzinfo is None or start_at.utcoffset() is None:
             raise ValueError("clock must return a timezone-aware datetime")
@@ -58,8 +61,8 @@ class DiscoveredHistoryQuotePollingJob:
             )
             return 0
 
-        total = 0
-        seen: set[int] = set()
+        due_ids = set(self._scheduler.due_fixture_ids(now=start_at))
+        candidates: dict[int, Fixture] = {}
         for fixture in fixtures:
             provider_fixture_id = fixture.provider_fixture_id
             if provider_fixture_id is None:
@@ -68,9 +71,27 @@ class DiscoveredHistoryQuotePollingJob:
                 fixture_id = int(provider_fixture_id)
             except ValueError:
                 continue
-            if fixture_id <= 0 or fixture_id in seen:
+            if fixture_id <= 0 or fixture_id in candidates:
                 continue
-            seen.add(fixture_id)
+            if fixture.kickoff_at.tzinfo is None or fixture.kickoff_at.utcoffset() is None:
+                LOGGER.warning("Ignoring fixture_id=%s with naive kickoff", fixture_id)
+                continue
+
+            previous_kickoff = self._known_kickoffs.get(fixture_id)
+            if previous_kickoff != fixture.kickoff_at:
+                self._known_kickoffs[fixture_id] = fixture.kickoff_at
+                scheduled = self._scheduler.register(
+                    fixture_id=fixture_id,
+                    kickoff_at=fixture.kickoff_at,
+                    now=start_at,
+                )
+                if scheduled is not None:
+                    candidates[fixture_id] = fixture
+            elif fixture_id in due_ids:
+                candidates[fixture_id] = fixture
+
+        total = 0
+        for fixture_id, fixture in candidates.items():
             try:
                 total += self._ingestion.ingest(
                     self._source.fetch_quotes(fixture_id=fixture_id)
@@ -80,4 +101,6 @@ class DiscoveredHistoryQuotePollingJob:
                     "Failed to collect or ingest quote history for fixture_id=%s",
                     fixture_id,
                 )
+                continue
+            self._scheduler.mark_refreshed(fixture_id=fixture_id, now=start_at)
         return total
