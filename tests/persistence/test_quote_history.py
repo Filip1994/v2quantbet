@@ -100,3 +100,20 @@ def test_append_snapshots_rejects_conflicting_duplicate_ids_in_same_batch() -> N
     with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
         repository.append_snapshots([first, conflicting])
     assert repository.get_snapshot("snapshot-1") is None
+
+
+def test_append_snapshots_rejects_duplicate_natural_key_with_different_id() -> None:
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    repository.append_snapshots([make_snapshot("snapshot-1", odd=2.10)])
+    with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
+        repository.append_snapshots([make_snapshot("snapshot-2", odd=2.10)])
+
+
+def test_append_snapshots_rejects_duplicate_natural_key_with_same_idempotent_payload() -> None:
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    first = make_snapshot("snapshot-1", odd=2.10)
+    repository.append_snapshots([first])
+    with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
+        repository.append_snapshots([make_snapshot("snapshot-2", odd=2.10)])
