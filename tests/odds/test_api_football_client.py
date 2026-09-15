@@ -53,10 +53,10 @@ def test_clear_cache_forces_refresh() -> None:
     assert client.fetch_odds(fixture_id=42) == {"response": [2]}
 
 
-@pytest.mark.parametrize("fixture_id", [0, -1])
-def test_fixture_id_must_be_positive(fixture_id: int) -> None:
+@pytest.mark.parametrize("fixture_id", [0, -1, True, 42.0, "42"])
+def test_fixture_id_must_be_positive_integer(fixture_id: object) -> None:
     with pytest.raises(ValueError, match="fixture_id"):
-        ApiFootballClient(Mock(), "secret").fetch_odds(fixture_id=fixture_id)
+        ApiFootballClient(Mock(), "secret").fetch_odds(fixture_id=fixture_id)  # type: ignore[arg-type]
 
 
 def test_api_key_must_not_be_empty() -> None:
@@ -64,6 +64,18 @@ def test_api_key_must_not_be_empty() -> None:
         ApiFootballClient(Mock(), " ").fetch_odds(fixture_id=1)
 
 
-def test_cache_ttl_must_not_be_negative() -> None:
+@pytest.mark.parametrize("ttl", [-1, True, float("inf"), "30"])
+def test_cache_ttl_must_be_non_negative_finite_number(ttl: object) -> None:
     with pytest.raises(ValueError, match="cache_ttl_seconds"):
-        ApiFootballClient(Mock(), "secret", cache_ttl_seconds=-1).fetch_odds(fixture_id=1)
+        ApiFootballClient(Mock(), "secret", cache_ttl_seconds=ttl).fetch_odds(fixture_id=1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, float("nan"), float("inf"), "10"])
+def test_timeout_must_be_positive_finite_number(timeout: object) -> None:
+    with pytest.raises(ValueError, match="timeout"):
+        ApiFootballClient(Mock(), "secret", timeout=timeout).fetch_odds(fixture_id=1)  # type: ignore[arg-type]
+
+
+def test_base_url_must_not_be_empty() -> None:
+    with pytest.raises(ValueError, match="base_url"):
+        ApiFootballClient(Mock(), "secret", base_url=" ").fetch_odds(fixture_id=1)
