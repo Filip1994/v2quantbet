@@ -102,11 +102,11 @@ class UrllibJsonTransport:
             raise TransportResponseError(
                 f"provider returned HTTP {exc.code} for {url}"
             ) from exc
-        except (TimeoutError, OSError) as exc:
-            if isinstance(exc, TimeoutError):
-                raise TransportTimeoutError(f"request timed out: {url}") from exc
-            raise TransportError(f"transport request failed: {url}") from exc
+        except TimeoutError as exc:
+            raise TransportTimeoutError(f"request timed out: {url}") from exc
         except URLError as exc:
+            raise TransportError(f"transport request failed: {url}") from exc
+        except OSError as exc:
             raise TransportError(f"transport request failed: {url}") from exc
 
         try:
