@@ -126,3 +126,14 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Prethodni globalni polling od 60 sekundi nije usvojena politika.
 - Ovo je dokumentaciona odluka; implementacija cadence scheduler-a, testovi i CI još nisu potvrđeni.
 - Commit: `de6d9caa2b01baade472c73956c3ff82b1aa5f79`.
+
+## 2026-09-15T10:00:00+02:00 — Izolovani kickoff-aware quote refresh scheduler
+
+- Dodat je `src/h2h/workers/quote_refresh_schedule.py`.
+- Scheduler je čist, izolovan i ne menja postojeći production worker.
+- Na osnovu `now` i `kickoff_at` vraća da li je fixture podoban za pre-match refresh, odgovarajući interval i oznaku za završnu closing capturu.
+- Implementirani prozori su: 24h, 12h, 6h, 2h i 30min, uz posebno označavanje poslednjih 15 minuta.
+- Fixture-i nakon kickoff-a, bez timezone-aware datuma ili izvan 72-časovnog prozora se odbacuju.
+- Dodat je `tests/workers/test_quote_refresh_schedule.py` sa proverama svih granica, prošlih fixture-a, 72h lookahead-a i timezone validacije.
+- Testovi, Ruff i CI nisu pokrenuti u ovom okruženju.
+- Commitovi: `402127765e4ba39cac7a594b10bc7ac03427b15e`, `b678d6b31bbc00454f1b989179517eb87c19a062`.
