@@ -32,7 +32,7 @@ class DiscoveredHistoryQuotePollingJob:
         discovery: ScopedFixtureDiscoveryPort,
         *,
         clock: Callable[[], datetime] | None = None,
-        lookahead: timedelta = timedelta(hours=24),
+        lookahead: timedelta = timedelta(hours=72),
     ) -> None:
         if lookahead <= timedelta(0):
             raise ValueError("lookahead must be positive")
@@ -69,7 +69,7 @@ class DiscoveredHistoryQuotePollingJob:
                 continue
             try:
                 fixture_id = int(provider_fixture_id)
-            except ValueError:
+            except (TypeError, ValueError):
                 continue
             if fixture_id <= 0 or fixture_id in candidates:
                 continue
