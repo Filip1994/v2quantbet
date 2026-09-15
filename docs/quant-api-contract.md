@@ -72,6 +72,47 @@ A static helper returning `Counter[int]`, counting every appearance of each team
 
 ## Responsibility boundary
 
+### Canonical selection bridge
+
+`h2h.quant.market_probability.model_probability_for_selection(probabilities, *,
+market, selection) -> float` selects the probability for canonical `Market` and
+`Selection` enum instances:
+
+| Canonical pair | Consumed model probability |
+| --- | --- |
+| `OU_25 / OVER` | `OVER_2_5` |
+| `OU_25 / UNDER` | `UNDER_2_5` |
+| `BTTS / YES` | `BTTS_YES` |
+| `BTTS / NO` | `1.0 - BTTS_YES` |
+
+BTTS NO is bridge-derived under the normalized model probability contract, not a
+new Dixon-Coles output key. Model mathematics and the three public output keys
+remain unchanged. The bridge is imported from its own module; existing package
+exports remain unchanged.
+
+The input must be a `collections.abc.Mapping`. Only the consumed scalar is checked:
+it must be a `numbers.Real` other than bool, finite and in `[0, 1]`. Integers at the
+endpoints and real numeric scalars are accepted and the result is a Python float.
+No string coercion, clipping, rounding, renormalization or missing-value fallback
+is performed. Input is not mutated; unrelated keys need not be present or valid.
+
+Wrong input/enum/scalar types raise `TypeError`. Unsupported canonical pairs,
+missing required keys, non-finite or out-of-range probabilities raise `ValueError`.
+There is no new exception hierarchy. BTTS NO validates YES before complementing it.
+
+The caller must associate the model output with the quote's correct fixture and
+home/away teams. The mapping contains no fixture identity and cannot prove this
+association. This bridge performs no odds evaluation, acceptance, de-vig,
+bookmaker filtering, risk/stake calculation, eligibility, registration or publication.
+
+Tests: `tests/quant/test_market_probability.py` covers mappings/errors, a hand-set
+normalized matrix through the existing `score_matrix` seam, and all four mappings
+composed with `evaluate_value()`. The composition fixture isolates aggregation;
+it does not fit a model or establish predictive validity, calibration, profitability
+or betting edge.
+
+### Existing layer responsibilities
+
 - The API/domain layer validates external payloads, provider formats, authentication, and bookmaker-specific fields.
 - An adapter converts validated external data into the record shape required by `fit`.
 - The quant layer performs model fitting and probability calculations.

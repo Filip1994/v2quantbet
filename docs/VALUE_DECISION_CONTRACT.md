@@ -131,3 +131,29 @@ Coverage: `tests/decisions/test_pick_eligibility.py` and
 `tests/use_cases/test_register_pick.py`, together with existing valuation and
 registration tests. Targeted: 39 passed. Ruff: all checks passed. Full suite:
 336 passed, 6 PostgreSQL integration tests skipped, 0 failed, 0 errors.
+
+## 10. Deterministic probability-selection bridge — 2026-09-15
+
+The numerical selection portion of model-to-quote orchestration is now implemented
+by `h2h.quant.market_probability.model_probability_for_selection()`. Pass model
+market probabilities with `market=quote.market` and `selection=quote.selection`,
+then pass the returned float to unchanged `evaluate_value(quote, probability)`.
+The exact mapping and error contract are documented in `quant-api-contract.md`.
+
+BTTS NO is derived as `1.0 - validated BTTS_YES`. Dixon-Coles still produces only
+`OVER_2_5`, `UNDER_2_5`, and `BTTS_YES`. The bridge validates only the selected input;
+it does not evaluate odds or produce an eligibility decision. Fixture/model-result
+association remains a caller precondition. Complete production orchestration,
+acceptance policy and full provenance remain unimplemented; earlier statements
+about missing orchestration must not be read as saying this mapper is absent.
+
+Verification on branch `codex/model-probability-bridge`, base
+`172d0a021ee7e6eacb7910ce814b34e2c9b964ea`:
+
+- Focused tests: `uv run python -m pytest tests/quant tests/domain/test_canonical_quote.py tests/domain/test_value_pick.py` — 124 passed, including 72 new cases.
+- `uv run python -m ruff check .` — all checks passed.
+- Full local `uv run python -m pytest`, once — 429 passed, 15 PostgreSQL integration tests skipped, zero failed/errors (444 collected).
+- Both pytest commands used separate external `--basetemp` directories and an external cache. No external infrastructure was provisioned. PR CI results are reported separately after observing the run.
+
+These tests verify deterministic mapping/formulas only, not a production betting
+strategy, predictive validity, calibration, profitability or betting edge.
