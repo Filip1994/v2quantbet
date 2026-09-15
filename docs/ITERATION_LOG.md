@@ -62,8 +62,8 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Додат је `docs/DATA_STORAGE_ARCHITECTURE.md`.
 - Дефинисано је да је PostgreSQL једини извор истине за структуриране QuantBet пословне податке.
 - QuantBet application service је compute/runtime слој; његов локални filesystem, RAM, логови и генерисани фајлови нису source of truth.
-- Durable Volume је дефинисан као секундарно file storage место за rebuildable cache, велике артефакте и export-е, уз правила за provenance и checksum када су потребни.
-- Документовано је да Durable Volume није backup PostgreSQL-а и да SQLite није део циљане production архитектуре.
+- Durable Barrel је дефинисан као секундарно file storage место за rebuildable cache, велике артефакте и export-е, уз правила за provenance и checksum када су потребни.
+- Документовано је да Durable Barrel није backup PostgreSQL-а и да SQLite није део циљане production архитектуре.
 - Тестови, CI, backup/restore и production worker startup нису потврђени овом документационом изменом.
 - Commit: `70eed0e8458331a26644d7d843a487e8a0b9808b`.
 
@@ -74,3 +74,12 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dependency promena je commitovana i pushovana na `main` kao `8daf196`.
 - `docs/DATA_STORAGE_ARCHITECTURE.md` je ispravljen tako da koristi tačan Railway termin **Durable Barrel** umesto prethodnog pogrešnog naziva Durable Volume.
 - Ova dokumentaciona korekcija je commitovana kao `16d2572`.
+
+## 2026-09-15T05:00:00+02:00 — Kooperativno gašenje worker runtime-a
+
+- Ažuriran je `src/h2h/workers/runtime.py`.
+- Dodat je `should_stop` predicate kako bi production supervisor mogao kontrolisano da zaustavi worker pre sledeće iteracije.
+- Postojeće ponašanje je zadržano: bez prosleđenog predicate-a runtime nastavlja rad kao ranije, a spoljašnji signal i dalje može prekinuti proces.
+- Dodat je test koji proverava da se nakon aktiviranja stop uslova ne pokreće naredna iteracija.
+- Testovi i Ruff nisu pokrenuti u ovom okruženju.
+- Commitovi: `909592dfbad80ffd019af5adaafad977d0560b8f`, `aa91ada060913d6e6005d27016a757bb826a0ebe`.
