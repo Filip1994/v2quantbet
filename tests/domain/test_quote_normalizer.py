@@ -12,7 +12,7 @@ def payload(**overrides):
     value = {
         "fixture_id": "fixture-1",
         "bookmaker_id": 8,
-        "bookmaker_name": "Example Bookmaker",
+        "bookmaker_name": "Bet365",
         "market": "OU_25",
         "selection": "OVER",
         "odd": 1.95,
@@ -28,6 +28,7 @@ def test_normalize_quote_maps_supported_market_and_selection() -> None:
 
     assert quote.fixture_id == "fixture-1"
     assert quote.bookmaker_id == 8
+    assert quote.bookmaker_name == "bet365"
     assert quote.market is Market.OU_25
     assert quote.selection is Selection.OVER
     assert quote.odd == 1.95
@@ -67,6 +68,16 @@ def test_normalize_quote_rejects_missing_required_field() -> None:
 
     with pytest.raises(QuoteNormalizationError, match="fixture_id"):
         normalize_quote(value)
+
+
+def test_normalize_quote_rejects_unsupported_bookmaker() -> None:
+    with pytest.raises(QuoteNormalizationError, match="unsupported bookmaker"):
+        normalize_quote(payload(bookmaker_id=999, bookmaker_name="Unknown"))
+
+
+def test_normalize_quote_rejects_bookmaker_id_name_mismatch() -> None:
+    with pytest.raises(QuoteNormalizationError, match="does not match"):
+        normalize_quote(payload(bookmaker_id=8, bookmaker_name="1xbet"))
 
 
 def test_normalize_quote_reuses_canonical_quote_validation() -> None:
