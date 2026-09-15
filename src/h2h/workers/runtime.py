@@ -30,12 +30,21 @@ class WorkerRuntime:
         self.job()
 
     def run_forever(self) -> None:
-        """Run until the shutdown predicate returns true or an external signal stops it."""
+        """Run until the shutdown predicate returns true."""
         while not self.should_stop():
             self.run_once()
             self.sleep(self.interval_seconds)
 
 
-def run_worker(job: Job, *, interval_seconds: float = 60.0) -> None:
-    """Convenience entrypoint for a production process supervisor."""
-    WorkerRuntime(job=job, interval_seconds=interval_seconds).run_forever()
+def run_worker(
+    job: Job,
+    *,
+    interval_seconds: float = 60.0,
+    should_stop: StopPredicate = lambda: False,
+) -> None:
+    """Run a job until the supplied cooperative shutdown predicate is true."""
+    WorkerRuntime(
+        job=job,
+        interval_seconds=interval_seconds,
+        should_stop=should_stop,
+    ).run_forever()
