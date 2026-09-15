@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from h2h.odds.http import TransportError, TransportResponseError
+from h2h.odds.http import TransportError, TransportRateLimitError, TransportResponseError
 from h2h.odds.retry import RetryingJsonTransport
 
 
@@ -16,6 +16,26 @@ def test_retries_transient_errors_with_exponential_backoff() -> None:
     assert result == {"response": []}
     assert transport.get_json.call_count == 2
     sleeper.assert_called_once_with(0.5)
+
+
+def test_retries_rate_limit_using_retry_after_delay() -> None:
+    transport = Mock()
+    transport.get_json.side_effect = [
+        TransportRateLimitError("limited", retry_after=4.0),
+        {"response": []},
+    ]
+    sleeper = Mock()
+
+    result = RetryingJsonTransport(
+        transport,
+        max_attempts=3,
+        backoff_seconds=0.5,
+        sleeper=sleeper,
+    ).get_json("url")
+
+    assert result == {"response": []}
+    assert transport.get_json.call_count == 2
+    sleeper.assert_called_once_with(4.0)
 
 
 def test_does_not_retry_invalid_provider_response() -> None:
