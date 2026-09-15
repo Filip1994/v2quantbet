@@ -105,7 +105,7 @@ class DiscoveredHistoryQuotePollingJob:
                 # Do not leave a future scheduled slot or a known-kickoff marker
                 # that would suppress the retry.
                 self._known_kickoffs.pop(fixture_id, None)
-                self._scheduler.remove(fixture_id)
+                self._scheduler.remove(fixture_id=fixture_id)
                 continue
             self._scheduler.mark_refreshed(fixture_id=fixture_id, now=start_at)
         return total
