@@ -66,11 +66,12 @@ def test_ignores_missing_or_invalid_provider_fixture_ids() -> None:
 
 
 def test_requires_timezone_aware_clock() -> None:
+    naive_now = datetime(2026, 9, 15, 12, tzinfo=UTC).replace(tzinfo=None)
     job = DiscoveredHistoryQuotePollingJob(
         Mock(),
         Mock(),
         Mock(),
-        clock=lambda: datetime(2026, 9, 15, 12),
+        clock=lambda: naive_now,
     )
 
     try:
