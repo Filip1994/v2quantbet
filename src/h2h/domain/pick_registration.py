@@ -1,6 +1,6 @@
 """Immutable registration record for a published value pick."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -23,6 +23,7 @@ class PickRegistration:
     value_pick: ValuePick
     registered_at: datetime
     status: PickStatus = PickStatus.REGISTERED
+    eligibility_decision_id: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not isinstance(self.pick_id, str):
@@ -35,6 +36,11 @@ class PickRegistration:
             raise ValueError("registered_at must be timezone-aware")
         if not isinstance(self.status, PickStatus):
             raise TypeError("status must be a PickStatus")
+        if self.eligibility_decision_id is not None:
+            if not isinstance(self.eligibility_decision_id, str):
+                raise TypeError("eligibility_decision_id must be a string")
+            if not self.eligibility_decision_id.strip():
+                raise ValueError("eligibility_decision_id must not be empty")
 
     @property
     def fixture_id(self) -> str:
