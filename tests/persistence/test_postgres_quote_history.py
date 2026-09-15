@@ -48,19 +48,24 @@ class FakeCursor:
         self.connection.executed.append((sql, params))
         self.result = None
         self.rows = []
-        if sql.startswith("SELECT 1 FROM quote_series"):
-            self.result = (1,) if params[0] in self.connection.series_by_id else None
+        if sql.startswith("SELECT series_id FROM quote_series WHERE series_id = ANY"):
+            self.rows = [
+                (series_id,)
+                for series_id in params[0]
+                if series_id in self.connection.series_by_id
+            ]
         elif "FROM quote_series WHERE series_id" in sql:
             self.result = self.connection.series_by_id.get(params[0])
         elif "FROM quote_series WHERE fixture_id" in sql:
-            self.rows = [
-                row
-                for row in self.connection.series_rows
-                if row[1] == params[0]
-                and row[2] == params[1]
-                and row[3] == params[2]
-                and row[4] == params[3]
-            ]
+            self.rows = [row for row in self.connection.series_rows if row[1] == params[0]]
+            if len(params) == 4:
+                self.rows = [
+                    row
+                    for row in self.rows
+                    if row[2] == params[1]
+                    and row[3] == params[2]
+                    and row[4] == params[3]
+                ]
             self.result = self.rows[0] if self.rows else None
         elif "FROM quote_snapshots WHERE snapshot_id" in sql:
             stored = self.connection.snapshots_by_id.get(params[0])
@@ -70,6 +75,18 @@ class FakeCursor:
                 self.result = (params[0], *stored)
             else:
                 self.result = stored
+        elif "FROM quote_snapshots WHERE series_id = %s AND observed_at" in sql:
+            self.result = next(
+                (
+                    row
+                    for row in self.connection.snapshot_rows
+                    if row[1] == params[0]
+                    and row[3] == params[1]
+                    and row[4] == params[2]
+                    and row[5] == params[3]
+                ),
+                None,
+            )
         elif "FROM quote_snapshots WHERE series_id" in sql:
             self.rows = [row for row in self.connection.snapshot_rows if row[1] == params[0]]
         elif sql.startswith("INSERT INTO quote_series"):
@@ -242,7 +259,7 @@ def test_append_snapshots_rejects_conflicting_snapshot() -> None:
     connection.snapshots_by_id[snapshot.snapshot_id] = (
         snapshot.series_id, 2.20, snapshot.observed_at, snapshot.captured_at, snapshot.source
     )
-    with pytest.raises(QuoteHistoryConflictError, match="conflicting observation"):
+    with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
         repository(connection).append_snapshots((snapshot,))
 
 
