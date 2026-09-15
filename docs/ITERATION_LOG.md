@@ -92,9 +92,9 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Lokalni `pytest` i Ruff nisu pokrenuti u ovom okruženju; CI treba da potvrdi promenu.
 - Commitovi: `6c9fa851f853e87ddfa77fc20e1b66b4c38d25be`, `31c0cdb794f46d6fe59212475c03f2eacf07007`.
 
-## 2026-09-15T06:30:00+02:00 — Izolacija grešaka po fixture-u u discovery worker-u
+## 2026-09-15T06:30:00+02:00 — Изолација грешака по fixture-у у discovery worker-у
 
-- Ažuriran je `src/h2h/workers/discovered_history_quote_polling.py`.
+- Ажуриран је `src/h2h/workers/discovered_history_quote_polling.py`.
 - Greška pri provider fetch-u ili ingestion-u sada se loguje sa traceback-om i ne prekida obradu ostalih fixture-a u istom ciklusu.
 - Dodat je test `test_continues_after_fixture_failure`.
 - Lokalna verifikacija za ovu izmenu još nije izvršena; potrebno je pokrenuti `uv run pytest` i `uv run ruff check .`.
@@ -109,3 +109,20 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Dodat je `tests/test_bookmaker_policy.py` sa proverama dozvoljenih, nedozvoljenih, praznih i ne-string identifikatora.
 - Lokalni testovi, Ruff i CI nisu pokrenuti u ovom okruženju.
 - Commitovi: `08005a503b34033ca153decf24cf01ae7ab237e9`, `83f20660ca4df5ef98e460a5cb0ecbac3298e069`.
+
+## 2026-09-15T09:30:00+02:00 — Usvojena konzervativna politika quote refresh-a
+
+- Ažuriran je `docs/architecture.md`.
+- Dokumentovana je ugovorena, konzervativna frekvencija osvežavanja kvota:
+  - discovery do 72 sata unapred, približno na 15 minuta;
+  - T−72h do T−48h: jednom dnevno;
+  - T−48h do T−24h: na 12 sati;
+  - T−24h do T−6h: na 6 sati;
+  - T−6h do T−2h: na 2 sata;
+  - T−2h do kickoff-a: na 30 minuta;
+  - T−15 minuta: posebna završna/closing captura.
+- Naglašeno je da se quote refresh radi selektivno, samo za relevantne fixture-e, markete i dozvoljene bookmaker-e.
+- Discovery ne sme automatski da pokreće kompletnu quote kolekciju za svaki pronađeni fixture.
+- Prethodni globalni polling od 60 sekundi nije usvojena politika.
+- Ovo je dokumentaciona odluka; implementacija cadence scheduler-a, testovi i CI još nisu potvrđeni.
+- Commit: `de6d9caa2b01baade472c73956c3ff82b1aa5f79`.
