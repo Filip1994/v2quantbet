@@ -12,7 +12,7 @@ def payload(selection: str, *, market: str = "OU_25") -> dict[str, object]:
     return {
         "fixture_id": "fixture-1",
         "bookmaker_id": 8,
-        "bookmaker_name": "Example Bookmaker",
+        "bookmaker_name": "Bet365",
         "market": market,
         "selection": selection,
         "odd": 1.95,

@@ -83,12 +83,16 @@ def test_adapts_api_football_btts_no_selection(adapter: ApiFootballQuoteAdapter)
     assert quote.odd == 1.62
 
 
-@pytest.mark.parametrize("odd", [2.2, 2, "2.20", " 2.20 "])
+@pytest.mark.parametrize(
+    ("odd", "expected_odd"),
+    [(2.2, 2.2), (2, 2.0), ("2.20", 2.2), (" 2.20 ", 2.2)],
+)
 def test_accepts_valid_numeric_odd_forms(
     adapter: ApiFootballQuoteAdapter,
     odd: object,
+    expected_odd: float,
 ) -> None:
-    assert adapter.adapt(payload(odd=odd)).odd == 2.2
+    assert adapter.adapt(payload(odd=odd)).odd == expected_odd
 
 
 @pytest.mark.parametrize("odd", [True, "", "not-a-number", "nan", "inf", float("nan"), float("inf")])

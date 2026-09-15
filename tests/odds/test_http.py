@@ -57,5 +57,5 @@ def test_timeout_is_mapped() -> None:
 
 
 def test_timeout_must_be_positive() -> None:
-    with pytest.raises(ValueError, match="greater than zero"):
+    with pytest.raises(ValueError, match="positive number"):
         UrllibJsonTransport().get_json("https://example.test/odds", timeout=0)

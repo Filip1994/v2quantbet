@@ -12,7 +12,7 @@ def payload(**overrides):
     value = {
         "fixture_id": "fixture-1",
         "bookmaker_id": 8,
-        "bookmaker_name": "Example Bookmaker",
+        "bookmaker_name": "Bet365",
         "market": "OU_25",
         "selection": "OVER",
         "odd": 1.95,

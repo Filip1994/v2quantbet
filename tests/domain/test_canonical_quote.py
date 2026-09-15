@@ -90,8 +90,8 @@ def test_quote_is_immutable():
         quote.odd = 2.0
 
 
-def test_unsupported_market_is_rejected():
-    with pytest.raises(ValueError):
+def test_untyped_market_is_rejected():
+    with pytest.raises(TypeError, match="market must be a Market"):
         make_quote(market="CORRECT_SCORE")
 
 

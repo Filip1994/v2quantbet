@@ -12,24 +12,33 @@ from h2h.persistence.quote_history import (
 UTC = timezone.utc
 
 
-def make_series(series_id: str = "series-1", fixture_id: str = "fixture-1") -> QuoteSeries:
+def make_series(
+    series_id: str = "series-1",
+    fixture_id: str = "fixture-1",
+    selection: Selection = Selection.OVER,
+) -> QuoteSeries:
     return QuoteSeries(
         series_id=series_id,
         fixture_id=fixture_id,
         bookmaker_id=10,
         market=Market.OU_25,
-        selection=Selection.OVER,
+        selection=selection,
         created_at=datetime(2026, 9, 14, 12, 0, tzinfo=UTC),
     )
 
 
-def make_snapshot(snapshot_id: str, odd: float = 2.10, series_id: str = "series-1") -> QuoteSnapshot:
+def make_snapshot(
+    snapshot_id: str,
+    odd: float = 2.10,
+    series_id: str = "series-1",
+    captured_at: datetime = datetime(2026, 9, 14, 12, 0, 1, tzinfo=UTC),
+) -> QuoteSnapshot:
     return QuoteSnapshot(
         snapshot_id=snapshot_id,
         series_id=series_id,
         odd=odd,
         observed_at=datetime(2026, 9, 14, 12, 0, tzinfo=UTC),
-        captured_at=datetime(2026, 9, 14, 12, 0, 1, tzinfo=UTC),
+        captured_at=captured_at,
         source="api-football",
     )
 
@@ -53,7 +62,11 @@ def test_append_snapshots_preserves_history_and_is_idempotent() -> None:
     repository = InMemoryQuoteHistoryRepository()
     repository.ensure_series(make_series())
     first = make_snapshot("snapshot-1", odd=2.10)
-    second = make_snapshot("snapshot-2", odd=2.25)
+    second = make_snapshot(
+        "snapshot-2",
+        odd=2.25,
+        captured_at=datetime(2026, 9, 14, 12, 0, 2, tzinfo=UTC),
+    )
     repository.append_snapshots([first, second])
     repository.append_snapshots([first])
     assert repository.snapshots_for_series("series-1") == (first, second)
@@ -64,7 +77,7 @@ def test_append_snapshots_preserves_history_and_is_idempotent() -> None:
 def test_snapshots_for_series_filters_other_series() -> None:
     repository = InMemoryQuoteHistoryRepository()
     repository.ensure_series(make_series("series-1"))
-    repository.ensure_series(make_series("series-2"))
+    repository.ensure_series(make_series("series-2", selection=Selection.UNDER))
     first = make_snapshot("snapshot-1", series_id="series-1")
     other = make_snapshot("snapshot-2", series_id="series-2")
     repository.append_snapshots([first, other])
@@ -85,7 +98,11 @@ def test_append_snapshots_is_atomic_on_conflict() -> None:
     repository.append_snapshots([first])
     with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
         repository.append_snapshots([
-            make_snapshot("snapshot-2", odd=2.30),
+            make_snapshot(
+                "snapshot-2",
+                odd=2.30,
+                captured_at=datetime(2026, 9, 14, 12, 0, 2, tzinfo=UTC),
+            ),
             make_snapshot("snapshot-1", odd=2.40),
         ])
     assert repository.snapshots_for_series("series-1") == (first,)

@@ -11,8 +11,8 @@ def test_ingests_api_football_response_into_canonical_quotes() -> None:
                 "fixture": {"id": 1493129},
                 "bookmakers": [
                     {
-                        "id": 7,
-                        "name": "William Hill",
+                        "id": 8,
+                        "name": "Bet365",
                         "bets": [
                             {
                                 "id": 8,
@@ -34,7 +34,8 @@ def test_ingests_api_football_response_into_canonical_quotes() -> None:
 
     assert len(quotes) == 2
     assert quotes[0].fixture_id == "1493129"
-    assert quotes[0].bookmaker_name == "William Hill"
+    assert quotes[0].bookmaker_id == 8
+    assert quotes[0].bookmaker_name == "Bet365"
     assert quotes[0].market is Market.BTTS
     assert quotes[0].selection is Selection.YES
     assert quotes[0].odd == 2.20
