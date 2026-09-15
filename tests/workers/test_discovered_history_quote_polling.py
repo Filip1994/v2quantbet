@@ -5,7 +5,7 @@ from h2h.domain.fixture import Fixture
 from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
 
 
-def fixture(provider_fixture_id: str | None) -> Fixture:
+def fixture(provider_fixture_id: str | None, *, kickoff_at: datetime | None = None) -> Fixture:
     return Fixture(
         fixture_id=f"api-football:{provider_fixture_id or 'missing'}",
         home_team="Home FC",
@@ -13,7 +13,7 @@ def fixture(provider_fixture_id: str | None) -> Fixture:
         competition_id=39,
         competition_name="Premier League",
         country="England",
-        kickoff_at=datetime(2026, 9, 15, 18, tzinfo=UTC),
+        kickoff_at=kickoff_at or datetime(2026, 9, 15, 18, tzinfo=UTC),
         provider="api-football",
         provider_fixture_id=provider_fixture_id,
     )
@@ -45,6 +45,30 @@ def test_discovers_and_polls_unique_provider_fixture_ids() -> None:
         call(fixture_id=42),
         call(fixture_id=7),
     ]
+
+
+def test_does_not_refresh_known_fixture_before_next_due_time() -> None:
+    now = datetime(2026, 9, 15, 12, tzinfo=UTC)
+    discovery = Mock()
+    discovery.discover.return_value = [
+        fixture("42", kickoff_at=datetime(2026, 9, 17, 12, tzinfo=UTC))
+    ]
+    source = Mock()
+    source.fetch_quotes.return_value = ()
+    ingestion = Mock()
+    ingestion.ingest.return_value = 1
+    current_time = [now]
+    job = DiscoveredHistoryQuotePollingJob(
+        source,
+        ingestion,
+        discovery,
+        clock=lambda: current_time[0],
+    )
+
+    assert job.run_once() == 1
+    current_time[0] = now + timedelta(hours=1)
+    assert job.run_once() == 0
+    assert source.fetch_quotes.call_count == 1
 
 
 def test_continues_after_fixture_failure() -> None:
