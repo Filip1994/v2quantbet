@@ -129,7 +129,7 @@ The mathematical contracts should be documented incrementally alongside that ver
 | Value decision service | Key implementation gap |
 | Immutable pick registration | Key implementation gap |
 | Quote lifecycle and closing reference | In progress |
-| PostgreSQL foundation | In progress; real-DB verification remains |
+| PostgreSQL foundation | Unit-level baseline green; six real-DB integration tests remain unexecuted |
 | End-to-end bulletin-to-kickoff flow | Not yet demonstrated |
 | Dashboard | Not currently a blocker |
 
@@ -179,16 +179,27 @@ Relevant implementation commits:
 - `b13c1518b922f1359762fd5ffa94206baa44c53a`
 - `edcf42eae28213c442a28edb197014ae7f23321e`
 
-### Verification status
+### Verification status after Codex remediation
 
-- Tests were expanded alongside the relevant changes, including validation, malformed payload, transport, natural-key conflict, and PostgreSQL integration coverage.
-- **Local test execution has not been performed in this environment.** Therefore, no local green-test claim is made.
-- PostgreSQL integration remains dependent on a real PostgreSQL service; the CI service configuration was added, but CI execution still needs to be checked explicitly.
+Codex independently executed the repository in a reproducible local environment and triaged the previously observed failures. The remediation was pushed through baseline commit `15ca1b5`.
+
+- `uv run python -m ruff check .` → **All checks passed**.
+- Targeted verification → **101 passed, 6 skipped**.
+- Full pytest verification → **306 passed, 6 skipped, 0 failed, 0 errors**.
+- The six skipped tests are the real PostgreSQL integration tests and remain unverified because no PostgreSQL service was available in that environment.
+- The previous 18 failures were resolved primarily as stale tests, fixtures, and test doubles following earlier contract changes.
+- One production/API-boundary defect was confirmed and fixed: `ApiFootballQuoteAdapter` now preserves `UnsupportedBookmakerError` instead of accidentally wrapping it through the broader `ValueError` handler. Production fix commit: `2e5ac1d25a8a13ed144a53f3593e2a19aaa20722`.
+- The Codex remediation and documentation sequence ends at `15ca1b5`.
+
+### Audit-side review of the remediation
+
+The post-remediation diff was reviewed against the previous baseline. The change set is appropriately constrained: test expectations/fixtures/doubles, verification documentation, and one minimal production adapter exception-boundary fix. No evidence from this remediation justifies reopening the bookmaker mapping, canonical quote identity, quote-history natural identity, or Dixon–Coles mathematics.
+
+`15ca1b5` is therefore accepted as the new clean non-PostgreSQL verification baseline for continuation of the audit. This label is deliberately limited: it does not claim real-PostgreSQL parity, predictive validity, calibration, profitability, or end-to-end betting eligibility correctness.
 
 ### Open verification items
 
-1. Run the complete test suite in CI or a reproducible local environment.
-2. Confirm the PostgreSQL service job actually passes integration tests.
-3. Add/verify explicit `URLError` transport coverage.
-4. Complete the fixture-discovery/client timezone audit.
-5. Continue with the provider-neutral value-eligibility boundary and its rejection-code contract.
+1. Execute the six PostgreSQL integration tests against a real PostgreSQL 16 service when an appropriate environment is available.
+2. Continue with a read-only trace of the provider-neutral production decision path: model probability → market probability → value evaluation → eligibility → pick registration.
+3. Before implementing eligibility, establish from existing code/tests/docs exactly which rules are already contractual and which thresholds/policies are genuinely unspecified.
+4. Do not introduce new thresholds, hardening, or mathematical changes merely to fill an unspecified design gap.
