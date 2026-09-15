@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -10,6 +11,48 @@ from h2h.persistence.quote_history import (
 )
 
 UTC = timezone.utc
+
+
+@pytest.mark.parametrize("new_id", [False, True])
+@pytest.mark.parametrize("later_capture", [False, True])
+def test_semantic_replay_preserves_original_snapshot(new_id, later_capture):
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    first = make_snapshot("snapshot-1")
+    replay = replace(
+        first,
+        snapshot_id="replay" if new_id else first.snapshot_id,
+        captured_at=first.captured_at + timedelta(seconds=int(later_capture)),
+    )
+    repository.append_snapshots([first])
+    repository.append_snapshots([replay])
+    assert repository.snapshots_for_series(first.series_id) == (first,)
+    assert repository.get_snapshot(first.snapshot_id) == first
+    if new_id:
+        assert repository.get_snapshot(replay.snapshot_id) is None
+
+
+@pytest.mark.parametrize("field", ["observed_at", "source"])
+def test_distinct_semantic_observations_are_preserved(field):
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    first = make_snapshot("snapshot-1")
+    value = first.observed_at + timedelta(seconds=1) if field == "observed_at" else "other-source"
+    second = replace(first, snapshot_id="second", **{field: value})
+    repository.append_snapshots([first, second])
+    assert repository.snapshots_for_series(first.series_id) == (first, second)
+
+
+@pytest.mark.parametrize("field", ["odd", "observed_at", "source"])
+def test_snapshot_id_cannot_change_observation(field):
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    first = make_snapshot("snapshot-1")
+    value = {"odd": 2.5, "observed_at": first.observed_at + timedelta(seconds=1), "source": "other"}[field]
+    repository.append_snapshots([first])
+    with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
+        repository.append_snapshots([replace(first, **{field: value})])
+    assert repository.get_snapshot(first.snapshot_id) == first
 
 
 def make_series(
@@ -32,12 +75,13 @@ def make_snapshot(
     odd: float = 2.10,
     series_id: str = "series-1",
     captured_at: datetime = datetime(2026, 9, 14, 12, 0, 1, tzinfo=UTC),
+    observed_at: datetime = datetime(2026, 9, 14, 12, 0, tzinfo=UTC),
 ) -> QuoteSnapshot:
     return QuoteSnapshot(
         snapshot_id=snapshot_id,
         series_id=series_id,
         odd=odd,
-        observed_at=datetime(2026, 9, 14, 12, 0, tzinfo=UTC),
+        observed_at=observed_at,
         captured_at=captured_at,
         source="api-football",
     )
@@ -65,6 +109,7 @@ def test_append_snapshots_preserves_history_and_is_idempotent() -> None:
     second = make_snapshot(
         "snapshot-2",
         odd=2.25,
+        observed_at=datetime(2026, 9, 14, 12, 0, 1, tzinfo=UTC),
         captured_at=datetime(2026, 9, 14, 12, 0, 2, tzinfo=UTC),
     )
     repository.append_snapshots([first, second])
@@ -101,6 +146,7 @@ def test_append_snapshots_is_atomic_on_conflict() -> None:
             make_snapshot(
                 "snapshot-2",
                 odd=2.30,
+                observed_at=datetime(2026, 9, 14, 12, 0, 1, tzinfo=UTC),
                 captured_at=datetime(2026, 9, 14, 12, 0, 2, tzinfo=UTC),
             ),
             make_snapshot("snapshot-1", odd=2.40),
@@ -119,18 +165,32 @@ def test_append_snapshots_rejects_conflicting_duplicate_ids_in_same_batch() -> N
     assert repository.get_snapshot("snapshot-1") is None
 
 
-def test_append_snapshots_rejects_duplicate_natural_key_with_different_id() -> None:
+def test_append_snapshots_accepts_duplicate_natural_key_with_different_id() -> None:
     repository = InMemoryQuoteHistoryRepository()
     repository.ensure_series(make_series())
     repository.append_snapshots([make_snapshot("snapshot-1", odd=2.10)])
-    with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
-        repository.append_snapshots([make_snapshot("snapshot-2", odd=2.10)])
+    repository.append_snapshots([make_snapshot("snapshot-2", odd=2.10)])
+    assert repository.snapshots_for_series("series-1") == (make_snapshot("snapshot-1"),)
+    assert repository.get_snapshot("snapshot-2") is None
 
 
-def test_append_snapshots_rejects_duplicate_natural_key_with_same_idempotent_payload() -> None:
+def test_append_snapshots_rejects_changed_odd_for_semantic_identity() -> None:
     repository = InMemoryQuoteHistoryRepository()
     repository.ensure_series(make_series())
     first = make_snapshot("snapshot-1", odd=2.10)
     repository.append_snapshots([first])
     with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
-        repository.append_snapshots([make_snapshot("snapshot-2", odd=2.10)])
+        repository.append_snapshots([make_snapshot("snapshot-2", odd=2.20)])
+
+
+def test_semantic_conflict_rolls_back_entire_batch():
+    repository = InMemoryQuoteHistoryRepository()
+    repository.ensure_series(make_series())
+    first = make_snapshot("snapshot-1")
+    repository.append_snapshots([first])
+    new = replace(first, snapshot_id="new", observed_at=first.observed_at + timedelta(seconds=1))
+    conflict = replace(first, snapshot_id="conflict", odd=2.5)
+    with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
+        repository.append_snapshots([new, conflict])
+    assert repository.snapshots_for_series(first.series_id) == (first,)
+    assert repository.get_snapshot(new.snapshot_id) is None

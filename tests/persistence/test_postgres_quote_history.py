@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,6 +9,51 @@ from h2h.persistence.postgres_quote_history import PostgreSQLQuoteHistoryReposit
 from h2h.persistence.quote_history import QuoteHistoryConflictError
 
 UTC = timezone.utc
+
+
+@pytest.mark.parametrize("new_id", [False, True])
+@pytest.mark.parametrize("later_capture", [False, True])
+def test_semantic_replay_preserves_original_snapshot(new_id, later_capture):
+    connection = FakeConnection()
+    seed_series(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+    first = make_snapshot()
+    replay = replace(
+        first,
+        snapshot_id="replay" if new_id else first.snapshot_id,
+        captured_at=first.captured_at + timedelta(seconds=int(later_capture)),
+    )
+    repository.append_snapshots([first])
+    repository.append_snapshots([replay])
+    assert repository.snapshots_for_series(first.series_id) == (first,)
+    assert repository.get_snapshot(first.snapshot_id) == first
+    if new_id:
+        assert repository.get_snapshot(replay.snapshot_id) is None
+
+
+@pytest.mark.parametrize("field", ["observed_at", "source"])
+def test_distinct_semantic_observations_are_preserved(field):
+    connection = FakeConnection()
+    seed_series(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+    first = make_snapshot()
+    value = first.observed_at + timedelta(seconds=1) if field == "observed_at" else "other-source"
+    second = replace(first, snapshot_id="second", **{field: value})
+    repository.append_snapshots([first, second])
+    assert repository.snapshots_for_series(first.series_id) == (first, second)
+
+
+@pytest.mark.parametrize("field", ["odd", "observed_at", "source"])
+def test_snapshot_id_cannot_change_observation(field):
+    connection = FakeConnection()
+    seed_series(connection)
+    repository = PostgreSQLQuoteHistoryRepository(connect=lambda: connection)
+    first = make_snapshot()
+    value = {"odd": 2.5, "observed_at": first.observed_at + timedelta(seconds=1), "source": "other"}[field]
+    repository.append_snapshots([first])
+    with pytest.raises(QuoteHistoryConflictError, match="snapshot ID"):
+        repository.append_snapshots([replace(first, **{field: value})])
+    assert repository.get_snapshot(first.snapshot_id) == first
 
 
 def make_series() -> QuoteSeries:
@@ -82,8 +128,7 @@ class FakeCursor:
                     for row in self.connection.snapshot_rows
                     if row[1] == params[0]
                     and row[3] == params[1]
-                    and row[4] == params[2]
-                    and row[5] == params[3]
+                    and row[5] == params[2]
                 ),
                 None,
             )
@@ -93,6 +138,12 @@ class FakeCursor:
             self.connection.series_by_id[params[0]] = params[1:]
             self.connection.series_rows.append((params[0], *params[1:]))
         elif sql.startswith("INSERT INTO quote_snapshots"):
+            # Control-flow double only: real SQL compatibility is tested in integration.
+            if any(
+                (row[1], row[3], row[5]) == (params[1], params[3], params[5])
+                for row in self.connection.snapshot_rows
+            ):
+                return
             self.connection.snapshots_by_id[params[0]] = params[1:]
             self.connection.snapshot_rows.append((params[0], *params[1:]))
 
@@ -265,3 +316,23 @@ def test_append_snapshots_rejects_conflicting_snapshot() -> None:
 
 def test_get_snapshot_returns_none_when_missing() -> None:
     assert repository(FakeConnection()).get_snapshot("missing") is None
+
+
+def test_changed_odd_conflicts_after_semantic_insert_noop():
+    connection = FakeConnection()
+    seed_series(connection)
+    first = seed_snapshot(connection)
+    with pytest.raises(QuoteHistoryConflictError, match="semantic quote identity"):
+        repository(connection).append_snapshots([replace(first, snapshot_id="replay", odd=2.5)])
+    assert repository(connection).snapshots_for_series(first.series_id) == (first,)
+
+
+def test_insert_and_lookup_use_three_column_semantic_key():
+    connection = FakeConnection()
+    seed_series(connection)
+    repository(connection).append_snapshots([make_snapshot()])
+    inserts = [sql for sql, _ in connection.executed if sql.startswith("INSERT INTO quote_snapshots")]
+    assert "ON CONFLICT (series_id, observed_at, source) DO NOTHING" in inserts[0]
+    lookups = [(sql, params) for sql, params in connection.executed if "AND observed_at" in sql]
+    assert "AND captured_at" not in lookups[0][0]
+    assert len(lookups[0][1]) == 3

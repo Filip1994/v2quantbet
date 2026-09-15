@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from h2h.domain.odds import CanonicalQuote, Market, Selection
-from h2h.persistence.quote_history import InMemoryQuoteHistoryRepository
+from h2h.persistence.quote_history import InMemoryQuoteHistoryRepository, QuoteHistoryConflictError
 from h2h.use_cases import QuoteHistoryIngestionService
 
 
@@ -47,7 +49,7 @@ def test_repeated_same_cycle_is_idempotent() -> None:
     assert len(repository.snapshots_for_series(series[0].series_id)) == 1
 
 
-def test_changed_odd_creates_new_snapshot_when_capture_changes() -> None:
+def test_changed_odd_conflicts_even_when_capture_changes() -> None:
     repository = InMemoryQuoteHistoryRepository()
     captures = iter(
         (
@@ -58,7 +60,11 @@ def test_changed_odd_creates_new_snapshot_when_capture_changes() -> None:
     service = QuoteHistoryIngestionService(repository, capture_clock=lambda: next(captures))
 
     service.ingest([make_quote(2.1)])
-    service.ingest([make_quote(2.2)])
+    with pytest.raises(QuoteHistoryConflictError, match="natural identity"):
+        service.ingest([make_quote(2.2)])
 
     series = repository.series_for_fixture("fixture-1")
-    assert len(repository.snapshots_for_series(series[0].series_id)) == 2
+    snapshots = repository.snapshots_for_series(series[0].series_id)
+    assert len(snapshots) == 1
+    assert snapshots[0].odd == 2.1
+    assert snapshots[0].captured_at == datetime(2026, 9, 15, 12, 1, tzinfo=UTC)

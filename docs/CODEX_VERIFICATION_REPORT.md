@@ -182,3 +182,70 @@ uv run python -m pytest --basetemp .verification-tmp/pytest
 The only remaining blocker is real PostgreSQL 16 execution.  The local pytest
 run also emitted a non-failing `PytestCacheWarning` because this environment
 cannot write `.pytest_cache`; it does not affect collection or test outcomes.
+
+## Observation-identity regression remediation — 2026-09-15
+
+Base: `c934d8f6791f5c03025f83cdeb20b42f52f3d861`.
+Branch: `codex/postgres-observation-identity`; reviewer approval required before merge.
+Implementation: `cea53a990c602c9d53d7a62ec64d8c62c92ef359`.
+
+Classification F was statically confirmed: migration 002 removes `captured_at`
+from snapshot uniqueness, but the regressed adapter still targeted four columns.
+The canonical identity is `(series_id, observed_at, source)`. Both repositories
+now use it, preserve original capture provenance on semantic replay, and reject
+changed odds/incompatible reused IDs. Migrations remain unchanged.
+
+This supersedes earlier claims above that capture-time-separated fixtures matched
+the documented snapshot identity. Those earlier runs did not verify the fully
+migrated database. Integration bootstrap now uses the normal migration runner,
+including 002, rather than manually executing only 001.
+
+Actual local executions (Python 3.11.16, pytest 9.1.1):
+
+| Execution | Actual result |
+| --- | --- |
+| Initial targeted persistence/migration tests | 44 passed, 4 setup errors: missing parent of external pytest basetemp; environment issue, not code failures |
+| Same targets after creating the parent directory | 48 passed |
+| Ruff before full run | All checks passed |
+| Full suite, once | 356 passed, 1 failed, 15 skipped, 0 errors; 372 collected |
+| Final targeted tests, including corrected ingestion test | 51 passed |
+| Final Ruff after test correction | All checks passed |
+
+The full-run failure was
+`tests/use_cases/test_quote_history.py::test_changed_odd_creates_new_snapshot_when_capture_changes`.
+It expected a changed odd at the same provider observation time to become a new
+row merely because capture time changed. The repository correctly raised
+`QuoteHistoryConflictError: conflicting observation for snapshot natural identity`
+from `append_snapshots()`, called by `QuoteHistoryIngestionService.ingest()`.
+This stale test was rewritten to expect conflict and preserve the first row.
+It passes in the final targeted run. The local full suite was NOT rerun; do not
+reinterpret its recorded result as an all-green final run.
+
+Commands:
+
+```text
+uv run python -m pytest tests/persistence/test_quote_history.py tests/persistence/test_postgres_quote_history.py tests/persistence/test_migrations.py --basetemp <external-temp>/targeted -o cache_dir=<external-temp>/cache
+uv run python -m ruff check .
+uv run python -m pytest --basetemp <external-temp>/full -o cache_dir=<external-temp>/cache
+uv run python -m pytest tests/persistence/test_quote_history.py tests/persistence/test_postgres_quote_history.py tests/persistence/test_migrations.py tests/use_cases/test_quote_history.py --basetemp <external-temp>/targeted-final -o cache_dir=<external-temp>/cache
+uv run python -m ruff check .
+```
+
+`<external-temp>` was `C:/Users/User/Documents/ChatGPT/fudbal/quantbet-observation-remediation`.
+Local `QUANTBET_TEST_DATABASE_URL` was unset and no PostgreSQL Windows service was
+found. No PostgreSQL/Docker provisioning or Railway operation was performed.
+All 15 local integration cases were skipped. Fake-cursor tests do not validate
+PostgreSQL constraint inference. Draft PR #2 uses the existing PostgreSQL 16 CI
+workflow; its observed result follows.
+
+### Real PostgreSQL CI verification
+
+On 2026-09-15 at 17:24 UTC, [CI run 35000997862](https://github.com/Filip1994/v2quantbet/actions/runs/35000997862)
+for draft PR #2 / implementation head `cea53a990c602c9d53d7a62ec64d8c62c92ef359`
+completed successfully. Job `104489067044` logs show PostgreSQL **16.15**, Python
+3.11.16, Ruff **All checks passed**, and **372 passed, 0 failed, 0 skipped, 0 errors**.
+All **15 real PostgreSQL integration cases passed**, including migration-chain
+and final-schema assertions, fresh insertion, semantic replay, conflicts and
+atomic rollback. This establishes the tested fully migrated PostgreSQL behavior;
+it does not establish concurrent-writer coverage or live Railway verification.
+The subsequent documentation-only commit does not alter the verified code/tests.

@@ -197,3 +197,16 @@ Ovaj dokument beleži manje korake rada na projektu, uključujući read-only pre
 - Full suite, jednom nakon ciljanih testova i Ruff-a: `uv run python -m pytest --basetemp .verification-tmp/pytest -o cache_dir=.verification-tmp/cache` -> **336 passed, 6 skipped, 0 failed, 0 errors** (342 prikupljena testa). Roditeljski temp direktorijum je napravljen pre testova; cache je usmeren u writable test direktorijum.
 - Šest PostgreSQL integration testova ostaje preskočeno; PostgreSQL nije provisionovan. CI nije pokretan ovim zadatkom.
 - Implementacioni commit: `09250378c27eec646862e9cba42af58cb239832f`.
+
+## 2026-09-15T19:23:10+02:00 — PostgreSQL observation-identity remediation
+
+- Base: `c934d8f6791f5c03025f83cdeb20b42f52f3d861`; review branch: `codex/postgres-observation-identity`. Main is not pushed or merged by this task.
+- Classification F: fully migrated PostgreSQL runtime incompatibility. Restored `(series_id, observed_at, source)` in repository conflict target/lookup and in-memory natural identity; migrations 001/002 unchanged.
+- `captured_at` is metadata, not immutable observation payload. Replay with same/different proposed ID or capture time preserves original row/ID/provenance; changed odd or incompatible reused ID conflicts.
+- Integration bootstrap uses `apply_migrations()` and checks the complete migration chain, 002, and final uniqueness. Coverage now has 15 real-DB cases; fake-cursor tests remain control-flow checks only.
+- Initial targeted run: 44 passed, 4 environment setup errors (missing external basetemp parent); after creating the parent: 48 passed. Ruff passed.
+- One local full run: 356 passed, 1 failed, 15 skipped, 0 errors. The stale ingestion test still expected new capture time to legitimize a changed odd. It was corrected without changing ingestion production code.
+- Final targeted run including ingestion: 51 passed; final Ruff passed. Full local suite not repeated.
+- No local PostgreSQL URL/service; no provisioning or Railway changes. Existing CI is requested through draft PR #2; actual CI result is recorded in `CODEX_VERIFICATION_REPORT.md`.
+- Implementation commit: `cea53a990c602c9d53d7a62ec64d8c62c92ef359`.
+- Existing PR CI subsequently passed: [run 35000997862](https://github.com/Filip1994/v2quantbet/actions/runs/35000997862), job `104489067044`, PostgreSQL 16.15. Actual logs: 372 passed, 0 failed, 0 skipped, 0 errors, including all 15 integration cases; Ruff passed. No live Railway verification or concurrent-writer claim. Documentation-only follow-up preserves this tested code/test content.
