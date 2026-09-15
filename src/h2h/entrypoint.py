@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import timedelta
+from time import monotonic
 from threading import Event
 
 from h2h.application import build_api_football_client
@@ -68,18 +69,21 @@ def main() -> None:
     lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 24.0)
 
     if manual_fixture_ids:
-        job = HistoryQuotePollingJob(source, application.service, manual_fixture_ids)
+        poll_job = HistoryQuotePollingJob(source, application.service, manual_fixture_ids)
         LOGGER.warning(
             "QUANTBET_FIXTURE_IDS is configured; using manual fixture allowlist instead of discovery"
         )
+        discovery_refresh = None
     else:
         discovery = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
-        job = DiscoveredHistoryQuotePollingJob(
+        discovered_job = DiscoveredHistoryQuotePollingJob(
             source,
             application.service,
             discovery,
             lookahead=timedelta(hours=lookahead_hours),
         )
+        poll_job = None
+        last_discovery_at: float | None = None
         LOGGER.info(
             "Starting discovery-driven worker: poll=%ss discovery=%ss lookahead=%sh",
             poll_interval,
@@ -87,21 +91,25 @@ def main() -> None:
             lookahead_hours,
         )
 
-    last_discovery_at: float | None = None
-    monotonic = __import__("time").monotonic
+        def discovery_refresh() -> None:
+            nonlocal last_discovery_at
+            now = monotonic()
+            if last_discovery_at is None or now - last_discovery_at >= discovery_interval:
+                total = discovered_job.run_once()
+                last_discovery_at = now
+                LOGGER.info("Discovery cycle persisted %s snapshots", total)
+            else:
+                LOGGER.debug(
+                    "Skipping discovery cycle; next refresh due in %.1fs",
+                    discovery_interval - (now - last_discovery_at),
+                )
 
     def run_cycle() -> None:
-        nonlocal last_discovery_at
-        now = monotonic()
-        if last_discovery_at is None or manual_fixture_ids or now - last_discovery_at >= discovery_interval:
-            if manual_fixture_ids:
-                total = job.run_once()
-            else:
-                total = job.run_once()
-            last_discovery_at = now
+        if poll_job is not None:
+            total = poll_job.run_once()
             LOGGER.info("Worker cycle persisted %s snapshots", total)
-        else:
-            LOGGER.debug("Skipping discovery cycle; next refresh due in %.1fs", discovery_interval - (now - last_discovery_at))
+            return
+        discovery_refresh()
 
     WorkerRuntime(
         job=run_cycle,
