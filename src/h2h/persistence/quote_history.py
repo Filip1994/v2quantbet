@@ -13,6 +13,17 @@ class QuoteHistoryRepository(Protocol):
         """Create a series or reject a conflicting definition."""
         ...
 
+    def find_series(
+        self,
+        *,
+        fixture_id: str,
+        bookmaker_id: int,
+        market: str,
+        selection: str,
+    ) -> QuoteSeries | None:
+        """Find a series by its stable natural identity."""
+        ...
+
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
         """Return registered quote series for one fixture in insertion order."""
         ...
@@ -51,8 +62,40 @@ class InMemoryQuoteHistoryRepository:
                     f"conflicting definition for series ID {series.series_id!r}"
                 )
             return
+        natural_match = self.find_series(
+            fixture_id=series.fixture_id,
+            bookmaker_id=series.bookmaker_id,
+            market=series.market.value,
+            selection=series.selection.value,
+        )
+        if natural_match is not None and natural_match != series:
+            raise QuoteHistoryConflictError(
+                "conflicting definition for quote series natural identity"
+            )
         self._series[series.series_id] = series
         self._series_order.append(series.series_id)
+
+    def find_series(
+        self,
+        *,
+        fixture_id: str,
+        bookmaker_id: int,
+        market: str,
+        selection: str,
+    ) -> QuoteSeries | None:
+        return next(
+            (
+                series
+                for series in self._series.values()
+                if (
+                    series.fixture_id == fixture_id
+                    and series.bookmaker_id == bookmaker_id
+                    and series.market.value == market
+                    and series.selection.value == selection
+                )
+            ),
+            None,
+        )
 
     def series_for_fixture(self, fixture_id: str) -> tuple[QuoteSeries, ...]:
         return tuple(
