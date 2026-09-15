@@ -2,46 +2,65 @@
 
 ## Status
 
-**Architecture decision confirmed.** Railway PostgreSQL is the target production database for QuantBet.
+**Implementation foundation complete; production hardening and final migration remain separate work.**
 
-This document defines the target and migration sequence only. It does not introduce the PostgreSQL implementation yet.
+Railway PostgreSQL is the target production database for QuantBet. The repository now contains:
+
+- PostgreSQL schema migration for immutable quote history;
+- `DATABASE_URL` configuration boundary;
+- PostgreSQL application composition and explicit migration hook;
+- `PostgreSQLQuoteHistoryRepository` for history-aware quote series and snapshots;
+- idempotent inserts using PostgreSQL conflict handling;
+- conflict detection for mismatched series or snapshot content;
+- isolated unit tests and a real-PostgreSQL integration-test scaffold.
+
+The real-PostgreSQL integration tests require `QUANTBET_TEST_DATABASE_URL` and have not been treated as passed unless executed against an actual PostgreSQL instance.
 
 ## Target architecture
 
 ```text
-QuoteRepository
-├── InMemoryQuoteRepository    # tests and local development
-└── PostgreSQLQuoteRepository  # Railway production
+Quote history contract
+├── InMemoryQuoteHistoryRepository       # tests and local development
+└── PostgreSQLQuoteHistoryRepository     # Railway production
 ```
 
-The provider-neutral `QuoteRepository` contract remains the boundary. Domain models, quote normalization, ingestion, deduplication and conflict semantics must not depend on PostgreSQL-specific types or APIs.
+The provider-neutral quote-history contract remains the boundary. Domain models, quote normalization, ingestion, deduplication and conflict semantics must not depend on PostgreSQL-specific types or APIs.
 
-SQLite is treated as an existing transitional adapter. It must not be deleted until the PostgreSQL adapter and its tests provide an equivalent supported path.
+SQLite is treated as an existing transitional adapter. It must not be deleted until all active consumers have migrated and the PostgreSQL path has passed the required verification.
 
 ## Target configuration
 
 - Production connection input: `DATABASE_URL`.
 - Credentials and connection details are supplied through Railway Variables/Secrets.
 - No database credentials are committed to the repository.
-- Local and CI tests must not require a live Railway database by default.
+- Local and CI unit tests must not require a live Railway database by default.
+- Integration tests may use `QUANTBET_TEST_DATABASE_URL` against an isolated PostgreSQL database.
 
-## Implementation sequence
+## Implemented sequence
 
-1. Review and freeze the current `QuoteRepository` contract and its behavioral guarantees.
-2. Define the PostgreSQL schema for canonical quote observations.
-3. Add migration files under `migrations/`.
-4. Add a PostgreSQL connection/configuration boundary using `DATABASE_URL`.
-5. Implement `PostgreSQLQuoteRepository` behind the existing contract.
-6. Preserve and test:
-   - idempotent identical writes;
-   - conflict detection for the same canonical identity;
-   - atomic batch behavior;
-   - `all()` retrieval;
-   - `for_fixture()` retrieval.
-7. Add isolated repository tests and, where available, a PostgreSQL integration test job/service.
-8. Add production application composition for the PostgreSQL repository.
-9. Update configuration and architecture documentation.
-10. Remove SQLite only after PostgreSQL implementation, tests and CI verification are complete.
+1. Reviewed and preserved the provider-neutral history contract.
+2. Defined the PostgreSQL schema for canonical quote observations.
+3. Added migration files under `migrations/`.
+4. Added the PostgreSQL connection/configuration boundary using `DATABASE_URL`.
+5. Implemented `PostgreSQLQuoteHistoryRepository`.
+6. Added protection for:
+   - idempotent identical series writes;
+   - natural-key series conflicts;
+   - idempotent identical snapshot writes;
+   - conflicting snapshot IDs;
+   - unknown series IDs;
+   - atomic batch behavior through one database transaction.
+7. Added isolated repository tests and a real-PostgreSQL integration-test scaffold.
+8. Added PostgreSQL application composition and an explicit migration lifecycle hook.
+9. Updated configuration and storage architecture documentation.
+
+## Remaining work
+
+- Execute the integration suite against a real PostgreSQL instance.
+- Confirm the exact migration/bootstrap procedure in the deployed Railway environment.
+- Finish production runtime wiring for all required history-aware use cases.
+- Remove SQLite only after active consumers, tests and CI have been migrated and verified.
+- Add persistence models for picks, bankroll ledger and dashboard read models in separate, explicitly scoped iterations.
 
 ## Explicitly out of scope for this step
 
@@ -49,18 +68,18 @@ SQLite is treated as an existing transitional adapter. It must not be deleted un
 - ValuePick persistence;
 - CLV storage;
 - Research data model;
-- Railway deployment changes;
 - deletion of existing SQLite code;
 - changes to quant mathematics or domain contracts.
 
 ## Acceptance criteria
 
-The PostgreSQL persistence step is complete only when:
+The PostgreSQL persistence foundation is considered complete when:
 
-- the adapter satisfies the existing repository contract;
+- the adapter satisfies the history repository contract;
 - schema creation is reproducible through migrations;
-- conflict and idempotency semantics are covered by tests;
+- conflict and idempotency semantics are implemented;
 - configuration is environment-based;
-- CI passes;
-- documentation and `docs/PROGRESS.md` reflect the actual state;
+- isolated tests exist;
+- real-PostgreSQL integration verification is explicitly tracked;
+- documentation reflects the actual implementation state;
 - SQLite removal is performed as a separate, explicitly verified step.
