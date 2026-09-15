@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
@@ -9,6 +10,8 @@ from typing import Protocol
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.workers.history_quote_polling import HistoricalQuoteSource
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ScopedFixtureDiscoveryPort(Protocol):
@@ -58,7 +61,13 @@ class DiscoveredHistoryQuotePollingJob:
             if fixture_id <= 0 or fixture_id in seen:
                 continue
             seen.add(fixture_id)
-            total += self._ingestion.ingest(
-                self._source.fetch_quotes(fixture_id=fixture_id)
-            )
+            try:
+                total += self._ingestion.ingest(
+                    self._source.fetch_quotes(fixture_id=fixture_id)
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Failed to collect or ingest quote history for fixture_id=%s",
+                    fixture_id,
+                )
         return total
