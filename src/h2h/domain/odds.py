@@ -36,9 +36,19 @@ class CanonicalQuote:
     source: str
 
     @property
-    def identity(self) -> tuple[str, int, Market, Selection]:
-        """Return the stable identity shared by observations of one quote."""
+    def series_identity(self) -> tuple[str, int, Market, Selection]:
+        """Return the stable identity of the quote series."""
         return (self.fixture_id, self.bookmaker_id, self.market, self.selection)
+
+    @property
+    def identity(self) -> tuple[str, int, Market, Selection]:
+        """Backward-compatible alias for the quote-series identity."""
+        return self.series_identity
+
+    @property
+    def observation_identity(self) -> tuple[str, int, Market, Selection, datetime, str]:
+        """Return the identity of one provider observation within a series."""
+        return (*self.series_identity, self.observed_at, self.source)
 
     def __post_init__(self) -> None:
         if not self.fixture_id.strip():
@@ -51,6 +61,8 @@ class CanonicalQuote:
             raise ValueError("source must not be empty")
         if not isinstance(self.observed_at, datetime):
             raise TypeError("observed_at must be a datetime")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("observed_at must be timezone-aware")
         if not isfinite(self.odd) or self.odd <= 1.0:
             raise ValueError("odd must be finite and greater than 1.0")
 
