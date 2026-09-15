@@ -1,9 +1,10 @@
-"""HTTP client boundary for API-Football odds data."""
+"""HTTP client boundary for API-Football odds and fixture data."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from time import monotonic
 from typing import Any
 from urllib.parse import urlencode
@@ -13,7 +14,7 @@ from h2h.odds.http import JsonTransport
 
 @dataclass
 class ApiFootballClient:
-    """Fetch API-Football odds payloads with optional fixture-level TTL caching."""
+    """Fetch API-Football data with optional fixture-level TTL caching."""
 
     transport: JsonTransport
     api_key: str
@@ -23,10 +24,7 @@ class ApiFootballClient:
     clock: Callable[[], float] = field(default=monotonic, repr=False)
     _cache: dict[int, tuple[float, Mapping[str, Any]]] = field(default_factory=dict, init=False, repr=False)
 
-    def fetch_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
-        """Fetch odds for one fixture, serving a fresh cached response when enabled."""
-        if fixture_id <= 0:
-            raise ValueError("fixture_id must be greater than zero")
+    def _validate(self) -> None:
         if not self.api_key.strip():
             raise ValueError("api_key must not be empty")
         if self.timeout <= 0:
@@ -34,6 +32,11 @@ class ApiFootballClient:
         if self.cache_ttl_seconds < 0:
             raise ValueError("cache_ttl_seconds must not be negative")
 
+    def fetch_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
+        """Fetch odds for one fixture, serving a fresh cached response when enabled."""
+        if fixture_id <= 0:
+            raise ValueError("fixture_id must be greater than zero")
+        self._validate()
         now = self.clock()
         cached = self._cache.get(fixture_id)
         if cached is not None:
@@ -44,14 +47,19 @@ class ApiFootballClient:
 
         query = urlencode({"fixture": fixture_id})
         url = f"{self.base_url.rstrip('/')}/odds?{query}"
-        payload = self.transport.get_json(
-            url,
-            headers={"x-apisports-key": self.api_key},
-            timeout=self.timeout,
-        )
+        payload = self.transport.get_json(url, headers={"x-apisports-key": self.api_key}, timeout=self.timeout)
         if self.cache_ttl_seconds > 0:
             self._cache[fixture_id] = (now + self.cache_ttl_seconds, payload)
         return payload
+
+    def fetch_fixtures(self, *, start_at: datetime, end_at: datetime) -> Mapping[str, Any]:
+        """Fetch fixtures in the inclusive provider date range covering the window."""
+        self._validate()
+        if start_at >= end_at:
+            raise ValueError("start_at must be before end_at")
+        query = urlencode({"from": start_at.date().isoformat(), "to": end_at.date().isoformat()})
+        url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
+        return self.transport.get_json(url, headers={"x-apisports-key": self.api_key}, timeout=self.timeout)
 
     def clear_cache(self) -> None:
         """Remove all cached fixture responses."""
