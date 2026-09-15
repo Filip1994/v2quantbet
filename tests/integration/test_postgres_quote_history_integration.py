@@ -155,3 +155,28 @@ def test_snapshot_natural_key_includes_captured_at(repository) -> None:
     repository.created_snapshots.extend([first.snapshot_id, second.snapshot_id])
 
     assert repository.repo.snapshots_for_series(series.series_id) == (first, second)
+
+
+def test_snapshot_batch_conflict_rolls_back_prior_inserts(repository) -> None:
+    series = _series(series_id=f"{repository.prefix}-series", fixture_id=f"{repository.prefix}-fixture")
+    existing = _snapshot(snapshot_id=f"{repository.prefix}-existing", series_id=series.series_id)
+    new_snapshot = _snapshot(
+        snapshot_id=f"{repository.prefix}-new",
+        series_id=series.series_id,
+        captured_at=existing.captured_at + timedelta(seconds=1),
+    )
+    conflicting = _snapshot(
+        snapshot_id=f"{repository.prefix}-conflict",
+        series_id=series.series_id,
+        odd=2.2,
+    )
+    repository.repo.ensure_series(series)
+    repository.created_series.append(series.series_id)
+    repository.repo.append_snapshots((existing,))
+    repository.created_snapshots.append(existing.snapshot_id)
+
+    with pytest.raises(QuoteHistoryConflictError):
+        repository.repo.append_snapshots((new_snapshot, conflicting))
+
+    assert repository.repo.get_snapshot(new_snapshot.snapshot_id) is None
+    assert repository.repo.get_snapshot(existing.snapshot_id) == existing
