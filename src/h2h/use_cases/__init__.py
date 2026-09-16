@@ -26,9 +26,11 @@ from .pick_monitoring import (
     RefreshRegisteredPickOdds,
     StartRegisteredPickMonitoring,
 )
+from .result_settlement import ApiFootballResultSource, ReconcileFixtureResults, ResultCycle
 
 __all__ = [
     "ApiFootballHistoricalResults",
+    "ApiFootballResultSource",
     "ApiFootballTrainingDataset",
     "ApiFootballTrainingScope",
     "BootstrapBankroll",
@@ -42,9 +44,11 @@ __all__ = [
     "QuoteHistoryIngestionService",
     "QuoteIngestionService",
     "ReadPickOddsLifecycle",
+    "ReconcileFixtureResults",
     "ReconcileRegisteredPickMonitoring",
     "RefreshRegisteredPickOdds",
     "RegisterEligiblePick",
+    "ResultCycle",
     "StartRegisteredPickMonitoring",
     "TeamIdNamespaceMismatchError",
     "evaluate_prediction_quote",

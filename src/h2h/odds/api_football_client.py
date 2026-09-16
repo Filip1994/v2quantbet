@@ -101,6 +101,23 @@ class ApiFootballClient:
             timeout=self.timeout,
         )
 
+    def fetch_fixture_results(self, *, fixture_ids: tuple[int, ...]) -> Mapping[str, Any]:
+        """Fetch current fixture/result records for at most twenty provider fixture IDs."""
+        self._validate()
+        if not fixture_ids or len(fixture_ids) > 20:
+            raise ValueError("fixture_ids must contain between one and twenty IDs")
+        for fixture_id in fixture_ids:
+            self._validate_fixture_id(fixture_id)
+        if len(set(fixture_ids)) != len(fixture_ids):
+            raise ValueError("fixture_ids must not contain duplicates")
+        query = urlencode({"ids": "-".join(str(value) for value in fixture_ids), "timezone": "UTC"})
+        url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
+        return self.transport.get_json(
+            url,
+            headers={"x-apisports-key": self.api_key},
+            timeout=self.timeout,
+        )
+
     def fetch_completed_fixtures(
         self,
         *,

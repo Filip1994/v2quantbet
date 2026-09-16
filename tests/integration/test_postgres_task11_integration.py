@@ -55,7 +55,7 @@ def _registered(candidate: DurableCandidate, account: str):
     ).pick
 
 
-def test_fresh_schema_migrates_in_order_through_006() -> None:
+def test_fresh_schema_migrates_in_order_through_007() -> None:
     assert DATABASE_URL is not None
     schema = "task11_" + uuid4().hex
     with psycopg.connect(DATABASE_URL) as admin, admin.cursor() as cursor:
@@ -69,7 +69,7 @@ def test_fresh_schema_migrates_in_order_through_006() -> None:
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
-            assert applied[-1] == "006_pick_monitoring_odds_lifecycle.sql"
+            assert applied[-1] == "007_results_settlement_performance.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(
@@ -78,6 +78,8 @@ def test_fresh_schema_migrates_in_order_through_006() -> None:
             )
             row = inspection.execute("SELECT to_regclass('pick_closing_finalizations')").fetchone()
             assert row[0] == "pick_closing_finalizations"
+            row = inspection.execute("SELECT to_regclass('pick_settlement_events')").fetchone()
+            assert row[0] == "pick_settlement_events"
     finally:
         with psycopg.connect(DATABASE_URL) as admin, admin.cursor() as cursor:
             cursor.execute(

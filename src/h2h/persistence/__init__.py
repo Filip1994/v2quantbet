@@ -17,6 +17,15 @@ from .postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from .postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from .postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
 from .postgres_daily_bulletin import PostgreSQLDailyBulletinRepository
+from .postgres_result_settlement import PostgreSQLResultSettlementRepository
+from .postgres_performance import PostgreSQLPerformanceRepository
+from .result_settlement import (
+    ClvResult,
+    ResultNotStableError,
+    ResultPersistenceConflictError,
+    SettlementConflictError,
+    SettlementRecord,
+)
 from .pick_monitoring import (
     PickClosingNotDueError,
     PickMonitoringConflictError,
@@ -47,6 +56,7 @@ __all__ = [
     "ActiveModelUnavailableError",
     "BankrollBootstrapConflictError",
     "BankrollNotBootstrappedError",
+    "ClvResult",
     "FixturePersistenceConflictError",
     "FixturePredictionRepository",
     "FixtureRepository",
@@ -63,9 +73,11 @@ __all__ = [
     "PostgreSQLDixonColesModelVersionRepository",
     "PostgreSQLFixturePredictionRepository",
     "PostgreSQLFixtureRepository",
+    "PostgreSQLPerformanceRepository",
     "PostgreSQLPickMonitoringRepository",
     "PostgreSQLPickRegistrationRepository",
     "PostgreSQLQuoteHistoryRepository",
+    "PostgreSQLResultSettlementRepository",
     "PostgreSQLValueEvaluationRepository",
     "PredictionPersistenceConflictError",
     "QuoteHistoryConflictError",
@@ -73,7 +85,11 @@ __all__ = [
     "QuoteRepository",
     "RegistrationPersistenceConflictError",
     "RegistrationProvenanceError",
+    "ResultNotStableError",
+    "ResultPersistenceConflictError",
     "SQLiteQuoteRepository",
+    "SettlementConflictError",
+    "SettlementRecord",
     "ValueEvaluationPersistenceConflictError",
     "ValueEvaluationRepository",
     "apply_migrations",

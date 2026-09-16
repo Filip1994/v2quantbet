@@ -5,6 +5,7 @@ from h2h.config import (
     ConfigError,
     load_config,
     load_odds_lifecycle_policy,
+    load_result_settlement_policy,
     load_registration_policy_config,
     load_settings,
 )
@@ -179,3 +180,27 @@ def test_load_settings_validates_bulletin_timezone_and_lifecycle() -> None:
     environment["QUANTBET_BULLETIN_TIMEZONE"] = "Not/A_Zone"
     with pytest.raises(ConfigError, match="IANA"):
         load_settings(environment)
+
+
+def result_environment():
+    return {
+        "QUANTBET_RESULT_INITIAL_DELAY_SECONDS": "6300",
+        "QUANTBET_RESULT_POLL_INTERVAL_SECONDS": "300",
+        "QUANTBET_RESULT_SUSPENDED_POLL_INTERVAL_SECONDS": "900",
+        "QUANTBET_RESULT_POSTPONED_POLL_INTERVAL_SECONDS": "21600",
+        "QUANTBET_RESULT_FINALITY_DELAY_SECONDS": "900",
+        "QUANTBET_RESULT_CLAIM_LEASE_SECONDS": "120",
+        "QUANTBET_RESULT_CLAIM_LIMIT": "100",
+        "QUANTBET_RESULT_CORRECTION_WINDOW_SECONDS": "259200",
+    }
+
+
+def test_result_policy_defaults_and_partial_configuration_fails_closed() -> None:
+    default = load_result_settlement_policy({})
+    assert default.finality_delay_seconds == 900
+    explicit = load_result_settlement_policy(result_environment())
+    assert explicit.claim_limit == 100
+    partial = result_environment()
+    del partial["QUANTBET_RESULT_CLAIM_LEASE_SECONDS"]
+    with pytest.raises(ConfigError, match="QUANTBET_RESULT_CLAIM_LEASE_SECONDS"):
+        load_result_settlement_policy(partial)

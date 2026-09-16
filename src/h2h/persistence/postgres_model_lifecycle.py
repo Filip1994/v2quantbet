@@ -64,7 +64,7 @@ class PostgreSQLDixonColesModelVersionRepository(_PostgreSQLConnections):
                 + _VERSION_COLUMNS.replace(", persisted_at", "")
                 + ") VALUES ("
                 + ", ".join(["%s"] * len(values))
-                + ") ON CONFLICT (model_version_id) DO NOTHING",
+                + ") ON CONFLICT DO NOTHING",
                 values,
             )
             cursor.execute(

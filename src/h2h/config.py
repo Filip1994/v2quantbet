@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from h2h.domain.odds import Market, Selection
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.domain.registration_policy import RegistrationPolicyConfig
+from h2h.domain.settlement import ResultSettlementPolicy
 
 
 class ConfigError(ValueError):
@@ -49,6 +50,7 @@ class ApplicationSettings:
     database_url: str | None = field(default=None, repr=False)
     registration_policy: RegistrationPolicyConfig | None = None
     odds_lifecycle_policy: OddsLifecyclePolicy | None = None
+    result_settlement_policy: ResultSettlementPolicy = field(default_factory=ResultSettlementPolicy)
     bulletin_timezone: ZoneInfo = field(default_factory=lambda: ZoneInfo("Europe/Belgrade"))
 
     def __repr__(self) -> str:
@@ -57,6 +59,7 @@ class ApplicationSettings:
             "database_url='[REDACTED]', api_football_key='[REDACTED]', "
             f"registration_policy={self.registration_policy!r}, "
             f"odds_lifecycle_policy={self.odds_lifecycle_policy!r}, "
+            f"result_settlement_policy={self.result_settlement_policy!r}, "
             f"bulletin_timezone={self.bulletin_timezone.key!r})"
         )
 
@@ -103,6 +106,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> ApplicationSettin
     odds_lifecycle_policy = (
         load_odds_lifecycle_policy(values) if configured_lifecycle else None
     )
+    result_settlement_policy = load_result_settlement_policy(values)
     timezone_name = values.get("QUANTBET_BULLETIN_TIMEZONE", "Europe/Belgrade").strip()
     if not timezone_name:
         raise ConfigError("QUANTBET_BULLETIN_TIMEZONE must not be blank")
@@ -117,8 +121,43 @@ def load_settings(environ: Mapping[str, str] | None = None) -> ApplicationSettin
         database_url=database_url,
         registration_policy=registration_policy,
         odds_lifecycle_policy=odds_lifecycle_policy,
+        result_settlement_policy=result_settlement_policy,
         bulletin_timezone=bulletin_timezone,
     )
+
+
+_RESULT_ENV = {
+    "initial_delay_seconds": "QUANTBET_RESULT_INITIAL_DELAY_SECONDS",
+    "poll_interval_seconds": "QUANTBET_RESULT_POLL_INTERVAL_SECONDS",
+    "suspended_poll_interval_seconds": "QUANTBET_RESULT_SUSPENDED_POLL_INTERVAL_SECONDS",
+    "postponed_poll_interval_seconds": "QUANTBET_RESULT_POSTPONED_POLL_INTERVAL_SECONDS",
+    "finality_delay_seconds": "QUANTBET_RESULT_FINALITY_DELAY_SECONDS",
+    "claim_lease_seconds": "QUANTBET_RESULT_CLAIM_LEASE_SECONDS",
+    "claim_limit": "QUANTBET_RESULT_CLAIM_LIMIT",
+    "correction_window_seconds": "QUANTBET_RESULT_CORRECTION_WINDOW_SECONDS",
+}
+
+
+def load_result_settlement_policy(
+    environ: Mapping[str, str] | None = None,
+) -> ResultSettlementPolicy:
+    values = os.environ if environ is None else environ
+    configured = [name for name in _RESULT_ENV.values() if values.get(name, "").strip()]
+    if not configured:
+        return ResultSettlementPolicy()
+    missing = [name for name in _RESULT_ENV.values() if not values.get(name, "").strip()]
+    if missing:
+        raise ConfigError(f"Missing required result settlement configuration: {missing[0]}")
+    parsed: dict[str, int] = {}
+    for field_name, env_name in _RESULT_ENV.items():
+        try:
+            parsed[field_name] = int(values[env_name].strip())
+        except ValueError as exc:
+            raise ConfigError(f"{env_name} must be an integer") from exc
+    try:
+        return ResultSettlementPolicy(**parsed)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid result settlement configuration: {exc}") from exc
 
 
 _LIFECYCLE_ENV_NAMES = (

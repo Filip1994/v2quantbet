@@ -19,8 +19,11 @@ from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluation
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
 from h2h.persistence.postgres_daily_bulletin import PostgreSQLDailyBulletinRepository
+from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
+from h2h.persistence.postgres_performance import PostgreSQLPerformanceRepository
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
+from h2h.domain.settlement import ResultSettlementPolicy
 from h2h.persistence.migrations import apply_migrations
 from h2h.use_cases.api_football_training import ApiFootballHistoricalResults
 from h2h.use_cases.model_lifecycle import (
@@ -44,6 +47,8 @@ from h2h.use_cases.pick_monitoring import (
 )
 from h2h.read_models.daily_bulletin import DailyBulletin
 from h2h.workers.registered_pick_monitoring import RegisteredPickMonitoringWorker
+from h2h.use_cases.result_settlement import ApiFootballResultSource, ReconcileFixtureResults
+from h2h.workers.result_settlement import ResultSettlementWorker
 from zoneinfo import ZoneInfo
 
 
@@ -154,6 +159,27 @@ class PostgreSQLPickMonitoringApplication:
     read_lifecycle: ReadPickOddsLifecycle
     bulletin: DailyBulletin
     worker: RegisteredPickMonitoringWorker
+
+    def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
+        with self.repository.connect() as connection:
+            return apply_migrations(connection, migration_dir)
+
+    def close(self) -> None:
+        """Connections are operation-scoped."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+
+@dataclass
+class PostgreSQLResultSettlementApplication:
+    repository: PostgreSQLResultSettlementRepository
+    performance: PostgreSQLPerformanceRepository
+    reconcile: ReconcileFixtureResults
+    worker: ResultSettlementWorker
 
     def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
         with self.repository.connect() as connection:
@@ -299,4 +325,25 @@ def build_postgres_pick_monitoring_application(
             bulletin_timezone or ZoneInfo("Europe/Belgrade"),
         ),
         worker=RegisteredPickMonitoringWorker(reconcile, refresh),
+    )
+
+
+def build_postgres_result_settlement_application(
+    policy: ResultSettlementPolicy,
+    source: ApiFootballResultSource,
+    database_url: str | None = None,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> PostgreSQLResultSettlementApplication:
+    if not isinstance(policy, ResultSettlementPolicy):
+        raise TypeError("policy must be a ResultSettlementPolicy")
+    result_clock = clock or (lambda: datetime.now(timezone.utc))
+    repository = PostgreSQLResultSettlementRepository(policy, database_url=database_url)
+    performance = PostgreSQLPerformanceRepository(database_url=database_url)
+    reconcile = ReconcileFixtureResults(repository, source, clock=result_clock)
+    return PostgreSQLResultSettlementApplication(
+        repository=repository,
+        performance=performance,
+        reconcile=reconcile,
+        worker=ResultSettlementWorker(reconcile),
     )

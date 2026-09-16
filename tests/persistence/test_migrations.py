@@ -133,3 +133,19 @@ def test_task11_migration_has_monitoring_transition_and_closing_boundaries() -> 
     assert "idx_pick_monitoring_due" in migration
     assert "pick_closing_finalizations_immutable" in migration
     assert "ALTER TABLE quote_snapshots" in migration
+
+
+def test_task12_migration_has_result_settlement_ledger_and_clv_boundaries() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "007_results_settlement_performance.sql"
+    ).read_text(encoding="utf-8")
+    for table in (
+        "fixture_result_observations",
+        "fixture_result_acquisition_states",
+        "pick_settlement_events",
+        "pick_realized_clv",
+    ):
+        assert f"CREATE TABLE {table}" in migration
+    assert "uq_pick_one_normal_settlement" in migration
+    assert "uq_bankroll_one_reservation_per_pick" in migration
+    assert "bankroll_ledger_entries_append_only" in migration

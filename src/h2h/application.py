@@ -15,8 +15,10 @@ from h2h.application_postgres import (
     PostgreSQLProductionPredictionApplication,
     PostgreSQLPickRegistrationApplication,
     PostgreSQLPickMonitoringApplication,
+    PostgreSQLResultSettlementApplication,
     build_postgres_pick_monitoring_application,
     build_postgres_pick_registration_application,
+    build_postgres_result_settlement_application,
     build_postgres_production_prediction_application,
 )
 from h2h.config import ApplicationSettings
@@ -31,6 +33,7 @@ from h2h.use_cases.api_football_training import (
 )
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
+from h2h.use_cases.result_settlement import ApiFootballResultSource
 
 
 @dataclass
@@ -183,4 +186,20 @@ def build_postgres_pick_monitoring_from_settings(
         source,
         database_url=settings.database_url,
         bulletin_timezone=settings.bulletin_timezone,
+    )
+
+
+def build_postgres_result_settlement_from_settings(
+    settings: ApplicationSettings,
+    *,
+    client: ApiFootballClient | None = None,
+) -> PostgreSQLResultSettlementApplication:
+    """Compose Task #12 around the shared V1 provider client."""
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for result settlement composition")
+    result_client = client or build_api_football_client(UrllibJsonTransport(), settings)
+    return build_postgres_result_settlement_application(
+        settings.result_settlement_policy,
+        ApiFootballResultSource(result_client),
+        database_url=settings.database_url,
     )

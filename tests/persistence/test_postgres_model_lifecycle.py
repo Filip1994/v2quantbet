@@ -69,7 +69,7 @@ def test_version_add_uses_immutable_insert_and_reconstructs_complete_version() -
     assert version.artifact == artifact
     assert version.persisted_at == NOW
     insert_sql = cursor.execute.call_args_list[0].args[0]
-    assert "ON CONFLICT (model_version_id) DO NOTHING" in insert_sql
+    assert "ON CONFLICT DO NOTHING" in insert_sql
     assert "persisted_at" not in insert_sql.split(") VALUES", maxsplit=1)[0]
 
 

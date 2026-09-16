@@ -39,6 +39,13 @@ class BulletinEntry:
     policy_fingerprint: str
     registered_at: datetime
     odds: PickOddsLifecycle
+    result_status: str | None = None
+    result_observation_id: str | None = None
+    settlement_outcome: str | None = None
+    gross_return_minor: int | None = None
+    realized_pnl_minor: int | None = None
+    realized_clv_status: str = "PENDING_SETTLEMENT"
+    realized_clv_ppm: int | None = None
 
 
 class DailyBulletinReadRepository(Protocol):
@@ -72,4 +79,3 @@ class DailyBulletin:
             end_at=local_end.astimezone(UTC),
             as_of=as_of.astimezone(UTC),
         )
-

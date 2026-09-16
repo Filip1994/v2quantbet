@@ -77,8 +77,11 @@ class BankrollRiskSnapshot:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must not be blank")
+        if isinstance(self.balance_before_minor, bool) or not isinstance(
+            self.balance_before_minor, int
+        ):
+            raise TypeError("balance_before_minor must be an integer")
         for name in (
-            "balance_before_minor",
             "open_exposure_before_minor",
             "max_stake_per_pick_minor",
             "max_open_exposure_minor",

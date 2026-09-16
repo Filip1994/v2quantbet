@@ -215,8 +215,12 @@ class PostgreSQLPickRegistrationRepository:
                     "initial bankroll funding contradicts registration policy"
                 )
             cursor.execute(
-                "SELECT COALESCE(SUM(-amount_minor), 0) FROM bankroll_ledger_entries "
-                "WHERE bankroll_account_id = %s AND entry_type = 'STAKE_RESERVED'",
+                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
+                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
+                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+                "WHERE successor.prior_event_id = e.settlement_event_id))",
                 (policy.bankroll_account_id,),
             )
             open_exposure = int(cursor.fetchone()[0])

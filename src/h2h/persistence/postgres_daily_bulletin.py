@@ -41,11 +41,54 @@ class PostgreSQLDailyBulletinRepository:
                 (as_of, as_of, start_at, end_at),
             )
             rows = cursor.fetchall()
-        return tuple(
-            BulletinEntry(
-                *row,
-                odds=self._monitoring.read_lifecycle(row[0], as_of=as_of),
+            result_rows = {}
+            for row in rows:
+                cursor.execute(
+                    "SELECT ro.provider_status, ro.result_observation_id, effective.outcome, "
+                    "effective.gross_return_minor, effective.realized_pnl_minor, c.clv_ppm, "
+                    "f.outcome, f.cutoff_at, used.provider_kickoff_at "
+                    "FROM registered_picks r "
+                    "LEFT JOIN fixture_result_acquisition_states s ON s.fixture_id = r.fixture_id "
+                    "LEFT JOIN fixture_result_observations ro "
+                    "ON ro.result_observation_id = s.current_observation_id "
+                    "LEFT JOIN LATERAL (SELECT e.* FROM pick_settlement_events e "
+                    "WHERE e.pick_id = r.pick_id AND NOT EXISTS (SELECT 1 FROM "
+                    "pick_settlement_events n WHERE n.prior_event_id = e.settlement_event_id) "
+                    "LIMIT 1) effective ON TRUE "
+                    "LEFT JOIN fixture_result_observations used "
+                    "ON used.result_observation_id = effective.result_observation_id "
+                    "LEFT JOIN pick_realized_clv c ON c.pick_id = r.pick_id "
+                    "LEFT JOIN pick_closing_finalizations f ON f.pick_id = r.pick_id "
+                    "WHERE r.pick_id = %s",
+                    (row[0],),
+                )
+                result_rows[row[0]] = cursor.fetchone()
+        entries = []
+        for row in rows:
+            financial = result_rows[row[0]]
+            status = "PENDING_SETTLEMENT"
+            if financial[5] is not None:
+                status = "AVAILABLE"
+            elif financial[2] is not None:
+                if financial[6] in (None, "NO_VALID_QUOTE"):
+                    status = "NO_VALID_CLOSING"
+                elif financial[6] == "STALE_QUOTE":
+                    status = "STALE_CLOSING"
+                elif financial[7] != financial[8]:
+                    status = "KICKOFF_CHANGED_AFTER_CLOSING"
+                else:
+                    status = "PROVENANCE_CONFLICT"
+            entries.append(
+                BulletinEntry(
+                    *row,
+                    odds=self._monitoring.read_lifecycle(row[0], as_of=as_of),
+                    result_status=financial[0],
+                    result_observation_id=financial[1],
+                    settlement_outcome=financial[2],
+                    gross_return_minor=None if financial[3] is None else int(financial[3]),
+                    realized_pnl_minor=None if financial[4] is None else int(financial[4]),
+                    realized_clv_status=status,
+                    realized_clv_ppm=None if financial[5] is None else int(financial[5]),
+                )
             )
-            for row in rows
-        )
-
+        return tuple(entries)
