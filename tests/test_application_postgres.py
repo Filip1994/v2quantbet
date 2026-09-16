@@ -4,11 +4,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 from h2h.application_postgres import (
+    PostgreSQLPickRegistrationApplication,
     PostgreSQLProductionPredictionApplication,
     PostgreSQLQuoteHistoryApplication,
     build_postgres_production_prediction_application,
+    build_postgres_pick_registration_application,
     build_postgres_quote_history_application,
 )
+from tests.domain.test_task10_policy import policy
 from h2h.persistence import (
     PostgreSQLFixturePredictionRepository,
     PostgreSQLFixtureRepository,
@@ -96,3 +99,12 @@ def test_production_builder_wires_durable_repositories_and_pure_use_cases() -> N
     assert isinstance(application.predictor, ProduceFixturePrediction)
     assert isinstance(application.evaluator, EvaluatePersistedPredictionQuote)
     assert application.durable_discovery is None
+
+
+def test_pick_registration_builder_has_no_bootstrap_side_effect() -> None:
+    application = build_postgres_pick_registration_application(
+        policy(), database_url="postgresql://example.invalid/quantbet"
+    )
+    assert isinstance(application, PostgreSQLPickRegistrationApplication)
+    assert application.register_pick is not None
+    assert application.bootstrap_bankroll is not None

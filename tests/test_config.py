@@ -1,6 +1,12 @@
 import pytest
 
-from h2h.config import ApplicationSettings, ConfigError, load_config, load_settings
+from h2h.config import (
+    ApplicationSettings,
+    ConfigError,
+    load_config,
+    load_registration_policy_config,
+    load_settings,
+)
 
 
 def _set_valid_config(monkeypatch):
@@ -96,3 +102,46 @@ def test_application_settings_repr_redacts_api_key_and_database_url() -> None:
     assert "secret" not in rendered
     assert "postgresql://secret-host/quantbet" not in rendered
     assert "[REDACTED]" in rendered
+
+
+def registration_environment():
+    return {
+        "QUANTBET_ALLOWED_MARKET_SELECTIONS": "OU_25/OVER,OU_25/UNDER,BTTS/YES,BTTS/NO",
+        "QUANTBET_ALLOWED_DEVIG_METHODS": "PROPORTIONAL_TWO_WAY_V1",
+        "QUANTBET_ALLOWED_FIXTURE_STATUSES": "NS",
+        "QUANTBET_MINIMUM_EDGE": "0.03",
+        "QUANTBET_MINIMUM_EXPECTED_VALUE": "0.02",
+        "QUANTBET_MINIMUM_ODDS": "1.40",
+        "QUANTBET_MAXIMUM_ODDS": "3.50",
+        "QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS": "300",
+        "QUANTBET_MINIMUM_TIME_TO_KICKOFF_SECONDS": "600",
+        "QUANTBET_BANKROLL_ACCOUNT_ID": "quantbet-pilot-rsd",
+        "QUANTBET_CURRENCY": "RSD",
+        "QUANTBET_INITIAL_BANKROLL_MINOR": "3000000",
+        "QUANTBET_FIXED_STAKE_MINOR": "30000",
+        "QUANTBET_MAX_STAKE_PER_PICK_MINOR": "30000",
+        "QUANTBET_MAX_OPEN_EXPOSURE_MINOR": "300000",
+    }
+
+
+def test_load_registration_policy_config_reads_explicit_pilot_values() -> None:
+    policy = load_registration_policy_config(registration_environment())
+    assert str(policy.minimum_edge) == "0.03"
+    assert policy.initial_bankroll_minor == 3_000_000
+    assert policy.fixed_stake_minor == 30_000
+    assert policy.allowed_fixture_statuses == ("NS",)
+
+
+def test_partial_registration_policy_fails_clearly() -> None:
+    environment = registration_environment()
+    del environment["QUANTBET_MINIMUM_EDGE"]
+    with pytest.raises(ConfigError, match="QUANTBET_MINIMUM_EDGE"):
+        load_registration_policy_config(environment)
+
+
+def test_load_settings_parses_policy_only_when_registration_is_configured() -> None:
+    environment = registration_environment()
+    environment["API_FOOTBALL_KEY"] = "test-key"
+    settings = load_settings(environment)
+    assert settings.registration_policy is not None
+    assert settings.registration_policy.fingerprint.startswith("pick-policy-config-v1:")

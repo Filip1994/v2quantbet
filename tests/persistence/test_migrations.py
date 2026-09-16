@@ -100,3 +100,20 @@ def test_task9_migration_has_bounded_tables_and_no_global_quote_fixture_fk() -> 
         "ALTER TABLE quote_snapshots", 1
     )[0]
     assert "REFERENCES fixtures" not in quote_series_section
+
+
+def test_task10_migration_has_decision_bankroll_and_pick_boundaries() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "005_pick_decision_risk_registration.sql"
+    ).read_text(encoding="utf-8")
+    for table in (
+        "pick_policy_configurations",
+        "bankroll_accounts",
+        "pick_decisions",
+        "registered_picks",
+        "bankroll_ledger_entries",
+    ):
+        assert f"CREATE TABLE {table}" in migration
+    assert "UNIQUE (fixture_id, market)" in migration
+    assert "STAKE_RESERVED" in migration
+    assert "ON DELETE RESTRICT" in migration

@@ -1,9 +1,16 @@
-"""Register a valuation only after an explicit approved eligibility decision."""
+"""Legacy registration helper and Task #10 durable registration use cases."""
 
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from h2h.decisions.pick_eligibility import EligibilityDecision, EligibilityStatus
+from h2h.domain.pick_decision import RegistrationResult
 from h2h.domain.pick_registration import PickRegistration
+from h2h.domain.registration_policy import RegistrationPolicyConfig
+from h2h.persistence.pick_registration import (
+    BankrollBootstrapResult,
+    PickRegistrationRepository,
+)
 
 
 class RejectedPickRegistrationError(ValueError):
@@ -30,3 +37,51 @@ def register_pick(
         registered_at=registered_at,
         eligibility_decision_id=decision.decision_id,
     )
+
+
+def _now(clock: Callable[[], datetime]) -> datetime:
+    value = clock()
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("clock must return a timezone-aware datetime")
+    return value.astimezone(UTC)
+
+
+class RegisterEligiblePick:
+    """Register one persisted Task #9 evaluation through the atomic repository boundary."""
+
+    def __init__(
+        self,
+        repository: PickRegistrationRepository,
+        policy: RegistrationPolicyConfig,
+        *,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._repository = repository
+        self._policy = policy
+        self._clock = clock
+
+    def execute(self, evaluation_id: str, registration_request_id: str) -> RegistrationResult:
+        return self._repository.register(
+            evaluation_id,
+            registration_request_id,
+            self._policy,
+            decided_at=_now(self._clock),
+        )
+
+
+class BootstrapBankroll:
+    """Explicit, idempotent initialization of the configured bankroll account."""
+
+    def __init__(
+        self,
+        repository: PickRegistrationRepository,
+        policy: RegistrationPolicyConfig,
+        *,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._repository = repository
+        self._policy = policy
+        self._clock = clock
+
+    def execute(self) -> BankrollBootstrapResult:
+        return self._repository.bootstrap_bankroll(self._policy, occurred_at=_now(self._clock))

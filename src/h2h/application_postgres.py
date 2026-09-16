@@ -16,6 +16,8 @@ from h2h.persistence import (
 from h2h.persistence.postgres_fixtures import PostgreSQLFixtureRepository
 from h2h.persistence.postgres_predictions import PostgreSQLFixturePredictionRepository
 from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
+from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
+from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.persistence.migrations import apply_migrations
 from h2h.use_cases.api_football_training import ApiFootballHistoricalResults
 from h2h.use_cases.model_lifecycle import (
@@ -28,6 +30,7 @@ from h2h.use_cases.durable_fixture_discovery import DurableFixtureDiscovery
 from h2h.use_cases.fixture_discovery import FixtureDiscovery
 from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.value_evaluation import EvaluatePersistedPredictionQuote
+from h2h.use_cases.register_pick import BootstrapBankroll, RegisterEligiblePick
 
 
 _DEFAULT_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "migrations"
@@ -107,6 +110,26 @@ class PostgreSQLProductionPredictionApplication:
         self.close()
 
 
+@dataclass
+class PostgreSQLPickRegistrationApplication:
+    repository: PostgreSQLPickRegistrationRepository
+    register_pick: RegisterEligiblePick
+    bootstrap_bankroll: BootstrapBankroll
+
+    def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
+        with self.repository.connect() as connection:
+            return apply_migrations(connection, migration_dir)
+
+    def close(self) -> None:
+        """Connections are operation-scoped."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+
 def build_postgres_quote_history_application(
     database_url: str | None = None,
     *,
@@ -177,4 +200,23 @@ def build_postgres_production_prediction_application(
             if discovery is None
             else DurableFixtureDiscovery(discovery, fixtures, clock=production_clock)
         ),
+    )
+
+
+def build_postgres_pick_registration_application(
+    policy: RegistrationPolicyConfig,
+    database_url: str | None = None,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> PostgreSQLPickRegistrationApplication:
+    """Build the durable Task #10 boundary without bootstrap or registration side effects."""
+
+    if not isinstance(policy, RegistrationPolicyConfig):
+        raise TypeError("policy must be a RegistrationPolicyConfig")
+    registration_clock = clock or (lambda: datetime.now(timezone.utc))
+    repository = PostgreSQLPickRegistrationRepository(database_url=database_url)
+    return PostgreSQLPickRegistrationApplication(
+        repository=repository,
+        register_pick=RegisterEligiblePick(repository, policy, clock=registration_clock),
+        bootstrap_bankroll=BootstrapBankroll(repository, policy, clock=registration_clock),
     )

@@ -32,3 +32,20 @@ with build_postgres_quote_history_application_from_settings(settings) as applica
 The production path is PostgreSQL. The application must fail clearly when `DATABASE_URL` is missing rather than silently creating or selecting a local SQLite database.
 
 Secrets are not included in the `repr()` output of `ApplicationSettings`. Tests use synthetic credentials only; no real provider key belongs in source control.
+
+## Task #10 registration policy
+
+Pick registration uses a complete, validated policy loaded by
+`load_registration_policy_config()`. The initial pilot values are represented
+explicitly by the `QUANTBET_*` variables in `.env.example`; monetary values use
+integer minor RSD units. Partial configuration fails closed, and the canonical
+non-secret configuration is fingerprinted and persisted with every decision.
+
+`QUANTBET_ALLOWED_FIXTURE_STATUSES` has no default. Fixture status is currently
+an opaque API-Football provider value, so deployment must supply the exact
+operationally approved pre-match statuses instead of relying on an invented
+domain interpretation.
+
+Application composition does not create or fund the bankroll. Deployment/test
+setup must invoke the explicit idempotent `BootstrapBankroll` operation once for
+the configured account before eligible registrations can reserve stake.

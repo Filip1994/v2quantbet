@@ -14,6 +14,13 @@ from .postgres_quote_history import PostgreSQLQuoteHistoryRepository
 from .postgres_fixtures import PostgreSQLFixtureRepository
 from .postgres_predictions import PostgreSQLFixturePredictionRepository
 from .postgres_value_evaluations import PostgreSQLValueEvaluationRepository
+from .postgres_pick_registration import PostgreSQLPickRegistrationRepository
+from .pick_registration import (
+    BankrollBootstrapConflictError,
+    BankrollNotBootstrappedError,
+    RegistrationPersistenceConflictError,
+    RegistrationProvenanceError,
+)
 from .fixtures import FixturePersistenceConflictError, FixtureRepository
 from .predictions import FixturePredictionRepository, PredictionPersistenceConflictError
 from .value_evaluations import (
@@ -30,6 +37,8 @@ from .sqlite import SQLiteQuoteRepository
 
 __all__ = [
     "ActiveModelUnavailableError",
+    "BankrollBootstrapConflictError",
+    "BankrollNotBootstrappedError",
     "FixturePersistenceConflictError",
     "FixturePredictionRepository",
     "FixtureRepository",
@@ -41,12 +50,15 @@ __all__ = [
     "PostgreSQLDixonColesModelVersionRepository",
     "PostgreSQLFixturePredictionRepository",
     "PostgreSQLFixtureRepository",
+    "PostgreSQLPickRegistrationRepository",
     "PostgreSQLQuoteHistoryRepository",
     "PostgreSQLValueEvaluationRepository",
     "PredictionPersistenceConflictError",
     "QuoteHistoryConflictError",
     "QuoteHistoryRepository",
     "QuoteRepository",
+    "RegistrationPersistenceConflictError",
+    "RegistrationProvenanceError",
     "SQLiteQuoteRepository",
     "ValueEvaluationPersistenceConflictError",
     "ValueEvaluationRepository",

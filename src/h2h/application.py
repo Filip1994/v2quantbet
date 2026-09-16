@@ -13,6 +13,8 @@ from h2h.application_postgres import (
     build_postgres_dixon_coles_model_lifecycle_application,
     build_postgres_quote_history_application,
     PostgreSQLProductionPredictionApplication,
+    PostgreSQLPickRegistrationApplication,
+    build_postgres_pick_registration_application,
     build_postgres_production_prediction_application,
 )
 from h2h.config import ApplicationSettings
@@ -142,4 +144,19 @@ def build_postgres_production_prediction_from_settings(
     return build_postgres_production_prediction_application(
         database_url=settings.database_url,
         discovery=discovery,
+    )
+
+
+def build_postgres_pick_registration_from_settings(
+    settings: ApplicationSettings,
+) -> PostgreSQLPickRegistrationApplication:
+    """Compose Task #10 only from complete durable database and policy settings."""
+
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for pick registration composition")
+    if settings.registration_policy is None:
+        raise ValueError("registration policy configuration is required")
+    return build_postgres_pick_registration_application(
+        settings.registration_policy,
+        database_url=settings.database_url,
     )
