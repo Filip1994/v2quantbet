@@ -75,6 +75,15 @@ Ovaj dokument sadrži samo proverene, do sada završene radove. Ne predstavlja t
 - `FixturePrediction` je vezan za target, a valuation zahteva exact canonical fixture equality pre probability/value mapiranja.
 - Implementirani su canonical market/selection probability mapping i osnovni value izračun.
 
+## I — API-Football historical training provenance
+
+- Implementirana je eksplicitna league/season/UTC training scope granica sa half-open `[start_at, end_at)` semantikom.
+- API-Football historical call zahteva `status=FT`, proverava kompletan single-page envelope i razlikuje uspešan prazan rezultat od greške.
+- Completed-match adapter strogo proverava canonical fixture identitet, ordered provider team IDs, league/season, UTC kickoff i nonnegative integer goals.
+- Prihvaćeni FT rezultat zahteva jednakost top-level `goals` i `score.fulltime`, uz null home/away vrednosti u `score.extratime` i `score.penalty`; AET/PEN nisu podržani.
+- Identical duplicates se spajaju, konfliktni duplicates atomically prekidaju acquisition, a dataset je immutable i deterministički sortiran.
+- Production provenance factory interno vezuje canonical API-Football endpoint i odobreni HTTP transport; injectable general client ne može da mint-uje trusted dataset. Fit bridge izvodi `api-football` namespace iz tog dataset-a i caller ga ne bira na toj granici.
+
 ## Trenutna granica
 
-Do sada je izgrađen i testiran quant/domain foundation, API-Football fixture/odds identity path, PostgreSQL quote-history path, discovery-driven worker i fixture-bound prediction/value foundation. Production completed-match acquisition i verified training provenance još ne postoje; zato production fixture-to-model execution, eligibility policy, Daily Bulletin, pick monitoring, closing/CLV, API/dashboard i operational pilot nisu završeni kao end-to-end sistem.
+Do sada je izgrađen i testiran quant/domain foundation, API-Football fixture/odds identity path, PostgreSQL quote-history path, discovery-driven worker, fixture-bound prediction/value foundation i FT-only completed-match acquisition sa verified API-Football training provenance. Broader training orchestration, model artifact lifecycle, production fixture-to-model execution, eligibility policy, Daily Bulletin, pick monitoring, closing/CLV, API/dashboard i operational pilot nisu završeni kao end-to-end sistem.

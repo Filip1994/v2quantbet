@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -79,3 +80,37 @@ def test_timeout_must_be_positive_finite_number(timeout: object) -> None:
 def test_base_url_must_not_be_empty() -> None:
     with pytest.raises(ValueError, match="base_url"):
         ApiFootballClient(Mock(), "secret", base_url=" ").fetch_odds(fixture_id=1)
+
+
+def test_fetch_completed_fixtures_uses_exact_ft_scope_and_utc_dates() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+    client = ApiFootballClient(transport, "secret")
+
+    result = client.fetch_completed_fixtures(
+        league_id=39,
+        season=2025,
+        start_at=datetime(2026, 1, 1, 2, tzinfo=timezone(timedelta(hours=2))),
+        end_at=datetime(2026, 1, 3, 2, tzinfo=timezone(timedelta(hours=2))),
+    )
+
+    assert result == {"response": []}
+    transport.get_json.assert_called_once_with(
+        "https://v3.football.api-sports.io/fixtures?"
+        "league=39&season=2025&from=2026-01-01&to=2026-01-03&status=FT&timezone=UTC",
+        headers={"x-apisports-key": "secret"},
+        timeout=10.0,
+    )
+
+
+@pytest.mark.parametrize("field,value", [("league_id", True), ("league_id", 1.5), ("season", "2025")])
+def test_fetch_completed_fixtures_rejects_non_integer_scope(field: str, value: object) -> None:
+    arguments = {
+        "league_id": 39,
+        "season": 2025,
+        "start_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "end_at": datetime(2026, 1, 2, tzinfo=UTC),
+    }
+    arguments[field] = value
+    with pytest.raises(ValueError, match=field):
+        ApiFootballClient(Mock(), "secret").fetch_completed_fixtures(**arguments)  # type: ignore[arg-type]

@@ -19,9 +19,9 @@ authoritative Fixture
 
 ## Model namespace claim
 
-`DixonColesModel.fit()` requires a nonblank `team_id_namespace` and retains it on the fitted model. This is an explicit claim supplied by the training caller. It enables fail-closed namespace comparison but is not evidence of data provenance.
+`DixonColesModel.fit()` requires a nonblank `team_id_namespace` and retains it on the fitted model. At the low-level mathematical API this remains a caller claim. The production API-Football path closes that gap through `build_trusted_api_football_historical_results(settings)`, an internally constructed `ApiFootballTrainingDataset`, and `fit_api_football_dixon_coles()`, which derives the namespace instead of accepting it from the caller. General injected `ApiFootballClient` instances and caller-normalized responses have no dataset-minting authority.
 
-The repository still has no production historical-results acquisition or training adapter for API-Football. Until one supplies authoritative namespaced records, no production-fitted model can claim verified API-Football training provenance.
+The provider-specific path is FT-only and requires complete single-page envelope evidence, exact league/season and half-open UTC scope, canonical fixture identity, ordered provider team IDs, matching top-level/full-time scores, null home/away values in the extra-time and penalty score objects, and conflict-safe deduplication. Broader training orchestration and model artifact/version lifecycle remain future work.
 
 ## Target-bound execution
 

@@ -16,7 +16,7 @@ Fixture identity path je canonical: API-Football discovery dodeljuje `api-footba
 
 Prediction boundary je fixture-bound: authoritative `Fixture` se pretvara u kontrolisani `PredictionTarget`, proverava se `team_id_namespace`, home/away redosled ostaje stabilan, a valuation zahteva exact canonical fixture equality.
 
-Ovaj prediction path ne predstavlja production training pipeline. Repository još nema trusted API-Football completed-match acquisition, training adapter ni dokaz da caller-supplied namespace odgovara stvarnom poreklu training records.
+Prediction path sada može da primi model fitted kroz trusted FT-only API-Football completed-match acquisition i provenance-aware bridge. Trusted production factory vezuje canonical endpoint i odobreni HTTP transport; general injectable client ostaje low-level granica bez dataset-minting authority. Broader training orchestration, model artifact lifecycle i durable provenance još nisu implementirani.
 
 ## Završeno
 
@@ -35,6 +35,7 @@ Ovaj prediction path ne predstavlja production training pipeline. Repository jo�
 - Provider-neutral fixture discovery, scoped discovery i API-Football fixture adapter.
 - Provider-neutral `HistoryQuotePollingJob`, discovery-driven polling i worker/runtime entrypoint.
 - Fixture-bound Dixon–Coles prediction target, model namespace compatibility i identity-safe value evaluation.
+- FT-only API-Football completed-match acquisition, strict score/scope validation i provenance-aware Dixon–Coles fitting bridge.
 - Testovi i dokumentacija za navedene celine.
 - Jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
 - Research boundary i plan, bez implicitnog menjanja production logike.
@@ -47,11 +48,11 @@ Ovaj prediction path ne predstavlja production training pipeline. Repository jo�
 - Local PostgreSQL integration testovi zahtevaju dostupnu PostgreSQL instancu; CI workflow je zasebna verifikaciona putanja.
 - Istorijski pre-match quote model koristi quote series i immutable snapshots.
 - Live/in-play kvote nisu deo QuantBet obuhvata.
-- `team_id_namespace` na modelu je compatibility claim, ne dokaz porekla training podataka.
+- Low-level `DixonColesModel.fit()` namespace ostaje caller claim; production API-Football fitting bridge ga izvodi iz validiranog provider dataset-a.
 
 ## Dokumentacija
 
-Detaljni ugovori i planovi ostaju u specijalizovanim dokumentima, uključujući `docs/FIXTURE_DISCOVERY_CONTRACT.md`, `docs/ODDS_INGESTION_CONTRACT.md`, `docs/PREDICTION_TARGETING_CONTRACT.md`, `docs/quant-api-contract.md`, `docs/POSTGRESQL_PERSISTENCE_PLAN.md`, `docs/VALUE_DECISION_CONTRACT.md` i `docs/RESEARCH_SECTOR_PLAN.md`.
+Detaljni ugovori i planovi ostaju u specijalizovanim dokumentima, uključujući `docs/FIXTURE_DISCOVERY_CONTRACT.md`, `docs/ODDS_INGESTION_CONTRACT.md`, `docs/API_FOOTBALL_TRAINING.md`, `docs/PREDICTION_TARGETING_CONTRACT.md`, `docs/quant-api-contract.md`, `docs/POSTGRESQL_PERSISTENCE_PLAN.md`, `docs/VALUE_DECISION_CONTRACT.md` i `docs/RESEARCH_SECTOR_PLAN.md`.
 
 ## Implementation roadmap
 
@@ -61,10 +62,10 @@ Detaljni ugovori i planovi ostaju u specijalizovanim dokumentima, uključujući 
 4. Dixon–Coles matematika i numerical regression baseline — **IMPLEMENTED / VERIFIED**
 5. Canonical market/selection probability mapping i value formule — **IMPLEMENTED / VERIFIED**
 6. Authoritative target, namespace compatibility i identity-safe valuation — **IMPLEMENTED / VERIFIED**
-7. Production completed-match acquisition sa eksplicitnim API-Football provenance — **NOT IMPLEMENTED; NEXT DEPENDENCY**
+7. Production completed-match acquisition sa eksplicitnim API-Football provenance — **IMPLEMENTED / VERIFIED (FT ONLY)**
 8. Training validation/orchestration i model artifact/version lifecycle — **PARTIAL / BLOCKED**
 9. Durable fixture metadata i prediction/value provenance — **PARTIAL / NOT COMPLETE**
-10. Production fixture-to-model execution — **BLOCKED** training putanjom
+10. Production fixture-to-model execution — **NOT IMPLEMENTED**
 11. Eligibility structures i registration gate — **PARTIAL**
 12. Actual eligibility/freshness/quality/de-vig/risk/stake policy — **NOT IMPLEMENTED**
 13. Durable decision/pick repository i duplicate protection — **NOT COMPLETE**

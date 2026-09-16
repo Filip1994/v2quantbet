@@ -33,12 +33,15 @@ Implemented and tested:
 - PostgreSQL migration runner;
 - discovery-driven quote polling and the PostgreSQL worker/runtime entrypoint;
 - fixture-bound Dixon–Coles prediction targeting and identity-safe value evaluation;
+- FT-only API-Football completed-match acquisition with strict score/scope validation,
+  conflict-safe deduplication, production-bound transport/endpoint provenance and a
+  provenance-derived Dixon–Coles team namespace;
 - CI lint and test verification.
 
 Not implemented or not production-wired yet:
 
-- production completed-match acquisition and verified API-Football training provenance;
 - model artifact/version lifecycle and durable prediction/value provenance;
+- broader training orchestration and production fixture-to-model execution;
 - concrete eligibility, freshness, quality, de-vig, risk and stake policy;
 - Daily Bulletin generation and delivery;
 - pick-specific monitoring, designated closing capture, settlement and realized CLV;

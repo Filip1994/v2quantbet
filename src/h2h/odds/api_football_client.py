@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from math import isfinite
 from time import monotonic
-from typing import Any
+from typing import Any, Final
 from urllib.parse import urlencode
 
 from h2h.odds.http import JsonTransport
+
+
+API_FOOTBALL_BASE_URL: Final = "https://v3.football.api-sports.io"
 
 
 @dataclass
@@ -19,7 +22,7 @@ class ApiFootballClient:
 
     transport: JsonTransport
     api_key: str
-    base_url: str = "https://v3.football.api-sports.io"
+    base_url: str = API_FOOTBALL_BASE_URL
     timeout: float = 10.0
     cache_ttl_seconds: float = 0.0
     clock: Callable[[], float] = field(default=monotonic, repr=False)
@@ -97,6 +100,49 @@ class ApiFootballClient:
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
+
+    def fetch_completed_fixtures(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Fetch one FT-only league/season slice using UTC calendar boundaries."""
+        self._validate()
+        self._validate_positive_int(league_id, "league_id")
+        self._validate_positive_int(season, "season")
+        if not isinstance(start_at, datetime) or not isinstance(end_at, datetime):
+            raise TypeError("start_at and end_at must be datetime values")
+        self._validate_datetime(start_at, "start_at")
+        self._validate_datetime(end_at, "end_at")
+        start_utc = start_at.astimezone(UTC)
+        end_utc = end_at.astimezone(UTC)
+        if start_utc >= end_utc:
+            raise ValueError("start_at must be before end_at")
+
+        query = urlencode(
+            {
+                "league": league_id,
+                "season": season,
+                "from": start_utc.date().isoformat(),
+                "to": end_utc.date().isoformat(),
+                "status": "FT",
+                "timezone": "UTC",
+            }
+        )
+        url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
+        return self.transport.get_json(
+            url,
+            headers={"x-apisports-key": self.api_key},
+            timeout=self.timeout,
+        )
+
+    @staticmethod
+    def _validate_positive_int(value: int, field: str) -> None:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
 
     def clear_cache(self) -> None:
         """Remove all cached fixture responses."""

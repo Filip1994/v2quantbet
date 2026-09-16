@@ -13,9 +13,14 @@ from h2h.application_postgres import (
 )
 from h2h.config import ApplicationSettings
 from h2h.odds import ApiFootballClient, BudgetedJsonTransport, DailyApiBudget
-from h2h.odds.http import JsonTransport
+from h2h.odds.api_football_client import API_FOOTBALL_BASE_URL
+from h2h.odds.http import JsonTransport, UrllibJsonTransport
 from h2h.persistence import SQLiteQuoteRepository
 from h2h.use_cases import QuoteIngestionService
+from h2h.use_cases.api_football_training import (
+    ApiFootballHistoricalResults,
+    _trusted_api_football_historical_results,
+)
 
 
 @dataclass
@@ -95,4 +100,13 @@ def build_api_football_client(
     return ApiFootballClient(
         transport=guarded_transport,
         api_key=settings.api_football_key,
+        base_url=API_FOOTBALL_BASE_URL,
     )
+
+
+def build_trusted_api_football_historical_results(
+    settings: ApplicationSettings,
+) -> ApiFootballHistoricalResults:
+    """Build the sole supported API-Football training-provenance acquisition path."""
+    client = build_api_football_client(UrllibJsonTransport(), settings)
+    return _trusted_api_football_historical_results(client)

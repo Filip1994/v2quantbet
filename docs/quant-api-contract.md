@@ -28,7 +28,7 @@ The package exports are aliases of the canonical module objects.
 
 Only records with `record.date < reference_time` are used. The quant layer expects records to represent completed matches and expects team identifiers to be stable integers. Provider-specific objects must be adapted before entering this interface.
 
-`team_id_namespace` is a required nonblank string retained by the fitted model. It is the caller's explicit claim about the namespace shared by every training-record team ID. The field makes namespace compatibility enforceable at prediction time; it does not prove where the records came from or that the claim is truthful. Production API-Football historical-results acquisition and training adaptation are not implemented.
+`team_id_namespace` is a required nonblank string retained by the fitted model. On this low-level mathematical API it remains the caller's explicit claim about the namespace shared by every training-record team ID. Production API-Football callers instead construct acquisition with `build_trusted_api_football_historical_results(settings)` and use `fit_api_football_dixon_coles()`. The factory fixes the canonical endpoint and approved production HTTP transport without caller injection; the bridge accepts only the internally minted dataset and derives `api-football`, so the caller cannot select the namespace at that boundary. General injected clients and caller-normalized records do not carry that authority.
 
 `Fixture.provider_home_team_id` and `Fixture.provider_away_team_id` retain ordered, provider-qualified identifiers from fixture discovery. They may be used as Dixon–Coles `home_id` and `away_id` only when the fitted training records are explicitly known to use the same provider namespace. Their presence alone does not prove that namespace association, and the quant layer does not perform provider-team entity resolution.
 
@@ -61,7 +61,7 @@ Before invoking `market_probabilities()`, the predictor requires the model's `te
 
 `evaluate_prediction_quote(prediction, quote)` is the identity-safe valuation gateway. It accepts only the internal result form produced by `DixonColesFixturePredictor`, then requires exact canonical fixture-ID equality before delegating selection mapping to `model_probability_for_selection()` and numerical valuation to unchanged `evaluate_value()`. Supported public APIs therefore cannot rebind arbitrary or fixture-A probabilities to a fixture-B target. Raw provider IDs and canonical IDs are not interchangeable, and cross-provider equivalence is never inferred. This supported-API boundary does not attempt to defend against deliberate private-module imports or reflection.
 
-This target-binding boundary is implemented, but no production component currently acquires completed API-Football results or fits an API-Football-namespaced model.
+The target-binding boundary composes with the implemented FT-only API-Football historical acquisition and provenance-aware fitting bridge. Model artifact/version lifecycle, scheduled training and durable prediction provenance are not implemented.
 
 ## Prediction methods
 
