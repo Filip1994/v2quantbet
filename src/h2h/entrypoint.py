@@ -10,6 +10,7 @@ from threading import Event
 
 from h2h.application import build_api_football_client
 from h2h.application import build_postgres_quote_history_application_from_settings
+from h2h.application import build_postgres_pick_monitoring_from_settings
 from h2h.config import load_settings
 from h2h.domain.fixture_identity import (
     ResolvedFixtureIdentity,
@@ -65,6 +66,11 @@ def main() -> None:
 
     client = build_api_football_client(UrllibJsonTransport(), settings)
     source = ApiFootballOddsService(client)
+    monitoring_application = (
+        None
+        if settings.odds_lifecycle_policy is None
+        else build_postgres_pick_monitoring_from_settings(settings, source=source)
+    )
     stopped = Event()
     install_shutdown_handlers(stopped.set)
 
@@ -113,6 +119,14 @@ def main() -> None:
                 )
 
     def run_cycle() -> None:
+        if monitoring_application is not None:
+            result = monitoring_application.worker.run_once()
+            LOGGER.info(
+                "Pick monitoring cycle: started=%s finalized=%s snapshots=%s",
+                len(result.reconciliation.started_pick_ids),
+                len(result.reconciliation.finalized_pick_ids),
+                result.refresh.persisted_snapshot_count,
+            )
         if poll_job is not None:
             total = poll_job.run_once()
             LOGGER.info("Worker cycle persisted %s snapshots", total)

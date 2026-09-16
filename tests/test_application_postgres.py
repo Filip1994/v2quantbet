@@ -10,8 +10,10 @@ from h2h.application_postgres import (
     build_postgres_production_prediction_application,
     build_postgres_pick_registration_application,
     build_postgres_quote_history_application,
+    build_postgres_pick_monitoring_application,
 )
 from tests.domain.test_task10_policy import policy
+from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.persistence import (
     PostgreSQLFixturePredictionRepository,
     PostgreSQLFixtureRepository,
@@ -108,3 +110,15 @@ def test_pick_registration_builder_has_no_bootstrap_side_effect() -> None:
     assert isinstance(application, PostgreSQLPickRegistrationApplication)
     assert application.register_pick is not None
     assert application.bootstrap_bankroll is not None
+
+
+def test_pick_monitoring_builder_wires_worker_and_bulletin() -> None:
+    source = Mock()
+    application = build_postgres_pick_monitoring_application(
+        OddsLifecyclePolicy(300, 600, 900),
+        source,
+        database_url="postgresql://example.invalid/quantbet",
+    )
+    assert application.worker is not None
+    assert application.read_lifecycle is not None
+    assert application.bulletin.timezone.key == "Europe/Belgrade"

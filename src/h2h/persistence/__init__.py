@@ -15,6 +15,14 @@ from .postgres_fixtures import PostgreSQLFixtureRepository
 from .postgres_predictions import PostgreSQLFixturePredictionRepository
 from .postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from .postgres_pick_registration import PostgreSQLPickRegistrationRepository
+from .postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
+from .postgres_daily_bulletin import PostgreSQLDailyBulletinRepository
+from .pick_monitoring import (
+    PickClosingNotDueError,
+    PickMonitoringConflictError,
+    PickMonitoringNotStartedError,
+    PickMonitoringRepository,
+)
 from .pick_registration import (
     BankrollBootstrapConflictError,
     BankrollNotBootstrappedError,
@@ -46,10 +54,16 @@ __all__ = [
     "InMemoryQuoteRepository",
     "ModelActivationConflictError",
     "ModelPersistenceConflictError",
+    "PickClosingNotDueError",
+    "PickMonitoringConflictError",
+    "PickMonitoringNotStartedError",
+    "PickMonitoringRepository",
     "PostgreSQLActiveDixonColesModelRepository",
+    "PostgreSQLDailyBulletinRepository",
     "PostgreSQLDixonColesModelVersionRepository",
     "PostgreSQLFixturePredictionRepository",
     "PostgreSQLFixtureRepository",
+    "PostgreSQLPickMonitoringRepository",
     "PostgreSQLPickRegistrationRepository",
     "PostgreSQLQuoteHistoryRepository",
     "PostgreSQLValueEvaluationRepository",

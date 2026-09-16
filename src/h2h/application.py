@@ -14,11 +14,13 @@ from h2h.application_postgres import (
     build_postgres_quote_history_application,
     PostgreSQLProductionPredictionApplication,
     PostgreSQLPickRegistrationApplication,
+    PostgreSQLPickMonitoringApplication,
+    build_postgres_pick_monitoring_application,
     build_postgres_pick_registration_application,
     build_postgres_production_prediction_application,
 )
 from h2h.config import ApplicationSettings
-from h2h.odds import ApiFootballClient, BudgetedJsonTransport, DailyApiBudget
+from h2h.odds import ApiFootballClient, ApiFootballOddsService, BudgetedJsonTransport, DailyApiBudget
 from h2h.odds.api_football_client import API_FOOTBALL_BASE_URL
 from h2h.odds.http import JsonTransport, UrllibJsonTransport
 from h2h.persistence import SQLiteQuoteRepository
@@ -159,4 +161,26 @@ def build_postgres_pick_registration_from_settings(
     return build_postgres_pick_registration_application(
         settings.registration_policy,
         database_url=settings.database_url,
+    )
+
+
+def build_postgres_pick_monitoring_from_settings(
+    settings: ApplicationSettings,
+    *,
+    source: ApiFootballOddsService | None = None,
+) -> PostgreSQLPickMonitoringApplication:
+    """Compose the Task #11 backend worker and read models from explicit settings."""
+
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for pick monitoring composition")
+    if settings.odds_lifecycle_policy is None:
+        raise ValueError("odds lifecycle configuration is required")
+    if source is None:
+        client = build_api_football_client(UrllibJsonTransport(), settings)
+        source = ApiFootballOddsService(client)
+    return build_postgres_pick_monitoring_application(
+        settings.odds_lifecycle_policy,
+        source,
+        database_url=settings.database_url,
+        bulletin_timezone=settings.bulletin_timezone,
     )

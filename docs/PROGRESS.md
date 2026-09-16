@@ -69,8 +69,8 @@ Detaljni ugovori i planovi ostaju u specijalizovanim dokumentima, uključujući 
 11. Eligibility structures i registration gate — **PARTIAL**
 12. Actual eligibility/freshness/quality/de-vig/risk/stake policy — **NOT IMPLEMENTED**
 13. Durable decision/pick repository i duplicate protection — **NOT COMPLETE**
-14. Daily Bulletin selection/formatting/delivery — **NOT COMPLETE**
-15. Pick-specific monitoring i designated closing capture — **PARTIAL / NOT COMPLETE**
+14. Daily Bulletin durable registered-pick read model — **IMPLEMENTED / DELIVERY NOT INCLUDED**
+15. Pick-specific monitoring i immutable closing finalization — **IMPLEMENTED / VERIFIED**
 16. Match-result acquisition, settlement i realized CLV — **NOT COMPLETE**
 17. Production end-to-end composition i operational pilot — **BLOCKED** prethodnim runtime komponentama
 

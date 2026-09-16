@@ -49,3 +49,14 @@ domain interpretation.
 Application composition does not create or fund the bankroll. Deployment/test
 setup must invoke the explicit idempotent `BootstrapBankroll` operation once for
 the configured account before eligible registrations can reserve stake.
+
+## Task #11 monitoring and Bulletin
+
+Pick monitoring requires the complete explicit set
+`QUANTBET_PICK_MONITOR_INTERVAL_SECONDS`, `QUANTBET_CURRENT_MAX_AGE_SECONDS`, and
+`QUANTBET_CLOSING_MAX_AGE_SECONDS`. Each must be a positive integer number of seconds; partial
+configuration fails closed. The values and `ODDS_LIFECYCLE_V1` are pinned when a pick enters
+`MONITORING`.
+
+`QUANTBET_BULLETIN_TIMEZONE` must be a valid IANA timezone. It defaults to the approved V1
+timezone `Europe/Belgrade`; it never uses the host's local timezone implicitly.

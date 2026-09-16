@@ -117,3 +117,19 @@ def test_task10_migration_has_decision_bankroll_and_pick_boundaries() -> None:
     assert "UNIQUE (fixture_id, market)" in migration
     assert "STAKE_RESERVED" in migration
     assert "ON DELETE RESTRICT" in migration
+
+
+def test_task11_migration_has_monitoring_transition_and_closing_boundaries() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "006_pick_monitoring_odds_lifecycle.sql"
+    ).read_text(encoding="utf-8")
+    for table in (
+        "pick_monitoring_states",
+        "pick_monitoring_transitions",
+        "pick_closing_finalizations",
+    ):
+        assert f"CREATE TABLE {table}" in migration
+    assert "ODDS_LIFECYCLE_V1" in migration
+    assert "idx_pick_monitoring_due" in migration
+    assert "pick_closing_finalizations_immutable" in migration
+    assert "ALTER TABLE quote_snapshots" in migration

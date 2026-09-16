@@ -7,8 +7,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from h2h.domain.odds import Market, Selection
+from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 
 
@@ -46,12 +48,16 @@ class ApplicationSettings:
     api_football_key: str = field(repr=False)
     database_url: str | None = field(default=None, repr=False)
     registration_policy: RegistrationPolicyConfig | None = None
+    odds_lifecycle_policy: OddsLifecyclePolicy | None = None
+    bulletin_timezone: ZoneInfo = field(default_factory=lambda: ZoneInfo("Europe/Belgrade"))
 
     def __repr__(self) -> str:
         return (
             f"ApplicationSettings(database_path={str(self.database_path)!r}, "
             "database_url='[REDACTED]', api_football_key='[REDACTED]', "
-            f"registration_policy={self.registration_policy!r})"
+            f"registration_policy={self.registration_policy!r}, "
+            f"odds_lifecycle_policy={self.odds_lifecycle_policy!r}, "
+            f"bulletin_timezone={self.bulletin_timezone.key!r})"
         )
 
 
@@ -92,12 +98,59 @@ def load_settings(environ: Mapping[str, str] | None = None) -> ApplicationSettin
     registration_names = _REGISTRATION_ENV_NAMES
     configured_policy = any(values.get(name, "").strip() for name in registration_names)
     registration_policy = load_registration_policy_config(values) if configured_policy else None
+    lifecycle_names = _LIFECYCLE_ENV_NAMES
+    configured_lifecycle = any(values.get(name, "").strip() for name in lifecycle_names)
+    odds_lifecycle_policy = (
+        load_odds_lifecycle_policy(values) if configured_lifecycle else None
+    )
+    timezone_name = values.get("QUANTBET_BULLETIN_TIMEZONE", "Europe/Belgrade").strip()
+    if not timezone_name:
+        raise ConfigError("QUANTBET_BULLETIN_TIMEZONE must not be blank")
+    try:
+        bulletin_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ConfigError("QUANTBET_BULLETIN_TIMEZONE must be a valid IANA timezone") from exc
 
     return ApplicationSettings(
         database_path=Path(database_path),
         api_football_key=api_key,
         database_url=database_url,
         registration_policy=registration_policy,
+        odds_lifecycle_policy=odds_lifecycle_policy,
+        bulletin_timezone=bulletin_timezone,
+    )
+
+
+_LIFECYCLE_ENV_NAMES = (
+    "QUANTBET_PICK_MONITOR_INTERVAL_SECONDS",
+    "QUANTBET_CURRENT_MAX_AGE_SECONDS",
+    "QUANTBET_CLOSING_MAX_AGE_SECONDS",
+)
+
+
+def load_odds_lifecycle_policy(
+    environ: Mapping[str, str] | None = None,
+) -> OddsLifecyclePolicy:
+    """Load complete lifecycle interpretation settings; partial input fails closed."""
+
+    values = os.environ if environ is None else environ
+
+    def positive(name: str) -> int:
+        raw = values.get(name, "").strip()
+        if not raw:
+            raise ConfigError(f"Missing required odds lifecycle configuration: {name}")
+        try:
+            result = int(raw)
+        except ValueError as exc:
+            raise ConfigError(f"{name} must be an integer") from exc
+        if result <= 0:
+            raise ConfigError(f"{name} must be positive")
+        return result
+
+    return OddsLifecyclePolicy(
+        monitoring_interval_seconds=positive("QUANTBET_PICK_MONITOR_INTERVAL_SECONDS"),
+        current_max_age_seconds=positive("QUANTBET_CURRENT_MAX_AGE_SECONDS"),
+        closing_max_age_seconds=positive("QUANTBET_CLOSING_MAX_AGE_SECONDS"),
     )
 
 

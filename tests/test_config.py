@@ -4,6 +4,7 @@ from h2h.config import (
     ApplicationSettings,
     ConfigError,
     load_config,
+    load_odds_lifecycle_policy,
     load_registration_policy_config,
     load_settings,
 )
@@ -145,3 +146,36 @@ def test_load_settings_parses_policy_only_when_registration_is_configured() -> N
     settings = load_settings(environment)
     assert settings.registration_policy is not None
     assert settings.registration_policy.fingerprint.startswith("pick-policy-config-v1:")
+
+
+def lifecycle_environment():
+    return {
+        "QUANTBET_PICK_MONITOR_INTERVAL_SECONDS": "300",
+        "QUANTBET_CURRENT_MAX_AGE_SECONDS": "600",
+        "QUANTBET_CLOSING_MAX_AGE_SECONDS": "900",
+    }
+
+
+def test_load_odds_lifecycle_policy_requires_complete_explicit_values() -> None:
+    policy = load_odds_lifecycle_policy(lifecycle_environment())
+    assert policy.monitoring_interval_seconds == 300
+    partial = lifecycle_environment()
+    del partial["QUANTBET_CLOSING_MAX_AGE_SECONDS"]
+    with pytest.raises(ConfigError, match="QUANTBET_CLOSING_MAX_AGE_SECONDS"):
+        load_odds_lifecycle_policy(partial)
+
+
+def test_load_settings_validates_bulletin_timezone_and_lifecycle() -> None:
+    environment = lifecycle_environment()
+    environment.update(
+        {
+            "API_FOOTBALL_KEY": "test-key",
+            "QUANTBET_BULLETIN_TIMEZONE": "Europe/Belgrade",
+        }
+    )
+    settings = load_settings(environment)
+    assert settings.odds_lifecycle_policy is not None
+    assert settings.bulletin_timezone.key == "Europe/Belgrade"
+    environment["QUANTBET_BULLETIN_TIMEZONE"] = "Not/A_Zone"
+    with pytest.raises(ConfigError, match="IANA"):
+        load_settings(environment)

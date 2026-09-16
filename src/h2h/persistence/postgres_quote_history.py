@@ -88,6 +88,11 @@ class PostgreSQLQuoteHistoryRepository:
             return
         with self.connect() as connection, connection.cursor() as cursor:
             series_ids = tuple({snapshot.series_id for snapshot in incoming})
+            for series_id in sorted(series_ids):
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"quote-series:{series_id}",),
+                )
             cursor.execute("SELECT series_id FROM quote_series WHERE series_id = ANY(%s)", (list(series_ids),))
             known_series = {row[0] for row in cursor.fetchall()}
             for series_id in series_ids:

@@ -17,7 +17,10 @@ from h2h.persistence.postgres_fixtures import PostgreSQLFixtureRepository
 from h2h.persistence.postgres_predictions import PostgreSQLFixturePredictionRepository
 from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
+from h2h.persistence.postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
+from h2h.persistence.postgres_daily_bulletin import PostgreSQLDailyBulletinRepository
 from h2h.domain.registration_policy import RegistrationPolicyConfig
+from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.persistence.migrations import apply_migrations
 from h2h.use_cases.api_football_training import ApiFootballHistoricalResults
 from h2h.use_cases.model_lifecycle import (
@@ -31,6 +34,17 @@ from h2h.use_cases.fixture_discovery import FixtureDiscovery
 from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.value_evaluation import EvaluatePersistedPredictionQuote
 from h2h.use_cases.register_pick import BootstrapBankroll, RegisterEligiblePick
+from h2h.use_cases.pick_monitoring import (
+    FinalizePickClosingOdds,
+    ReadPickOddsLifecycle,
+    ReconcileRegisteredPickMonitoring,
+    RefreshRegisteredPickOdds,
+    RegisteredPickQuoteSource,
+    StartRegisteredPickMonitoring,
+)
+from h2h.read_models.daily_bulletin import DailyBulletin
+from h2h.workers.registered_pick_monitoring import RegisteredPickMonitoringWorker
+from zoneinfo import ZoneInfo
 
 
 _DEFAULT_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "migrations"
@@ -115,6 +129,31 @@ class PostgreSQLPickRegistrationApplication:
     repository: PostgreSQLPickRegistrationRepository
     register_pick: RegisterEligiblePick
     bootstrap_bankroll: BootstrapBankroll
+
+    def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
+        with self.repository.connect() as connection:
+            return apply_migrations(connection, migration_dir)
+
+    def close(self) -> None:
+        """Connections are operation-scoped."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+
+@dataclass
+class PostgreSQLPickMonitoringApplication:
+    repository: PostgreSQLPickMonitoringRepository
+    start_monitoring: StartRegisteredPickMonitoring
+    refresh_odds: RefreshRegisteredPickOdds
+    finalize_closing: FinalizePickClosingOdds
+    reconcile: ReconcileRegisteredPickMonitoring
+    read_lifecycle: ReadPickOddsLifecycle
+    bulletin: DailyBulletin
+    worker: RegisteredPickMonitoringWorker
 
     def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
         with self.repository.connect() as connection:
@@ -219,4 +258,45 @@ def build_postgres_pick_registration_application(
         repository=repository,
         register_pick=RegisterEligiblePick(repository, policy, clock=registration_clock),
         bootstrap_bankroll=BootstrapBankroll(repository, policy, clock=registration_clock),
+    )
+
+
+def build_postgres_pick_monitoring_application(
+    policy: OddsLifecyclePolicy,
+    source: RegisteredPickQuoteSource,
+    database_url: str | None = None,
+    *,
+    bulletin_timezone: ZoneInfo | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PostgreSQLPickMonitoringApplication:
+    """Compose durable monitoring, finalization, worker, and read-only Bulletin."""
+
+    if not isinstance(policy, OddsLifecyclePolicy):
+        raise TypeError("policy must be an OddsLifecyclePolicy")
+    lifecycle_clock = clock or (lambda: datetime.now(timezone.utc))
+    repository = PostgreSQLPickMonitoringRepository(database_url=database_url)
+    quote_history = PostgreSQLQuoteHistoryRepository(database_url=database_url)
+    ingestion = QuoteHistoryIngestionService(quote_history, capture_clock=lifecycle_clock)
+    start = StartRegisteredPickMonitoring(repository, policy, clock=lifecycle_clock)
+    refresh = RefreshRegisteredPickOdds(
+        repository, source, ingestion, clock=lifecycle_clock
+    )
+    finalize = FinalizePickClosingOdds(repository, clock=lifecycle_clock)
+    reconcile = ReconcileRegisteredPickMonitoring(
+        repository, policy, clock=lifecycle_clock
+    )
+    read = ReadPickOddsLifecycle(repository, clock=lifecycle_clock)
+    bulletin_repository = PostgreSQLDailyBulletinRepository(repository)
+    return PostgreSQLPickMonitoringApplication(
+        repository=repository,
+        start_monitoring=start,
+        refresh_odds=refresh,
+        finalize_closing=finalize,
+        reconcile=reconcile,
+        read_lifecycle=read,
+        bulletin=DailyBulletin(
+            bulletin_repository,
+            bulletin_timezone or ZoneInfo("Europe/Belgrade"),
+        ),
+        worker=RegisteredPickMonitoringWorker(reconcile, refresh),
     )

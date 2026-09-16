@@ -19,6 +19,13 @@ from .production_prediction import ProduceFixturePrediction
 from .value_evaluation import EvaluatePersistedPredictionQuote, EvaluationFixtureMismatchError
 from .quotes import QuoteIngestionService
 from .register_pick import BootstrapBankroll, RegisterEligiblePick
+from .pick_monitoring import (
+    FinalizePickClosingOdds,
+    ReadPickOddsLifecycle,
+    ReconcileRegisteredPickMonitoring,
+    RefreshRegisteredPickOdds,
+    StartRegisteredPickMonitoring,
+)
 
 __all__ = [
     "ApiFootballHistoricalResults",
@@ -29,11 +36,16 @@ __all__ = [
     "DurableFixtureDiscovery",
     "EvaluatePersistedPredictionQuote",
     "EvaluationFixtureMismatchError",
+    "FinalizePickClosingOdds",
     "PredictionFixtureMismatchError",
     "ProduceFixturePrediction",
     "QuoteHistoryIngestionService",
     "QuoteIngestionService",
+    "ReadPickOddsLifecycle",
+    "ReconcileRegisteredPickMonitoring",
+    "RefreshRegisteredPickOdds",
     "RegisterEligiblePick",
+    "StartRegisteredPickMonitoring",
     "TeamIdNamespaceMismatchError",
     "evaluate_prediction_quote",
     "fit_api_football_dixon_coles",
