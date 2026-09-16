@@ -14,8 +14,8 @@ Servis ne sadrži provider-specifičnu logiku, već samo orkestrira postojeće g
 
 ```python
 service = ApiFootballOddsService(client)
-quotes = service.fetch_quotes(fixture_id=42)
-snapshots = service.fetch_market_snapshots(fixture_id=42)
+quotes = service.fetch_quotes(fixture_identity=resolved_fixture_identity)
+snapshots = service.fetch_market_snapshots(fixture_identity=resolved_fixture_identity)
 ```
 
-Servis trenutno ne upisuje podatke u bazu. Persistence ostaje odvojena odgovornost aplikacionog sloja.
+Service accepts the resolved canonical/provider fixture identity. It uses the positive numeric provider ID only for the API-Football transport call and passes the canonical `api-football:<id>` identity into quote ingestion. It does not write to the database; persistence remains the application-layer responsibility.

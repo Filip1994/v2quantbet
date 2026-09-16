@@ -10,90 +10,74 @@ Prvi value-evaluation sloj je implementiran: model-vs-market poređenje računa 
 
 Fixture discovery foundation je uveden kroz canonical `Fixture` model, provider-neutral `FixtureDiscovery` contract, `ScopedFixtureDiscovery` use-case i API-Football fixture adapter sa hardening validacijom.
 
-Dodatno je definisana jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
+History-aware ingestion pretvara canonical quote opažanja u stabilne `QuoteSeries` entitete i immutable `QuoteSnapshot` zapise. PostgreSQL runtime composition, restart-safe series lookup, discovery-driven polling i worker entrypoint su implementirani i testirani. Live Railway deployment i operational pilot nisu potvrđeni ovim repozitorijumom.
 
-Uveden je history-aware ingestion sloj koji canonical quote opažanja pretvara u stabilne `QuoteSeries` entitete i immutable `QuoteSnapshot` zapise. Dodat је provider-neutral polling job који тај ingestion позива за више fixture-а. Production runtime composition, restart-safe series lookup и Railway worker entrypoint још нису завршени.
+Fixture identity path je canonical: API-Football discovery dodeljuje `api-football:<id>`, čuva odvojeni numeric provider ID za transport i authoritative ordered provider home/away team IDs. Odds ingestion proverava da response pripada traženom provider fixture-u pre flattening-a.
 
-## Завршено
+Prediction boundary je fixture-bound: authoritative `Fixture` se pretvara u kontrolisani `PredictionTarget`, proverava se `team_id_namespace`, home/away redosled ostaje stabilan, a valuation zahteva exact canonical fixture equality.
 
-- Quant/domain foundation и регресиона заштита.
-- Canonical quote модели и market snapshot validacija.
+Ovaj prediction path ne predstavlja production training pipeline. Repository još nema trusted API-Football completed-match acquisition, training adapter ni dokaz da caller-supplied namespace odgovara stvarnom poreklu training records.
+
+## Završeno
+
+- Quant/domain foundation i regresiona zaštita.
+- Canonical quote modeli i market snapshot validacija.
 - Provider-neutral quote adapter contract.
 - API-Football flattening, normalization, deduplication i conflict handling.
-- In-memory i SQLite persistence sa idempotentnim upisom i atomskim odbijanjem konflikata.
-- Quote ingestion use case i SQLite application composition/lifecycle.
-- Environment konfiguracija sa obaveznim `API_FOOTBALL_KEY` i podrazumevanom SQLite putanjom.
-- Provider-neutral `JsonTransport` i `UrllibJsonTransport` sa timeout/error mapiranjem.
-- `ApiFootballClient` sa pravilnim `/odds?fixture=<id>` zahtevom.
-- `ApiFootballOddsService` koji povezuje client sa ingestion i snapshot slojem.
-- `RetryingJsonTransport` sa ograničenim brojem pokušaja i eksponencijalnim backoff-om.
-- HTTP 429 klasifikacija kroz `TransportRateLimitError` sa očuvanim `Retry-After` intervalom.
-- Dnevni `DailyApiBudget` sa operativnom rezervom i `BudgetedJsonTransport` zaštitom.
-- Fixture-level in-memory TTL cache za API-Football odgovore, sa eksplicitnim invalidiranjem.
-- Definisan Phase I scope takmičenja i pravila za isključivanje afričkih, omladinskih, nižerazrednih engleskih/nemačkih i kup takmičenja.
-- Deterministički Phase I competition-scope filter sa stabilnim rejection reason kodovima.
+- Canonical fixture identity, provider fixture reference i ordered provider team identity.
+- Fail-closed API-Football response fixture identity validation pre quote flattening-a.
+- In-memory i PostgreSQL quote-history persistence sa idempotentnim upisom i atomskim odbijanjem konflikata.
+- Quote ingestion use case, PostgreSQL migrations i application composition/lifecycle.
+- Environment konfiguracija, provider-neutral HTTP transport, retry/rate-limit handling, API budget i fixture-level cache.
+- Phase I competition-scope filter sa stabilnim rejection reason kodovima.
 - Deterministička ValuePick evaluacija: implied probability, probability gap i expected value.
-- Canonical immutable `Fixture` model.
-- Provider-neutral `FixtureDiscovery` contract.
-- `ScopedFixtureDiscovery` use-case za primenu Phase I universe politike.
-- API-Football fixture adapter za mapiranje provider payload-a u canonical `Fixture`.
-- Hardening validacija fixture adaptera i prošireni testovi za nevalidne payload-e, tipove, идентификаторе и датуме.
 - Immutable `PickRegistration` model sa `PickStatus` lifecycle enumeracijom.
-- Istorijski quote domain modeli, repository contract i PostgreSQL adapter foundation.
-- History-aware quote ingestion servis sa stabilnim series ID-jevima i idempotentnim snapshot ID-jevima.
-- Provider-neutral `HistoryQuotePollingJob` sa `HistoricalQuoteSource` ugovorom i testovima za više fixture-а и nevalidne fixture identifikatore.
+- Provider-neutral fixture discovery, scoped discovery i API-Football fixture adapter.
+- Provider-neutral `HistoryQuotePollingJob`, discovery-driven polling i worker/runtime entrypoint.
+- Fixture-bound Dixon–Coles prediction target, model namespace compatibility i identity-safe value evaluation.
 - Testovi i dokumentacija za navedene celine.
-- Prošireni product goals sa Research sektorom i eksplicitnom granicom prema production screeningu.
-- Dodat plan Research sektora u `docs/RESEARCH_SECTOR_PLAN.md`.
-- Uveden detaljni ljudski čitljiv dnevnik manjih iteracija u `docs/ITERATION_LOG.md`.
-- Dodat dizajn istorijskih pre-match quote snapshot-a u `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`.
+- Jasna granica između operativnog Daily Bulletin screeninga i budućeg Research sektora.
+- Research boundary i plan, bez implicitnog menjanja production logike.
 
 ## Arhitektonske odluke
 
-- Railway PostgreSQL je potvrđena ciljna production baza.
-- `QuoteRepository` ugovor ostaje provider-neutral i ne menja se zbog izbora baze.
-- `InMemoryQuoteRepository` ostaje za testove i lokalni razvoj.
-- PostgreSQL adapter će biti uveden kao `PostgreSQLQuoteRepository` iza postojećeg ugovora.
-- SQLite ostaje privremeni postojeći adapter dok PostgreSQL implementacija i testovi ne budu završeni.
-- SQLite se neće brisati pre uspešne PostgreSQL zamene i CI verifikacije.
-- Detaljan plan je u `docs/POSTGRESQL_PERSISTENCE_PLAN.md`.
-- Istorijski pre-match quote model mora koristiti quote series i immutable snapshots; postojeći single-row identity model nije dovoljan.
+- Railway PostgreSQL je potvrđena ciljna production baza; repository ne tvrdi da je live deployment izvršen.
+- PostgreSQL quote-history adapter je implementiran iza provider-neutral ugovora.
+- SQLite ostaje privremeno dostupan za legacy testove i migration work; nije odobreni Railway production path.
+- Local PostgreSQL integration testovi zahtevaju dostupnu PostgreSQL instancu; CI workflow je zasebna verifikaciona putanja.
+- Istorijski pre-match quote model koristi quote series i immutable snapshots.
 - Live/in-play kvote nisu deo QuantBet obuhvata.
+- `team_id_namespace` na modelu je compatibility claim, ne dokaz porekla training podataka.
 
 ## Dokumentacija
 
-- `docs/QUOTE_USE_CASES.md`
-- `docs/PERSISTENCE_BOUNDARY.md`
-- `docs/SQLITE_PERSISTENCE.md`
-- `docs/POSTGRESQL_PERSISTENCE_PLAN.md`
-- `docs/HISTORICAL_PREMATCH_QUOTES_DESIGN.md`
-- `docs/ITERATION_LOG.md`
-- `docs/APPLICATION_COMPOSITION.md`
-- `docs/CONFIGURATION.md`
-- `docs/HTTP_TRANSPORT.md`
-- `docs/API_FOOTBALL_SERVICE.md`
-- `docs/RETRY_POLICY.md`
-- `docs/API_BUDGET.md`
-- `docs/API_FOOTBALL_CACHE.md`
-- `docs/PHASE_I_UNIVERSE_SCOPE.md`
-- `docs/VALUE_PICK_EVALUATION.md`
-- `docs/FIXTURE_DISCOVERY_CONTRACT.md`
-- `docs/SCOPED_FIXTURE_DISCOVERY.md`
-- `docs/API_FOOTBALL_FIXTURE_ADAPTER.md`
-- `docs/PICK_REGISTRATION.md`
-- `docs/RESEARCH_SECTOR_PLAN.md`
+Detaljni ugovori i planovi ostaju u specijalizovanim dokumentima, uključujući `docs/FIXTURE_DISCOVERY_CONTRACT.md`, `docs/ODDS_INGESTION_CONTRACT.md`, `docs/PREDICTION_TARGETING_CONTRACT.md`, `docs/quant-api-contract.md`, `docs/POSTGRESQL_PERSISTENCE_PLAN.md`, `docs/VALUE_DECISION_CONTRACT.md` i `docs/RESEARCH_SECTOR_PLAN.md`.
 
-## Sledeći korak
+## Implementation roadmap
 
-Implementirati restart-safe lookup postojećeg `QuoteSeries` zapisa po prirodnom ključu (fixture/bookmaker/market/selection), zatim povezati history-aware polling sa production runtime composition i završiti PostgreSQL/Railway worker entrypoint. Nakon toga sledi kickoff/closing politika i prvi end-to-end Daily Bulletin pipeline.
+1. API-Football fixture discovery, canonical identity i ordered provider team IDs — **IMPLEMENTED / VERIFIED**
+2. API-Football odds transport, canonical quotes i response identity validation — **IMPLEMENTED / VERIFIED**
+3. PostgreSQL quote-history ingestion i discovery-driven worker — **IMPLEMENTED / VERIFIED**
+4. Dixon–Coles matematika i numerical regression baseline — **IMPLEMENTED / VERIFIED**
+5. Canonical market/selection probability mapping i value formule — **IMPLEMENTED / VERIFIED**
+6. Authoritative target, namespace compatibility i identity-safe valuation — **IMPLEMENTED / VERIFIED**
+7. Production completed-match acquisition sa eksplicitnim API-Football provenance — **NOT IMPLEMENTED; NEXT DEPENDENCY**
+8. Training validation/orchestration i model artifact/version lifecycle — **PARTIAL / BLOCKED**
+9. Durable fixture metadata i prediction/value provenance — **PARTIAL / NOT COMPLETE**
+10. Production fixture-to-model execution — **BLOCKED** training putanjom
+11. Eligibility structures i registration gate — **PARTIAL**
+12. Actual eligibility/freshness/quality/de-vig/risk/stake policy — **NOT IMPLEMENTED**
+13. Durable decision/pick repository i duplicate protection — **NOT COMPLETE**
+14. Daily Bulletin selection/formatting/delivery — **NOT COMPLETE**
+15. Pick-specific monitoring i designated closing capture — **PARTIAL / NOT COMPLETE**
+16. Match-result acquisition, settlement i realized CLV — **NOT COMPLETE**
+17. Production end-to-end composition i operational pilot — **BLOCKED** prethodnim runtime komponentama
 
 ## Pravila rada
 
 - Jedna mala implementaciona celina po koraku.
 - Testovi i CI verifikacija pre prelaska na sledeći korak.
 - Svaka završena celina mora imati odgovarajuću `.md` dokumentaciju.
-- Svaka relevantna iteracija mora biti zabeležena u `docs/ITERATION_LOG.md` ljudски čitljivim opisom i timestamp-om.
-- `docs/PROGRESS.md` sadrži sažetak većih završenih celina, dok `docs/ITERATION_LOG.md` sadrži detalje manjih koraka.
 - Quant matematika ostaje zaključana bez nove regresione verifikacije.
 - Provider-specific strukture ne ulaze u quant sloj.
 - Fixture-universe politika ostaje odvojena od quant izračunavanja i quote normalizacije.

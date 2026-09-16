@@ -17,8 +17,9 @@ Ovaj dokument sadrži samo proverene, do sada završene radove. Ne predstavlja t
 - Verifikovana je Railway PostgreSQL infrastruktura, uključujući servis, repliku i persistent volume.
 - Identifikovane su i uklonjene legacy aplikacione tabele.
 - Verifikovani su read readiness preko `SELECT 1`, identitet baze `railway` / `postgres` i odsustvo aplikacionih tabela u `public` šemi.
+- Implementirani su PostgreSQL quote-history repository, migration runner, application composition i production worker entrypoint.
 
-> Infrastruktura je proverena, ali aplikacioni persistence sloj još nije implementiran kao celina.
+> Ovo potvrđuje ciljnu infrastrukturu i repository/runtime putanju, ne live Railway deployment, backup/DR ili operativni pilot.
 
 ## C — Quant baseline i stabilizacija
 
@@ -60,6 +61,20 @@ Ovaj dokument sadrži samo proverene, do sada završene radove. Ne predstavlja t
 - Usvojeno je pravilo: jedna mala celina po koraku, testovi pre prelaska dalje, bez provider-specific struktura u quant sloju, bez širokih refaktora bez razloga i bez širenja market scope-a bez eksplicitne odluke.
 - `peak_quote` koncept se ne koristi.
 
+## G — Fixture identity i API-Football granice
+
+- API-Football fixture discovery čuva canonical identitet `api-football:<id>` i odvojeni pozitivni numeric provider ID za transport.
+- Discovered fixture čuva authoritative, ordered provider home/away team IDs u `api-football` namespace-u.
+- Odds ingestion proverava response fixture identity pre flattening-a i odbija missing, wrong, malformed ili contradictory provider identity.
+- Canonical quotes koriste isti canonical fixture identity; raw numeric provider ID nije quote/business identity.
+
+## H — Fixture-bound prediction i value foundation
+
+- `DixonColesModel` zahteva eksplicitni `team_id_namespace`; namespace je compatibility claim, ne dokaz porekla training podataka.
+- `DixonColesFixturePredictor` izvodi kontrolisani target iz authoritative `Fixture`, čuva home/away redosled i odbija namespace mismatch i jednake team IDs.
+- `FixturePrediction` je vezan za target, a valuation zahteva exact canonical fixture equality pre probability/value mapiranja.
+- Implementirani su canonical market/selection probability mapping i osnovni value izračun.
+
 ## Trenutna granica
 
-Do sada je izgrađen i testiran quant/domain foundation, uključujući canonical quote validaciju i provider-neutral normalizaciju. Production ingestion, persistence, fixture lifecycle, decision/risk, pick lifecycle, CLV, bulletin, API/dashboard i operativni monitoring još nisu završeni kao end-to-end sistem.
+Do sada je izgrađen i testiran quant/domain foundation, API-Football fixture/odds identity path, PostgreSQL quote-history path, discovery-driven worker i fixture-bound prediction/value foundation. Production completed-match acquisition i verified training provenance još ne postoje; zato production fixture-to-model execution, eligibility policy, Daily Bulletin, pick monitoring, closing/CLV, API/dashboard i operational pilot nisu završeni kao end-to-end sistem.
