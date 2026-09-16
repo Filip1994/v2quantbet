@@ -264,3 +264,24 @@ class LoadedDixonColesModelVersion:
     scope: DixonColesModelScope
     provenance: DixonColesTrainingProvenance
     model: DixonColesModel
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedActiveDixonColesModel:
+    """Validated artifact plus the exact active-pointer state that selected it."""
+
+    loaded: LoadedDixonColesModelVersion
+    generation: int
+    activated_at: datetime
+
+    def __post_init__(self) -> None:
+        _positive_int(self.generation, "generation")
+        object.__setattr__(self, "activated_at", _utc(self.activated_at, "activated_at"))
+
+    @property
+    def model_version_id(self) -> str:
+        return self.loaded.model_version_id
+
+    @property
+    def scope(self) -> DixonColesModelScope:
+        return self.loaded.scope

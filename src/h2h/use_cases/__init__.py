@@ -14,6 +14,9 @@ from .api_football_training import (
     normalize_api_football_historical_response,
 )
 from .quote_history import QuoteHistoryIngestionService
+from .durable_fixture_discovery import DurableFixtureDiscovery
+from .production_prediction import ProduceFixturePrediction
+from .value_evaluation import EvaluatePersistedPredictionQuote, EvaluationFixtureMismatchError
 from .quotes import QuoteIngestionService
 
 __all__ = [
@@ -21,7 +24,11 @@ __all__ = [
     "ApiFootballTrainingDataset",
     "ApiFootballTrainingScope",
     "DixonColesFixturePredictor",
+    "DurableFixtureDiscovery",
+    "EvaluatePersistedPredictionQuote",
+    "EvaluationFixtureMismatchError",
     "PredictionFixtureMismatchError",
+    "ProduceFixturePrediction",
     "QuoteHistoryIngestionService",
     "QuoteIngestionService",
     "TeamIdNamespaceMismatchError",

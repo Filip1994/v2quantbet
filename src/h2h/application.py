@@ -12,6 +12,8 @@ from h2h.application_postgres import (
     PostgreSQLQuoteHistoryApplication,
     build_postgres_dixon_coles_model_lifecycle_application,
     build_postgres_quote_history_application,
+    PostgreSQLProductionPredictionApplication,
+    build_postgres_production_prediction_application,
 )
 from h2h.config import ApplicationSettings
 from h2h.odds import ApiFootballClient, BudgetedJsonTransport, DailyApiBudget
@@ -23,6 +25,8 @@ from h2h.use_cases.api_football_training import (
     ApiFootballHistoricalResults,
     _trusted_api_football_historical_results,
 )
+from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
+from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 
 
 @dataclass
@@ -124,4 +128,18 @@ def build_postgres_dixon_coles_model_lifecycle_from_settings(
     return build_postgres_dixon_coles_model_lifecycle_application(
         historical_results,
         database_url=settings.database_url,
+    )
+
+
+def build_postgres_production_prediction_from_settings(
+    settings: ApplicationSettings,
+) -> PostgreSQLProductionPredictionApplication:
+    """Compose provider acquisition around the durable production boundary."""
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for production prediction composition")
+    client = build_api_football_client(UrllibJsonTransport(), settings)
+    discovery = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
+    return build_postgres_production_prediction_application(
+        database_url=settings.database_url,
+        discovery=discovery,
     )

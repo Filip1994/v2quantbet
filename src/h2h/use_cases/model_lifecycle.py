@@ -12,6 +12,7 @@ from h2h.domain.model_lifecycle import (
     DixonColesModelVersion,
     DixonColesTrainingConfig,
     LoadedDixonColesModelVersion,
+    ValidatedActiveDixonColesModel,
 )
 from h2h.persistence.model_lifecycle import (
     ActiveDixonColesModelRepository,
@@ -152,6 +153,10 @@ class LoadActiveDixonColesModel:
         self._codec = codec or DixonColesArtifactCodecV1()
 
     def execute(self, scope: DixonColesModelScope) -> LoadedDixonColesModelVersion:
+        return self.execute_with_selection(scope).loaded
+
+    def execute_with_selection(self, scope: DixonColesModelScope) -> ValidatedActiveDixonColesModel:
+        """Return the validated model and exact active-pointer provenance."""
         _require_api_football_scope(scope)
         active = self._active_models.get_active(scope)
         if active is None:
@@ -161,7 +166,14 @@ class LoadActiveDixonColesModel:
             raise ActiveModelUnavailableError("active model version is missing")
         if version.scope != scope:
             raise ActiveModelUnavailableError("active model version belongs to another scope")
-        return self._codec.decode(version.artifact)
+        loaded = self._codec.decode(version.artifact)
+        if loaded.model_version_id != active.model_version_id or loaded.scope != active.scope:
+            raise ActiveModelUnavailableError("validated model contradicts active selection")
+        return ValidatedActiveDixonColesModel(
+            loaded=loaded,
+            generation=active.generation,
+            activated_at=active.activated_at,
+        )
 
 
 def _require_api_football_scope(scope: DixonColesModelScope) -> None:

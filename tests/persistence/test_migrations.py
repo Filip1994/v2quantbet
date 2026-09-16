@@ -81,3 +81,22 @@ def test_apply_migrations_rejects_file_as_directory(tmp_path: Path) -> None:
         apply_migrations(connection, migration_file)
 
     assert connection.executed == []
+
+
+def test_task9_migration_has_bounded_tables_and_no_global_quote_fixture_fk() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "004_fixture_prediction_value_evaluation.sql"
+    ).read_text(encoding="utf-8")
+
+    for table in (
+        "fixtures",
+        "fixture_observations",
+        "fixture_predictions",
+        "value_evaluations",
+    ):
+        assert f"CREATE TABLE {table}" in migration
+    assert "REFERENCES fixtures(fixture_id)" in migration
+    quote_series_section = migration.split("ALTER TABLE quote_series", 1)[1].split(
+        "ALTER TABLE quote_snapshots", 1
+    )[0]
+    assert "REFERENCES fixtures" not in quote_series_section

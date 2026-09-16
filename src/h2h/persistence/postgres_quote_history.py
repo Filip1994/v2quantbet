@@ -5,7 +5,9 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from h2h.domain.odds import Market, Selection
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.domain.quote_history import QuoteSeries, QuoteSnapshot
+from h2h.domain.value_evaluation import PersistedMarketObservation, PersistedQuoteObservation
 from h2h.persistence.quote_history import QuoteHistoryConflictError
 
 
@@ -165,6 +167,59 @@ class PostgreSQLQuoteHistoryRepository:
             )
             row = cursor.fetchone()
             return None if row is None else self._row_to_snapshot(row)
+
+    def complete_market_observation_for_snapshot(
+        self, snapshot_id: str
+    ) -> PersistedMarketObservation | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT qs.fixture_id, qs.bookmaker_id, qs.market, q.observed_at, q.source "
+                "FROM quote_snapshots q JOIN quote_series qs ON qs.series_id = q.series_id "
+                "WHERE q.snapshot_id = %s",
+                (snapshot_id,),
+            )
+            context = cursor.fetchone()
+            if context is None:
+                return None
+            cursor.execute(
+                "SELECT qs.series_id, q.snapshot_id, qs.fixture_id, qs.bookmaker_id, "
+                "qs.market, qs.selection, q.odd, q.observed_at, q.captured_at, q.source "
+                "FROM quote_series qs JOIN quote_snapshots q ON q.series_id = qs.series_id "
+                "WHERE qs.fixture_id = %s AND qs.bookmaker_id = %s AND qs.market = %s "
+                "AND q.observed_at = %s AND q.source = %s "
+                "ORDER BY qs.selection, qs.series_id, q.snapshot_id",
+                context,
+            )
+            rows = cursor.fetchall()
+        try:
+            bookmaker_key = API_FOOTBALL_BOOKMAKERS[context[1]]
+        except KeyError as exc:
+            raise QuoteHistoryConflictError("unknown durable bookmaker identity") from exc
+        quotes = tuple(
+            PersistedQuoteObservation(
+                series_id=row[0],
+                snapshot_id=row[1],
+                fixture_id=row[2],
+                bookmaker_id=row[3],
+                bookmaker_key=bookmaker_key,
+                market=Market(row[4]),
+                selection=Selection(row[5]),
+                odd=row[6],
+                observed_at=row[7],
+                captured_at=row[8],
+                source=row[9],
+            )
+            for row in rows
+        )
+        try:
+            observation = PersistedMarketObservation(quotes)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise QuoteHistoryConflictError(
+                "incomplete or inconsistent market observation"
+            ) from exc
+        if all(quote.snapshot_id != snapshot_id for quote in observation.quotes):
+            raise QuoteHistoryConflictError("selected snapshot is absent from resolved market")
+        return observation
 
     @staticmethod
     def _row_to_snapshot(row: tuple[Any, ...]) -> QuoteSnapshot:

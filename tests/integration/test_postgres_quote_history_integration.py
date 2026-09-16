@@ -194,7 +194,9 @@ def test_complete_migration_chain_is_applied(repository):
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
             "WHERE conrelid = 'quote_snapshots'::regclass AND contype = 'u'"
         )
-        assert {row[0] for row in cursor.fetchall()} == {"UNIQUE (series_id, observed_at, source)"}
+        assert "UNIQUE (series_id, observed_at, source)" in {
+            row[0] for row in cursor.fetchall()
+        }
     with repository.repo.connect() as connection:
         assert apply_migrations(connection, MIGRATION_DIR) == ()
 

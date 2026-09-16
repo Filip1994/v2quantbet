@@ -4,11 +4,20 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 from h2h.application_postgres import (
+    PostgreSQLProductionPredictionApplication,
     PostgreSQLQuoteHistoryApplication,
+    build_postgres_production_prediction_application,
     build_postgres_quote_history_application,
 )
-from h2h.persistence import PostgreSQLQuoteHistoryRepository
+from h2h.persistence import (
+    PostgreSQLFixturePredictionRepository,
+    PostgreSQLFixtureRepository,
+    PostgreSQLQuoteHistoryRepository,
+    PostgreSQLValueEvaluationRepository,
+)
+from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
+from h2h.use_cases.value_evaluation import EvaluatePersistedPredictionQuote
 
 
 def test_builder_creates_postgresql_repository_and_ingestion_service() -> None:
@@ -72,3 +81,18 @@ def test_context_manager_calls_close() -> None:
         assert entered is application
 
     close.assert_called_once_with()
+
+
+def test_production_builder_wires_durable_repositories_and_pure_use_cases() -> None:
+    application = build_postgres_production_prediction_application(
+        database_url="postgresql://example.invalid/quantbet"
+    )
+
+    assert isinstance(application, PostgreSQLProductionPredictionApplication)
+    assert isinstance(application.fixtures, PostgreSQLFixtureRepository)
+    assert isinstance(application.predictions, PostgreSQLFixturePredictionRepository)
+    assert isinstance(application.evaluations, PostgreSQLValueEvaluationRepository)
+    assert isinstance(application.quote_history, PostgreSQLQuoteHistoryRepository)
+    assert isinstance(application.predictor, ProduceFixturePrediction)
+    assert isinstance(application.evaluator, EvaluatePersistedPredictionQuote)
+    assert application.durable_discovery is None

@@ -13,6 +13,9 @@ from h2h.persistence import (
     PostgreSQLDixonColesModelVersionRepository,
     PostgreSQLQuoteHistoryRepository,
 )
+from h2h.persistence.postgres_fixtures import PostgreSQLFixtureRepository
+from h2h.persistence.postgres_predictions import PostgreSQLFixturePredictionRepository
+from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from h2h.persistence.migrations import apply_migrations
 from h2h.use_cases.api_football_training import ApiFootballHistoricalResults
 from h2h.use_cases.model_lifecycle import (
@@ -21,6 +24,10 @@ from h2h.use_cases.model_lifecycle import (
     TrainApiFootballDixonColesModel,
 )
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
+from h2h.use_cases.durable_fixture_discovery import DurableFixtureDiscovery
+from h2h.use_cases.fixture_discovery import FixtureDiscovery
+from h2h.use_cases.production_prediction import ProduceFixturePrediction
+from h2h.use_cases.value_evaluation import EvaluatePersistedPredictionQuote
 
 
 _DEFAULT_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "migrations"
@@ -76,6 +83,30 @@ class PostgreSQLDixonColesModelLifecycleApplication:
         self.close()
 
 
+@dataclass
+class PostgreSQLProductionPredictionApplication:
+    fixtures: PostgreSQLFixtureRepository
+    predictions: PostgreSQLFixturePredictionRepository
+    evaluations: PostgreSQLValueEvaluationRepository
+    quote_history: PostgreSQLQuoteHistoryRepository
+    predictor: ProduceFixturePrediction
+    evaluator: EvaluatePersistedPredictionQuote
+    durable_discovery: DurableFixtureDiscovery | None
+
+    def migrate(self, migration_dir: str | Path = _DEFAULT_MIGRATION_DIR) -> tuple[str, ...]:
+        with self.fixtures.connect() as connection:
+            return apply_migrations(connection, migration_dir)
+
+    def close(self) -> None:
+        """Connections are opened per operation; no persistent resource is owned."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+
 def build_postgres_quote_history_application(
     database_url: str | None = None,
     *,
@@ -114,4 +145,36 @@ def build_postgres_dixon_coles_model_lifecycle_application(
             clock=lifecycle_clock,
         ),
         loader=LoadActiveDixonColesModel(versions, active_models),
+    )
+
+
+def build_postgres_production_prediction_application(
+    database_url: str | None = None,
+    *,
+    discovery: FixtureDiscovery | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PostgreSQLProductionPredictionApplication:
+    """Build the durable production prediction/evaluation path without executing it."""
+    production_clock = clock or (lambda: datetime.now(timezone.utc))
+    fixtures = PostgreSQLFixtureRepository(database_url=database_url)
+    predictions = PostgreSQLFixturePredictionRepository(database_url=database_url)
+    evaluations = PostgreSQLValueEvaluationRepository(database_url=database_url)
+    quote_history = PostgreSQLQuoteHistoryRepository(database_url=database_url)
+    versions = PostgreSQLDixonColesModelVersionRepository(database_url=database_url)
+    active_models = PostgreSQLActiveDixonColesModelRepository(database_url=database_url)
+    loader = LoadActiveDixonColesModel(versions, active_models)
+    return PostgreSQLProductionPredictionApplication(
+        fixtures=fixtures,
+        predictions=predictions,
+        evaluations=evaluations,
+        quote_history=quote_history,
+        predictor=ProduceFixturePrediction(fixtures, loader, predictions, clock=production_clock),
+        evaluator=EvaluatePersistedPredictionQuote(
+            predictions, quote_history, evaluations, clock=production_clock
+        ),
+        durable_discovery=(
+            None
+            if discovery is None
+            else DurableFixtureDiscovery(discovery, fixtures, clock=production_clock)
+        ),
     )

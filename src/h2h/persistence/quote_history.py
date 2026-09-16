@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from typing import Protocol
 
 from h2h.domain.quote_history import QuoteSeries, QuoteSnapshot
+from h2h.domain.value_evaluation import PersistedMarketObservation, PersistedQuoteObservation
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 
 
 class QuoteHistoryRepository(Protocol):
@@ -38,6 +40,12 @@ class QuoteHistoryRepository(Protocol):
 
     def get_snapshot(self, snapshot_id: str) -> QuoteSnapshot | None:
         """Return one snapshot by ID, if present."""
+        ...
+
+    def complete_market_observation_for_snapshot(
+        self, snapshot_id: str
+    ) -> PersistedMarketObservation | None:
+        """Resolve one selected snapshot to its exact complete two-sided market."""
         ...
 
 
@@ -158,3 +166,52 @@ class InMemoryQuoteHistoryRepository:
 
     def get_snapshot(self, snapshot_id: str) -> QuoteSnapshot | None:
         return self._snapshots.get(snapshot_id)
+
+    def complete_market_observation_for_snapshot(
+        self, snapshot_id: str
+    ) -> PersistedMarketObservation | None:
+        selected = self._snapshots.get(snapshot_id)
+        if selected is None:
+            return None
+        selected_series = self._series[selected.series_id]
+        rows: list[PersistedQuoteObservation] = []
+        for series in self._series.values():
+            if (
+                series.fixture_id != selected_series.fixture_id
+                or series.bookmaker_id != selected_series.bookmaker_id
+                or series.market != selected_series.market
+            ):
+                continue
+            for snapshot in self._snapshots.values():
+                if (
+                    snapshot.series_id == series.series_id
+                    and snapshot.observed_at == selected.observed_at
+                    and snapshot.source == selected.source
+                ):
+                    try:
+                        bookmaker_key = API_FOOTBALL_BOOKMAKERS[series.bookmaker_id]
+                    except KeyError as exc:
+                        raise QuoteHistoryConflictError(
+                            "unknown durable bookmaker identity"
+                        ) from exc
+                    rows.append(
+                        PersistedQuoteObservation(
+                            series.series_id,
+                            snapshot.snapshot_id,
+                            series.fixture_id,
+                            series.bookmaker_id,
+                            bookmaker_key,
+                            series.market,
+                            series.selection,
+                            snapshot.odd,
+                            snapshot.observed_at,
+                            snapshot.captured_at,
+                            snapshot.source,
+                        )
+                    )
+        try:
+            return PersistedMarketObservation(tuple(rows))  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise QuoteHistoryConflictError(
+                "incomplete or inconsistent market observation"
+            ) from exc

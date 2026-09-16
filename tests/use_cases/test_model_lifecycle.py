@@ -232,6 +232,12 @@ def test_activation_load_and_same_target_retry_are_version_bearing() -> None:
     loaded = LoadActiveDixonColesModel(versions, active).execute(SCOPE)
     assert loaded.model_version_id == version.model_version_id
     assert loaded.scope == SCOPE
+    selected = LoadActiveDixonColesModel(versions, active).execute_with_selection(SCOPE)
+    assert selected.loaded.model_version_id == loaded.model_version_id
+    assert selected.loaded.scope == loaded.scope
+    assert selected.loaded.provenance == loaded.provenance
+    assert selected.generation == first.generation
+    assert selected.activated_at == first.activated_at
 
 
 def test_stale_activation_and_wrong_scope_fail_without_changing_active() -> None:
