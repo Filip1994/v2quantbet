@@ -98,6 +98,11 @@ class ApiFootballTrainingDataset:
         return iter(self._records)
 
 
+def _is_trusted_api_football_training_dataset(value: object) -> bool:
+    """Internal authority check shared with production artifact orchestration."""
+    return type(value) is ApiFootballTrainingDataset and value._provenance is _DATASET_PROVENANCE
+
+
 class ApiFootballCompletedMatchAdapter:
     """Normalize one provider fixture under the conservative FT score contract."""
 
@@ -242,9 +247,7 @@ def fit_api_football_dixon_coles(
     min_matches: int = 80,
 ) -> DixonColesModel:
     """Fit Dixon-Coles with the namespace proven by trusted acquisition."""
-    if not isinstance(dataset, ApiFootballTrainingDataset) or (
-        dataset._provenance is not _DATASET_PROVENANCE
-    ):
+    if not _is_trusted_api_football_training_dataset(dataset):
         raise TypeError("dataset must come from trusted API-Football acquisition")
     return DixonColesModel.fit(
         list(dataset.records),

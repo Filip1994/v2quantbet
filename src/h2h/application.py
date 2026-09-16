@@ -8,7 +8,9 @@ from types import TracebackType
 from typing import Self
 
 from h2h.application_postgres import (
+    PostgreSQLDixonColesModelLifecycleApplication,
     PostgreSQLQuoteHistoryApplication,
+    build_postgres_dixon_coles_model_lifecycle_application,
     build_postgres_quote_history_application,
 )
 from h2h.config import ApplicationSettings
@@ -110,3 +112,16 @@ def build_trusted_api_football_historical_results(
     """Build the sole supported API-Football training-provenance acquisition path."""
     client = build_api_football_client(UrllibJsonTransport(), settings)
     return _trusted_api_football_historical_results(client)
+
+
+def build_postgres_dixon_coles_model_lifecycle_from_settings(
+    settings: ApplicationSettings,
+) -> PostgreSQLDixonColesModelLifecycleApplication:
+    """Build the production lifecycle boundary without running training or activation."""
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for model lifecycle composition")
+    historical_results = build_trusted_api_football_historical_results(settings)
+    return build_postgres_dixon_coles_model_lifecycle_application(
+        historical_results,
+        database_url=settings.database_url,
+    )

@@ -6,10 +6,12 @@ from unittest.mock import Mock
 
 from h2h.application import (
     build_api_football_client,
+    build_postgres_dixon_coles_model_lifecycle_from_settings,
     build_sqlite_quote_application,
     build_sqlite_quote_application_from_settings,
     build_sqlite_quote_service,
 )
+from h2h.application_postgres import PostgreSQLDixonColesModelLifecycleApplication
 from h2h.config import ApplicationSettings
 from h2h.odds import ApiBudgetExceededError
 from h2h.use_cases import QuoteIngestionService
@@ -79,3 +81,27 @@ def test_build_api_football_client_enforces_daily_budget() -> None:
         raise AssertionError("client should enforce the daily API budget")
 
     assert transport.get_json.call_count == 1
+
+
+def test_model_lifecycle_composition_requires_postgres_and_has_no_side_effects() -> None:
+    missing = ApplicationSettings(
+        database_path=Path("unused.sqlite3"),
+        api_football_key="test-only-key",
+    )
+    try:
+        build_postgres_dixon_coles_model_lifecycle_from_settings(missing)
+    except ValueError as exc:
+        assert "DATABASE_URL" in str(exc)
+    else:
+        raise AssertionError("model lifecycle composition must require DATABASE_URL")
+
+    configured = ApplicationSettings(
+        database_path=Path("unused.sqlite3"),
+        api_football_key="test-only-key",
+        database_url="postgresql://example.invalid/quantbet",
+    )
+    application = build_postgres_dixon_coles_model_lifecycle_from_settings(configured)
+    assert isinstance(application, PostgreSQLDixonColesModelLifecycleApplication)
+    assert application.trainer is not None
+    assert application.activator is not None
+    assert application.loader is not None
