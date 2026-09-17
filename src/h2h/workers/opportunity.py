@@ -16,6 +16,7 @@ from h2h.odds.api_football_service import ApiFootballOddsService
 from h2h.odds.http import TransportError
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
+from h2h.quant import DixonColesFitError
 from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.use_cases.register_pick import RegisterEligiblePick
@@ -158,7 +159,7 @@ class OpportunityWorker:
                         picks.append(registration.pick.pick_id)
                 self._repository.clear_item_failure(WORKER_NAME, fixture.fixture_id)
                 processed.append(fixture.fixture_id)
-            except ActiveModelUnavailableError as exc:
+            except (ActiveModelUnavailableError, DixonColesFitError) as exc:
                 self._repository.record_item_failure(
                     WORKER_NAME, fixture.fixture_id, exc, failed_at=now
                 )

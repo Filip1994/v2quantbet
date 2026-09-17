@@ -12,6 +12,7 @@ import pytest
 from h2h.api.health import HealthService, RuntimeHealthState
 from h2h.config import ConfigError, PilotScope, load_production_settings
 from h2h.persistence.postgres_runtime import OpportunityFixture, WorkerStatus
+from h2h.quant import DixonColesFitError
 from h2h.production import build_production_application
 from h2h.workers.opportunity import OpportunityWorker, PilotFixtureDiscovery, registration_request_id
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
@@ -165,6 +166,37 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     assert [request["bookmaker_id"] for request in quote_requests] == [8, 8]
     assert requests[0][1] == registration_request_id(requests[0][0])
     assert requests[2] == requests[0]
+
+
+def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
+    repository = OpportunityRepositoryFake()
+    failures: list[tuple[str, str]] = []
+    repository.record_item_failure = lambda _worker, item, error, **_kwargs: failures.append(
+        (item, type(error).__name__)
+    )
+    worker = OpportunityWorker(
+        repository,
+        SimpleNamespace(fetch_quotes=lambda **_kwargs: ()),
+        SimpleNamespace(ingest=lambda _quotes: 0),
+        SimpleNamespace(
+            execute=lambda _fixture_id: (_ for _ in ()).throw(
+                DixonColesFitError("team absent from training sample")
+            )
+        ),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        scopes=(PilotScope(39, 2026),),
+        bookmaker_id=8,
+        provider_fixture_ids=frozenset(),
+        allowed_statuses=("NS",),
+        usable_scopes=lambda: frozenset({PilotScope(39, 2026)}),
+        should_stop=lambda: False,
+    )
+
+    result = worker.run_once()
+
+    assert result.failed_fixture_ids == ("api-football:123",)
+    assert failures == [("api-football:123", "DixonColesFitError")]
 
 
 class RuntimeFake:
