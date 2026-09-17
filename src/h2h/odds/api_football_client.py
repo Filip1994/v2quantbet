@@ -84,7 +84,14 @@ class ApiFootballClient:
             )
         return payload
 
-    def fetch_fixtures(self, *, start_at: datetime, end_at: datetime) -> Mapping[str, Any]:
+    def fetch_fixtures(
+        self,
+        *,
+        start_at: datetime,
+        end_at: datetime,
+        league_id: int | None = None,
+        season: int | None = None,
+    ) -> Mapping[str, Any]:
         """Fetch fixtures in the inclusive provider date range covering the window."""
         self._validate()
         if not isinstance(start_at, datetime) or not isinstance(end_at, datetime):
@@ -93,7 +100,18 @@ class ApiFootballClient:
         self._validate_datetime(end_at, "end_at")
         if start_at >= end_at:
             raise ValueError("start_at must be before end_at")
-        query = urlencode({"from": start_at.date().isoformat(), "to": end_at.date().isoformat()})
+        if (league_id is None) != (season is None):
+            raise ValueError("league_id and season must be provided together")
+        query_values: dict[str, object] = {
+            "from": start_at.date().isoformat(),
+            "to": end_at.date().isoformat(),
+            "timezone": "UTC",
+        }
+        if league_id is not None and season is not None:
+            self._validate_positive_int(league_id, "league_id")
+            self._validate_positive_int(season, "season")
+            query_values.update({"league": league_id, "season": season})
+        query = urlencode(query_values)
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
         return self.transport.get_json(
             url,

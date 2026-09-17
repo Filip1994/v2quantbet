@@ -162,6 +162,23 @@ def test_training_persists_inactive_version_and_loader_requires_activation() -> 
         LoadActiveDixonColesModel(versions, active).execute(SCOPE)
 
 
+def test_training_season_provenance_is_distinct_from_prediction_target_season() -> None:
+    versions = MemoryVersions()
+    trainer = TrainApiFootballDixonColesModel(
+        historical_results(), versions, clock=lambda: NOW
+    )
+    target = DixonColesModelScope("api-football", "api-football", 39, 2025)
+    with patch.object(UrllibJsonTransport, "get_json", return_value=provider_payload()):
+        version = trainer.execute(
+            ApiFootballTrainingScope(39, 2024, START, END),
+            config(),
+            target_scope=target,
+        )
+    assert version.scope == target
+    assert version.artifact.provenance.season == 2024
+    assert version.artifact.provenance.scope != version.scope
+
+
 @pytest.mark.parametrize("count", [0, 10])
 def test_empty_and_insufficient_training_data_create_no_version(count) -> None:
     versions = MemoryVersions()

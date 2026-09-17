@@ -188,6 +188,7 @@ class DixonColesModelArtifact:
     scipy_version: str
     artifact_sha256: str
     artifact_bytes: bytes
+    target_scope: DixonColesModelScope
     _authority: object
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -196,7 +197,7 @@ class DixonColesModelArtifact:
 
     @property
     def scope(self) -> DixonColesModelScope:
-        return self.provenance.scope
+        return self.target_scope
 
 
 def _create_dixon_coles_model_artifact(
@@ -208,6 +209,7 @@ def _create_dixon_coles_model_artifact(
     scipy_version: str,
     artifact_sha256: str,
     artifact_bytes: bytes,
+    target_scope: DixonColesModelScope | None = None,
 ) -> DixonColesModelArtifact:
     artifact = object.__new__(DixonColesModelArtifact)
     for name, value in (
@@ -218,6 +220,7 @@ def _create_dixon_coles_model_artifact(
         ("scipy_version", scipy_version),
         ("artifact_sha256", artifact_sha256),
         ("artifact_bytes", bytes(artifact_bytes)),
+        ("target_scope", target_scope or provenance.scope),
         ("_authority", _ARTIFACT_AUTHORITY),
     ):
         object.__setattr__(artifact, name, value)

@@ -93,7 +93,6 @@ def test_fetch_completed_fixtures_uses_exact_ft_scope_and_utc_dates() -> None:
         start_at=datetime(2026, 1, 1, 2, tzinfo=timezone(timedelta(hours=2))),
         end_at=datetime(2026, 1, 3, 2, tzinfo=timezone(timedelta(hours=2))),
     )
-
     assert result == {"response": []}
     transport.get_json.assert_called_once_with(
         "https://v3.football.api-sports.io/fixtures?"
@@ -102,6 +101,25 @@ def test_fetch_completed_fixtures_uses_exact_ft_scope_and_utc_dates() -> None:
         timeout=10.0,
     )
 
+
+def test_fetch_fixtures_uses_exact_live_scope() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+    client = ApiFootballClient(transport, "secret")
+
+    client.fetch_fixtures(
+        league_id=39,
+        season=2026,
+        start_at=datetime(2026, 9, 17, tzinfo=UTC),
+        end_at=datetime(2026, 9, 20, tzinfo=UTC),
+    )
+
+    transport.get_json.assert_called_once_with(
+        "https://v3.football.api-sports.io/fixtures?"
+        "from=2026-09-17&to=2026-09-20&timezone=UTC&league=39&season=2026",
+        headers={"x-apisports-key": "secret"},
+        timeout=10.0,
+    )
 
 @pytest.mark.parametrize("field,value", [("league_id", True), ("league_id", 1.5), ("season", "2025")])
 def test_fetch_completed_fixtures_rejects_non_integer_scope(field: str, value: object) -> None:

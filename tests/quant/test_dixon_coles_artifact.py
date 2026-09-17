@@ -186,6 +186,7 @@ def test_identical_training_inputs_have_separate_version_and_input_identities() 
 def _candidate_from_existing(model, artifact):
     candidate = object.__new__(_TrustedDixonColesArtifactCandidate)
     object.__setattr__(candidate, "provenance", artifact.provenance)
+    object.__setattr__(candidate, "target_scope", artifact.scope)
     object.__setattr__(candidate, "model", model)
     object.__setattr__(candidate, "python_version", artifact.python_version)
     object.__setattr__(candidate, "numpy_version", artifact.numpy_version)
@@ -209,6 +210,7 @@ def _rewrite_artifact(artifact, mutate):
         scipy_version=artifact.scipy_version,
         artifact_sha256=digest,
         artifact_bytes=raw,
+        target_scope=artifact.scope,
     )
 
 

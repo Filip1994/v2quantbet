@@ -97,7 +97,12 @@ def build_production_application(
     provider_state = ProviderOperationalState()
     runtime = PostgreSQLRuntimeRepository(application_settings.database_url)
 
-    scoped = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
+    scoped = ScopedFixtureDiscovery(
+        ApiFootballFixtureDiscovery(
+            client,
+            scope_pairs=tuple((scope.league_id, scope.season) for scope in settings.pilot_scopes),
+        )
+    )
     pilot_discovery = PilotFixtureDiscovery(
         scoped, settings.pilot_scopes, settings.pilot_fixture_ids
     )

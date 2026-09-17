@@ -62,7 +62,7 @@ class ProduceFixturePrediction:
             season=identity.season,
         )
         selected = self._active_models.execute_with_selection(scope)
-        if selected.scope != scope or selected.loaded.provenance.scope != scope:
+        if selected.scope != scope:
             raise ValueError("active model scope does not match durable fixture scope")
         if selected.loaded.model.team_id_namespace != scope.team_id_namespace:
             raise ValueError("active model namespace does not match durable fixture namespace")

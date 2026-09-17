@@ -18,6 +18,7 @@ import scipy
 from h2h.domain.fixture_identity import API_FOOTBALL_PROVIDER
 from h2h.domain.model_lifecycle import (
     DixonColesModelArtifact,
+    DixonColesModelScope,
     DixonColesTrainingConfig,
     DixonColesTrainingProvenance,
     LoadedDixonColesModelVersion,
@@ -35,7 +36,7 @@ from h2h.use_cases.api_football_training import (
 
 
 ARTIFACT_SCHEMA: Final = "quantbet.dixon-coles-model"
-ARTIFACT_SCHEMA_VERSION: Final = 1
+ARTIFACT_SCHEMA_VERSION: Final = 2
 ARTIFACT_MEDIA_TYPE: Final = "application/vnd.quantbet.dixon-coles+json"
 TRAINING_DATASET_SCHEMA_VERSION: Final = 1
 MODEL_IMPLEMENTATION_VERSION: Final = "quantbet.dixon-coles.v1"
@@ -63,6 +64,7 @@ class ModelArtifactIncompatibleError(ModelArtifactError):
 @dataclass(frozen=True, slots=True, init=False)
 class _TrustedDixonColesArtifactCandidate:
     provenance: DixonColesTrainingProvenance
+    target_scope: DixonColesModelScope
     model: DixonColesModel
     python_version: str
     numpy_version: str
@@ -222,11 +224,26 @@ def _trusted_candidate_from_training(
     config: DixonColesTrainingConfig,
     model: DixonColesModel,
     trained_at: datetime,
+    target_scope: DixonColesModelScope | None = None,
 ) -> _TrustedDixonColesArtifactCandidate:
     if not _is_trusted_api_football_training_dataset(dataset):
         raise TypeError("dataset must come from trusted API-Football acquisition")
     if model.team_id_namespace != API_FOOTBALL_PROVIDER:
         raise ModelArtifactSerializationError("fitted model namespace is not api-football")
+    resolved_target = target_scope or DixonColesModelScope(
+        API_FOOTBALL_PROVIDER,
+        API_FOOTBALL_PROVIDER,
+        scope.league_id,
+        scope.season,
+    )
+    if (
+        resolved_target.provider != API_FOOTBALL_PROVIDER
+        or resolved_target.team_id_namespace != API_FOOTBALL_PROVIDER
+        or resolved_target.league_id != scope.league_id
+    ):
+        raise ModelArtifactSerializationError(
+            "target scope must use the trusted provider, namespace, and training league"
+        )
     records = dataset.records
     if not records:
         raise ModelArtifactSerializationError("trusted artifact requires accepted matches")
@@ -275,6 +292,7 @@ def _trusted_candidate_from_training(
         raise ModelArtifactSerializationError("fitted team IDs do not match training records")
     candidate = object.__new__(_TrustedDixonColesArtifactCandidate)
     object.__setattr__(candidate, "provenance", provenance)
+    object.__setattr__(candidate, "target_scope", resolved_target)
     object.__setattr__(candidate, "model", model)
     object.__setattr__(candidate, "python_version", python_version)
     object.__setattr__(candidate, "numpy_version", numpy_version)
@@ -315,6 +333,12 @@ class DixonColesArtifactCodecV1:
                 "scipy": candidate.scipy_version,
             },
             "training_dataset_schema_version": TRAINING_DATASET_SCHEMA_VERSION,
+            "target_scope": {
+                "league_id": candidate.target_scope.league_id,
+                "provider": candidate.target_scope.provider,
+                "season": candidate.target_scope.season,
+                "team_id_namespace": candidate.target_scope.team_id_namespace,
+            },
         }
         artifact_bytes = _canonical_json(payload)
         digest = sha256(artifact_bytes).hexdigest()
@@ -326,6 +350,7 @@ class DixonColesArtifactCodecV1:
             scipy_version=candidate.scipy_version,
             artifact_sha256=digest,
             artifact_bytes=artifact_bytes,
+            target_scope=candidate.target_scope,
         )
 
     def decode(self, artifact: DixonColesModelArtifact) -> LoadedDixonColesModelVersion:
@@ -350,7 +375,8 @@ class DixonColesArtifactCodecV1:
             raise ModelArtifactCorruptionError("artifact JSON is not canonical")
         if payload.get("artifact_schema") != ARTIFACT_SCHEMA:
             raise ModelArtifactIncompatibleError("unsupported artifact schema")
-        if payload.get("artifact_schema_version") != ARTIFACT_SCHEMA_VERSION:
+        schema_version = payload.get("artifact_schema_version")
+        if schema_version not in {1, ARTIFACT_SCHEMA_VERSION}:
             raise ModelArtifactIncompatibleError("unsupported artifact schema version")
         if payload.get("model_implementation_version") != MODEL_IMPLEMENTATION_VERSION:
             raise ModelArtifactIncompatibleError("unsupported model implementation version")
@@ -364,7 +390,7 @@ class DixonColesArtifactCodecV1:
             raise ModelArtifactCorruptionError("artifact provider and namespace must be api-football")
         if provenance.artifact_media_type != ARTIFACT_MEDIA_TYPE:
             raise ModelArtifactIncompatibleError("unsupported artifact media type")
-        if provenance.artifact_schema_version != ARTIFACT_SCHEMA_VERSION:
+        if provenance.artifact_schema_version != schema_version:
             raise ModelArtifactIncompatibleError("provenance artifact schema version is unsupported")
         if provenance.training_dataset_schema_version != TRAINING_DATASET_SCHEMA_VERSION:
             raise ModelArtifactIncompatibleError("provenance dataset schema version is unsupported")
@@ -376,6 +402,13 @@ class DixonColesArtifactCodecV1:
             raise ModelArtifactIncompatibleError("score semantic is unsupported")
         runtime = self._mapping(payload, "runtime_versions")
         state = self._mapping(payload, "fitted_state")
+        target_scope = (
+            provenance.scope
+            if schema_version == 1
+            else self._parse_target_scope(payload.get("target_scope"), provenance)
+        )
+        if target_scope != artifact.target_scope:
+            raise ModelArtifactCorruptionError("artifact target scope contradicts stored metadata")
         if provenance != artifact.provenance:
             raise ModelArtifactCorruptionError("artifact provenance contradicts stored metadata")
         expected_runtime = {
@@ -392,6 +425,31 @@ class DixonColesArtifactCodecV1:
             provenance=provenance,
             model=model,
         )
+
+    @staticmethod
+    def _parse_target_scope(
+        value: object, provenance: DixonColesTrainingProvenance
+    ) -> DixonColesModelScope:
+        if not isinstance(value, Mapping):
+            raise ModelArtifactCorruptionError("target_scope must be an object")
+        try:
+            scope = DixonColesModelScope(
+                provider=value.get("provider"),  # type: ignore[arg-type]
+                team_id_namespace=value.get("team_id_namespace"),  # type: ignore[arg-type]
+                league_id=value.get("league_id"),  # type: ignore[arg-type]
+                season=value.get("season"),  # type: ignore[arg-type]
+            )
+        except (TypeError, ValueError) as exc:
+            raise ModelArtifactCorruptionError("invalid artifact target scope") from exc
+        if (
+            scope.provider != provenance.provider
+            or scope.team_id_namespace != provenance.team_id_namespace
+            or scope.league_id != provenance.league_id
+        ):
+            raise ModelArtifactCorruptionError(
+                "target scope contradicts training provider, namespace, or league"
+            )
+        return scope
 
     @staticmethod
     def _provenance_payload(value: DixonColesTrainingProvenance) -> dict[str, object]:
@@ -582,3 +640,18 @@ def _provenance_from_artifact_bytes(artifact_bytes: bytes) -> DixonColesTraining
     if not isinstance(payload, Mapping):
         raise ModelArtifactCorruptionError("artifact root must be an object")
     return DixonColesArtifactCodecV1()._parse_provenance(payload.get("provenance"))
+
+
+def _target_scope_from_artifact_bytes(artifact_bytes: bytes) -> DixonColesModelScope:
+    """Decode the explicit prediction target scope, with V1 compatibility."""
+    try:
+        payload = json.loads(artifact_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ModelArtifactCorruptionError("artifact is not valid UTF-8 JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise ModelArtifactCorruptionError("artifact root must be an object")
+    codec = DixonColesArtifactCodecV1()
+    provenance = codec._parse_provenance(payload.get("provenance"))
+    if payload.get("artifact_schema_version") == 1:
+        return provenance.scope
+    return codec._parse_target_scope(payload.get("target_scope"), provenance)

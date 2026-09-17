@@ -108,12 +108,13 @@ class PostgreSQLDixonColesModelVersionRepository(_PostgreSQLConnections):
     @staticmethod
     def _artifact_values(artifact: DixonColesModelArtifact) -> tuple[object, ...]:
         p = artifact.provenance
+        target = artifact.scope
         return (
             artifact.model_version_id,
-            p.provider,
-            p.team_id_namespace,
-            p.league_id,
-            p.season,
+            target.provider,
+            target.team_id_namespace,
+            target.league_id,
+            target.season,
             p.training_start_at,
             p.training_end_at,
             p.reference_time,
@@ -142,14 +143,18 @@ class PostgreSQLDixonColesModelVersionRepository(_PostgreSQLConnections):
     def _row_to_version(row: tuple[Any, ...]) -> DixonColesModelVersion:
         # Non-searchable provenance is protected by the artifact digest. Decode it
         # once here so the returned immutable version carries the complete values.
-        from h2h.quant.dixon_coles_artifact import _provenance_from_artifact_bytes
+        from h2h.quant.dixon_coles_artifact import (
+            _provenance_from_artifact_bytes,
+            _target_scope_from_artifact_bytes,
+        )
 
         complete = _provenance_from_artifact_bytes(bytes(row[27]))
+        target_scope = _target_scope_from_artifact_bytes(bytes(row[27]))
+        if tuple(row[1:5]) != _scope_values(target_scope):
+            raise ModelPersistenceConflictError(
+                "stored model scope contradicts artifact target scope"
+            )
         expected = (
-            complete.provider,
-            complete.team_id_namespace,
-            complete.league_id,
-            complete.season,
             complete.training_start_at,
             complete.training_end_at,
             complete.reference_time,
@@ -168,7 +173,7 @@ class PostgreSQLDixonColesModelVersionRepository(_PostgreSQLConnections):
             complete.model_implementation_version,
             complete.trainer_code_version,
         )
-        actual = (*row[1:18], *row[19:23])
+        actual = (*row[5:18], *row[19:23])
         if actual != expected:
             raise ModelPersistenceConflictError(
                 "stored model metadata contradicts artifact provenance"
@@ -181,6 +186,7 @@ class PostgreSQLDixonColesModelVersionRepository(_PostgreSQLConnections):
             scipy_version=row[25],
             artifact_sha256=row[26],
             artifact_bytes=bytes(row[27]),
+            target_scope=target_scope,
         )
         return DixonColesModelVersion(artifact=artifact, persisted_at=row[18])
 

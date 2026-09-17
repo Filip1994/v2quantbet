@@ -65,6 +65,8 @@ class TrainApiFootballDixonColesModel:
         self,
         scope: ApiFootballTrainingScope,
         config: DixonColesTrainingConfig,
+        *,
+        target_scope: DixonColesModelScope | None = None,
     ) -> DixonColesModelVersion:
         if not isinstance(scope, ApiFootballTrainingScope):
             raise TypeError("scope must be an ApiFootballTrainingScope")
@@ -72,6 +74,15 @@ class TrainApiFootballDixonColesModel:
             raise TypeError("config must be a DixonColesTrainingConfig")
         if config.reference_time < scope.end_at:
             raise ValueError("reference_time must be at or after scope.end_at")
+        resolved_target = target_scope or DixonColesModelScope(
+            API_FOOTBALL_PROVIDER,
+            API_FOOTBALL_PROVIDER,
+            scope.league_id,
+            scope.season,
+        )
+        _require_api_football_scope(resolved_target)
+        if resolved_target.league_id != scope.league_id:
+            raise ValueError("target model league must match the trusted training league")
         dataset = self._historical_results.acquire(scope)
         if len(dataset) < config.min_matches:
             raise InsufficientTrainingDataError(
@@ -94,6 +105,7 @@ class TrainApiFootballDixonColesModel:
             config=config,
             model=model,
             trained_at=_utc_now(self._clock),
+            target_scope=resolved_target,
         )
         return self._versions.add(self._codec.encode(candidate))
 
