@@ -26,7 +26,9 @@ class ApiFootballClient:
     timeout: float = 10.0
     cache_ttl_seconds: float = 0.0
     clock: Callable[[], float] = field(default=monotonic, repr=False)
-    _cache: dict[int, tuple[float, Mapping[str, Any]]] = field(default_factory=dict, init=False, repr=False)
+    _cache: dict[tuple[int, int | None], tuple[float, Mapping[str, Any]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def _validate(self) -> None:
         if not isinstance(self.api_key, str) or not self.api_key.strip():
@@ -58,19 +60,27 @@ class ApiFootballClient:
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError(f"{field} must be timezone-aware")
 
-    def fetch_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
+    def fetch_odds(
+        self, *, fixture_id: int, bookmaker_id: int | None = None
+    ) -> Mapping[str, Any]:
         """Fetch odds for one fixture, serving a fresh cached response when enabled."""
         self._validate_fixture_id(fixture_id)
+        if bookmaker_id is not None:
+            self._validate_positive_int(bookmaker_id, "bookmaker_id")
         self._validate()
         now = self.clock()
-        cached = self._cache.get(fixture_id)
+        cache_key = (fixture_id, bookmaker_id)
+        cached = self._cache.get(cache_key)
         if cached is not None:
             expires_at, payload = cached
             if now < expires_at:
                 return payload
-            del self._cache[fixture_id]
+            del self._cache[cache_key]
 
-        query = urlencode({"fixture": fixture_id})
+        query_values = {"fixture": fixture_id}
+        if bookmaker_id is not None:
+            query_values["bookmaker"] = bookmaker_id
+        query = urlencode(query_values)
         url = f"{self.base_url.rstrip('/')}/odds?{query}"
         payload = self.transport.get_json(
             url,
@@ -78,7 +88,7 @@ class ApiFootballClient:
             timeout=self.timeout,
         )
         if self.cache_ttl_seconds > 0:
-            self._cache[fixture_id] = (
+            self._cache[cache_key] = (
                 self.clock() + self.cache_ttl_seconds,
                 payload,
             )

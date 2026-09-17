@@ -102,6 +102,19 @@ def test_fetch_completed_fixtures_uses_exact_ft_scope_and_utc_dates() -> None:
     )
 
 
+def test_fetch_odds_can_pin_one_provider_bookmaker() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+
+    ApiFootballClient(transport, "secret").fetch_odds(fixture_id=42, bookmaker_id=8)
+
+    transport.get_json.assert_called_once_with(
+        "https://v3.football.api-sports.io/odds?fixture=42&bookmaker=8",
+        headers={"x-apisports-key": "secret"},
+        timeout=10.0,
+    )
+
+
 def test_fetch_fixtures_uses_exact_live_scope() -> None:
     transport = Mock()
     transport.get_json.return_value = {"response": []}

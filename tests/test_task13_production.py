@@ -123,7 +123,13 @@ class OpportunityRepositoryFake:
 def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     repository = OpportunityRepositoryFake()
     requests: list[tuple[str, str]] = []
-    source = SimpleNamespace(fetch_quotes=lambda **_kwargs: ())
+    quote_requests: list[dict[str, object]] = []
+
+    def fetch_quotes(**kwargs):
+        quote_requests.append(kwargs)
+        return ()
+
+    source = SimpleNamespace(fetch_quotes=fetch_quotes)
     ingestion = SimpleNamespace(ingest=lambda _quotes: 0)
     predictor = SimpleNamespace(
         execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction-1")
@@ -156,6 +162,7 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     assert first.registered_pick_ids == ("pick-1",)
     assert second.evaluation_ids == first.evaluation_ids
     assert repository.bookmakers == [8, 8]
+    assert [request["bookmaker_id"] for request in quote_requests] == [8, 8]
     assert requests[0][1] == registration_request_id(requests[0][0])
     assert requests[2] == requests[0]
 

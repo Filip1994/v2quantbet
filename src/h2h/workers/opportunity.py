@@ -121,7 +121,10 @@ class OpportunityWorker:
             if not self._repository.item_retry_due(WORKER_NAME, fixture.fixture_id, now=now):
                 continue
             try:
-                quotes = self._source.fetch_quotes(fixture_identity=fixture.identity)
+                quotes = self._source.fetch_quotes(
+                    fixture_identity=fixture.identity,
+                    bookmaker_id=self._bookmaker_id,
+                )
             except ApiBudgetExceededError:
                 raise
             except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:

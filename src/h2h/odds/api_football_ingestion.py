@@ -19,6 +19,7 @@ def iter_api_football_quote_payloads(
     response: Mapping[str, Any],
     *,
     fixture_identity: ResolvedFixtureIdentity,
+    bookmaker_id: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield one flattened payload for each bookmaker/bet/value combination.
 
@@ -76,6 +77,8 @@ def iter_api_football_quote_payloads(
         for bookmaker in bookmakers:
             if not isinstance(bookmaker, Mapping):
                 continue
+            if bookmaker_id is not None and bookmaker.get("id") != bookmaker_id:
+                continue
             bets = bookmaker.get("bets", [])
             if not isinstance(bets, list):
                 continue
@@ -112,6 +115,7 @@ def ingest_api_football_odds(
     *,
     fixture_identity: ResolvedFixtureIdentity,
     adapter: ApiFootballQuoteAdapter | None = None,
+    bookmaker_id: int | None = None,
 ) -> tuple[CanonicalQuote, ...]:
     """Convert a complete API-Football odds response into canonical quotes."""
     quote_adapter = adapter or ApiFootballQuoteAdapter()
@@ -120,6 +124,7 @@ def ingest_api_football_odds(
         for payload in iter_api_football_quote_payloads(
             response,
             fixture_identity=fixture_identity,
+            bookmaker_id=bookmaker_id,
         )
     )
 
@@ -129,12 +134,14 @@ def build_api_football_market_snapshots(
     *,
     fixture_identity: ResolvedFixtureIdentity,
     adapter: ApiFootballQuoteAdapter | None = None,
+    bookmaker_id: int | None = None,
 ) -> tuple[MarketSnapshot, ...]:
     """Build validated snapshots grouped by fixture, bookmaker, market and time."""
     quotes = ingest_api_football_odds(
         response,
         fixture_identity=fixture_identity,
         adapter=adapter,
+        bookmaker_id=bookmaker_id,
     )
     groups: dict[tuple[str, int, object, object], list[CanonicalQuote]] = {}
     for quote in quotes:

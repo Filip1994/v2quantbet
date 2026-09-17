@@ -28,13 +28,17 @@ class ApiFootballOddsService:
         self,
         *,
         fixture_identity: ResolvedFixtureIdentity,
+        bookmaker_id: int | None = None,
     ) -> tuple[CanonicalQuote, ...]:
         """Fetch and normalize all supported quotes for one fixture."""
         provider_fixture_id = api_football_provider_fixture_id(fixture_identity)
-        response = self.client.fetch_odds(fixture_id=provider_fixture_id)
+        response = self.client.fetch_odds(
+            fixture_id=provider_fixture_id, bookmaker_id=bookmaker_id
+        )
         return ingest_api_football_odds(
             response,
             fixture_identity=fixture_identity,
+            bookmaker_id=bookmaker_id,
         )
 
     def fetch_market_snapshots(
