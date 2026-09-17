@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Self
+from collections.abc import Callable
 
 from h2h.application_postgres import (
     PostgreSQLDixonColesModelLifecycleApplication,
@@ -22,7 +23,13 @@ from h2h.application_postgres import (
     build_postgres_production_prediction_application,
 )
 from h2h.config import ApplicationSettings
-from h2h.odds import ApiFootballClient, ApiFootballOddsService, BudgetedJsonTransport, DailyApiBudget
+from h2h.odds import (
+    ApiFootballClient,
+    ApiFootballOddsService,
+    BudgetedJsonTransport,
+    DailyApiBudget,
+    RetryingJsonTransport,
+)
 from h2h.odds.api_football_client import API_FOOTBALL_BASE_URL
 from h2h.odds.http import JsonTransport, UrllibJsonTransport
 from h2h.persistence import SQLiteQuoteRepository
@@ -106,14 +113,25 @@ def build_api_football_client(
     *,
     daily_limit: int = 7500,
     reserve: int = 1500,
+    budget: DailyApiBudget | None = None,
+    timeout: float = 10.0,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> ApiFootballClient:
     """Build an API-Football client protected by a shared daily call budget."""
-    budget = DailyApiBudget(daily_limit=daily_limit, reserve=reserve)
-    guarded_transport = BudgetedJsonTransport(transport=transport, budget=budget)
-    return ApiFootballClient(
+    shared_budget = budget or DailyApiBudget(daily_limit=daily_limit, reserve=reserve)
+    guarded_transport = BudgetedJsonTransport(transport=transport, budget=shared_budget)
+    retrying_transport = RetryingJsonTransport(
         transport=guarded_transport,
+        max_attempts=2,
+        backoff_seconds=1.0,
+        max_backoff_seconds=30.0,
+        should_stop=should_stop,
+    )
+    return ApiFootballClient(
+        transport=retrying_transport,
         api_key=settings.api_football_key,
         base_url=API_FOOTBALL_BASE_URL,
+        timeout=timeout,
     )
 
 

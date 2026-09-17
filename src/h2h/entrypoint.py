@@ -1,35 +1,37 @@
-"""Production entrypoint for the QuantBet history worker."""
+"""Production entrypoint for the single-leader QuantBet Railway service."""
 
 from __future__ import annotations
 
 import logging
 import os
-from datetime import timedelta
-from time import monotonic
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Event
+from uuid import uuid4
 
-from h2h.application import build_api_football_client
-from h2h.application import build_postgres_quote_history_application_from_settings
-from h2h.application import build_postgres_pick_monitoring_from_settings
-from h2h.application import build_postgres_result_settlement_from_settings
-from h2h.config import load_settings
-from h2h.domain.fixture_identity import (
-    ResolvedFixtureIdentity,
-    api_football_fixture_identity,
-)
-from h2h.odds import ApiFootballOddsService
-from h2h.odds.http import UrllibJsonTransport
-from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
-from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
-from h2h.workers.discovered_history_quote_polling import DiscoveredHistoryQuotePollingJob
-from h2h.workers.history_quote_polling import HistoryQuotePollingJob
-from h2h.workers.runtime import WorkerRuntime, install_shutdown_handlers
+from h2h.api.health import HealthService, RuntimeHealthState
+from h2h.config import PilotScope, load_production_settings
+from h2h.domain.model_lifecycle import DixonColesModelScope
+from h2h.domain.fixture_identity import ResolvedFixtureIdentity, api_football_fixture_identity
+from h2h.logging_config import configure_logging
+from h2h.odds import ApiBudgetExceededError
+from h2h.odds.http import TransportError
+from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
+from h2h.production import ProductionApplication, build_production_application
+from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
+from h2h.workers.runtime import install_shutdown_handlers
+
 
 LOGGER = logging.getLogger("quantbet.worker")
+MIGRATION_DIR = Path(__file__).resolve().parents[2] / "migrations"
+
+
+def _expected_migrations() -> tuple[str, ...]:
+    return tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
 
 
 def _fixture_identities_from_environment() -> tuple[ResolvedFixtureIdentity, ...]:
-    """Read the optional API-Football allowlist as resolved fixture identities."""
+    """Legacy parser retained for compatibility; production uses pilot discovery filters."""
     raw = os.getenv("QUANTBET_FIXTURE_IDS", "").strip()
     if not raw:
         return ()
@@ -37,121 +39,191 @@ def _fixture_identities_from_environment() -> tuple[ResolvedFixtureIdentity, ...
         fixture_ids = tuple(int(value.strip()) for value in raw.split(","))
     except ValueError as exc:
         raise ValueError("QUANTBET_FIXTURE_IDS must contain integers") from exc
-    if not fixture_ids or any(fixture_id <= 0 for fixture_id in fixture_ids):
+    if any(fixture_id <= 0 for fixture_id in fixture_ids):
         raise ValueError("QUANTBET_FIXTURE_IDS must contain positive integers")
     return tuple(api_football_fixture_identity(fixture_id) for fixture_id in fixture_ids)
 
 
-def _positive_seconds(name: str, default: float) -> float:
-    raw = os.getenv(name, str(default)).strip()
+def _connect_with_retry(application: ProductionApplication, stop: Event) -> None:
+    settings = application.settings
+    last_error: BaseException | None = None
+    for attempt in range(settings.database_startup_attempts):
+        if stop.is_set():
+            raise RuntimeError("shutdown requested during database startup")
+        try:
+            if application.runtime.check_database():
+                return
+        except Exception as exc:  # noqa: BLE001 - bounded startup connectivity retry
+            last_error = exc
+        if attempt + 1 < settings.database_startup_attempts:
+            stop.wait(settings.database_startup_backoff_seconds)
+    raise RuntimeError("PostgreSQL did not become ready within the startup window") from last_error
+
+
+def _prepare_bankroll(application: ProductionApplication) -> None:
+    policy = application.settings.application.registration_policy
+    assert policy is not None
+    if application.settings.bankroll_bootstrap_mode == "create":
+        application.registration.bootstrap_bankroll.execute()
+    application.runtime.verify_bankroll(
+        policy.bankroll_account_id, policy.currency, policy.initial_bankroll_minor
+    )
+
+
+def _verify_models(application: ProductionApplication) -> tuple[PilotScope, ...]:
+    missing: list[PilotScope] = []
+    application.usable_scopes.clear()
+    for scope in application.settings.pilot_scopes:
+        model_scope = DixonColesModelScope(
+            provider="api-football",
+            team_id_namespace="api-football",
+            league_id=scope.league_id,
+            season=scope.season,
+        )
+        try:
+            selected = application.active_model_loader.execute_with_selection(model_scope)
+        except ActiveModelUnavailableError:
+            missing.append(scope)
+            continue
+        application.usable_scopes.add(scope)
+        LOGGER.info("active model verified", extra={"model_version_id": selected.model_version_id})
+    if not application.usable_scopes:
+        raise RuntimeError("no configured pilot scope has a usable active model")
+    return tuple(missing)
+
+
+def _run_active_leader(
+    application: ProductionApplication,
+    state: RuntimeHealthState,
+    stop: Event,
+    leader: object,
+    instance_id: str,
+) -> bool:
+    _prepare_bankroll(application)
+    missing = _verify_models(application)
+    state.update(
+        leadership="active",
+        missing_model_scopes=tuple(f"{scope.league_id}:{scope.season}" for scope in missing),
+    )
+    application.monitoring.reconcile.execute()
+    application.results.repository.reconcile(reconciled_at=datetime.now(UTC))
+    policy = application.settings.application.registration_policy
+    lifecycle = application.settings.application.odds_lifecycle_policy
+    assert policy is not None and lifecycle is not None
+    application.runtime.due_opportunity_fixtures(
+        scopes=application.settings.pilot_scopes,
+        bookmaker_id=application.settings.pilot_bookmaker_id,
+        provider_fixture_ids=application.settings.pilot_fixture_ids,
+        allowed_statuses=policy.allowed_fixture_statuses,
+        now=datetime.now(UTC),
+    )
+
+    def discovery_cycle() -> int:
+        if stop.is_set():
+            return 0
+        start = datetime.now(UTC)
+        durable = application.prediction.durable_discovery
+        if durable is None:
+            raise RuntimeError("durable fixture discovery is not composed")
+        return len(
+            durable.discover(
+                start,
+                start + timedelta(hours=application.settings.discovery_lookahead_hours),
+            )
+        )
+
+    jobs = (
+        ScheduledJob("discovery", application.settings.discovery_interval_seconds, discovery_cycle),
+        ScheduledJob(
+            "opportunity",
+            application.settings.opportunity_interval_seconds,
+            application.opportunity.run_once,
+        ),
+        ScheduledJob(
+            "monitoring", float(lifecycle.monitoring_interval_seconds), application.monitoring.worker.run_once
+        ),
+        ScheduledJob(
+            "results",
+            float(application.settings.application.result_settlement_policy.poll_interval_seconds),
+            application.results.worker.run_once,
+        ),
+    )
+
+    def degraded(error: BaseException) -> None:
+        if isinstance(error, (ApiBudgetExceededError, TransportError)):
+            application.provider_state.failure(error)
+        state.update(accepting_work=False)
+
+    def recovered() -> None:
+        state.update(accepting_work=True, last_scheduler_tick=datetime.now(UTC))
+
+    state.update(scheduler_alive=True, accepting_work=True)
     try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a positive number") from exc
-    if value <= 0:
-        raise ValueError(f"{name} must be a positive number")
-    return value
+        return ProductionOrchestrator(
+            jobs,
+            application.runtime,
+            instance_id=instance_id,
+            stop=stop,
+            tick_seconds=application.settings.scheduler_tick_seconds,
+            leader_healthy=leader.healthy,  # type: ignore[attr-defined]
+            on_degraded=degraded,
+            on_recovered=recovered,
+        ).run_forever()
+    finally:
+        state.update(scheduler_alive=False, accepting_work=False)
 
 
 def main() -> None:
-    """Initialize PostgreSQL and run the configured pre-match polling worker."""
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    settings = load_settings()
-    manual_fixture_identities = _fixture_identities_from_environment()
-    application = build_postgres_quote_history_application_from_settings(settings)
-    applied = application.migrate()
-    LOGGER.info("PostgreSQL ready; migrations applied: %s", applied)
+    configure_logging(os.getenv("LOG_LEVEL", "INFO"))
+    settings = load_production_settings()
+    stop = Event()
+    state = RuntimeHealthState()
 
-    client = build_api_football_client(UrllibJsonTransport(), settings)
-    source = ApiFootballOddsService(client)
-    monitoring_application = (
-        None
-        if settings.odds_lifecycle_policy is None
-        else build_postgres_pick_monitoring_from_settings(settings, source=source)
-    )
-    result_application = build_postgres_result_settlement_from_settings(
-        settings, client=client
-    )
-    stopped = Event()
-    install_shutdown_handlers(stopped.set)
-
-    poll_interval = _positive_seconds("QUANTBET_POLL_INTERVAL_SECONDS", 60.0)
-    discovery_interval = _positive_seconds("QUANTBET_DISCOVERY_INTERVAL_SECONDS", 900.0)
-    lookahead_hours = _positive_seconds("QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", 72.0)
-
-    if manual_fixture_identities:
-        poll_job = HistoryQuotePollingJob(
-            source,
-            application.service,
-            manual_fixture_identities,
-        )
-        LOGGER.warning(
-            "QUANTBET_FIXTURE_IDS is configured; using manual fixture allowlist instead of discovery"
-        )
-        discovery_refresh = None
-    else:
-        discovery = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
-        discovered_job = DiscoveredHistoryQuotePollingJob(
-            source,
-            application.service,
-            discovery,
-            lookahead=timedelta(hours=lookahead_hours),
-        )
-        poll_job = None
-        last_discovery_at: float | None = None
+    def request_shutdown() -> None:
+        state.update(accepting_work=False, leadership="stopping")
+        stop.set()
         LOGGER.info(
-            "Starting discovery-driven worker: poll=%ss discovery=%ss lookahead=%sh",
-            poll_interval,
-            discovery_interval,
-            lookahead_hours,
+            "graceful shutdown requested; waiting for bounded in-flight work",
+            extra={"shutdown_grace_seconds": settings.shutdown_grace_seconds},
         )
 
-        def discovery_refresh() -> None:
-            nonlocal last_discovery_at
-            now = monotonic()
-            if last_discovery_at is None or now - last_discovery_at >= discovery_interval:
-                total = discovered_job.run_once()
-                last_discovery_at = now
-                LOGGER.info("Discovery cycle persisted %s snapshots", total)
-            else:
-                LOGGER.debug(
-                    "Skipping discovery cycle; next refresh due in %.1fs",
-                    discovery_interval - (now - last_discovery_at),
-                )
-
-    def run_cycle() -> None:
-        if monitoring_application is not None:
-            result = monitoring_application.worker.run_once()
-            LOGGER.info(
-                "Pick monitoring cycle: started=%s finalized=%s snapshots=%s",
-                len(result.reconciliation.started_pick_ids),
-                len(result.reconciliation.finalized_pick_ids),
-                result.refresh.persisted_snapshot_count,
-            )
-        result_cycle = result_application.worker.run_once()
-        LOGGER.info(
-            "Result settlement cycle: initialized=%s claimed=%s persisted=%s settled=%s clv=%s",
-            len(result_cycle.initialized_fixture_ids),
-            len(result_cycle.claimed_fixture_ids),
-            result_cycle.persisted_result_count,
-            len(result_cycle.settled_pick_ids),
-            len(result_cycle.clv_finalized_pick_ids),
-        )
-        if poll_job is not None:
-            total = poll_job.run_once()
-            LOGGER.info("Worker cycle persisted %s snapshots", total)
-            return
-        discovery_refresh()
-
-    WorkerRuntime(
-        job=run_cycle,
-        interval_seconds=poll_interval,
-        should_stop=stopped.is_set,
-    ).run_forever()
-    LOGGER.info("QuantBet worker stopped")
+    install_shutdown_handlers(request_shutdown)
+    application = build_production_application(settings, should_stop=stop.is_set)
+    health: HealthService | None = None
+    leader = None
+    instance_id = os.getenv("RAILWAY_REPLICA_ID", "").strip() or f"local-{uuid4()}"
+    try:
+        _connect_with_retry(application, stop)
+        application.runtime.verify_schema(_expected_migrations())
+        state.update(schema_current=True)
+        health = HealthService(application, state, host="0.0.0.0", port=settings.port)
+        health.start()
+        LOGGER.info("health service started")
+        while not stop.is_set():
+            leader = application.runtime.open_leader_lock()
+            if not leader.try_acquire():
+                state.update(leadership="standby", scheduler_alive=False, accepting_work=False)
+                leader.close()
+                leader = None
+                stop.wait(settings.scheduler_tick_seconds)
+                continue
+            LOGGER.info("production leadership acquired")
+            requested_shutdown = _run_active_leader(application, state, stop, leader, instance_id)
+            leader.close()
+            leader = None
+            if requested_shutdown:
+                break
+            state.update(leadership="standby")
+            LOGGER.warning("production leadership lost; returning to standby")
+        state.update(leadership="stopping", accepting_work=False)
+    finally:
+        stop.set()
+        if leader is not None:
+            leader.close()
+        if health is not None:
+            health.close()
+        application.close()
+        LOGGER.info("QuantBet worker stopped")
 
 
 if __name__ == "__main__":

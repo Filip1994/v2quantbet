@@ -9,6 +9,8 @@ from typing import Any
 
 from h2h.domain.fixture_result import ApiFootballSettlementResultNormalizer
 from h2h.odds.api_football_client import ApiFootballClient
+from h2h.odds import ApiBudgetExceededError
+from h2h.odds.http import TransportError
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
 
 
@@ -86,26 +88,49 @@ class ReconcileFixtureResults:
         source: ApiFootballResultSource,
         *,
         clock: Callable[[], datetime],
+        on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
+        on_item_success: Callable[[str], None] | None = None,
+        should_stop: Callable[[], bool] = lambda: False,
     ) -> None:
         self._repository = repository
         self._source = source
         self._clock = clock
         self._normalizer = ApiFootballSettlementResultNormalizer()
+        self._on_item_failure = on_item_failure or (lambda _item, _error, _at: None)
+        self._on_item_success = on_item_success or (lambda _item: None)
+        self._should_stop = should_stop
 
     def execute(self) -> ResultCycle:
         now = _now(self._clock)
         initialized = self._repository.reconcile(reconciled_at=now)
         claimed = self._repository.claim_due(claimed_at=now)
         contexts = self._repository.provider_contexts(claimed)
-        records = self._source.fetch(contexts) if contexts else {}
+        records: dict[str, Mapping[str, Any]] = {}
+        for context in contexts:
+            if self._should_stop():
+                break
+            try:
+                records.update(self._source.fetch((context,)))
+            except ApiBudgetExceededError:
+                raise
+            except (TransportError, TypeError, ValueError, RuntimeError) as exc:
+                self._on_item_failure(context[0], exc, now)
+                continue
         settled: list[str] = []
         clv: list[str] = []
         for fixture_id, _provider_id in contexts:
+            if self._should_stop():
+                break
             payload = records.get(fixture_id)
             if payload is None:
                 continue
-            result = self._normalizer.normalize(payload, fixture_id=fixture_id, acquired_at=now)
+            try:
+                result = self._normalizer.normalize(payload, fixture_id=fixture_id, acquired_at=now)
+            except (TypeError, ValueError) as exc:
+                self._on_item_failure(fixture_id, exc, now)
+                continue
             self._repository.persist_result(result, checked_at=now)
+            self._on_item_success(fixture_id)
             stable = self._repository.stable_result(fixture_id, as_of=now)
             if stable is None:
                 continue

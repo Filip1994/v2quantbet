@@ -294,6 +294,9 @@ def build_postgres_pick_monitoring_application(
     *,
     bulletin_timezone: ZoneInfo | None = None,
     clock: Callable[[], datetime] | None = None,
+    on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
+    on_item_success: Callable[[str], None] | None = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> PostgreSQLPickMonitoringApplication:
     """Compose durable monitoring, finalization, worker, and read-only Bulletin."""
 
@@ -305,7 +308,13 @@ def build_postgres_pick_monitoring_application(
     ingestion = QuoteHistoryIngestionService(quote_history, capture_clock=lifecycle_clock)
     start = StartRegisteredPickMonitoring(repository, policy, clock=lifecycle_clock)
     refresh = RefreshRegisteredPickOdds(
-        repository, source, ingestion, clock=lifecycle_clock
+        repository,
+        source,
+        ingestion,
+        clock=lifecycle_clock,
+        on_item_failure=on_item_failure,
+        on_item_success=on_item_success,
+        should_stop=should_stop,
     )
     finalize = FinalizePickClosingOdds(repository, clock=lifecycle_clock)
     reconcile = ReconcileRegisteredPickMonitoring(
@@ -334,13 +343,23 @@ def build_postgres_result_settlement_application(
     database_url: str | None = None,
     *,
     clock: Callable[[], datetime] | None = None,
+    on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
+    on_item_success: Callable[[str], None] | None = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> PostgreSQLResultSettlementApplication:
     if not isinstance(policy, ResultSettlementPolicy):
         raise TypeError("policy must be a ResultSettlementPolicy")
     result_clock = clock or (lambda: datetime.now(timezone.utc))
     repository = PostgreSQLResultSettlementRepository(policy, database_url=database_url)
     performance = PostgreSQLPerformanceRepository(database_url=database_url)
-    reconcile = ReconcileFixtureResults(repository, source, clock=result_clock)
+    reconcile = ReconcileFixtureResults(
+        repository,
+        source,
+        clock=result_clock,
+        on_item_failure=on_item_failure,
+        on_item_success=on_item_success,
+        should_stop=should_stop,
+    )
     return PostgreSQLResultSettlementApplication(
         repository=repository,
         performance=performance,

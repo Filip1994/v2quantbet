@@ -39,6 +39,16 @@ class DailyApiBudget:
         return self.daily_limit - self.reserve
 
     @property
+    def day(self) -> date:
+        with self._lock:
+            self._reset_if_needed()
+            return self._day
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining <= 0
+
+    @property
     def used(self) -> int:
         with self._lock:
             self._reset_if_needed()

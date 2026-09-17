@@ -20,6 +20,9 @@ from h2h.persistence.pick_monitoring import (
     PickMonitoringRepository,
 )
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
+from h2h.domain.quote_normalizer import QuoteNormalizationError
+from h2h.odds import ApiBudgetExceededError
+from h2h.odds.http import TransportError
 
 
 def _now(clock: Callable[[], datetime]) -> datetime:
@@ -67,12 +70,18 @@ class RefreshRegisteredPickOdds:
         *,
         clock: Callable[[], datetime],
         claim_limit: int = 100,
+        on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
+        on_item_success: Callable[[str], None] | None = None,
+        should_stop: Callable[[], bool] = lambda: False,
     ) -> None:
         self._repository = repository
         self._source = source
         self._ingestion = ingestion
         self._clock = clock
         self._claim_limit = claim_limit
+        self._on_item_failure = on_item_failure or (lambda _item, _error, _at: None)
+        self._on_item_success = on_item_success or (lambda _item: None)
+        self._should_stop = should_stop
 
     def execute(self) -> RefreshResult:
         claimed = self._repository.claim_due(
@@ -82,9 +91,18 @@ class RefreshRegisteredPickOdds:
         refreshed: list[str] = []
         count = 0
         for identity in identities:
-            quotes = self._source.fetch_quotes(fixture_identity=identity)
+            if self._should_stop():
+                break
+            try:
+                quotes = self._source.fetch_quotes(fixture_identity=identity)
+            except ApiBudgetExceededError:
+                raise
+            except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:
+                self._on_item_failure(identity.fixture_id, exc, _now(self._clock))
+                continue
             count += self._ingestion.ingest(quotes)
             refreshed.append(identity.fixture_id)
+            self._on_item_success(identity.fixture_id)
         return RefreshResult(claimed, tuple(refreshed), count)
 
 
@@ -145,4 +163,3 @@ class ReadPickOddsLifecycle:
 
     def execute(self, pick_id: str) -> PickOddsLifecycle:
         return self._repository.read_lifecycle(pick_id, as_of=_now(self._clock))
-

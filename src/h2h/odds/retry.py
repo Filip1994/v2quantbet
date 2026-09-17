@@ -23,13 +23,17 @@ class RetryingJsonTransport:
     transport: JsonTransport
     max_attempts: int = 3
     backoff_seconds: float = 0.0
+    max_backoff_seconds: float = 30.0
     sleeper: Callable[[float], None] = sleep
+    should_stop: Callable[[], bool] = lambda: False
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be at least one")
         if self.backoff_seconds < 0:
             raise ValueError("backoff_seconds must not be negative")
+        if self.max_backoff_seconds < 0:
+            raise ValueError("max_backoff_seconds must not be negative")
 
     def get_json(
         self,
@@ -40,6 +44,10 @@ class RetryingJsonTransport:
     ) -> Mapping[str, Any]:
         last_error: TransportError | None = None
         for attempt in range(self.max_attempts):
+            if self.should_stop():
+                if last_error is not None:
+                    raise last_error
+                raise TransportError("provider request blocked during shutdown")
             try:
                 return self.transport.get_json(
                     url,
@@ -52,12 +60,14 @@ class RetryingJsonTransport:
                     delay = self.backoff_seconds * (2**attempt)
                     if exc.retry_after is not None:
                         delay = max(delay, exc.retry_after)
-                    self.sleeper(delay)
+                    self.sleeper(min(delay, self.max_backoff_seconds))
             except TransportResponseError:
                 raise
             except (TransportTimeoutError, TransportError) as exc:
                 last_error = exc
                 if attempt + 1 < self.max_attempts:
-                    self.sleeper(self.backoff_seconds * (2**attempt))
+                    self.sleeper(
+                        min(self.backoff_seconds * (2**attempt), self.max_backoff_seconds)
+                    )
         assert last_error is not None
         raise last_error

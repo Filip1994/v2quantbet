@@ -13,6 +13,7 @@ from h2h.domain.odds import Market, Selection
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.domain.settlement import ResultSettlementPolicy
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 
 
 class ConfigError(ValueError):
@@ -61,6 +62,49 @@ class ApplicationSettings:
             f"odds_lifecycle_policy={self.odds_lifecycle_policy!r}, "
             f"result_settlement_policy={self.result_settlement_policy!r}, "
             f"bulletin_timezone={self.bulletin_timezone.key!r})"
+        )
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class PilotScope:
+    league_id: int
+    season: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.league_id, bool) or not isinstance(self.league_id, int) or self.league_id <= 0:
+            raise ValueError("pilot league_id must be a positive integer")
+        if isinstance(self.season, bool) or not isinstance(self.season, int) or self.season <= 0:
+            raise ValueError("pilot season must be a positive integer")
+
+
+@dataclass(frozen=True, repr=False)
+class ProductionSettings:
+    app_env: str
+    log_level: str
+    application: ApplicationSettings
+    pilot_scopes: tuple[PilotScope, ...]
+    pilot_bookmaker_id: int
+    pilot_fixture_ids: frozenset[int]
+    bankroll_bootstrap_mode: str
+    discovery_interval_seconds: float
+    discovery_lookahead_hours: float
+    opportunity_interval_seconds: float
+    scheduler_tick_seconds: float
+    shutdown_grace_seconds: float
+    api_daily_limit: int
+    api_reserve: int
+    api_timeout_seconds: float
+    database_startup_attempts: int
+    database_startup_backoff_seconds: float
+    port: int
+
+    def __repr__(self) -> str:
+        return (
+            f"ProductionSettings(app_env={self.app_env!r}, log_level={self.log_level!r}, "
+            "application=[REDACTED], "
+            f"pilot_scopes={self.pilot_scopes!r}, pilot_bookmaker_id={self.pilot_bookmaker_id!r}, "
+            f"pilot_fixture_ids={sorted(self.pilot_fixture_ids)!r}, "
+            f"bankroll_bootstrap_mode={self.bankroll_bootstrap_mode!r})"
         )
 
 
@@ -123,6 +167,125 @@ def load_settings(environ: Mapping[str, str] | None = None) -> ApplicationSettin
         odds_lifecycle_policy=odds_lifecycle_policy,
         result_settlement_policy=result_settlement_policy,
         bulletin_timezone=bulletin_timezone,
+    )
+
+
+def _positive_number(values: Mapping[str, str], name: str, default: str) -> float:
+    raw = values.get(name, default).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be a positive number")
+    return value
+
+
+def _positive_integer(values: Mapping[str, str], name: str, default: str) -> int:
+    raw = values.get(name, default).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be a positive integer")
+    return value
+
+
+def load_production_settings(environ: Mapping[str, str] | None = None) -> ProductionSettings:
+    """Load the complete single-service production contract; partial input fails closed."""
+    values = os.environ if environ is None else environ
+    app_env = values.get("APP_ENV", "").strip().lower()
+    if app_env != "production":
+        raise ConfigError("APP_ENV must be production for the production runtime")
+    log_level = values.get("LOG_LEVEL", "").strip().upper()
+    if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ConfigError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+    application = load_settings(values)
+    if not application.database_url:
+        raise ConfigError("Missing required configuration: DATABASE_URL")
+    if application.registration_policy is None:
+        raise ConfigError("complete registration policy configuration is required")
+    if application.odds_lifecycle_policy is None:
+        raise ConfigError("complete odds lifecycle configuration is required")
+
+    raw_scopes = values.get("QUANTBET_PILOT_SCOPES", "").strip()
+    if not raw_scopes:
+        raise ConfigError("Missing required configuration: QUANTBET_PILOT_SCOPES")
+    scopes: list[PilotScope] = []
+    try:
+        for raw_scope in raw_scopes.split(","):
+            league, season = (part.strip() for part in raw_scope.split(":", 1))
+            scopes.append(PilotScope(int(league), int(season)))
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("QUANTBET_PILOT_SCOPES must use league_id:season") from exc
+    if len(set(scopes)) != len(scopes):
+        raise ConfigError("QUANTBET_PILOT_SCOPES must not contain duplicates")
+
+    bookmaker_id = _positive_integer(values, "QUANTBET_PILOT_BOOKMAKER_ID", "0")
+    if bookmaker_id not in API_FOOTBALL_BOOKMAKERS:
+        raise ConfigError("QUANTBET_PILOT_BOOKMAKER_ID is not a supported bookmaker")
+
+    fixture_ids: set[int] = set()
+    raw_fixture_ids = values.get("QUANTBET_PILOT_FIXTURE_IDS", "").strip()
+    if raw_fixture_ids:
+        try:
+            for item in raw_fixture_ids.split(","):
+                normalized = item.strip()
+                if normalized.startswith("api-football:"):
+                    normalized = normalized.split(":", 1)[1]
+                fixture_id = int(normalized)
+                if fixture_id <= 0:
+                    raise ValueError
+                fixture_ids.add(fixture_id)
+        except ValueError as exc:
+            raise ConfigError(
+                "QUANTBET_PILOT_FIXTURE_IDS must contain positive provider or canonical IDs"
+            ) from exc
+
+    mode = values.get("QUANTBET_BANKROLL_BOOTSTRAP_MODE", "").strip().lower()
+    if mode not in {"create", "verify"}:
+        raise ConfigError("QUANTBET_BANKROLL_BOOTSTRAP_MODE must be create or verify")
+    api_limit = _positive_integer(values, "QUANTBET_API_DAILY_LIMIT", "7500")
+    api_reserve = int(values.get("QUANTBET_API_RESERVE", "1500").strip())
+    if api_reserve < 0 or api_reserve >= api_limit:
+        raise ConfigError("QUANTBET_API_RESERVE must be non-negative and below the daily limit")
+    port = _positive_integer(values, "PORT", "8080")
+    if port > 65535:
+        raise ConfigError("PORT must be at most 65535")
+    return ProductionSettings(
+        app_env=app_env,
+        log_level=log_level,
+        application=application,
+        pilot_scopes=tuple(sorted(scopes)),
+        pilot_bookmaker_id=bookmaker_id,
+        pilot_fixture_ids=frozenset(fixture_ids),
+        bankroll_bootstrap_mode=mode,
+        discovery_interval_seconds=_positive_number(
+            values, "QUANTBET_DISCOVERY_INTERVAL_SECONDS", "900"
+        ),
+        discovery_lookahead_hours=_positive_number(
+            values, "QUANTBET_DISCOVERY_LOOKAHEAD_HOURS", "72"
+        ),
+        opportunity_interval_seconds=_positive_number(
+            values, "QUANTBET_OPPORTUNITY_INTERVAL_SECONDS", "60"
+        ),
+        scheduler_tick_seconds=_positive_number(
+            values, "QUANTBET_SCHEDULER_TICK_SECONDS", "5"
+        ),
+        shutdown_grace_seconds=_positive_number(
+            values, "QUANTBET_SHUTDOWN_GRACE_SECONDS", "30"
+        ),
+        api_daily_limit=api_limit,
+        api_reserve=api_reserve,
+        api_timeout_seconds=_positive_number(values, "QUANTBET_API_TIMEOUT_SECONDS", "10"),
+        database_startup_attempts=_positive_integer(
+            values, "QUANTBET_DATABASE_STARTUP_ATTEMPTS", "12"
+        ),
+        database_startup_backoff_seconds=_positive_number(
+            values, "QUANTBET_DATABASE_STARTUP_BACKOFF_SECONDS", "5"
+        ),
+        port=port,
     )
 
 

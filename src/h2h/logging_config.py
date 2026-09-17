@@ -1,0 +1,45 @@
+"""Small JSON log formatter with no secret-bearing context."""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import UTC, datetime
+
+
+_EXTRA_FIELDS = (
+    "worker",
+    "fixture_id",
+    "pick_id",
+    "model_version_id",
+    "evaluation_id",
+    "settlement_id",
+    "result_observation_id",
+    "error_class",
+    "shutdown_grace_seconds",
+)
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for field in _EXTRA_FIELDS:
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = value
+        if record.exc_info:
+            payload["exception_class"] = record.exc_info[0].__name__
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+
+def configure_logging(level: str) -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(level.upper())

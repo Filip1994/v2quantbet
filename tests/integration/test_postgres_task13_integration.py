@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import os
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+psycopg = pytest.importorskip("psycopg")
+from psycopg import sql
+
+from h2h.config import PilotScope, load_registration_policy_config
+from h2h.persistence.migrations import apply_migrations
+from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
+from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
+from h2h.persistence.pick_registration import BankrollBootstrapConflictError
+from tests.test_config import registration_environment
+
+
+DATABASE_URL = os.environ.get("QUANTBET_TEST_DATABASE_URL")
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="QUANTBET_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+MIGRATION_DIR = Path(__file__).parents[2] / "migrations"
+
+
+@pytest.fixture
+def isolated_database():
+    assert DATABASE_URL is not None
+    schema = f"task13_{uuid4().hex}"
+    with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+        connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+
+    def connect():
+        return psycopg.connect(DATABASE_URL, options=f"-c search_path={schema}")
+
+    try:
+        yield schema, connect
+    finally:
+        with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+            connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+
+def test_fresh_001_through_008_runtime_leadership_and_bankroll(isolated_database) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        applied = apply_migrations(connection, MIGRATION_DIR)
+    expected = tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
+    assert applied == expected
+    assert expected[-1] == "008_production_runtime.sql"
+
+    runtime = PostgreSQLRuntimeRepository(connect=connect)
+    assert runtime.check_database()
+    assert runtime.verify_schema(expected) == expected
+
+    now = datetime.now(UTC)
+    runtime.worker_started("opportunity", "instance-a", at=now)
+    runtime.worker_succeeded(
+        "opportunity", "instance-a", at=now, next_due_at=now + timedelta(minutes=1)
+    )
+    status = runtime.worker_statuses()[0]
+    assert status.worker_name == "opportunity"
+    assert status.cycle_count == status.success_count == 1
+
+    first = runtime.open_leader_lock()
+    second = runtime.open_leader_lock()
+    try:
+        assert first.try_acquire()
+        assert not second.try_acquire()
+        first.close()
+        assert second.try_acquire()
+    finally:
+        if first.acquired:
+            first.close()
+        second.close()
+
+    policy = load_registration_policy_config(registration_environment())
+    registration = PostgreSQLPickRegistrationRepository(connect=connect)
+    registration.bootstrap_bankroll(policy, occurred_at=now)
+    runtime.verify_bankroll(
+        policy.bankroll_account_id, policy.currency, policy.initial_bankroll_minor
+    )
+    with pytest.raises(RuntimeError, match="conflict"):
+        runtime.verify_bankroll(
+            policy.bankroll_account_id, policy.currency, policy.initial_bankroll_minor + 1
+        )
+    with pytest.raises(BankrollBootstrapConflictError):
+        registration.bootstrap_bankroll(replace(policy, currency="EUR"), occurred_at=now)
+
+
+def test_durable_opportunity_query_uses_scope_and_fixture_restriction(isolated_database) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        apply_migrations(connection, MIGRATION_DIR)
+    now = datetime.now(UTC)
+    fixture_id = "api-football:987654321"
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO fixtures (fixture_id, provider, provider_fixture_id, league_id, "
+            "season, provider_home_team_id, provider_away_team_id, created_at) "
+            "VALUES (%s, 'api-football', '987654321', 39, 2026, 1, 2, %s)",
+            (fixture_id, now),
+        )
+        cursor.execute(
+            "INSERT INTO fixture_observations (fixture_observation_id, fixture_id, home_team, "
+            "away_team, competition_name, country, competition_type, kickoff_at, "
+            "provider_status, source, observed_at) VALUES (%s, %s, 'Home', 'Away', "
+            "'League', 'Country', 'League', %s, 'NS', 'api-football', %s)",
+            ("fixture-observation-v1:" + "a" * 64, fixture_id, now + timedelta(hours=2), now),
+        )
+
+    runtime = PostgreSQLRuntimeRepository(connect=connect)
+    due = runtime.due_opportunity_fixtures(
+        scopes=(PilotScope(39, 2026),),
+        bookmaker_id=8,
+        provider_fixture_ids=frozenset({987654321}),
+        allowed_statuses=("NS",),
+        now=now,
+    )
+    assert tuple(item.fixture_id for item in due) == (fixture_id,)
+    assert (
+        runtime.due_opportunity_fixtures(
+            scopes=(PilotScope(140, 2026),),
+            bookmaker_id=8,
+            provider_fixture_ids=frozenset(),
+            allowed_statuses=("NS",),
+            now=now,
+        )
+        == ()
+    )

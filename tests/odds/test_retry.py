@@ -49,6 +49,27 @@ def test_does_not_retry_invalid_provider_response() -> None:
     assert transport.get_json.call_count == 1
 
 
+def test_shutdown_after_backoff_starts_no_new_provider_request() -> None:
+    transport = Mock()
+    transport.get_json.side_effect = TransportError("temporary")
+    stopping = False
+
+    def sleeper(_seconds: float) -> None:
+        nonlocal stopping
+        stopping = True
+
+    with pytest.raises(TransportError, match="temporary"):
+        RetryingJsonTransport(
+            transport,
+            max_attempts=3,
+            backoff_seconds=0.5,
+            sleeper=sleeper,
+            should_stop=lambda: stopping,
+        ).get_json("url")
+
+    assert transport.get_json.call_count == 1
+
+
 def test_rejects_invalid_policy() -> None:
     with pytest.raises(ValueError):
         RetryingJsonTransport(Mock(), max_attempts=0)
