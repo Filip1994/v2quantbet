@@ -86,6 +86,8 @@ def iter_api_football_quote_payloads(
             for bet in bets:
                 if not isinstance(bet, Mapping):
                     continue
+                if bet.get("id") not in (5, 8):
+                    continue
                 values = bet.get("values", [])
                 if not isinstance(values, list):
                     continue

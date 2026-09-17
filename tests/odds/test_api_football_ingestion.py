@@ -226,3 +226,32 @@ def test_matching_fixture_with_no_supported_quote_branches_yields_no_quotes() ->
         )
         == ()
     )
+
+
+def test_unsupported_bet_branches_are_skipped_before_adapting() -> None:
+    response = {
+        "response": [
+            {
+                "fixture": {"id": 123},
+                "bookmakers": [
+                    {
+                        "id": 8,
+                        "name": "Bet365",
+                        "update": "2026-09-15T12:00:00+00:00",
+                        "bets": [
+                            {"id": 1, "values": [{"value": "Home", "odd": "2.1"}]},
+                            {"id": 8, "values": [{"value": "Yes", "odd": "2.2"}]},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    quotes = ingest_api_football_odds(
+        response,
+        fixture_identity=api_football_fixture_identity(123),
+    )
+
+    assert len(quotes) == 1
+    assert quotes[0].market.value == "BTTS"
