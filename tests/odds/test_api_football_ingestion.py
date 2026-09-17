@@ -240,6 +240,10 @@ def test_unsupported_bet_branches_are_skipped_before_adapting() -> None:
                         "update": "2026-09-15T12:00:00+00:00",
                         "bets": [
                             {"id": 1, "values": [{"value": "Home", "odd": "2.1"}]},
+                            {
+                                "id": 5,
+                                "values": [{"value": "Over 1.5", "odd": "1.4"}],
+                            },
                             {"id": 8, "values": [{"value": "Yes", "odd": "2.2"}]},
                         ],
                     }

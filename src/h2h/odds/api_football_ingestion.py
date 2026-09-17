@@ -95,6 +95,17 @@ def iter_api_football_quote_payloads(
                 for value in values:
                     if not isinstance(value, Mapping):
                         continue
+                    selection = value.get("value")
+                    if not isinstance(selection, str):
+                        continue
+                    normalized_selection = selection.strip().upper()
+                    if bet.get("id") == 5 and normalized_selection not in {
+                        "OVER 2.5",
+                        "UNDER 2.5",
+                    }:
+                        continue
+                    if bet.get("id") == 8 and normalized_selection not in {"YES", "NO"}:
+                        continue
                     yield {
                         "fixture": fixture_data,
                         "bookmaker": {
