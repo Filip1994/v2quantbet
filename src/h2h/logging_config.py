@@ -30,6 +30,15 @@ _EXTRA_FIELDS = (
     "decisions",
     "registered_picks",
     "rejected_picks",
+    "model_unavailable_scopes",
+    "model_unavailable_by_scope",
+    "pending_work",
+    "budget_exhausted",
+    "max_items",
+    "cycle_started_at",
+    "cycle_finished_at",
+    "duration_seconds",
+    "next_due_at",
     "fixture_id",
     "pick_id",
     "model_version_id",
@@ -55,7 +64,7 @@ class JsonFormatter(logging.Formatter):
                 payload[field] = value
         if record.exc_info:
             payload["exception_class"] = record.exc_info[0].__name__
-        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
 
 
 def configure_logging(level: str) -> None:
