@@ -10,11 +10,12 @@ from urllib.request import urlopen
 import pytest
 
 from h2h.api.health import HealthService, RuntimeHealthState
-from h2h.config import ConfigError, PilotScope, load_production_settings
-from h2h.persistence.postgres_runtime import OpportunityFixture, WorkerStatus
+from h2h.config import ConfigError, load_production_settings
+from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
+from h2h.persistence.postgres_runtime import OpportunityFixture, OpportunitySelection, WorkerStatus
 from h2h.quant import DixonColesFitError
 from h2h.production import build_production_application
-from h2h.workers.opportunity import OpportunityWorker, PilotFixtureDiscovery, registration_request_id
+from h2h.workers.opportunity import OpportunityWorker, registration_request_id
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 
 from tests.test_config import lifecycle_environment, registration_environment
@@ -29,27 +30,25 @@ def production_environment() -> dict[str, str]:
             "LOG_LEVEL": "INFO",
             "API_FOOTBALL_KEY": "test-key",
             "DATABASE_URL": "postgresql://example/quantbet",
-            "QUANTBET_PILOT_SCOPES": "39:2026,140:2026",
-            "QUANTBET_PILOT_BOOKMAKER_ID": "8",
+            "QUANTBET_BOOKMAKER_ID": "8",
             "QUANTBET_BANKROLL_BOOTSTRAP_MODE": "verify",
         }
     )
     return values
 
 
-def test_production_config_is_complete_and_scoped() -> None:
+def test_production_config_has_no_explicit_competition_scope() -> None:
     settings = load_production_settings(production_environment())
-    assert settings.pilot_scopes == (PilotScope(39, 2026), PilotScope(140, 2026))
-    assert settings.pilot_bookmaker_id == 8
+    assert settings.bookmaker_id == 8
+    assert not hasattr(settings, "pilot_scopes")
+    assert not hasattr(settings, "pilot_fixture_ids")
     assert settings.discovery_interval_seconds == 900
 
 
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        ("QUANTBET_PILOT_SCOPES", ""),
-        ("QUANTBET_PILOT_SCOPES", "broken"),
-        ("QUANTBET_PILOT_BOOKMAKER_ID", "7"),
+        ("QUANTBET_BOOKMAKER_ID", "7"),
         ("QUANTBET_BANKROLL_BOOTSTRAP_MODE", "automatic"),
         ("APP_ENV", "development"),
         ("LOG_LEVEL", "VERBOSE"),
@@ -62,10 +61,14 @@ def test_production_config_rejects_partial_or_invalid_values(name: str, value: s
         load_production_settings(environment)
 
 
-def test_optional_fixture_ids_accept_provider_and_canonical_forms() -> None:
+def test_legacy_pilot_allowlists_do_not_define_production_universe() -> None:
     environment = production_environment()
-    environment["QUANTBET_PILOT_FIXTURE_IDS"] = "123,api-football:456"
-    assert load_production_settings(environment).pilot_fixture_ids == {123, 456}
+    environment["QUANTBET_PILOT_SCOPES"] = "39:2026"
+    environment["QUANTBET_PILOT_FIXTURE_IDS"] = "123"
+    settings = load_production_settings(environment)
+    assert settings.bookmaker_id == 8
+    assert not hasattr(settings, "pilot_scopes")
+    assert not hasattr(settings, "pilot_fixture_ids")
 
 
 def test_production_composition_shares_one_client_and_budget() -> None:
@@ -76,19 +79,8 @@ def test_production_composition_shares_one_client_and_budget() -> None:
     assert application.client.transport.transport.budget is application.budget
     durable = application.prediction.durable_discovery
     assert durable is not None
-    provider_discovery = durable._discovery._discovery._discovery
+    provider_discovery = durable._discovery._discovery
     assert provider_discovery._client is application.client
-
-
-def test_pilot_discovery_restricts_after_underlying_discovery() -> None:
-    fixtures = (
-        SimpleNamespace(competition_id=39, season=2026, provider_fixture_id=1),
-        SimpleNamespace(competition_id=140, season=2026, provider_fixture_id=2),
-    )
-    underlying = SimpleNamespace(discover=lambda _start, _end: fixtures)
-    discovery = PilotFixtureDiscovery(underlying, (PilotScope(39, 2026),), frozenset({1}))
-    now = datetime.now(UTC)
-    assert discovery.discover(now, now + timedelta(hours=1)) == (fixtures[0],)
 
 
 class OpportunityRepositoryFake:
@@ -97,15 +89,15 @@ class OpportunityRepositoryFake:
         self.fixture = OpportunityFixture(
             "api-football:123",
             SimpleNamespace(fixture_id="api-football:123"),
-            39,
+            140,
             2026,
             now + timedelta(hours=2),
             None,
         )
         self.bookmakers: list[int] = []
 
-    def due_opportunity_fixtures(self, **_kwargs):
-        return (self.fixture,)
+    def select_opportunity_fixtures(self, **_kwargs):
+        return OpportunitySelection(1, 0, 0, 0, (self.fixture,))
 
     def item_retry_due(self, *_args, **_kwargs):
         return True
@@ -125,10 +117,11 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     repository = OpportunityRepositoryFake()
     requests: list[tuple[str, str]] = []
     quote_requests: list[dict[str, object]] = []
+    model_scopes: list[tuple[int, int]] = []
 
     def fetch_quotes(**kwargs):
         quote_requests.append(kwargs)
-        return ()
+        return (SimpleNamespace(),)
 
     source = SimpleNamespace(fetch_quotes=fetch_quotes)
     ingestion = SimpleNamespace(ingest=lambda _quotes: 0)
@@ -151,21 +144,59 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
         predictor,
         evaluator,
         SimpleNamespace(execute=register),
-        scopes=(PilotScope(39, 2026),),
         bookmaker_id=8,
-        provider_fixture_ids=frozenset(),
         allowed_statuses=("NS",),
-        usable_scopes=lambda: frozenset({PilotScope(39, 2026)}),
+        ensure_model_available=lambda fixture: model_scopes.append(
+            (fixture.league_id, fixture.season)
+        ),
         should_stop=lambda: False,
     )
     first = worker.run_once()
     second = worker.run_once()
     assert first.registered_pick_ids == ("pick-1",)
+    assert first.quotes_fetched == 1
+    assert first.fresh_quotes == 0
+    assert first.decisions == 2
     assert second.evaluation_ids == first.evaluation_ids
     assert repository.bookmakers == [8, 8]
     assert [request["bookmaker_id"] for request in quote_requests] == [8, 8]
+    assert model_scopes == [(140, 2026), (140, 2026)]
     assert requests[0][1] == registration_request_id(requests[0][0])
     assert requests[2] == requests[0]
+
+
+def test_due_non_epl_fixture_without_model_is_explicit_and_stops_before_odds() -> None:
+    repository = OpportunityRepositoryFake()
+    quote_requests: list[object] = []
+    failures: list[tuple[str, str]] = []
+    repository.record_item_failure = lambda _worker, item, error, **_kwargs: failures.append(
+        (item, type(error).__name__)
+    )
+
+    def unavailable(_fixture):
+        raise ActiveModelUnavailableError("no active model exists for the requested scope")
+
+    worker = OpportunityWorker(
+        repository,
+        SimpleNamespace(fetch_quotes=lambda **kwargs: quote_requests.append(kwargs)),
+        SimpleNamespace(ingest=lambda _quotes: 0),
+        SimpleNamespace(execute=lambda _fixture_id: pytest.fail("prediction must not run")),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        ensure_model_available=unavailable,
+        should_stop=lambda: False,
+    )
+
+    result = worker.run_once()
+
+    assert result.due_fixture_ids == ("api-football:123",)
+    assert result.model_unavailable_fixture_ids == ("api-football:123",)
+    assert result.prediction_ids == ()
+    assert result.registered_pick_ids == ()
+    assert quote_requests == []
+    assert failures == [("api-football:123", "ActiveModelUnavailableError")]
 
 
 def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
@@ -176,7 +207,7 @@ def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
     )
     worker = OpportunityWorker(
         repository,
-        SimpleNamespace(fetch_quotes=lambda **_kwargs: ()),
+        SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),)),
         SimpleNamespace(ingest=lambda _quotes: 0),
         SimpleNamespace(
             execute=lambda _fixture_id: (_ for _ in ()).throw(
@@ -185,11 +216,9 @@ def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
         ),
         SimpleNamespace(),
         SimpleNamespace(),
-        scopes=(PilotScope(39, 2026),),
         bookmaker_id=8,
-        provider_fixture_ids=frozenset(),
         allowed_statuses=("NS",),
-        usable_scopes=lambda: frozenset({PilotScope(39, 2026)}),
+        ensure_model_available=lambda _fixture: None,
         should_stop=lambda: False,
     )
 

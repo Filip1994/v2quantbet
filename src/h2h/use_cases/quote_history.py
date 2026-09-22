@@ -50,12 +50,22 @@ class QuoteHistoryIngestionService:
         return None
 
     def ingest(self, quotes: Iterable[CanonicalQuote]) -> int:
-        """Persist one collection cycle and return the number of observations."""
+        """Persist one collection cycle and return newly observed quote count."""
         captured_at = self._capture_clock()
         snapshots: list[QuoteSnapshot] = []
+        fresh_observations = 0
+        incoming_observations: set[tuple[str, datetime, str]] = set()
         for quote in quotes:
             series_id = self._series_id(quote)
             existing = self._existing_series(quote)
+            observation_key = (series_id, quote.observed_at, quote.source)
+            already_persisted = existing is not None and any(
+                snapshot.observed_at == quote.observed_at and snapshot.source == quote.source
+                for snapshot in self._repository.snapshots_for_series(existing.series_id)
+            )
+            if not already_persisted and observation_key not in incoming_observations:
+                fresh_observations += 1
+            incoming_observations.add(observation_key)
             created_at = (
                 existing.created_at
                 if existing is not None
@@ -82,4 +92,4 @@ class QuoteHistoryIngestionService:
                 )
             )
         self._repository.append_snapshots(snapshots)
-        return len(snapshots)
+        return fresh_observations

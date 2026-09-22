@@ -46,8 +46,8 @@ def test_repeated_same_cycle_is_idempotent() -> None:
         capture_clock=lambda: datetime(2026, 9, 15, 12, 1, tzinfo=UTC),
     )
 
-    service.ingest([make_quote()])
-    service.ingest([make_quote()])
+    assert service.ingest([make_quote()]) == 1
+    assert service.ingest([make_quote()]) == 0
 
     series = repository.series_for_fixture("fixture-1")
     assert len(repository.snapshots_for_series(series[0].series_id)) == 1

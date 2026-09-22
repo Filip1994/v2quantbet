@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from h2h.odds.http import JsonTransport
 
 
 API_FOOTBALL_BASE_URL: Final = "https://v3.football.api-sports.io"
+LOGGER = logging.getLogger("quantbet.provider")
 
 
 @dataclass
@@ -87,6 +89,7 @@ class ApiFootballClient:
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
+        self._log_request("odds", payload)
         if self.cache_ttl_seconds > 0:
             self._cache[cache_key] = (
                 self.clock() + self.cache_ttl_seconds,
@@ -123,11 +126,13 @@ class ApiFootballClient:
             query_values.update({"league": league_id, "season": season})
         query = urlencode(query_values)
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        return self.transport.get_json(
+        payload = self.transport.get_json(
             url,
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
+        self._log_request("fixtures", payload)
+        return payload
 
     def fetch_fixture_results(self, *, fixture_ids: tuple[int, ...]) -> Mapping[str, Any]:
         """Fetch current fixture/result records for at most twenty provider fixture IDs."""
@@ -140,11 +145,13 @@ class ApiFootballClient:
             raise ValueError("fixture_ids must not contain duplicates")
         query = urlencode({"ids": "-".join(str(value) for value in fixture_ids), "timezone": "UTC"})
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        return self.transport.get_json(
+        payload = self.transport.get_json(
             url,
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
+        self._log_request("fixture-results", payload)
+        return payload
 
     def fetch_completed_fixtures(
         self,
@@ -178,10 +185,25 @@ class ApiFootballClient:
             }
         )
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        return self.transport.get_json(
+        payload = self.transport.get_json(
             url,
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
+        )
+        self._log_request("completed-fixtures", payload)
+        return payload
+
+    @staticmethod
+    def _log_request(endpoint: str, payload: Mapping[str, Any]) -> None:
+        response = payload.get("response")
+        response_items = len(response) if isinstance(response, list) else 0
+        LOGGER.info(
+            "provider request completed",
+            extra={
+                "provider_endpoint": endpoint,
+                "provider_requests": 1,
+                "provider_response_items": response_items,
+            },
         )
 
     @staticmethod

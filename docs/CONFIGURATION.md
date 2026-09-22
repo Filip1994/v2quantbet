@@ -20,6 +20,13 @@ export DATABASE_URL="<postgresql-connection-string-from-railway>"
 
 ## Production composition
 
+The production fixture universe is date-window driven and filtered by
+`ScopedFixtureDiscovery` through the fail-closed Phase I competition policy.
+It does not accept a league/season or fixture-ID allowlist. The production
+bookmaker is configured with `QUANTBET_BOOKMAKER_ID`; the former
+`QUANTBET_PILOT_SCOPES`, `QUANTBET_PILOT_FIXTURE_IDS`, and
+`QUANTBET_PILOT_BOOKMAKER_ID` names are not part of the production contract.
+
 ```python
 from h2h.application import build_postgres_quote_history_application_from_settings
 from h2h.config import load_settings

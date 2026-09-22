@@ -1,4 +1,4 @@
-"""Single-process production composition for the Railway V1 pilot."""
+"""Single-process production composition for the Phase I football universe."""
 
 from __future__ import annotations
 
@@ -17,20 +17,21 @@ from h2h.application_postgres import (
     build_postgres_production_prediction_application,
     build_postgres_result_settlement_application,
 )
-from h2h.config import PilotScope, ProductionSettings
+from h2h.config import ProductionSettings
+from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.odds import ApiFootballOddsService, DailyApiBudget
 from h2h.odds.http import UrllibJsonTransport
 from h2h.persistence import (
     PostgreSQLActiveDixonColesModelRepository,
     PostgreSQLDixonColesModelVersionRepository,
 )
-from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
+from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
 from h2h.use_cases.model_lifecycle import LoadActiveDixonColesModel
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.use_cases.result_settlement import ApiFootballResultSource
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
-from h2h.workers.opportunity import OpportunityWorker, PilotFixtureDiscovery
+from h2h.workers.opportunity import OpportunityWorker
 
 
 @dataclass
@@ -66,7 +67,6 @@ class ProductionApplication:
     results: PostgreSQLResultSettlementApplication
     active_model_loader: LoadActiveDixonColesModel
     opportunity: OpportunityWorker
-    usable_scopes: set[PilotScope]
 
     def close(self) -> None:
         self.prediction.close()
@@ -97,18 +97,10 @@ def build_production_application(
     provider_state = ProviderOperationalState()
     runtime = PostgreSQLRuntimeRepository(application_settings.database_url)
 
-    scoped = ScopedFixtureDiscovery(
-        ApiFootballFixtureDiscovery(
-            client,
-            scope_pairs=tuple((scope.league_id, scope.season) for scope in settings.pilot_scopes),
-        )
-    )
-    pilot_discovery = PilotFixtureDiscovery(
-        scoped, settings.pilot_scopes, settings.pilot_fixture_ids
-    )
+    scoped = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
     prediction = build_postgres_production_prediction_application(
         database_url=application_settings.database_url,
-        discovery=pilot_discovery,
+        discovery=scoped,
     )
     registration = build_postgres_pick_registration_application(
         application_settings.registration_policy,
@@ -152,7 +144,17 @@ def build_production_application(
         database_url=application_settings.database_url
     )
     loader = LoadActiveDixonColesModel(versions, active)
-    usable_scopes: set[PilotScope] = set()
+
+    def ensure_model_available(fixture: OpportunityFixture) -> None:
+        loader.execute_with_selection(
+            DixonColesModelScope(
+                provider="api-football",
+                team_id_namespace="api-football",
+                league_id=fixture.league_id,
+                season=fixture.season,
+            )
+        )
+
     opportunity = OpportunityWorker(
         runtime,
         source,
@@ -162,11 +164,9 @@ def build_production_application(
         prediction.predictor,
         prediction.evaluator,
         registration.register_pick,
-        scopes=settings.pilot_scopes,
-        bookmaker_id=settings.pilot_bookmaker_id,
-        provider_fixture_ids=settings.pilot_fixture_ids,
+        bookmaker_id=settings.bookmaker_id,
         allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
-        usable_scopes=lambda: frozenset(usable_scopes),
+        ensure_model_available=ensure_model_available,
         should_stop=should_stop,
     )
     return ProductionApplication(
@@ -181,5 +181,4 @@ def build_production_application(
         results,
         loader,
         opportunity,
-        usable_scopes,
     )

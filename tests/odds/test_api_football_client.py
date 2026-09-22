@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import Mock
 from datetime import UTC, datetime, timedelta, timezone
 
@@ -6,7 +7,8 @@ import pytest
 from h2h.odds.api_football_client import ApiFootballClient
 
 
-def test_fetch_odds_uses_injected_transport() -> None:
+def test_fetch_odds_uses_injected_transport(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="quantbet.provider")
     transport = Mock()
     transport.get_json.return_value = {"response": [{"fixture": {"id": 42}}]}
 
@@ -18,6 +20,10 @@ def test_fetch_odds_uses_injected_transport() -> None:
         headers={"x-apisports-key": "secret"},
         timeout=10.0,
     )
+    record = next(item for item in caplog.records if item.message == "provider request completed")
+    assert record.provider_endpoint == "odds"
+    assert record.provider_requests == 1
+    assert record.provider_response_items == 1
 
 
 def test_fetch_odds_uses_fresh_fixture_cache() -> None:

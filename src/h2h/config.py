@@ -65,26 +65,12 @@ class ApplicationSettings:
         )
 
 
-@dataclass(frozen=True, slots=True, order=True)
-class PilotScope:
-    league_id: int
-    season: int
-
-    def __post_init__(self) -> None:
-        if isinstance(self.league_id, bool) or not isinstance(self.league_id, int) or self.league_id <= 0:
-            raise ValueError("pilot league_id must be a positive integer")
-        if isinstance(self.season, bool) or not isinstance(self.season, int) or self.season <= 0:
-            raise ValueError("pilot season must be a positive integer")
-
-
 @dataclass(frozen=True, repr=False)
 class ProductionSettings:
     app_env: str
     log_level: str
     application: ApplicationSettings
-    pilot_scopes: tuple[PilotScope, ...]
-    pilot_bookmaker_id: int
-    pilot_fixture_ids: frozenset[int]
+    bookmaker_id: int
     bankroll_bootstrap_mode: str
     discovery_interval_seconds: float
     discovery_lookahead_hours: float
@@ -102,8 +88,7 @@ class ProductionSettings:
         return (
             f"ProductionSettings(app_env={self.app_env!r}, log_level={self.log_level!r}, "
             "application=[REDACTED], "
-            f"pilot_scopes={self.pilot_scopes!r}, pilot_bookmaker_id={self.pilot_bookmaker_id!r}, "
-            f"pilot_fixture_ids={sorted(self.pilot_fixture_ids)!r}, "
+            f"bookmaker_id={self.bookmaker_id!r}, "
             f"bankroll_bootstrap_mode={self.bankroll_bootstrap_mode!r})"
         )
 
@@ -209,39 +194,9 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
     if application.odds_lifecycle_policy is None:
         raise ConfigError("complete odds lifecycle configuration is required")
 
-    raw_scopes = values.get("QUANTBET_PILOT_SCOPES", "").strip()
-    if not raw_scopes:
-        raise ConfigError("Missing required configuration: QUANTBET_PILOT_SCOPES")
-    scopes: list[PilotScope] = []
-    try:
-        for raw_scope in raw_scopes.split(","):
-            league, season = (part.strip() for part in raw_scope.split(":", 1))
-            scopes.append(PilotScope(int(league), int(season)))
-    except (TypeError, ValueError) as exc:
-        raise ConfigError("QUANTBET_PILOT_SCOPES must use league_id:season") from exc
-    if len(set(scopes)) != len(scopes):
-        raise ConfigError("QUANTBET_PILOT_SCOPES must not contain duplicates")
-
-    bookmaker_id = _positive_integer(values, "QUANTBET_PILOT_BOOKMAKER_ID", "0")
+    bookmaker_id = _positive_integer(values, "QUANTBET_BOOKMAKER_ID", "0")
     if bookmaker_id not in API_FOOTBALL_BOOKMAKERS:
-        raise ConfigError("QUANTBET_PILOT_BOOKMAKER_ID is not a supported bookmaker")
-
-    fixture_ids: set[int] = set()
-    raw_fixture_ids = values.get("QUANTBET_PILOT_FIXTURE_IDS", "").strip()
-    if raw_fixture_ids:
-        try:
-            for item in raw_fixture_ids.split(","):
-                normalized = item.strip()
-                if normalized.startswith("api-football:"):
-                    normalized = normalized.split(":", 1)[1]
-                fixture_id = int(normalized)
-                if fixture_id <= 0:
-                    raise ValueError
-                fixture_ids.add(fixture_id)
-        except ValueError as exc:
-            raise ConfigError(
-                "QUANTBET_PILOT_FIXTURE_IDS must contain positive provider or canonical IDs"
-            ) from exc
+        raise ConfigError("QUANTBET_BOOKMAKER_ID is not a supported bookmaker")
 
     mode = values.get("QUANTBET_BANKROLL_BOOTSTRAP_MODE", "").strip().lower()
     if mode not in {"create", "verify"}:
@@ -257,9 +212,7 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         app_env=app_env,
         log_level=log_level,
         application=application,
-        pilot_scopes=tuple(sorted(scopes)),
-        pilot_bookmaker_id=bookmaker_id,
-        pilot_fixture_ids=frozenset(fixture_ids),
+        bookmaker_id=bookmaker_id,
         bankroll_bootstrap_mode=mode,
         discovery_interval_seconds=_positive_number(
             values, "QUANTBET_DISCOVERY_INTERVAL_SECONDS", "900"

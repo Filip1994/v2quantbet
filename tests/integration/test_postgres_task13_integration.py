@@ -11,7 +11,7 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 from psycopg import sql
 
-from h2h.config import PilotScope, load_registration_policy_config
+from h2h.config import load_registration_policy_config
 from h2h.persistence.migrations import apply_migrations
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
@@ -91,7 +91,7 @@ def test_fresh_001_through_008_runtime_leadership_and_bankroll(isolated_database
         registration.bootstrap_bankroll(replace(policy, currency="EUR"), occurred_at=now)
 
 
-def test_durable_opportunity_query_uses_scope_and_fixture_restriction(isolated_database) -> None:
+def test_durable_opportunity_query_uses_phase_i_policy_not_manual_scope(isolated_database) -> None:
     _schema, connect = isolated_database
     with connect() as connection:
         apply_migrations(connection, MIGRATION_DIR)
@@ -101,33 +101,22 @@ def test_durable_opportunity_query_uses_scope_and_fixture_restriction(isolated_d
         cursor.execute(
             "INSERT INTO fixtures (fixture_id, provider, provider_fixture_id, league_id, "
             "season, provider_home_team_id, provider_away_team_id, created_at) "
-            "VALUES (%s, 'api-football', '987654321', 39, 2026, 1, 2, %s)",
+            "VALUES (%s, 'api-football', '987654321', 140, 2026, 1, 2, %s)",
             (fixture_id, now),
         )
         cursor.execute(
             "INSERT INTO fixture_observations (fixture_observation_id, fixture_id, home_team, "
             "away_team, competition_name, country, competition_type, kickoff_at, "
             "provider_status, source, observed_at) VALUES (%s, %s, 'Home', 'Away', "
-            "'League', 'Country', 'League', %s, 'NS', 'api-football', %s)",
+            "'La Liga', 'Spain', 'League', %s, 'NS', 'api-football', %s)",
             ("fixture-observation-v1:" + "a" * 64, fixture_id, now + timedelta(hours=2), now),
         )
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     due = runtime.due_opportunity_fixtures(
-        scopes=(PilotScope(39, 2026),),
         bookmaker_id=8,
-        provider_fixture_ids=frozenset({987654321}),
         allowed_statuses=("NS",),
         now=now,
     )
     assert tuple(item.fixture_id for item in due) == (fixture_id,)
-    assert (
-        runtime.due_opportunity_fixtures(
-            scopes=(PilotScope(140, 2026),),
-            bookmaker_id=8,
-            provider_fixture_ids=frozenset(),
-            allowed_statuses=("NS",),
-            now=now,
-        )
-        == ()
-    )
+    assert due[0].league_id == 140

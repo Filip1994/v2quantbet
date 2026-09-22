@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from h2h.config import PilotScope
+from h2h.domain.competition_scope import CompetitionMetadata, classify_phase_i
 from h2h.domain.fixture_identity import ProviderFixtureReference, ResolvedFixtureIdentity
 from h2h.workers.quote_refresh_schedule import quote_refresh_decision
 
@@ -37,6 +37,17 @@ class OpportunityFixture:
     season: int
     kickoff_at: datetime
     last_captured_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class OpportunitySelection:
+    """Observable scheduling result for the persisted Phase I fixture universe."""
+
+    eligible_fixture_count: int
+    phase_i_excluded_count: int
+    waiting_for_window_count: int
+    waiting_for_refresh_count: int
+    due_fixtures: tuple[OpportunityFixture, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,44 +156,78 @@ class PostgreSQLRuntimeRepository:
     def due_opportunity_fixtures(
         self,
         *,
-        scopes: tuple[PilotScope, ...],
         bookmaker_id: int,
-        provider_fixture_ids: frozenset[int],
         allowed_statuses: tuple[str, ...],
         now: datetime,
     ) -> tuple[OpportunityFixture, ...]:
+        return self.select_opportunity_fixtures(
+            bookmaker_id=bookmaker_id,
+            allowed_statuses=allowed_statuses,
+            now=now,
+        ).due_fixtures
+
+    def select_opportunity_fixtures(
+        self,
+        *,
+        bookmaker_id: int,
+        allowed_statuses: tuple[str, ...],
+        now: datetime,
+    ) -> OpportunitySelection:
         current = _utc(now)
-        if not scopes:
-            return ()
-        scope_predicate = " OR ".join(
-            "(f.league_id = %s AND f.season = %s)" for _scope in scopes
-        )
-        scope_parameters = [value for scope in scopes for value in (scope.league_id, scope.season)]
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT f.fixture_id, f.provider_fixture_id::bigint, f.league_id, f.season, "
-                "latest.kickoff_at, MAX(q.captured_at) "
-                "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status "
+                "latest.kickoff_at, latest.country, latest.competition_name, "
+                "latest.competition_type, MAX(q.captured_at) "
+                "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
+                "competition_name, competition_type "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
                 "LEFT JOIN quote_series s ON s.fixture_id = f.fixture_id AND s.bookmaker_id = %s "
                 "LEFT JOIN quote_snapshots q ON q.series_id = s.series_id "
-                f"WHERE ({scope_predicate}) AND latest.kickoff_at > %s "
+                "WHERE latest.kickoff_at > %s "
                 "AND latest.provider_status = ANY(%s) "
-                "GROUP BY f.fixture_id, f.provider_fixture_id, f.league_id, f.season, latest.kickoff_at "
+                "GROUP BY f.fixture_id, f.provider_fixture_id, f.league_id, f.season, "
+                "latest.kickoff_at, latest.country, latest.competition_name, latest.competition_type "
                 "ORDER BY latest.kickoff_at, f.fixture_id",
-                (bookmaker_id, *scope_parameters, current, list(allowed_statuses)),
+                (bookmaker_id, current, list(allowed_statuses)),
             )
             rows = cursor.fetchall()
         due: list[OpportunityFixture] = []
-        for fixture_id, provider_id, league_id, season, kickoff_at, last_captured in rows:
-            provider_id = int(provider_id)
-            if provider_fixture_ids and provider_id not in provider_fixture_ids:
+        eligible = 0
+        excluded = 0
+        waiting_for_window = 0
+        waiting_for_refresh = 0
+        for (
+            fixture_id,
+            provider_id,
+            league_id,
+            season,
+            kickoff_at,
+            country,
+            competition_name,
+            competition_type,
+            last_captured,
+        ) in rows:
+            scope = classify_phase_i(
+                CompetitionMetadata(
+                    country=country,
+                    name=competition_name,
+                    type=competition_type,
+                    level=None,
+                )
+            )
+            if not scope.eligible:
+                excluded += 1
                 continue
+            eligible += 1
+            provider_id = int(provider_id)
             decision = quote_refresh_decision(now=current, kickoff_at=kickoff_at)
             if not decision.eligible or decision.interval is None:
+                waiting_for_window += 1
                 continue
             if last_captured is not None and last_captured + decision.interval > current:
+                waiting_for_refresh += 1
                 continue
             due.append(
                 OpportunityFixture(
@@ -199,7 +244,13 @@ class PostgreSQLRuntimeRepository:
                     last_captured_at=last_captured,
                 )
             )
-        return tuple(due)
+        return OpportunitySelection(
+            eligible_fixture_count=eligible,
+            phase_i_excluded_count=excluded,
+            waiting_for_window_count=waiting_for_window,
+            waiting_for_refresh_count=waiting_for_refresh,
+            due_fixtures=tuple(due),
+        )
 
     def latest_complete_snapshot_ids(
         self, fixture_id: str, bookmaker_id: int
@@ -316,8 +367,15 @@ class PostgreSQLRuntimeRepository:
 
     def operational_counts(self) -> dict[str, int]:
         with self.connect() as connection, connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM production_item_failures")
-            retry = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
+                "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
+                "('OpportunityOddsUnavailableError', 'TransportError', "
+                "'QuoteNormalizationError')) FROM production_item_failures"
+            )
+            retry, model_unavailable, odds_unavailable = (
+                int(value) for value in cursor.fetchone()
+            )
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
             )
@@ -326,4 +384,10 @@ class PostgreSQLRuntimeRepository:
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
             )
             corrections = int(cursor.fetchone()[0])
-        return {"retry": retry, "pending_results": pending_results, "correction_required": corrections}
+        return {
+            "retry": retry,
+            "model_unavailable": model_unavailable,
+            "odds_unavailable": odds_unavailable,
+            "pending_results": pending_results,
+            "correction_required": corrections,
+        }

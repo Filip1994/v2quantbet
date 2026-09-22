@@ -10,13 +10,11 @@ from threading import Event
 from uuid import uuid4
 
 from h2h.api.health import HealthService, RuntimeHealthState
-from h2h.config import PilotScope, load_production_settings
-from h2h.domain.model_lifecycle import DixonColesModelScope
+from h2h.config import load_production_settings
 from h2h.domain.fixture_identity import ResolvedFixtureIdentity, api_football_fixture_identity
 from h2h.logging_config import configure_logging
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
-from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.production import ProductionApplication, build_production_application
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 from h2h.workers.runtime import install_shutdown_handlers
@@ -31,7 +29,7 @@ def _expected_migrations() -> tuple[str, ...]:
 
 
 def _fixture_identities_from_environment() -> tuple[ResolvedFixtureIdentity, ...]:
-    """Legacy parser retained for compatibility; production uses pilot discovery filters."""
+    """Legacy parser retained for compatibility; production uses date-window discovery."""
     raw = os.getenv("QUANTBET_FIXTURE_IDS", "").strip()
     if not raw:
         return ()
@@ -70,28 +68,6 @@ def _prepare_bankroll(application: ProductionApplication) -> None:
     )
 
 
-def _verify_models(application: ProductionApplication) -> tuple[PilotScope, ...]:
-    missing: list[PilotScope] = []
-    application.usable_scopes.clear()
-    for scope in application.settings.pilot_scopes:
-        model_scope = DixonColesModelScope(
-            provider="api-football",
-            team_id_namespace="api-football",
-            league_id=scope.league_id,
-            season=scope.season,
-        )
-        try:
-            selected = application.active_model_loader.execute_with_selection(model_scope)
-        except ActiveModelUnavailableError:
-            missing.append(scope)
-            continue
-        application.usable_scopes.add(scope)
-        LOGGER.info("active model verified", extra={"model_version_id": selected.model_version_id})
-    if not application.usable_scopes:
-        raise RuntimeError("no configured pilot scope has a usable active model")
-    return tuple(missing)
-
-
 def _run_active_leader(
     application: ProductionApplication,
     state: RuntimeHealthState,
@@ -100,20 +76,14 @@ def _run_active_leader(
     instance_id: str,
 ) -> bool:
     _prepare_bankroll(application)
-    missing = _verify_models(application)
-    state.update(
-        leadership="active",
-        missing_model_scopes=tuple(f"{scope.league_id}:{scope.season}" for scope in missing),
-    )
+    state.update(leadership="active")
     application.monitoring.reconcile.execute()
     application.results.repository.reconcile(reconciled_at=datetime.now(UTC))
     policy = application.settings.application.registration_policy
     lifecycle = application.settings.application.odds_lifecycle_policy
     assert policy is not None and lifecycle is not None
     application.runtime.due_opportunity_fixtures(
-        scopes=application.settings.pilot_scopes,
-        bookmaker_id=application.settings.pilot_bookmaker_id,
-        provider_fixture_ids=application.settings.pilot_fixture_ids,
+        bookmaker_id=application.settings.bookmaker_id,
         allowed_statuses=policy.allowed_fixture_statuses,
         now=datetime.now(UTC),
     )
@@ -125,12 +95,17 @@ def _run_active_leader(
         durable = application.prediction.durable_discovery
         if durable is None:
             raise RuntimeError("durable fixture discovery is not composed")
-        return len(
+        fixtures_persisted = len(
             durable.discover(
                 start,
                 start + timedelta(hours=application.settings.discovery_lookahead_hours),
             )
         )
+        LOGGER.info(
+            "discovery cycle outcomes",
+            extra={"worker": "discovery", "fixtures_persisted": fixtures_persisted},
+        )
+        return fixtures_persisted
 
     jobs = (
         ScheduledJob("discovery", application.settings.discovery_interval_seconds, discovery_cycle),

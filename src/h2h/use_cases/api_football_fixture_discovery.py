@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import datetime
 
 from h2h.domain.fixture import Fixture
@@ -17,28 +17,15 @@ class ApiFootballFixtureDiscovery:
         self,
         client: ApiFootballClient,
         adapter: ApiFootballFixtureAdapter | None = None,
-        scope_pairs: Sequence[tuple[int, int]] = (),
     ) -> None:
         self._client = client
         self._adapter = adapter or ApiFootballFixtureAdapter()
-        self._scope_pairs = tuple(scope_pairs)
 
     def discover(self, start_at: datetime, end_at: datetime) -> tuple[Fixture, ...]:
         """Fetch and adapt fixtures, retaining only kickoffs inside the requested window."""
         if start_at >= end_at:
             raise ValueError("start_at must be before end_at")
-        if self._scope_pairs:
-            payloads = tuple(
-                self._client.fetch_fixtures(
-                    start_at=start_at,
-                    end_at=end_at,
-                    league_id=league_id,
-                    season=season,
-                )
-                for league_id, season in self._scope_pairs
-            )
-        else:
-            payloads = (self._client.fetch_fixtures(start_at=start_at, end_at=end_at),)
+        payloads = (self._client.fetch_fixtures(start_at=start_at, end_at=end_at),)
         discovered: dict[str, Fixture] = {}
         for payload in payloads:
             for fixture in self._adapt_payload(payload, start_at=start_at, end_at=end_at):

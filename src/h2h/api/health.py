@@ -19,7 +19,6 @@ class RuntimeHealthState:
     leadership: str = "starting"
     scheduler_alive: bool = False
     accepting_work: bool = False
-    missing_model_scopes: tuple[str, ...] = ()
     last_scheduler_tick: datetime | None = None
     _lock: Lock = field(default_factory=Lock, repr=False)
 
@@ -128,7 +127,6 @@ class HealthService:
             and self._state.leadership == "active"
             and self._state.scheduler_alive
             and self._state.accepting_work
-            and not self._state.missing_model_scopes
             and not stale_workers
         )
         return {
@@ -148,7 +146,6 @@ class HealthService:
                 "last_error_message": app.provider_state.last_error_message,
                 "last_error_at": app.provider_state.last_error_at,
             },
-            "missing_active_model_scopes": self._state.missing_model_scopes,
             "counts": counts,
             "bankroll": bankroll,
             "generated_at": generated_at,

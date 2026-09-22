@@ -3,19 +3,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 
-from h2h.config import PilotScope
-from h2h.domain.fixture import Fixture
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.api_football_service import ApiFootballOddsService
 from h2h.odds.http import TransportError
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
-from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
+from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
 from h2h.quant import DixonColesFitError
 from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
@@ -39,32 +37,20 @@ class OpportunityCycle:
     prediction_ids: tuple[str, ...]
     evaluation_ids: tuple[str, ...]
     registered_pick_ids: tuple[str, ...]
+    quotes_fetched: int = 0
+    fresh_quotes: int = 0
+    decisions: int = 0
+    eligible_fixtures: int = 0
+    phase_i_excluded: int = 0
+    waiting_for_window: int = 0
+    waiting_for_refresh: int = 0
+    model_unavailable_fixture_ids: tuple[str, ...] = ()
+    odds_unavailable_fixture_ids: tuple[str, ...] = ()
+    rejected_picks: int = 0
 
 
-class PilotFixtureDiscovery:
-    """Restrict already Phase-I-scoped discovery to the explicit production pilot."""
-
-    def __init__(
-        self,
-        discovery: object,
-        scopes: tuple[PilotScope, ...],
-        provider_fixture_ids: frozenset[int],
-    ) -> None:
-        self._discovery = discovery
-        self._scopes = {(scope.league_id, scope.season) for scope in scopes}
-        self._provider_fixture_ids = provider_fixture_ids
-
-    def discover(self, start_at: datetime, end_at: datetime) -> Sequence[Fixture]:
-        fixtures = self._discovery.discover(start_at, end_at)  # type: ignore[attr-defined]
-        return tuple(
-            fixture
-            for fixture in fixtures
-            if (fixture.competition_id, fixture.season) in self._scopes
-            and (
-                not self._provider_fixture_ids
-                or fixture.provider_fixture_id in self._provider_fixture_ids
-            )
-        )
+class OpportunityOddsUnavailableError(RuntimeError):
+    """The provider returned no usable quotes for a due fixture."""
 
 
 class OpportunityWorker:
@@ -77,11 +63,9 @@ class OpportunityWorker:
         evaluator: EvaluatePersistedPredictionQuote,
         register: RegisterEligiblePick,
         *,
-        scopes: tuple[PilotScope, ...],
         bookmaker_id: int,
-        provider_fixture_ids: frozenset[int],
         allowed_statuses: tuple[str, ...],
-        usable_scopes: Callable[[], frozenset[PilotScope]],
+        ensure_model_available: Callable[[OpportunityFixture], None],
         should_stop: Callable[[], bool],
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -91,35 +75,52 @@ class OpportunityWorker:
         self._predictor = predictor
         self._evaluator = evaluator
         self._register = register
-        self._scopes = scopes
         self._bookmaker_id = bookmaker_id
-        self._provider_fixture_ids = provider_fixture_ids
         self._allowed_statuses = allowed_statuses
-        self._usable_scopes = usable_scopes
+        self._ensure_model_available = ensure_model_available
         self._should_stop = should_stop
         self._clock = clock
 
     def run_once(self) -> OpportunityCycle:
         now = self._clock().astimezone(UTC)
-        due = self._repository.due_opportunity_fixtures(
-            scopes=self._scopes,
+        selection = self._repository.select_opportunity_fixtures(
             bookmaker_id=self._bookmaker_id,
-            provider_fixture_ids=self._provider_fixture_ids,
             allowed_statuses=self._allowed_statuses,
             now=now,
         )
+        due = selection.due_fixtures
         processed: list[str] = []
         failed: list[str] = []
+        model_unavailable: list[str] = []
+        odds_unavailable: list[str] = []
         predictions: list[str] = []
         evaluations: list[str] = []
         picks: list[str] = []
+        quotes_fetched = 0
+        fresh_quotes = 0
+        decisions = 0
+        rejected_picks = 0
         for fixture in due:
             if self._should_stop():
                 break
-            scope = PilotScope(fixture.league_id, fixture.season)
-            if scope not in self._usable_scopes():
-                continue
             if not self._repository.item_retry_due(WORKER_NAME, fixture.fixture_id, now=now):
+                continue
+            try:
+                self._ensure_model_available(fixture)
+            except ActiveModelUnavailableError as exc:
+                self._repository.record_item_failure(
+                    WORKER_NAME, fixture.fixture_id, exc, failed_at=now
+                )
+                failed.append(fixture.fixture_id)
+                model_unavailable.append(fixture.fixture_id)
+                LOGGER.warning(
+                    "opportunity model unavailable",
+                    extra={
+                        "worker": WORKER_NAME,
+                        "fixture_id": fixture.fixture_id,
+                        "error_class": type(exc).__name__,
+                    },
+                )
                 continue
             try:
                 quotes = self._source.fetch_quotes(
@@ -133,14 +134,28 @@ class OpportunityWorker:
                     WORKER_NAME, fixture.fixture_id, exc, failed_at=now
                 )
                 failed.append(fixture.fixture_id)
+                odds_unavailable.append(fixture.fixture_id)
                 LOGGER.warning(
                     "opportunity provider item failed",
                     extra={"worker": WORKER_NAME, "fixture_id": fixture.fixture_id, "error_class": type(exc).__name__},
                 )
                 continue
+            if not quotes:
+                error = OpportunityOddsUnavailableError("provider returned no usable quotes")
+                self._repository.record_item_failure(
+                    WORKER_NAME, fixture.fixture_id, error, failed_at=now
+                )
+                failed.append(fixture.fixture_id)
+                odds_unavailable.append(fixture.fixture_id)
+                LOGGER.info(
+                    "opportunity odds unavailable",
+                    extra={"worker": WORKER_NAME, "fixture_id": fixture.fixture_id},
+                )
+                continue
             # Persistence conflicts and database integrity failures are deliberately
             # outside the provider-error boundary and must reach the orchestrator.
-            self._ingestion.ingest(quotes)
+            quotes_fetched += len(quotes)
+            fresh_quotes += self._ingestion.ingest(quotes)
 
             try:
                 prediction = self._predictor.execute(fixture.fixture_id)
@@ -155,8 +170,11 @@ class OpportunityWorker:
                         evaluation.evaluation_id,
                         registration_request_id(evaluation.evaluation_id),
                     )
+                    decisions += 1
                     if registration.pick is not None:
                         picks.append(registration.pick.pick_id)
+                    else:
+                        rejected_picks += 1
                 self._repository.clear_item_failure(WORKER_NAME, fixture.fixture_id)
                 processed.append(fixture.fixture_id)
             except (ActiveModelUnavailableError, DixonColesFitError) as exc:
@@ -164,12 +182,47 @@ class OpportunityWorker:
                     WORKER_NAME, fixture.fixture_id, exc, failed_at=now
                 )
                 failed.append(fixture.fixture_id)
+                if isinstance(exc, ActiveModelUnavailableError):
+                    model_unavailable.append(fixture.fixture_id)
                 continue
-        return OpportunityCycle(
+        cycle = OpportunityCycle(
             tuple(item.fixture_id for item in due),
             tuple(processed),
             tuple(failed),
             tuple(predictions),
             tuple(evaluations),
             tuple(picks),
+            quotes_fetched,
+            fresh_quotes,
+            decisions,
+            selection.eligible_fixture_count,
+            selection.phase_i_excluded_count,
+            selection.waiting_for_window_count,
+            selection.waiting_for_refresh_count,
+            tuple(model_unavailable),
+            tuple(odds_unavailable),
+            rejected_picks,
         )
+        LOGGER.info(
+            "opportunity cycle outcomes",
+            extra={
+                "worker": WORKER_NAME,
+                "due_fixtures": len(cycle.due_fixture_ids),
+                "eligible_fixtures": cycle.eligible_fixtures,
+                "phase_i_excluded": cycle.phase_i_excluded,
+                "waiting_for_window": cycle.waiting_for_window,
+                "waiting_for_refresh": cycle.waiting_for_refresh,
+                "model_unavailable": len(cycle.model_unavailable_fixture_ids),
+                "odds_unavailable": len(cycle.odds_unavailable_fixture_ids),
+                "processed_fixtures": len(cycle.processed_fixture_ids),
+                "failed_fixtures": len(cycle.failed_fixture_ids),
+                "quotes_fetched": cycle.quotes_fetched,
+                "fresh_quotes": cycle.fresh_quotes,
+                "predictions": len(cycle.prediction_ids),
+                "evaluations": len(cycle.evaluation_ids),
+                "decisions": cycle.decisions,
+                "registered_picks": len(cycle.registered_pick_ids),
+                "rejected_picks": cycle.rejected_picks,
+            },
+        )
+        return cycle
