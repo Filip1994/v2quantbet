@@ -9,7 +9,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from h2h.api.health import HealthService, RuntimeHealthState
+from h2h.api.health import HealthService, RuntimeHealthState, WORKER_FRESHNESS_SECONDS
 from h2h.config import ConfigError, load_production_settings
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.postgres_runtime import OpportunityFixture, OpportunitySelection, WorkerStatus
@@ -262,6 +262,7 @@ def test_multicadence_scheduler_uses_interruptible_wait_without_busy_loop() -> N
 
 
 def test_health_http_exposes_liveness_and_structured_readiness() -> None:
+    assert WORKER_FRESHNESS_SECONDS == 120
     performance = SimpleNamespace(
         available_bankroll_minor=3_000_000, open_exposure_minor=0, currency="RSD"
     )

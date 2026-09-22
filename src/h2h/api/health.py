@@ -13,6 +13,9 @@ from typing import Any
 from h2h.production import ProductionApplication
 
 
+WORKER_FRESHNESS_SECONDS = 120
+
+
 @dataclass
 class RuntimeHealthState:
     schema_current: bool = False
@@ -89,20 +92,27 @@ class HealthService:
         app = self._application
         generated_at = datetime.now(UTC)
         try:
-            database = app.runtime.check_database()
+            snapshot = getattr(app.runtime, "readiness_snapshot", None)
+            if snapshot is None:
+                database = app.runtime.check_database()
+                statuses = app.runtime.worker_statuses()
+                counts = app.runtime.operational_counts()
+            else:
+                statuses, counts = snapshot()
+                database = True
             workers = []
             stale_workers: list[str] = []
-            for status in app.runtime.worker_statuses():
+            for status in statuses:
                 item = asdict(status)
                 stale = bool(
                     status.next_due_at is not None
-                    and generated_at > status.next_due_at + timedelta(seconds=120)
+                    and generated_at
+                    > status.next_due_at + timedelta(seconds=WORKER_FRESHNESS_SECONDS)
                 )
                 item["stale"] = stale
                 workers.append(item)
                 if stale:
                     stale_workers.append(status.worker_name)
-            counts = app.runtime.operational_counts()
             policy = app.settings.application.registration_policy
             assert policy is not None
             performance = app.results.performance.summary(policy.bankroll_account_id)

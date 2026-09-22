@@ -75,6 +75,8 @@ class ProductionSettings:
     discovery_interval_seconds: float
     discovery_lookahead_hours: float
     opportunity_interval_seconds: float
+    opportunity_max_items: int
+    opportunity_max_wall_seconds: float
     scheduler_tick_seconds: float
     shutdown_grace_seconds: float
     api_daily_limit: int
@@ -222,6 +224,12 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         ),
         opportunity_interval_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_INTERVAL_SECONDS", "60"
+        ),
+        opportunity_max_items=_positive_integer(
+            values, "QUANTBET_OPPORTUNITY_MAX_ITEMS", "10"
+        ),
+        opportunity_max_wall_seconds=_positive_number(
+            values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
         ),
         scheduler_tick_seconds=_positive_number(
             values, "QUANTBET_SCHEDULER_TICK_SECONDS", "5"

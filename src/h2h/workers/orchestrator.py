@@ -82,34 +82,56 @@ class ProductionOrchestrator:
         while not self._stop.is_set():
             if not self._leader_healthy():
                 return False
-            now = self._clock().astimezone(UTC)
             for job in self._jobs:
                 if self._stop.is_set():
                     break
-                if now < self._next_due[job.name]:
+                cycle_start = self._clock().astimezone(UTC)
+                if cycle_start < self._next_due[job.name]:
                     continue
-                next_due = now + timedelta(seconds=job.interval_seconds)
                 try:
-                    self._runtime.worker_started(job.name, self._instance_id, at=now)
+                    self._runtime.worker_started(job.name, self._instance_id, at=cycle_start)
                     job.run()
                     finished = self._clock().astimezone(UTC)
-                    if job.has_pending_work():
-                        next_due = finished
+                    pending = job.has_pending_work()
+                    # Ordinary cadence is completion-based: an overrun cannot make the
+                    # same worker instantly due again. Pending bounded work is eligible
+                    # in the next outer scheduler round, after every other due job has
+                    # received one execution opportunity.
+                    next_due = (
+                        finished
+                        if pending
+                        else finished + timedelta(seconds=job.interval_seconds)
+                    )
                     self._runtime.worker_succeeded(
                         job.name, self._instance_id, at=finished, next_due_at=next_due
                     )
                     self._on_recovered()
-                    LOGGER.info("worker cycle succeeded", extra={"worker": job.name})
+                    LOGGER.info(
+                        "worker cycle succeeded",
+                        extra={
+                            "worker": job.name,
+                            "cycle_started_at": cycle_start,
+                            "cycle_finished_at": finished,
+                            "duration_seconds": (finished - cycle_start).total_seconds(),
+                            "pending_work": pending,
+                            "next_due_at": next_due,
+                        },
+                    )
                 except BaseException as exc:
                     if self._fatal(exc):
                         raise
                     self._on_degraded(exc)
+                    failed_at = self._clock().astimezone(UTC)
+                    next_due = failed_at + timedelta(seconds=job.interval_seconds)
+                    if isinstance(exc, ApiBudgetExceededError):
+                        tomorrow = failed_at.date() + timedelta(days=1)
+                        next_due = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
                     try:
                         self._runtime.worker_failed(
                             job.name,
                             self._instance_id,
                             exc,
-                            at=self._clock(),
+                            at=failed_at,
                             next_due_at=next_due,
                         )
                     except Exception:
@@ -118,9 +140,6 @@ class ProductionOrchestrator:
                         "worker cycle deferred",
                         extra={"worker": job.name, "error_class": type(exc).__name__},
                     )
-                    if isinstance(exc, ApiBudgetExceededError):
-                        tomorrow = now.date() + timedelta(days=1)
-                        next_due = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
                 self._next_due[job.name] = next_due
             self._stop.wait(self._tick_seconds)
         return True

@@ -119,6 +119,7 @@ def _run_active_leader(
             "opportunity",
             application.settings.opportunity_interval_seconds,
             application.opportunity.run_once,
+            has_pending_work=lambda: application.opportunity.has_pending,
         ),
         ScheduledJob(
             "monitoring", float(lifecycle.monitoring_interval_seconds), application.monitoring.worker.run_once

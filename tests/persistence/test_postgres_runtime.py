@@ -51,6 +51,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "La Liga",
                 "League",
                 None,
+                None,
             ),
             (
                 "api-football:2",
@@ -61,6 +62,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "Premier League",
                 "League",
+                None,
                 None,
             ),
             (
@@ -73,6 +75,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "Serie A",
                 "League",
                 now,
+                None,
             ),
             (
                 "api-football:4",
@@ -83,6 +86,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "League Two",
                 "League",
+                None,
                 None,
             ),
         ]
@@ -95,6 +99,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
         bookmaker_id=8,
         allowed_statuses=("NS",),
         now=now,
+        item_limit=2,
     )
 
     assert tuple(item.fixture_id for item in selection.due_fixtures) == (
@@ -105,4 +110,15 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
     assert selection.waiting_for_window_count == 1
     assert selection.waiting_for_refresh_count == 1
     assert "f.league_id =" not in cursor.query
-    assert cursor.parameters == (8, now, ["NS"])
+    assert cursor.parameters == (
+        8,
+        now,
+        now + timedelta(hours=72),
+        ["NS"],
+        None,
+        None,
+        None,
+        9,
+    )
+    assert "LIMIT %s" in cursor.query
+    assert "ORDER BY latest.kickoff_at, f.fixture_id" in cursor.query

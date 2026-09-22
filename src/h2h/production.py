@@ -168,6 +168,8 @@ def build_production_application(
         allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
         ensure_model_available=ensure_model_available,
         should_stop=should_stop,
+        max_items=settings.opportunity_max_items,
+        max_wall_seconds=settings.opportunity_max_wall_seconds,
     )
     return ProductionApplication(
         settings,

@@ -37,6 +37,13 @@ class OpportunityFixture:
     season: int
     kickoff_at: datetime
     last_captured_at: datetime | None
+    next_retry_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OpportunityCursor:
+    kickoff_at: datetime
+    fixture_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +55,8 @@ class OpportunitySelection:
     waiting_for_window_count: int
     waiting_for_refresh_count: int
     due_fixtures: tuple[OpportunityFixture, ...]
+    continuation: OpportunityCursor | None = None
+    has_more: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +173,7 @@ class PostgreSQLRuntimeRepository:
             bookmaker_id=bookmaker_id,
             allowed_statuses=allowed_statuses,
             now=now,
+            item_limit=10,
         ).due_fixtures
 
     def select_opportunity_fixtures(
@@ -172,25 +182,49 @@ class PostgreSQLRuntimeRepository:
         bookmaker_id: int,
         allowed_statuses: tuple[str, ...],
         now: datetime,
+        item_limit: int = 10,
+        after: OpportunityCursor | None = None,
     ) -> OpportunitySelection:
+        if item_limit <= 0:
+            raise ValueError("item_limit must be positive")
         current = _utc(now)
+        # Classification remains application-owned, so scan a bounded multiple of the
+        # item budget. Keyset continuation prevents ineligible early rows from pinning
+        # every cycle while avoiding an unbounded future-fixture materialisation.
+        scan_limit = item_limit * 4
+        after_kickoff = None if after is None else _utc(after.kickoff_at)
+        after_fixture_id = None if after is None else after.fixture_id
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT f.fixture_id, f.provider_fixture_id::bigint, f.league_id, f.season, "
                 "latest.kickoff_at, latest.country, latest.competition_name, "
-                "latest.competition_type, MAX(q.captured_at) "
+                "latest.competition_type, MAX(q.captured_at), failures.next_retry_at "
                 "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
                 "competition_name, competition_type "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
                 "LEFT JOIN quote_series s ON s.fixture_id = f.fixture_id AND s.bookmaker_id = %s "
                 "LEFT JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "LEFT JOIN production_item_failures failures ON failures.worker_name = "
+                "'opportunity' AND failures.item_id = f.fixture_id "
                 "WHERE latest.kickoff_at > %s "
+                "AND latest.kickoff_at <= %s "
                 "AND latest.provider_status = ANY(%s) "
+                "AND (%s::timestamptz IS NULL OR (latest.kickoff_at, f.fixture_id) > (%s, %s)) "
                 "GROUP BY f.fixture_id, f.provider_fixture_id, f.league_id, f.season, "
-                "latest.kickoff_at, latest.country, latest.competition_name, latest.competition_type "
-                "ORDER BY latest.kickoff_at, f.fixture_id",
-                (bookmaker_id, current, list(allowed_statuses)),
+                "latest.kickoff_at, latest.country, latest.competition_name, "
+                "latest.competition_type, failures.next_retry_at "
+                "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
+                (
+                    bookmaker_id,
+                    current,
+                    current + timedelta(hours=72),
+                    list(allowed_statuses),
+                    after_kickoff,
+                    after_kickoff,
+                    after_fixture_id,
+                    scan_limit + 1,
+                ),
             )
             rows = cursor.fetchall()
         due: list[OpportunityFixture] = []
@@ -198,7 +232,10 @@ class PostgreSQLRuntimeRepository:
         excluded = 0
         waiting_for_window = 0
         waiting_for_refresh = 0
-        for (
+        continuation: OpportunityCursor | None = None
+        has_more = len(rows) > scan_limit
+        for row in rows[:scan_limit]:
+            (
             fixture_id,
             provider_id,
             league_id,
@@ -208,7 +245,9 @@ class PostgreSQLRuntimeRepository:
             competition_name,
             competition_type,
             last_captured,
-        ) in rows:
+            next_retry_at,
+            ) = row
+            continuation = OpportunityCursor(kickoff_at, fixture_id)
             scope = classify_phase_i(
                 CompetitionMetadata(
                     country=country,
@@ -242,14 +281,22 @@ class PostgreSQLRuntimeRepository:
                     season=int(season),
                     kickoff_at=kickoff_at,
                     last_captured_at=last_captured,
+                    next_retry_at=next_retry_at,
                 )
             )
+            if len(due) >= item_limit:
+                has_more = True
+                break
+        if not has_more:
+            continuation = None
         return OpportunitySelection(
             eligible_fixture_count=eligible,
             phase_i_excluded_count=excluded,
             waiting_for_window_count=waiting_for_window,
             waiting_for_refresh_count=waiting_for_refresh,
             due_fixtures=tuple(due),
+            continuation=continuation,
+            has_more=has_more,
         )
 
     def latest_complete_snapshot_ids(
@@ -302,6 +349,31 @@ class PostgreSQLRuntimeRepository:
                 "last_error_message = EXCLUDED.last_error_message",
                 (worker, item_id, failed, failed + timedelta(seconds=5), error_class, message),
             )
+
+    def record_item_failures(
+        self,
+        failures: Iterable[tuple[str, str, BaseException, datetime]],
+    ) -> None:
+        """Persist one bounded worker batch atomically on a single connection."""
+        pending = tuple(failures)
+        if not pending:
+            return
+        with self.connect() as connection, connection.cursor() as cursor:
+            for worker, item_id, error, failed_at in pending:
+                error_class, message = _bounded_error(error)
+                failed = _utc(failed_at)
+                cursor.execute(
+                    "INSERT INTO production_item_failures (worker_name, item_id, failure_count, "
+                    "last_failure_at, next_retry_at, last_error_class, last_error_message) "
+                    "VALUES (%s, %s, 1, %s, %s, %s, %s) ON CONFLICT (worker_name, item_id) "
+                    "DO UPDATE SET failure_count = production_item_failures.failure_count + 1, "
+                    "last_failure_at = EXCLUDED.last_failure_at, next_retry_at = LEAST("
+                    "EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
+                    "(power(2, LEAST(production_item_failures.failure_count, 8)) * interval '5 seconds')), "
+                    "last_error_class = EXCLUDED.last_error_class, "
+                    "last_error_message = EXCLUDED.last_error_message",
+                    (worker, item_id, failed, failed + timedelta(seconds=5), error_class, message),
+                )
 
     def clear_item_failure(self, worker: str, item_id: str) -> None:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -364,6 +436,41 @@ class PostgreSQLRuntimeRepository:
                 "ORDER BY worker_name"
             )
             return tuple(WorkerStatus(*row) for row in cursor.fetchall())
+
+    def readiness_snapshot(self) -> tuple[tuple[WorkerStatus, ...], dict[str, int]]:
+        """Read all runtime readiness facts using one database connection."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT worker_name, last_started_at, last_success_at, last_failure_at, next_due_at, "
+                "consecutive_failures, cycle_count, success_count, failure_count, last_error_class, "
+                "last_error_message, instance_id, updated_at FROM production_worker_status "
+                "ORDER BY worker_name"
+            )
+            statuses = tuple(WorkerStatus(*row) for row in cursor.fetchall())
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
+                "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
+                "('OpportunityOddsUnavailableError', 'TransportError', "
+                "'QuoteNormalizationError')) FROM production_item_failures"
+            )
+            retry, model_unavailable, odds_unavailable = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
+            )
+            pending_results = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
+            )
+            corrections = int(cursor.fetchone()[0])
+        return statuses, {
+            "retry": retry,
+            "model_unavailable": model_unavailable,
+            "odds_unavailable": odds_unavailable,
+            "pending_results": pending_results,
+            "correction_required": corrections,
+        }
 
     def operational_counts(self) -> dict[str, int]:
         with self.connect() as connection, connection.cursor() as cursor:
