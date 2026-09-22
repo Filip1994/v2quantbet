@@ -116,6 +116,11 @@ def _run_active_leader(
             has_pending_work=lambda: durable.has_pending,
         ),
         ScheduledJob(
+            "model_lifecycle",
+            application.settings.model_training_interval_seconds,
+            application.model_lifecycle.run_once,
+        ),
+        ScheduledJob(
             "opportunity",
             application.settings.opportunity_interval_seconds,
             application.opportunity.run_once,

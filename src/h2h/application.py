@@ -28,6 +28,7 @@ from h2h.odds import (
     ApiFootballOddsService,
     BudgetedJsonTransport,
     DailyApiBudget,
+    PostgreSQLApiBudget,
     RetryingJsonTransport,
 )
 from h2h.odds.api_football_client import API_FOOTBALL_BASE_URL
@@ -113,9 +114,10 @@ def build_api_football_client(
     *,
     daily_limit: int = 7500,
     reserve: int = 1500,
-    budget: DailyApiBudget | None = None,
+    budget: DailyApiBudget | PostgreSQLApiBudget | None = None,
     timeout: float = 10.0,
     should_stop: Callable[[], bool] = lambda: False,
+    odds_request_category: str = "opportunity_odds",
 ) -> ApiFootballClient:
     """Build an API-Football client protected by a shared daily call budget."""
     shared_budget = budget or DailyApiBudget(daily_limit=daily_limit, reserve=reserve)
@@ -132,6 +134,7 @@ def build_api_football_client(
         api_key=settings.api_football_key,
         base_url=API_FOOTBALL_BASE_URL,
         timeout=timeout,
+        odds_request_category=odds_request_category,
     )
 
 

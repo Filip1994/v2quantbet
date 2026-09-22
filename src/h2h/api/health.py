@@ -121,16 +121,37 @@ class HealthService:
                 "open_exposure_minor": performance.open_exposure_minor,
                 "currency": performance.currency,
             }
+            coverage_repository = getattr(app, "model_coverage", None)
+            model_coverage = (
+                asdict(coverage_repository.coverage_counts())
+                if coverage_repository is not None
+                else {}
+            )
         except Exception as exc:  # noqa: BLE001 - readiness must degrade, never crash HTTP
             database = False
             workers = []
             stale_workers = []
             counts = {}
             bankroll = None
+            model_coverage = {}
             database_error = type(exc).__name__
         else:
             database_error = None
         budget = app.budget
+        try:
+            usage_by_category = getattr(budget, "usage_by_category", dict)()
+            budget_used = (
+                sum(usage_by_category.values()) if usage_by_category else budget.used
+            )
+            budget_remaining = max(0, budget.effective_limit - budget_used)
+            budget_exhausted = budget_remaining <= 0
+            budget_store_reachable = True
+        except Exception:  # noqa: BLE001 - readiness must survive budget-store failure
+            usage_by_category = {}
+            budget_used = None
+            budget_remaining = None
+            budget_exhausted = None
+            budget_store_reachable = False
         ready = bool(
             database
             and self._state.schema_current
@@ -138,6 +159,7 @@ class HealthService:
             and self._state.scheduler_alive
             and self._state.accepting_work
             and not stale_workers
+            and budget_store_reachable
         )
         return {
             "ready": ready,
@@ -148,15 +170,24 @@ class HealthService:
             "stale_workers": stale_workers,
             "provider_budget": {
                 "day": budget.day.isoformat(),
-                "used": budget.used,
+                "store_reachable": budget_store_reachable,
+                "used": budget_used,
                 "effective_limit": budget.effective_limit,
-                "remaining": budget.remaining,
-                "exhausted": budget.exhausted,
+                "remaining": budget_remaining,
+                "exhausted": budget_exhausted,
+                "by_category": usage_by_category,
+                "model_training_daily_limit": getattr(
+                    budget, "training_daily_limit", None
+                ),
+                "model_training_operational_reserve": getattr(
+                    budget, "operational_reserve", None
+                ),
                 "last_error_class": app.provider_state.last_error_class,
                 "last_error_message": app.provider_state.last_error_message,
                 "last_error_at": app.provider_state.last_error_at,
             },
             "counts": counts,
+            "model_coverage": model_coverage,
             "bankroll": bankroll,
             "generated_at": generated_at,
         }

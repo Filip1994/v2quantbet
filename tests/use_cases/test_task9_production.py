@@ -284,6 +284,48 @@ def test_value_evaluation_uses_exact_persisted_pair_and_devig() -> None:
     assert use_case.execute(stored_prediction().prediction_id, selected_id) == value
 
 
+def test_real_dixon_coles_prediction_flows_through_devig_edge_and_ev() -> None:
+    fixtures, predictions = MemoryFixtures(), MemoryPredictions()
+    durable_fixture(fixtures)
+    scope = DixonColesModelScope("api-football", "api-football", 39, 2026)
+    prediction = ProduceFixturePrediction(
+        fixtures,
+        ActiveLoader(scope),
+        predictions,
+        clock=lambda: NOW,
+    ).execute("api-football:123")
+    direct = model().market_probabilities(10, 20)
+    assert prediction.over_2_5_probability == pytest.approx(direct["OVER_2_5"])
+    assert prediction.under_2_5_probability == pytest.approx(direct["UNDER_2_5"])
+    assert prediction.btts_yes_probability == pytest.approx(direct["BTTS_YES"])
+
+    history = InMemoryQuoteHistoryRepository()
+    QuoteHistoryIngestionService(history, capture_clock=lambda: NOW).ingest(
+        (quote(Selection.OVER, 2.0), quote(Selection.UNDER, 1.8))
+    )
+    selected_id = history.snapshots_for_series(
+        history.find_series(
+            fixture_id="api-football:123",
+            bookmaker_id=8,
+            market="OU_25",
+            selection="OVER",
+        ).series_id
+    )[0].snapshot_id
+    evaluations = MemoryEvaluations()
+    value = EvaluatePersistedPredictionQuote(
+        predictions,
+        history,
+        evaluations,
+        clock=lambda: NOW,
+    ).execute(prediction.prediction_id, selected_id)
+
+    expected_devig = (1 / 2.0) / ((1 / 2.0) + (1 / 1.8))
+    assert value.model_probability == pytest.approx(direct["OVER_2_5"])
+    assert value.selected_devig_probability == pytest.approx(expected_devig)
+    assert value.edge == pytest.approx(direct["OVER_2_5"] - expected_devig)
+    assert value.expected_value == pytest.approx(direct["OVER_2_5"] * 2.0 - 1.0)
+
+
 def test_incomplete_market_and_fixture_mismatch_fail_closed() -> None:
     history = InMemoryQuoteHistoryRepository()
     QuoteHistoryIngestionService(history, capture_clock=lambda: NOW).ingest(

@@ -33,6 +33,10 @@ from h2h.use_cases.api_football_training import (
 class InsufficientTrainingDataError(ValueError):
     """Trusted acquisition succeeded but cannot satisfy the requested fit."""
 
+    def __init__(self, message: str, *, accepted_match_count: int | None = None) -> None:
+        super().__init__(message)
+        self.accepted_match_count = accepted_match_count
+
 
 def _utc_now(clock: Callable[[], datetime]) -> datetime:
     value = clock()
@@ -86,7 +90,8 @@ class TrainApiFootballDixonColesModel:
         dataset = self._historical_results.acquire(scope)
         if len(dataset) < config.min_matches:
             raise InsufficientTrainingDataError(
-                f"trusted dataset has {len(dataset)} matches; {config.min_matches} required"
+                f"trusted dataset has {len(dataset)} matches; {config.min_matches} required",
+                accepted_match_count=len(dataset),
             )
         model = fit_api_football_dixon_coles(
             dataset,
@@ -97,7 +102,8 @@ class TrainApiFootballDixonColesModel:
         )
         if model.fitted_matches != len(dataset):
             raise InsufficientTrainingDataError(
-                "accepted match count does not equal fitted match count"
+                "accepted match count does not equal fitted match count",
+                accepted_match_count=len(dataset),
             )
         candidate = _trusted_candidate_from_training(
             dataset=dataset,

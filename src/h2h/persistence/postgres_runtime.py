@@ -464,12 +464,29 @@ class PostgreSQLRuntimeRepository:
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
             )
             corrections = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM fixture_predictions")
+            predictions = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM value_evaluations")
+            evaluations = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome = 'APPROVED'), "
+                "COUNT(*) FILTER (WHERE outcome = 'REJECTED') FROM pick_decisions"
+            )
+            decisions, approved, rejected = (int(value) for value in cursor.fetchone())
+            cursor.execute("SELECT COUNT(*) FROM registered_picks")
+            registered_picks = int(cursor.fetchone()[0])
         return statuses, {
             "retry": retry,
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
             "pending_results": pending_results,
             "correction_required": corrections,
+            "predictions": predictions,
+            "evaluations": evaluations,
+            "decisions": decisions,
+            "decisions_approved": approved,
+            "decisions_rejected": rejected,
+            "registered_picks": registered_picks,
         }
 
     def operational_counts(self) -> dict[str, int]:
@@ -491,10 +508,27 @@ class PostgreSQLRuntimeRepository:
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
             )
             corrections = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM fixture_predictions")
+            predictions = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM value_evaluations")
+            evaluations = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome = 'APPROVED'), "
+                "COUNT(*) FILTER (WHERE outcome = 'REJECTED') FROM pick_decisions"
+            )
+            decisions, approved, rejected = (int(value) for value in cursor.fetchone())
+            cursor.execute("SELECT COUNT(*) FROM registered_picks")
+            registered_picks = int(cursor.fetchone()[0])
         return {
             "retry": retry,
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
             "pending_results": pending_results,
             "correction_required": corrections,
+            "predictions": predictions,
+            "evaluations": evaluations,
+            "decisions": decisions,
+            "decisions_approved": approved,
+            "decisions_rejected": rejected,
+            "registered_picks": registered_picks,
         }
