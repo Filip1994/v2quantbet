@@ -53,6 +53,7 @@ class OpportunityCycle:
     odds_unavailable_fixture_ids: tuple[str, ...] = ()
     rejected_picks: int = 0
     model_unavailable_scope_counts: tuple[tuple[int, int, int], ...] = ()
+    model_deferred_fixture_ids: tuple[str, ...] = ()
     pending_work: bool = False
     budget_exhausted: bool = False
 
@@ -75,6 +76,7 @@ class OpportunityWorker:
         allowed_statuses: tuple[str, ...],
         ensure_model_available: Callable[[OpportunityFixture], None],
         should_stop: Callable[[], bool],
+        model_scope_status: Callable[[OpportunityFixture], str | None] = lambda _fixture: "ACTIVE",
         max_items: int = 10,
         max_wall_seconds: float = 30.0,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -91,6 +93,7 @@ class OpportunityWorker:
         self._bookmaker_id = bookmaker_id
         self._allowed_statuses = allowed_statuses
         self._ensure_model_available = ensure_model_available
+        self._model_scope_status = model_scope_status
         self._should_stop = should_stop
         self._max_items = max_items
         self._max_wall_seconds = max_wall_seconds
@@ -136,6 +139,7 @@ class OpportunityWorker:
         processed: list[str] = []
         failed: list[str] = []
         model_unavailable: list[str] = []
+        model_deferred: list[str] = []
         odds_unavailable: list[str] = []
         predictions: list[str] = []
         evaluations: list[str] = []
@@ -145,6 +149,7 @@ class OpportunityWorker:
         decisions = 0
         rejected_picks = 0
         model_scope_cache: dict[tuple[int, int], ActiveModelUnavailableError | None] = {}
+        coverage_status_cache: dict[tuple[int, int], str | None] = {}
         failures_to_persist: list[tuple[str, str, BaseException, datetime]] = []
         interrupted = False
         budget_exhausted = False
@@ -160,6 +165,11 @@ class OpportunityWorker:
                 if fixture.next_retry_at is not None and fixture.next_retry_at > item_now:
                     continue
                 scope = (fixture.league_id, fixture.season)
+                if scope not in coverage_status_cache:
+                    coverage_status_cache[scope] = self._model_scope_status(fixture)
+                if coverage_status_cache[scope] != "ACTIVE":
+                    model_deferred.append(fixture.fixture_id)
+                    continue
                 unavailable = model_scope_cache.get(scope)
                 if scope not in model_scope_cache:
                     try:
@@ -276,8 +286,9 @@ class OpportunityWorker:
             tuple(odds_unavailable),
             rejected_picks,
             unavailable_scope_counts,
-            self._has_pending,
-            budget_exhausted,
+            model_deferred_fixture_ids=tuple(model_deferred),
+            pending_work=self._has_pending,
+            budget_exhausted=budget_exhausted,
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -289,6 +300,7 @@ class OpportunityWorker:
                 "waiting_for_window": cycle.waiting_for_window,
                 "waiting_for_refresh": cycle.waiting_for_refresh,
                 "model_unavailable": len(cycle.model_unavailable_fixture_ids),
+                "model_training_deferred": len(cycle.model_deferred_fixture_ids),
                 "odds_unavailable": len(cycle.odds_unavailable_fixture_ids),
                 "processed_fixtures": len(cycle.processed_fixture_ids),
                 "failed_fixtures": len(cycle.failed_fixture_ids),

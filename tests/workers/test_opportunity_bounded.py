@@ -156,6 +156,40 @@ def test_graceful_shutdown_yields_remaining_bounded_work() -> None:
     assert len(repository.failure_batches[0]) == 1
 
 
+def test_training_pending_defers_scope_once_and_later_activation_resumes() -> None:
+    repository = RepositoryFake(fixtures(2))
+    status = ["TRAINING_PENDING"]
+    status_checks: list[str] = []
+    active_checks: list[str] = []
+
+    def coverage(fixture):
+        status_checks.append(fixture.fixture_id)
+        return status[0]
+
+    subject = worker(
+        repository,
+        lambda fixture: active_checks.append(fixture.fixture_id),
+        max_items=2,
+        model_scope_status=coverage,
+    )
+    first = subject.run_once()
+    status[0] = "ACTIVE"
+    second = subject.run_once()
+
+    assert first.model_deferred_fixture_ids == (
+        "api-football:0000",
+        "api-football:0001",
+    )
+    assert first.failed_fixture_ids == ()
+    assert active_checks == ["api-football:0000"]
+    assert len(status_checks) == 2  # one scope lookup in each cycle, never per fixture
+    assert second.model_deferred_fixture_ids == ()
+    assert second.odds_unavailable_fixture_ids == (
+        "api-football:0000",
+        "api-football:0001",
+    )
+
+
 def test_five_hundred_missing_models_drain_across_fair_scheduler_slices() -> None:
     repository = RepositoryFake(fixtures(500))
     now = [datetime(2026, 9, 22, 12, tzinfo=UTC)]
@@ -165,7 +199,10 @@ def test_five_hundred_missing_models_drain_across_fair_scheduler_slices() -> Non
         max_items=10,
         clock=lambda: now[0],
     )
-    runs = {name: 0 for name in ("discovery", "monitoring", "results")}
+    runs = {
+        name: 0
+        for name in ("discovery", "model_lifecycle", "monitoring", "results")
+    }
 
     class Runtime:
         def worker_started(self, *_args, **_kwargs):
@@ -199,6 +236,11 @@ def test_five_hundred_missing_models_drain_across_fair_scheduler_slices() -> Non
     jobs = (
         ScheduledJob("discovery", 1, lambda: mark("discovery"), has_pending_work=lambda: True),
         ScheduledJob(
+            "model_lifecycle",
+            60,
+            lambda: mark("model_lifecycle"),
+        ),
+        ScheduledJob(
             "opportunity", 60, subject.run_once, has_pending_work=lambda: subject.has_pending
         ),
         ScheduledJob("monitoring", 1, lambda: mark("monitoring"), has_pending_work=lambda: True),
@@ -216,5 +258,10 @@ def test_five_hundred_missing_models_drain_across_fair_scheduler_slices() -> Non
 
     assert len(repository.selection_calls) == 50
     assert all(len(batch) == 10 for batch in repository.failure_batches)
-    assert runs == {"discovery": 50, "monitoring": 50, "results": 50}
+    assert runs == {
+        "discovery": 50,
+        "model_lifecycle": 1,
+        "monitoring": 50,
+        "results": 50,
+    }
     assert subject.has_pending is False

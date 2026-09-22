@@ -21,6 +21,7 @@ from h2h.use_cases.api_football_training import (
     ApiFootballTrainingScope,
     fit_api_football_dixon_coles,
     normalize_api_football_historical_response,
+    _trusted_api_football_historical_results,
 )
 from h2h.use_cases.fixture_prediction import DixonColesFixturePredictor
 
@@ -88,6 +89,44 @@ def trusted_acquire(
     with patch.object(UrllibJsonTransport, "get_json", return_value=payload):
         service = build_trusted_api_football_historical_results(settings)
         return service.acquire(requested_scope or scope())
+
+
+def test_completed_historical_acquisition_is_reused_after_service_restart() -> None:
+    transport = Mock()
+    transport.get_json.return_value = envelope([item()])
+    client = ApiFootballClient(transport=transport, api_key="secret")
+    cache: dict[tuple[object, ...], object] = {}
+
+    def key(values):
+        return (
+            values["league_id"],
+            values["season"],
+            values["start_at"],
+            values["end_at"],
+        )
+
+    def load(**values):
+        return cache.get(key(values))
+
+    def save(**values):
+        cache[key(values)] = values["payload"]
+
+    first = _trusted_api_football_historical_results(
+        client,
+        load_cached_payload=load,
+        save_cached_payload=save,
+        clock=lambda: END,
+    )
+    assert len(first.acquire(scope())) == 1
+
+    restarted = _trusted_api_football_historical_results(
+        client,
+        load_cached_payload=load,
+        save_cached_payload=save,
+        clock=lambda: END,
+    )
+    assert len(restarted.acquire(scope())) == 1
+    assert transport.get_json.call_count == 1
 
 
 def test_valid_ft_fixture_preserves_identity_order_score_and_utc() -> None:

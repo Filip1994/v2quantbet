@@ -19,19 +19,26 @@ from h2h.application_postgres import (
 )
 from h2h.config import ProductionSettings
 from h2h.domain.model_lifecycle import DixonColesModelScope
-from h2h.odds import ApiFootballOddsService, DailyApiBudget
+from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
 from h2h.odds.http import UrllibJsonTransport
 from h2h.persistence import (
     PostgreSQLActiveDixonColesModelRepository,
     PostgreSQLDixonColesModelVersionRepository,
 )
 from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
+from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
+from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
-from h2h.use_cases.model_lifecycle import LoadActiveDixonColesModel
+from h2h.use_cases.model_lifecycle import (
+    ActivateDixonColesModel,
+    LoadActiveDixonColesModel,
+    TrainApiFootballDixonColesModel,
+)
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.use_cases.result_settlement import ApiFootballResultSource
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 from h2h.workers.opportunity import OpportunityWorker
+from h2h.workers.model_lifecycle import ModelLifecycleWorker
 
 
 @dataclass
@@ -57,7 +64,7 @@ class ProviderOperationalState:
 @dataclass
 class ProductionApplication:
     settings: ProductionSettings
-    budget: DailyApiBudget
+    budget: PostgreSQLApiBudget
     client: object
     provider_state: ProviderOperationalState
     runtime: PostgreSQLRuntimeRepository
@@ -66,6 +73,8 @@ class ProductionApplication:
     monitoring: PostgreSQLPickMonitoringApplication
     results: PostgreSQLResultSettlementApplication
     active_model_loader: LoadActiveDixonColesModel
+    model_coverage: PostgreSQLModelCoverageRepository
+    model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
 
     def close(self) -> None:
@@ -85,7 +94,14 @@ def build_production_application(
     assert application_settings.registration_policy is not None
     assert application_settings.odds_lifecycle_policy is not None
 
-    budget = DailyApiBudget(settings.api_daily_limit, settings.api_reserve)
+    runtime = PostgreSQLRuntimeRepository(application_settings.database_url)
+    budget = PostgreSQLApiBudget(
+        daily_limit=settings.api_daily_limit,
+        reserve=settings.api_reserve,
+        training_daily_limit=settings.model_training_daily_limit,
+        operational_reserve=settings.model_training_operational_reserve,
+        database_url=application_settings.database_url,
+    )
     client = build_api_football_client(
         UrllibJsonTransport(),
         application_settings,
@@ -95,7 +111,6 @@ def build_production_application(
     )
     source = ApiFootballOddsService(client)
     provider_state = ProviderOperationalState()
-    runtime = PostgreSQLRuntimeRepository(application_settings.database_url)
 
     scoped = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
     prediction = build_postgres_production_prediction_application(
@@ -120,9 +135,17 @@ def build_production_application(
 
         return clear
 
+    monitoring_client = build_api_football_client(
+        UrllibJsonTransport(),
+        application_settings,
+        budget=budget,
+        timeout=settings.api_timeout_seconds,
+        should_stop=should_stop,
+        odds_request_category="results_monitoring",
+    )
     monitoring = build_postgres_pick_monitoring_application(
         application_settings.odds_lifecycle_policy,
-        source,
+        ApiFootballOddsService(monitoring_client),
         database_url=application_settings.database_url,
         bulletin_timezone=application_settings.bulletin_timezone,
         on_item_failure=item_failure("monitoring"),
@@ -131,7 +154,7 @@ def build_production_application(
     )
     results = build_postgres_result_settlement_application(
         application_settings.result_settlement_policy,
-        ApiFootballResultSource(client),
+        ApiFootballResultSource(monitoring_client),
         database_url=application_settings.database_url,
         on_item_failure=item_failure("results"),
         on_item_success=item_success("results"),
@@ -144,6 +167,43 @@ def build_production_application(
         database_url=application_settings.database_url
     )
     loader = LoadActiveDixonColesModel(versions, active)
+    coverage = PostgreSQLModelCoverageRepository(
+        database_url=application_settings.database_url
+    )
+    training_client = build_api_football_client(
+        UrllibJsonTransport(),
+        application_settings,
+        budget=budget,
+        timeout=settings.api_timeout_seconds,
+        should_stop=should_stop,
+    )
+    historical = _trusted_api_football_historical_results(
+        training_client,
+        load_cached_payload=coverage.load_acquisition,
+        save_cached_payload=coverage.save_acquisition,
+    )
+    trainer = TrainApiFootballDixonColesModel(
+        historical,
+        versions,
+        clock=lambda: datetime.now(UTC),
+    )
+    activator = ActivateDixonColesModel(
+        versions,
+        active,
+        clock=lambda: datetime.now(UTC),
+    )
+    model_lifecycle = ModelLifecycleWorker(
+        coverage,
+        trainer,
+        activator,
+        active,
+        settings.model_training_policy,
+        max_scopes=settings.model_training_max_scopes,
+        max_provider_requests=settings.model_training_max_provider_requests,
+        max_wall_seconds=settings.model_training_max_wall_seconds,
+        training_requests_used=lambda: budget.usage_by_category()["model_training"],
+        should_stop=should_stop,
+    )
 
     def ensure_model_available(fixture: OpportunityFixture) -> None:
         loader.execute_with_selection(
@@ -168,6 +228,21 @@ def build_production_application(
         allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
         ensure_model_available=ensure_model_available,
         should_stop=should_stop,
+        model_scope_status=lambda fixture: (
+            status
+            if (
+                status := coverage.opportunity_status(
+                    DixonColesModelScope(
+                        "api-football",
+                        "api-football",
+                        fixture.league_id,
+                        fixture.season,
+                    )
+                )
+            )
+            is not None
+            else None
+        ),
         max_items=settings.opportunity_max_items,
         max_wall_seconds=settings.opportunity_max_wall_seconds,
     )
@@ -182,5 +257,7 @@ def build_production_application(
         monitoring,
         results,
         loader,
+        coverage,
+        model_lifecycle,
         opportunity,
     )

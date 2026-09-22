@@ -43,6 +43,12 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert not hasattr(settings, "pilot_scopes")
     assert not hasattr(settings, "pilot_fixture_ids")
     assert settings.discovery_interval_seconds == 900
+    assert settings.model_training_max_scopes == 1
+    assert settings.model_training_max_provider_requests == 2
+    assert settings.model_training_daily_limit == 25
+    assert settings.model_training_policy.min_matches == 80
+    assert settings.model_training_policy.xi == 0.0018
+    assert settings.model_training_policy.previous_seasons == 1
 
 
 @pytest.mark.parametrize(
@@ -52,6 +58,8 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
         ("QUANTBET_BANKROLL_BOOTSTRAP_MODE", "automatic"),
         ("APP_ENV", "development"),
         ("LOG_LEVEL", "VERBOSE"),
+        ("QUANTBET_MODEL_TRAINING_MAX_SCOPES", "0"),
+        ("QUANTBET_MODEL_XI", "nan"),
     ],
 )
 def test_production_config_rejects_partial_or_invalid_values(name: str, value: str) -> None:
@@ -71,12 +79,18 @@ def test_legacy_pilot_allowlists_do_not_define_production_universe() -> None:
     assert not hasattr(settings, "pilot_fixture_ids")
 
 
-def test_production_composition_shares_one_client_and_budget() -> None:
+def test_production_composition_uses_categorized_clients_with_one_durable_budget() -> None:
     application = build_production_application(load_production_settings(production_environment()))
     assert application.opportunity._source.client is application.client
-    assert application.monitoring.refresh_odds._source.client is application.client
-    assert application.results.reconcile._source._client is application.client
     assert application.client.transport.transport.budget is application.budget
+    monitoring_client = application.monitoring.refresh_odds._source.client
+    assert monitoring_client.odds_request_category == "results_monitoring"
+    assert monitoring_client.transport.transport.budget is application.budget
+    assert application.results.reconcile._source._client is monitoring_client
+    training_client = application.model_lifecycle._trainer._historical_results
+    assert training_client._fetch_completed_fixtures.__self__.transport.transport.budget is (
+        application.budget
+    )
     durable = application.prediction.durable_discovery
     assert durable is not None
     provider_discovery = durable._discovery._discovery

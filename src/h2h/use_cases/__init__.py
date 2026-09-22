@@ -15,7 +15,6 @@ from .api_football_training import (
 )
 from .quote_history import QuoteHistoryIngestionService
 from .durable_fixture_discovery import DurableFixtureDiscovery
-from .production_prediction import ProduceFixturePrediction
 from .value_evaluation import EvaluatePersistedPredictionQuote, EvaluationFixtureMismatchError
 from .quotes import QuoteIngestionService
 from .register_pick import BootstrapBankroll, RegisterEligiblePick
@@ -27,6 +26,15 @@ from .pick_monitoring import (
     StartRegisteredPickMonitoring,
 )
 from .result_settlement import ApiFootballResultSource, ReconcileFixtureResults, ResultCycle
+
+
+def __getattr__(name: str):
+    """Load the production predictor lazily to avoid the artifact/training import cycle."""
+    if name == "ProduceFixturePrediction":
+        from .production_prediction import ProduceFixturePrediction
+
+        return ProduceFixturePrediction
+    raise AttributeError(name)
 
 __all__ = [
     "ApiFootballHistoricalResults",

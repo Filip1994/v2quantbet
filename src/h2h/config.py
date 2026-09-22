@@ -14,6 +14,7 @@ from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.domain.settlement import ResultSettlementPolicy
 from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
+from h2h.domain.model_coverage import ProductionTrainingPolicy
 
 
 class ConfigError(ValueError):
@@ -77,6 +78,13 @@ class ProductionSettings:
     opportunity_interval_seconds: float
     opportunity_max_items: int
     opportunity_max_wall_seconds: float
+    model_training_interval_seconds: float
+    model_training_max_scopes: int
+    model_training_max_provider_requests: int
+    model_training_max_wall_seconds: float
+    model_training_daily_limit: int
+    model_training_operational_reserve: int
+    model_training_policy: ProductionTrainingPolicy
     scheduler_tick_seconds: float
     shutdown_grace_seconds: float
     api_daily_limit: int
@@ -179,6 +187,17 @@ def _positive_integer(values: Mapping[str, str], name: str, default: str) -> int
     return value
 
 
+def _nonnegative_integer(values: Mapping[str, str], name: str, default: str) -> int:
+    raw = values.get(name, default).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a non-negative integer") from exc
+    if value < 0:
+        raise ConfigError(f"{name} must be a non-negative integer")
+    return value
+
+
 def load_production_settings(environ: Mapping[str, str] | None = None) -> ProductionSettings:
     """Load the complete single-service production contract; partial input fails closed."""
     values = os.environ if environ is None else environ
@@ -207,6 +226,41 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
     api_reserve = int(values.get("QUANTBET_API_RESERVE", "1500").strip())
     if api_reserve < 0 or api_reserve >= api_limit:
         raise ConfigError("QUANTBET_API_RESERVE must be non-negative and below the daily limit")
+    effective_limit = api_limit - api_reserve
+    training_daily_limit = _positive_integer(
+        values, "QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT", "25"
+    )
+    training_operational_reserve = _nonnegative_integer(
+        values, "QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE", "500"
+    )
+    if training_daily_limit > effective_limit:
+        raise ConfigError(
+            "QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT must not exceed effective API capacity"
+        )
+    if training_operational_reserve >= effective_limit:
+        raise ConfigError(
+            "QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE must be below effective API capacity"
+        )
+    try:
+        training_policy = ProductionTrainingPolicy(
+            history_window_days=_positive_integer(
+                values, "QUANTBET_MODEL_HISTORY_WINDOW_DAYS", "730"
+            ),
+            min_matches=_positive_integer(values, "QUANTBET_MODEL_MIN_MATCHES", "80"),
+            xi=float(values.get("QUANTBET_MODEL_XI", "0.0018").strip()),
+            ridge=float(values.get("QUANTBET_MODEL_RIDGE", "0.01").strip()),
+            freshness_days=_positive_integer(
+                values, "QUANTBET_MODEL_FRESHNESS_DAYS", "14"
+            ),
+            previous_seasons=_nonnegative_integer(
+                values, "QUANTBET_MODEL_PREVIOUS_SEASONS", "1"
+            ),
+            min_team_matches=_positive_integer(
+                values, "QUANTBET_MODEL_MIN_TEAM_MATCHES", "3"
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"Invalid model training policy: {exc}") from exc
     port = _positive_integer(values, "PORT", "8080")
     if port > 65535:
         raise ConfigError("PORT must be at most 65535")
@@ -231,6 +285,21 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         opportunity_max_wall_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
         ),
+        model_training_interval_seconds=_positive_number(
+            values, "QUANTBET_MODEL_TRAINING_INTERVAL_SECONDS", "60"
+        ),
+        model_training_max_scopes=_positive_integer(
+            values, "QUANTBET_MODEL_TRAINING_MAX_SCOPES", "1"
+        ),
+        model_training_max_provider_requests=_positive_integer(
+            values, "QUANTBET_MODEL_TRAINING_MAX_PROVIDER_REQUESTS", "2"
+        ),
+        model_training_max_wall_seconds=_positive_number(
+            values, "QUANTBET_MODEL_TRAINING_MAX_WALL_SECONDS", "45"
+        ),
+        model_training_daily_limit=training_daily_limit,
+        model_training_operational_reserve=training_operational_reserve,
+        model_training_policy=training_policy,
         scheduler_tick_seconds=_positive_number(
             values, "QUANTBET_SCHEDULER_TICK_SECONDS", "5"
         ),

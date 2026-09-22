@@ -12,6 +12,7 @@ from typing import Any, Final
 from urllib.parse import urlencode
 
 from h2h.odds.http import JsonTransport
+from h2h.odds.budget import provider_request_category
 
 
 API_FOOTBALL_BASE_URL: Final = "https://v3.football.api-sports.io"
@@ -27,6 +28,7 @@ class ApiFootballClient:
     base_url: str = API_FOOTBALL_BASE_URL
     timeout: float = 10.0
     cache_ttl_seconds: float = 0.0
+    odds_request_category: str = "opportunity_odds"
     clock: Callable[[], float] = field(default=monotonic, repr=False)
     _cache: dict[tuple[int, int | None], tuple[float, Mapping[str, Any]]] = field(
         default_factory=dict, init=False, repr=False
@@ -84,11 +86,12 @@ class ApiFootballClient:
             query_values["bookmaker"] = bookmaker_id
         query = urlencode(query_values)
         url = f"{self.base_url.rstrip('/')}/odds?{query}"
-        payload = self.transport.get_json(
-            url,
-            headers={"x-apisports-key": self.api_key},
-            timeout=self.timeout,
-        )
+        with provider_request_category(self.odds_request_category):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
         self._log_request("odds", payload)
         if self.cache_ttl_seconds > 0:
             self._cache[cache_key] = (
@@ -104,11 +107,12 @@ class ApiFootballClient:
             raise TypeError("fixture_date must be a date")
         query = urlencode({"date": fixture_date.isoformat()})
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        payload = self.transport.get_json(
-            url,
-            headers={"x-apisports-key": self.api_key},
-            timeout=self.timeout,
-        )
+        with provider_request_category("discovery"):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
         self._log_request("fixtures-date", payload, fixture_date=fixture_date)
         return payload
 
@@ -123,11 +127,12 @@ class ApiFootballClient:
             raise ValueError("fixture_ids must not contain duplicates")
         query = urlencode({"ids": "-".join(str(value) for value in fixture_ids), "timezone": "UTC"})
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        payload = self.transport.get_json(
-            url,
-            headers={"x-apisports-key": self.api_key},
-            timeout=self.timeout,
-        )
+        with provider_request_category("results_monitoring"):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
         self._log_request("fixture-results", payload)
         return payload
 
@@ -163,11 +168,12 @@ class ApiFootballClient:
             }
         )
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
-        payload = self.transport.get_json(
-            url,
-            headers={"x-apisports-key": self.api_key},
-            timeout=self.timeout,
-        )
+        with provider_request_category("model_training"):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
         self._log_request("completed-fixtures", payload)
         return payload
 

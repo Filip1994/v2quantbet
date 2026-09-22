@@ -174,6 +174,9 @@ class ApiFootballHistoricalResults:
     """Production-bound acquisition authorized to mint trusted datasets."""
 
     _fetch_completed_fixtures: Callable[..., Mapping[str, Any]]
+    _load_cached_payload: Callable[..., Mapping[str, Any] | None] | None
+    _save_cached_payload: Callable[..., None] | None
+    _clock: Callable[[], datetime]
     _authority: object
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -189,13 +192,41 @@ class ApiFootballHistoricalResults:
             raise TypeError("historical results service must come from trusted production construction")
         if not isinstance(scope, ApiFootballTrainingScope):
             raise TypeError("scope must be an ApiFootballTrainingScope")
-        payload = self._fetch_completed_fixtures(
-            league_id=scope.league_id,
-            season=scope.season,
-            start_at=scope.start_at,
-            end_at=scope.end_at,
-        )
+        payload = None
+        if self._load_cached_payload is not None:
+            payload = self._load_cached_payload(
+                league_id=scope.league_id,
+                season=scope.season,
+                start_at=scope.start_at,
+                end_at=scope.end_at,
+            )
+        if payload is None:
+            payload = self._fetch_completed_fixtures(
+                league_id=scope.league_id,
+                season=scope.season,
+                start_at=scope.start_at,
+                end_at=scope.end_at,
+            )
         records = normalize_api_football_historical_response(payload, scope=scope)
+        if self._load_cached_payload is not None and self._save_cached_payload is not None:
+            # An already cached payload is never written again. A strict successful
+            # normalization is required before provider bytes become durable cache data.
+            cached = self._load_cached_payload(
+                league_id=scope.league_id,
+                season=scope.season,
+                start_at=scope.start_at,
+                end_at=scope.end_at,
+            )
+            if cached is None:
+                self._save_cached_payload(
+                    league_id=scope.league_id,
+                    season=scope.season,
+                    start_at=scope.start_at,
+                    end_at=scope.end_at,
+                    payload=payload,
+                    accepted_match_count=len(records),
+                    acquired_at=self._clock(),
+                )
         return ApiFootballTrainingDataset(records, _provenance=_DATASET_PROVENANCE)
 
 
@@ -228,12 +259,19 @@ def normalize_api_football_historical_response(
 
 def _trusted_api_football_historical_results(
     client: ApiFootballClient,
+    *,
+    load_cached_payload: Callable[..., Mapping[str, Any] | None] | None = None,
+    save_cached_payload: Callable[..., None] | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> ApiFootballHistoricalResults:
     """Internal composition hook; only the production factory may call this."""
     if not isinstance(client, ApiFootballClient):
         raise TypeError("client must be an ApiFootballClient")
     service = object.__new__(ApiFootballHistoricalResults)
     object.__setattr__(service, "_fetch_completed_fixtures", client.fetch_completed_fixtures)
+    object.__setattr__(service, "_load_cached_payload", load_cached_payload)
+    object.__setattr__(service, "_save_cached_payload", save_cached_payload)
+    object.__setattr__(service, "_clock", clock)
     object.__setattr__(service, "_authority", _ACQUISITION_AUTHORITY)
     return service
 

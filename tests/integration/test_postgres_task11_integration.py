@@ -69,7 +69,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
-            assert applied[-1] == "009_model_training_target_scope.sql"
+            assert applied[-1] == "010_model_coverage_training.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(
