@@ -1,6 +1,6 @@
 import logging
 from unittest.mock import Mock
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
@@ -121,24 +121,32 @@ def test_fetch_odds_can_pin_one_provider_bookmaker() -> None:
     )
 
 
-def test_fetch_fixtures_uses_exact_live_scope() -> None:
+def test_fetch_fixtures_for_date_uses_global_date_query(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="quantbet.provider")
     transport = Mock()
     transport.get_json.return_value = {"response": []}
     client = ApiFootballClient(transport, "secret")
 
-    client.fetch_fixtures(
-        league_id=39,
-        season=2026,
-        start_at=datetime(2026, 9, 17, tzinfo=UTC),
-        end_at=datetime(2026, 9, 20, tzinfo=UTC),
-    )
+    client.fetch_fixtures_for_date(fixture_date=date(2026, 9, 17))
 
     transport.get_json.assert_called_once_with(
-        "https://v3.football.api-sports.io/fixtures?"
-        "from=2026-09-17&to=2026-09-20&timezone=UTC&league=39&season=2026",
+        "https://v3.football.api-sports.io/fixtures?date=2026-09-17",
         headers={"x-apisports-key": "secret"},
         timeout=10.0,
     )
+    record = next(item for item in caplog.records if item.message == "provider request completed")
+    assert record.provider_endpoint == "fixtures-date"
+    assert record.provider_fixture_date == "2026-09-17"
+
+
+@pytest.mark.parametrize("fixture_date", [datetime(2026, 9, 17, tzinfo=UTC), "2026-09-17", None])
+def test_fetch_fixtures_for_date_requires_plain_date(fixture_date: object) -> None:
+    with pytest.raises(TypeError, match="fixture_date"):
+        ApiFootballClient(Mock(), "secret").fetch_fixtures_for_date(  # type: ignore[arg-type]
+            fixture_date=fixture_date
+        )
 
 @pytest.mark.parametrize("field,value", [("league_id", True), ("league_id", 1.5), ("season", "2025")])
 def test_fetch_completed_fixtures_rejects_non_integer_scope(field: str, value: object) -> None:

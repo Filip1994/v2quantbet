@@ -22,6 +22,12 @@ discover(start_at: datetime, end_at: datetime) -> Sequence[Fixture]
 
 An adapter is responsible for translating this request to a provider API and returning canonical `Fixture` objects. The contract does not prescribe HTTP, authentication, pagination, or provider payload structure.
 
+## API-Football production acquisition
+
+Production discovery maps the UTC calendar dates intersecting the requested timestamp window to global `fixtures?date=YYYY-MM-DD` requests. It does not send league, season or fixture-ID allowlists. Provider results are filtered back to the exact inclusive timestamp window before Phase I classification.
+
+Date shards inside the next 72 hours refresh at most every six hours; later shards refresh at most every 24 hours. Cached shard contents are filtered against the current exact timestamp window on every scheduler wakeup, so most wakeups make no fixture request without losing fixtures as the window rolls. The refresh state is in-process: a restart repopulates the configured horizon once. If any required shard fails, the discovery call fails without returning a partial horizon; successful shards from that incomplete attempt are retained in memory while the failed shard observes a one-hour retry delay.
+
 ## Deliberate scope
 
 Competition filtering, fixture persistence, cross-provider matching, prediction and bulletin orchestration remain separate concerns. Discovery establishes only the provider-qualified fixture reference and its canonical allocation; it does not infer equivalence from names, team IDs, kickoff times or numeric equality.

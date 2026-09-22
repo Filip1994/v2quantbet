@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 _EXTRA_FIELDS = (
     "worker",
     "provider_endpoint",
+    "provider_fixture_date",
     "provider_requests",
     "provider_response_items",
     "fixtures_persisted",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from math import isfinite
 from time import monotonic
 from typing import Any, Final
@@ -97,41 +97,19 @@ class ApiFootballClient:
             )
         return payload
 
-    def fetch_fixtures(
-        self,
-        *,
-        start_at: datetime,
-        end_at: datetime,
-        league_id: int | None = None,
-        season: int | None = None,
-    ) -> Mapping[str, Any]:
-        """Fetch fixtures in the inclusive provider date range covering the window."""
+    def fetch_fixtures_for_date(self, *, fixture_date: date) -> Mapping[str, Any]:
+        """Fetch every provider fixture on one UTC calendar date."""
         self._validate()
-        if not isinstance(start_at, datetime) or not isinstance(end_at, datetime):
-            raise TypeError("start_at and end_at must be datetime values")
-        self._validate_datetime(start_at, "start_at")
-        self._validate_datetime(end_at, "end_at")
-        if start_at >= end_at:
-            raise ValueError("start_at must be before end_at")
-        if (league_id is None) != (season is None):
-            raise ValueError("league_id and season must be provided together")
-        query_values: dict[str, object] = {
-            "from": start_at.date().isoformat(),
-            "to": end_at.date().isoformat(),
-            "timezone": "UTC",
-        }
-        if league_id is not None and season is not None:
-            self._validate_positive_int(league_id, "league_id")
-            self._validate_positive_int(season, "season")
-            query_values.update({"league": league_id, "season": season})
-        query = urlencode(query_values)
+        if isinstance(fixture_date, datetime) or not isinstance(fixture_date, date):
+            raise TypeError("fixture_date must be a date")
+        query = urlencode({"date": fixture_date.isoformat()})
         url = f"{self.base_url.rstrip('/')}/fixtures?{query}"
         payload = self.transport.get_json(
             url,
             headers={"x-apisports-key": self.api_key},
             timeout=self.timeout,
         )
-        self._log_request("fixtures", payload)
+        self._log_request("fixtures-date", payload, fixture_date=fixture_date)
         return payload
 
     def fetch_fixture_results(self, *, fixture_ids: tuple[int, ...]) -> Mapping[str, Any]:
@@ -194,16 +172,24 @@ class ApiFootballClient:
         return payload
 
     @staticmethod
-    def _log_request(endpoint: str, payload: Mapping[str, Any]) -> None:
+    def _log_request(
+        endpoint: str,
+        payload: Mapping[str, Any],
+        *,
+        fixture_date: date | None = None,
+    ) -> None:
         response = payload.get("response")
         response_items = len(response) if isinstance(response, list) else 0
+        extra: dict[str, object] = {
+            "provider_endpoint": endpoint,
+            "provider_requests": 1,
+            "provider_response_items": response_items,
+        }
+        if fixture_date is not None:
+            extra["provider_fixture_date"] = fixture_date.isoformat()
         LOGGER.info(
             "provider request completed",
-            extra={
-                "provider_endpoint": endpoint,
-                "provider_requests": 1,
-                "provider_response_items": response_items,
-            },
+            extra=extra,
         )
 
     @staticmethod

@@ -11,8 +11,8 @@
 - The client validates the fixture identifier, API key and timeout.
 - Tests use a mock transport; no real API-Football request is made in CI.
 
-The client exposes `fetch_odds(fixture_id=...)`, discovery-oriented
-`fetch_fixtures(...)`, and the bounded historical call
+The client exposes `fetch_odds(fixture_id=...)`, global discovery-oriented
+`fetch_fixtures_for_date(fixture_date=...)`, and the bounded historical call
 `fetch_completed_fixtures(league_id, season, start_at, end_at)`. The historical
 call sends the UTC covering calendar dates with `status=FT` and `timezone=UTC`;
 strict envelope, record, score and logical-window validation remains the
