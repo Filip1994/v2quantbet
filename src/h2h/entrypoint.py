@@ -88,13 +88,14 @@ def _run_active_leader(
         now=datetime.now(UTC),
     )
 
+    durable = application.prediction.durable_discovery
+    if durable is None:
+        raise RuntimeError("durable fixture discovery is not composed")
+
     def discovery_cycle() -> int:
         if stop.is_set():
             return 0
         start = datetime.now(UTC)
-        durable = application.prediction.durable_discovery
-        if durable is None:
-            raise RuntimeError("durable fixture discovery is not composed")
         fixtures_persisted = len(
             durable.discover(
                 start,
@@ -108,7 +109,12 @@ def _run_active_leader(
         return fixtures_persisted
 
     jobs = (
-        ScheduledJob("discovery", application.settings.discovery_interval_seconds, discovery_cycle),
+        ScheduledJob(
+            "discovery",
+            application.settings.discovery_interval_seconds,
+            discovery_cycle,
+            has_pending_work=lambda: durable.has_pending,
+        ),
         ScheduledJob(
             "opportunity",
             application.settings.opportunity_interval_seconds,

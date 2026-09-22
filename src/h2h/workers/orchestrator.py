@@ -45,6 +45,7 @@ class ScheduledJob:
     name: str
     interval_seconds: float
     run: Callable[[], object]
+    has_pending_work: Callable[[], bool] = lambda: False
 
     def __post_init__(self) -> None:
         if not self.name.strip() or self.interval_seconds <= 0:
@@ -92,6 +93,8 @@ class ProductionOrchestrator:
                     self._runtime.worker_started(job.name, self._instance_id, at=now)
                     job.run()
                     finished = self._clock().astimezone(UTC)
+                    if job.has_pending_work():
+                        next_due = finished
                     self._runtime.worker_succeeded(
                         job.name, self._instance_id, at=finished, next_due_at=next_due
                     )

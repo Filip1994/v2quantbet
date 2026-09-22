@@ -49,7 +49,12 @@ def test_multi_day_window_fetches_global_date_shards_without_scope() -> None:
     start = datetime(2026, 9, 17, 10, tzinfo=UTC)
     end = datetime(2026, 9, 19, 9, tzinfo=UTC)
 
-    assert ApiFootballFixtureDiscovery(client, clock=lambda: start).discover(start, end) == ()
+    discovery = ApiFootballFixtureDiscovery(client, clock=lambda: start)
+
+    assert discovery.discover(start, end) == ()
+    assert discovery.has_pending is True
+    assert discovery.discover(start, end) == ()
+    assert discovery.has_pending is False
 
     assert client.fetch_fixtures_for_date.call_args_list == [
         call(fixture_date=date(2026, 9, 17)),
@@ -69,11 +74,17 @@ def test_phase_i_policy_is_authoritative_for_multi_league_provider_payload() -> 
         _payload(2, 140, "La Liga", "Spain"),
         _payload(3, 135, "Serie A", "Italy"),
         _payload(4, 98, "J1 League", "Japan"),
+        _payload(10, 78, "Bundesliga", "Germany"),
+        _payload(11, 253, "Major League Soccer", "USA"),
         _payload(5, 1001, "Primera Division U19", "Spain"),
-        _payload(6, 1002, "Copa del Rey", "Spain", competition_type="Cup"),
+        _payload(6, 1002, "EFL Trophy", "England"),
         _payload(7, 1003, "Premier Soccer League", "South Africa"),
         _payload(8, 41, "League Two", "England"),
         _payload(9, 1004, "Regionalliga West", "Germany"),
+        _payload(12, 1005, "KNVB Beker", "Netherlands"),
+        _payload(13, 1006, "Copa Chile", "Chile"),
+        _payload(14, 1007, "Non League Premier - Isthmian", "England"),
+        _payload(15, 1008, "Oberliga - Bremen", "Germany"),
     )
     start = datetime(2026, 9, 18, tzinfo=UTC)
     end = datetime(2026, 9, 18, 23, 59, tzinfo=UTC)
@@ -82,12 +93,14 @@ def test_phase_i_policy_is_authoritative_for_multi_league_provider_payload() -> 
         ApiFootballFixtureDiscovery(client, clock=lambda: start)
     ).discover(start, end)
 
-    assert [fixture.competition_name for fixture in fixtures] == [
+    assert {fixture.competition_name for fixture in fixtures} == {
         "Premier League",
         "La Liga",
         "Serie A",
         "J1 League",
-    ]
+        "Bundesliga",
+        "Major League Soccer",
+    }
 
 
 def test_date_shards_are_filtered_to_exact_timestamp_window() -> None:
@@ -174,7 +187,11 @@ def test_cached_shard_is_refiltered_when_exact_window_rolls() -> None:
     )
     discovery = ApiFootballFixtureDiscovery(client, clock=lambda: now[0])
 
-    assert discovery.discover(now[0], datetime(2026, 9, 10, 10, tzinfo=UTC)) == ()
+    initial_end = datetime(2026, 9, 10, 10, tzinfo=UTC)
+    while True:
+        assert discovery.discover(now[0], initial_end) == ()
+        if not discovery.has_pending:
+            break
     now[0] += timedelta(minutes=15)
     fixtures = discovery.discover(now[0], datetime(2026, 9, 10, 10, 15, tzinfo=UTC))
 
@@ -220,7 +237,11 @@ def test_cold_start_populates_complete_twenty_one_day_horizon() -> None:
     start = datetime(2026, 9, 1, tzinfo=UTC)
     end = datetime(2026, 9, 21, 23, 59, tzinfo=UTC)
 
-    ApiFootballFixtureDiscovery(client, clock=lambda: start).discover(start, end)
+    discovery = ApiFootballFixtureDiscovery(client, clock=lambda: start)
+    while True:
+        discovery.discover(start, end)
+        if not discovery.has_pending:
+            break
 
     assert client.fetch_fixtures_for_date.call_count == 21
 

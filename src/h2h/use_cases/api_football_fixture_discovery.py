@@ -17,6 +17,7 @@ class ApiFootballFixtureDiscovery:
     _NEAR_REFRESH = timedelta(hours=6)
     _FAR_REFRESH = timedelta(hours=24)
     _FAILURE_RETRY = timedelta(hours=1)
+    _DEFAULT_MAX_DATE_SHARDS_PER_CALL = 2
 
     def __init__(
         self,
@@ -24,13 +25,25 @@ class ApiFootballFixtureDiscovery:
         adapter: ApiFootballFixtureAdapter | None = None,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        max_date_shards_per_call: int = _DEFAULT_MAX_DATE_SHARDS_PER_CALL,
     ) -> None:
+        if isinstance(max_date_shards_per_call, bool) or not isinstance(
+            max_date_shards_per_call, int
+        ):
+            raise TypeError("max_date_shards_per_call must be an integer")
+        if max_date_shards_per_call <= 0:
+            raise ValueError("max_date_shards_per_call must be positive")
         self._client = client
         self._adapter = adapter or ApiFootballFixtureAdapter()
         self._clock = clock
+        self._max_date_shards_per_call = max_date_shards_per_call
         self._cache: dict[date, tuple[datetime, tuple[Fixture, ...]]] = {}
         self._pending: dict[date, tuple[datetime, tuple[Fixture, ...]]] = {}
         self._retry_after: dict[date, datetime] = {}
+
+    @property
+    def has_pending(self) -> bool:
+        return bool(self._pending)
 
     def discover(self, start_at: datetime, end_at: datetime) -> tuple[Fixture, ...]:
         """Fetch and adapt fixtures, retaining only kickoffs inside the requested window."""
@@ -57,9 +70,8 @@ class ApiFootballFixtureDiscovery:
                 f"{self._retry_after[day].isoformat()}"
             )
 
-        for day in due:
-            if day in self._pending:
-                continue
+        missing = tuple(day for day in due if day not in self._pending)
+        for day in missing[: self._max_date_shards_per_call]:
             try:
                 payload = self._client.fetch_fixtures_for_date(fixture_date=day)
                 fixtures = self._adapt_payload(payload)
@@ -70,6 +82,9 @@ class ApiFootballFixtureDiscovery:
                 ) from exc
             self._pending[day] = (now, fixtures)
             self._retry_after.pop(day, None)
+
+        if any(day not in self._pending for day in due):
+            return ()
 
         for day in due:
             self._cache[day] = self._pending.pop(day)

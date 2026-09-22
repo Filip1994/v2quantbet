@@ -28,6 +28,8 @@ Production discovery maps the UTC calendar dates intersecting the requested time
 
 Date shards inside the next 72 hours refresh at most every six hours; later shards refresh at most every 24 hours. Cached shard contents are filtered against the current exact timestamp window on every scheduler wakeup, so most wakeups make no fixture request without losing fixtures as the window rolls. The refresh state is in-process: a restart repopulates the configured horizon once. If any required shard fails, the discovery call fails without returning a partial horizon; successful shards from that incomplete attempt are retained in memory while the failed shard observes a one-hour retry delay.
 
+Acquisition fetches at most two due date shards per scheduler unit, and durable ingestion persists at most ten eligible fixtures per unit. Pending in-memory acquisition and persistence batches resume on subsequent scheduler ticks before the normal 15-minute discovery interval resumes. This keeps opportunity, monitoring and result jobs schedulable during a cold-start horizon load; a process restart rebuilds the in-memory progress from the provider date cache workflow.
+
 ## Deliberate scope
 
 Competition filtering, fixture persistence, cross-provider matching, prediction and bulletin orchestration remain separate concerns. Discovery establishes only the provider-qualified fixture reference and its canonical allocation; it does not infer equivalence from names, team IDs, kickoff times or numeric equality.

@@ -37,6 +37,11 @@ def _normalise(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
 
 
+def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
+    padded = f" {value} "
+    return any(f" {phrase} " in padded for phrase in phrases)
+
+
 def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     """Return a fail-closed Phase I inclusion decision."""
     country = _normalise(metadata.country)
@@ -52,31 +57,76 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
         "democratic republic of the congo", "djibouti", "egypt", "equatorial guinea",
         "eritrea", "eswatini", "ethiopia", "gabon", "gambia", "ghana", "guinea",
         "guinea bissau", "ivory coast", "kenya", "lesotho", "liberia", "libya",
-        "madagascar", "malawi", "mali", "mauritania", "mauritius", "morocco",
+        "burundi", "congo dr", "dr congo", "madagascar", "malawi", "mali",
+        "mauritania", "mauritius", "morocco",
         "mozambique", "namibia", "niger", "nigeria", "rwanda", "senegal",
-        "seychelles", "sierra leone", "somalia", "south africa", "south sudan",
-        "sudan", "tanzania", "togo", "tunisia", "uganda", "zambia", "zimbabwe",
+        "sao tome and principe", "seychelles", "sierra leone", "somalia",
+        "south africa", "south sudan", "sudan", "tanzania", "togo", "tunisia",
+        "uganda", "western sahara", "zambia", "zimbabwe",
     }
-    if country in african_markers or "africa" in country:
+    if (
+        country in african_markers
+        or "africa" in country
+        or _contains_phrase(name, ("africa", "caf"))
+    ):
         return ScopeDecision(False, RejectionReason.AFRICA)
 
-    youth_pattern = r"\b(?:u|under)\s*\d{2}\b|youth|junior|academy|reserve youth|\bolympic\b"
+    youth_pattern = (
+        r"\b(?:u|under)\s*\d{1,2}\b|\byouth\b|\bjuniors?\b|\bacademy\b|"
+        r"\breserves?\b|\bolympic\b"
+    )
     if re.search(youth_pattern, name) or re.search(youth_pattern, competition_type):
         return ScopeDecision(False, RejectionReason.YOUTH)
 
-    if "cup" in competition_type or "cup" in name or "knockout" in competition_type:
+    cup_markers = (
+        "beker",
+        "copa",
+        "coppa",
+        "coupe",
+        "cup",
+        "pokal",
+        "shield",
+        "supercup",
+        "taca",
+        "trophy",
+    )
+    if (
+        _contains_phrase(name, cup_markers)
+        or _contains_phrase(competition_type, cup_markers)
+        or "knockout" in competition_type
+    ):
         return ScopeDecision(False, RejectionReason.CUP)
 
+    if competition_type != "league":
+        return ScopeDecision(False, RejectionReason.AMBIGUOUS)
+
     if country in {"england", "england uk", "united kingdom"}:
-        if name in {"league two", "national league", "national league north", "national league south"}:
+        excluded_english_tiers = (
+            "counties league",
+            "isthmian",
+            "league two",
+            "national league",
+            "non league",
+            "northern premier league",
+            "southern league",
+        )
+        if _contains_phrase(name, excluded_english_tiers):
             return ScopeDecision(False, RejectionReason.ENGLISH_TIER)
         if metadata.level is not None and metadata.level >= 4:
             return ScopeDecision(False, RejectionReason.ENGLISH_TIER)
 
-    if country == "germany" and (
-        "regionalliga" in name
-        or (metadata.level is not None and metadata.level >= 4)
-    ):
-        return ScopeDecision(False, RejectionReason.GERMAN_TIER)
+    if country == "germany":
+        excluded_german_tiers = (
+            "bezirksliga",
+            "kreisliga",
+            "landesliga",
+            "oberliga",
+            "regionalliga",
+            "verbandsliga",
+        )
+        if _contains_phrase(name, excluded_german_tiers) or (
+            metadata.level is not None and metadata.level >= 4
+        ):
+            return ScopeDecision(False, RejectionReason.GERMAN_TIER)
 
     return ScopeDecision(True)

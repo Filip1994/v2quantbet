@@ -13,6 +13,10 @@ class ScopedFixtureDiscovery:
     def __init__(self, discovery: FixtureDiscovery) -> None:
         self._discovery = discovery
 
+    @property
+    def has_pending(self) -> bool:
+        return bool(getattr(self._discovery, "has_pending", False))
+
     def discover(self, start_at: datetime, end_at: datetime) -> tuple[Fixture, ...]:
         """Return only fixtures eligible for the configured Phase I universe."""
         if start_at >= end_at:
