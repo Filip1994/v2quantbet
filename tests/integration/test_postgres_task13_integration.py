@@ -44,13 +44,13 @@ def isolated_database():
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
-def test_fresh_001_through_008_runtime_leadership_and_bankroll(isolated_database) -> None:
+def test_fresh_schema_runtime_leadership_and_bankroll(isolated_database) -> None:
     _schema, connect = isolated_database
     with connect() as connection:
         applied = apply_migrations(connection, MIGRATION_DIR)
     expected = tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
     assert applied == expected
-    assert expected[-1] == "008_production_runtime.sql"
+    assert expected[-1] == "009_model_training_target_scope.sql"
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     assert runtime.check_database()
