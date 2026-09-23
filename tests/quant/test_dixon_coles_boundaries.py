@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from h2h.quant.dixon_coles import DixonColesFitError, DixonColesModel
+from h2h.quant.dixon_coles import DixonColesFitAbortedError, DixonColesFitError, DixonColesModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +72,27 @@ def test_fit_rejects_invalid_team_id_namespace(namespace: object) -> None:
             xi=0.0015,
             min_matches=1,
         )
+
+
+def test_fit_aborts_cooperatively_during_optimizer() -> None:
+    records = records_for_teams((1, 2, 3, 4), count=40)
+    checks = [0]
+
+    def should_abort() -> bool:
+        checks[0] += 1
+        return checks[0] >= 3
+
+    with pytest.raises(DixonColesFitAbortedError, match="wall-clock guard"):
+        DixonColesModel.fit(
+            records,
+            team_id_namespace="synthetic-test",
+            reference_time=datetime(2025, 1, 1, tzinfo=UTC),
+            xi=0.0015,
+            min_matches=1,
+            should_abort=should_abort,
+        )
+
+    assert checks[0] >= 3
 
 
 def test_fit_rejects_insufficient_training_matches() -> None:
