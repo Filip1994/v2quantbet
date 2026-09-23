@@ -20,6 +20,7 @@ from h2h.application_postgres import (
 from h2h.config import ProductionSettings
 from h2h.domain.fixture_identity import ResolvedFixtureIdentity
 from h2h.domain.model_lifecycle import DixonColesModelScope
+from h2h.domain.odds import CanonicalQuote
 from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
 from h2h.odds.http import UrllibJsonTransport
 from h2h.persistence import (
@@ -71,7 +72,7 @@ class BookmakerBoundOddsSource:
 
     def fetch_quotes(
         self, *, fixture_identity: ResolvedFixtureIdentity
-    ) -> tuple[object, ...]:
+    ) -> tuple[CanonicalQuote, ...]:
         return self.service.fetch_quotes(
             fixture_identity=fixture_identity,
             bookmaker_id=self.bookmaker_id,
