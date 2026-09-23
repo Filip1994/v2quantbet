@@ -99,15 +99,24 @@ class PostgreSQLModelCoverageRepository:
                     )
                 ).eligible
             ]
-            for league_id, season in eligible:
+            if eligible:
                 cursor.execute(
                     "INSERT INTO model_coverage_scopes (provider, team_id_namespace, "
                     "league_id, season, status, first_required_at, updated_at, "
-                    "next_attempt_at, policy_fingerprint, eligible) VALUES "
-                    "('api-football', 'api-football', %s, %s, 'MISSING', %s, %s, %s, %s, TRUE) "
+                    "next_attempt_at, policy_fingerprint, eligible) SELECT "
+                    "'api-football', 'api-football', scope.league_id, scope.season, "
+                    "'MISSING', %s, %s, %s, %s, TRUE FROM unnest(%s::bigint[], %s::integer[]) "
+                    "AS scope(league_id, season) "
                     "ON CONFLICT (provider, team_id_namespace, league_id, season) DO UPDATE SET "
                     "updated_at = EXCLUDED.updated_at, eligible = TRUE",
-                    (league_id, season, current, current, current, policy.fingerprint),
+                    (
+                        current,
+                        current,
+                        current,
+                        policy.fingerprint,
+                        [league_id for league_id, _ in eligible],
+                        [season for _, season in eligible],
+                    ),
                 )
             # Active pointers are authoritative. Fresh pointers remain ACTIVE; old ones
             # become STALE and are queued without deleting the current safe model.
