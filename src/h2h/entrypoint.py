@@ -141,6 +141,7 @@ def _run_active_leader(
             "monitoring",
             float(lifecycle.monitoring_interval_seconds),
             application.monitoring.worker.run_once,
+            has_pending_work=lambda: application.monitoring.worker.has_pending,
         ),
         ScheduledJob(
             "results",
