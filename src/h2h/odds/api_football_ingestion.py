@@ -4,6 +4,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from h2h.domain.market_snapshot import MarketSnapshot
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.domain.fixture_identity import (
     ResolvedFixtureIdentity,
     api_football_provider_fixture_id,
@@ -60,9 +61,7 @@ def iter_api_football_quote_payloads(
             ):
                 raise TypeError("fixture.id must be a positive integer")
             if response_fixture_id != requested_fixture_id:
-                raise ValueError(
-                    "fixture.id does not match the requested API-Football fixture"
-                )
+                raise ValueError("fixture.id does not match the requested API-Football fixture")
         except (TypeError, ValueError) as exc:
             raise QuoteNormalizationError(
                 f"invalid API-Football odds response record at index {index}: {exc}"
@@ -78,6 +77,8 @@ def iter_api_football_quote_payloads(
             if not isinstance(bookmaker, Mapping):
                 continue
             if bookmaker_id is not None and bookmaker.get("id") != bookmaker_id:
+                continue
+            if bookmaker.get("id") not in API_FOOTBALL_BOOKMAKERS:
                 continue
             bets = bookmaker.get("bets", [])
             if not isinstance(bets, list):

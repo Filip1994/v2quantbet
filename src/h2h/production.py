@@ -18,9 +18,8 @@ from h2h.application_postgres import (
     build_postgres_result_settlement_application,
 )
 from h2h.config import ProductionSettings
-from h2h.domain.fixture_identity import ResolvedFixtureIdentity
 from h2h.domain.model_lifecycle import DixonColesModelScope
-from h2h.domain.odds import CanonicalQuote
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
 from h2h.odds.http import UrllibJsonTransport
 from h2h.persistence import (
@@ -61,26 +60,6 @@ class ProviderOperationalState:
             self.last_error_class = None
             self.last_error_message = None
             self.last_error_at = None
-
-
-@dataclass(frozen=True)
-class BookmakerBoundOddsSource:
-    """Bind monitoring refreshes to the same configured bookmaker as registration."""
-
-    service: ApiFootballOddsService
-    bookmaker_id: int
-
-    @property
-    def client(self) -> object:
-        return self.service.client
-
-    def fetch_quotes(
-        self, *, fixture_identity: ResolvedFixtureIdentity
-    ) -> tuple[CanonicalQuote, ...]:
-        return self.service.fetch_quotes(
-            fixture_identity=fixture_identity,
-            bookmaker_id=self.bookmaker_id,
-        )
 
 
 @dataclass
@@ -168,10 +147,7 @@ def build_production_application(
     )
     monitoring = build_postgres_pick_monitoring_application(
         application_settings.odds_lifecycle_policy,
-        BookmakerBoundOddsSource(
-            ApiFootballOddsService(monitoring_client),
-            settings.bookmaker_id,
-        ),
+        ApiFootballOddsService(monitoring_client),
         database_url=application_settings.database_url,
         bulletin_timezone=application_settings.bulletin_timezone,
         on_item_failure=item_failure("monitoring"),
@@ -249,6 +225,7 @@ def build_production_application(
         prediction.evaluator,
         registration.register_pick,
         bookmaker_id=settings.bookmaker_id,
+        bookmaker_ids=tuple(API_FOOTBALL_BOOKMAKERS),
         allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
         ensure_model_available=ensure_model_available,
         should_stop=should_stop,

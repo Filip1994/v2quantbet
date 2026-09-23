@@ -1,5 +1,18 @@
 # QuantBet — Bookmaker Policy
 
+## Production best-price universe
+
+Production compares only Bet365 (`8`), 1xBet (`11`) and Superbet (`34`). One unfiltered
+API-Football request can return all three without tripling budget use; normalization rejects
+every other bookmaker. Quotes are comparable only for the same fixture, market, selection,
+source and settlement semantics. Highest executable decimal odds win, with provider ID as a
+deterministic tie-breaker.
+
+The winner receives a mandatory bookmaker-specific final refresh. Unavailable, incomplete,
+stale or no-longer-playable prices fall back to the next ranked approved bookmaker. Initial
+and final observations remain in append-only history; registered bookmaker and Entry never
+change afterward.
+
 ## 1. Allowlist
 
 QuantBet may ingest, retain, compare, and display betting quotes only from the following bookmakers:

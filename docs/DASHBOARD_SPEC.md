@@ -1,5 +1,14 @@
 # QuantBet — Dashboard Specification
 
+## Multi-bookmaker price fields
+
+Each pick exposes registered bookmaker, immutable Pick odds, current same-bookmaker odds,
+best current odds plus bookmaker, and closing same-bookmaker odds. The accessible movement
+arrow compares same-book current with Pick: up is green, down red, unchanged/unavailable
+neutral. Technical provenance is not a visible column. A plain-language glossary defines
+implied probability (`1 / odds`), edge (`model probability - de-vig probability`), EV
+(`model probability * odds - 1`) and same-bookmaker CLV.
+
 ## 1. Product decision
 
 QuantBet does **not** need an interactive frontend dashboard.

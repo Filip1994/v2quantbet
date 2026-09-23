@@ -27,6 +27,9 @@ def _pick(**changes: object) -> dict[str, object]:
         "first_seen_odd": 1.91,
         "pick_odd": 1.95,
         "current_odd": 2.01,
+        "best_current_odd": 2.10,
+        "best_current_bookmaker_key": "superbet",
+        "best_current_observed_at": NOW,
         "closing_odd": 2.05,
         "bookmaker_key": "bet365",
         "source": "api-football",
@@ -107,6 +110,7 @@ def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html
     assert "1.91" in html
     assert "1.95" in html
     assert "2.01" in html
+    assert "2.10" in html
     assert "2.05" in html
     assert "950.00 RSD" in html
     assert "+5.00%" in html
@@ -114,6 +118,21 @@ def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html
     assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "FIXED_STAKE_V1" in html
+    assert "Best current" in html
+    assert "superbet" in html
+    assert 'aria-label="Same-bookmaker price moved up"' in html
+    assert "<th>Provenance</th>" not in html
+    assert "Plain-language glossary" in html
+
+
+def test_same_bookmaker_movement_is_accessible_for_down_and_neutral() -> None:
+    down = RenderingDashboard(_snapshot([_pick(current_odd=1.80)])).render_html()
+    neutral = RenderingDashboard(_snapshot([_pick(current_odd=1.95)])).render_html()
+
+    assert 'class="movement down"' in down
+    assert 'aria-label="Same-bookmaker price moved down"' in down
+    assert 'class="movement neutral"' in neutral
+    assert 'aria-label="Same-bookmaker price unchanged"' in neutral
 
 
 def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> None:
@@ -164,9 +183,7 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
                 )
             )
         ),
-        results=SimpleNamespace(
-            performance=SimpleNamespace(summary=lambda _account: performance)
-        ),
+        results=SimpleNamespace(performance=SimpleNamespace(summary=lambda _account: performance)),
         budget=SimpleNamespace(
             usage_by_category=lambda: {"discovery": 10, "results_monitoring": 5},
             effective_limit=7500,
@@ -176,10 +193,12 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     class Projection(DashboardService):
         def _picks(self) -> list[dict[str, object]]:
             return [
-                {"stake_minor": 100_000, "gross_return_minor": 195_000,
-                 "settlement_outcome": "WIN"},
-                {"stake_minor": 50_000, "gross_return_minor": None,
-                 "settlement_outcome": None},
+                {
+                    "stake_minor": 100_000,
+                    "gross_return_minor": 195_000,
+                    "settlement_outcome": "WIN",
+                },
+                {"stake_minor": 50_000, "gross_return_minor": None, "settlement_outcome": None},
             ]
 
         def _operations(self, _generated_at: datetime) -> dict[str, object]:
@@ -198,9 +217,7 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
 def dashboard_server(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
     monkeypatch.setenv("QUANTBET_DASHBOARD_PASSWORD", "correct horse")
-    service = DashboardHTTPService(
-        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
-    )
+    service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)
     service.start()
     try:
         yield service
@@ -229,9 +246,7 @@ def test_dashboard_http_auth_security_headers_and_no_write_path(dashboard_server
 
 def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
-    service = DashboardHTTPService(
-        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
-    )
+    service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)
     service.start()
     try:
         with pytest.raises(HTTPError) as response:
@@ -245,9 +260,7 @@ def test_dashboard_public_mode_needs_no_authorization(monkeypatch: pytest.Monkey
     monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
     monkeypatch.delenv("QUANTBET_DASHBOARD_USER", raising=False)
     monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
-    service = DashboardHTTPService(
-        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
-    )
+    service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)
     service.start()
     try:
         with urlopen(f"http://127.0.0.1:{service.port}/") as response:
@@ -262,9 +275,7 @@ def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
 ) -> None:
     calls: list[str] = []
     monkeypatch.setenv("QUANTBET_PROCESS", "dashboard")
-    monkeypatch.setattr(
-        "h2h.dashboard_entrypoint.main", lambda: calls.append("dashboard")
-    )
+    monkeypatch.setattr("h2h.dashboard_entrypoint.main", lambda: calls.append("dashboard"))
     monkeypatch.setattr(
         entrypoint,
         "load_production_settings",

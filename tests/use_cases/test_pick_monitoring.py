@@ -7,6 +7,7 @@ from h2h.use_cases.pick_monitoring import (
     RefreshRegisteredPickOdds,
     StartRegisteredPickMonitoring,
 )
+from h2h.persistence.pick_monitoring import PickQuoteRefreshTarget
 
 
 NOW = datetime(2026, 9, 16, 12, tzinfo=UTC)
@@ -56,27 +57,47 @@ class Ingestion:
 
 def test_start_supplies_pinned_policy_and_utc_time() -> None:
     repository = Repository()
-    assert StartRegisteredPickMonitoring(
-        repository, POLICY, clock=lambda: NOW
-    ).execute("p1") == "started"
+    assert (
+        StartRegisteredPickMonitoring(repository, POLICY, clock=lambda: NOW).execute("p1")
+        == "started"
+    )
     assert repository.started == [("p1", POLICY, NOW)]
 
 
 def test_refresh_claims_picks_and_groups_one_fixture() -> None:
     repository, source = Repository(), Source()
-    result = RefreshRegisteredPickOdds(
-        repository, source, Ingestion(), clock=lambda: NOW
-    ).execute()
+    result = RefreshRegisteredPickOdds(repository, source, Ingestion(), clock=lambda: NOW).execute()
     assert result.claimed_pick_ids == ("p1", "p2")
     assert result.refreshed_fixture_ids == ("api-football:42",)
     assert result.persisted_snapshot_count == 1
     assert source.calls == 1
 
 
+def test_refresh_targets_the_bookmaker_registered_on_each_pick() -> None:
+    identity = ResolvedFixtureIdentity(
+        "api-football:42", ProviderFixtureReference("api-football", "42")
+    )
+
+    class TargetRepository(Repository):
+        def quote_refresh_targets_for_picks(self, _pick_ids):
+            return (PickQuoteRefreshTarget(identity, 34),)
+
+    class TargetSource:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_quotes(self, *, fixture_identity, bookmaker_id=None):
+            self.calls.append((fixture_identity.fixture_id, bookmaker_id))
+            return ("quote",)
+
+    source = TargetSource()
+    RefreshRegisteredPickOdds(TargetRepository(), source, Ingestion(), clock=lambda: NOW).execute()
+
+    assert source.calls == [("api-football:42", 34)]
+
+
 def test_reconciliation_starts_every_unstarted_registered_pick() -> None:
     repository = Repository()
-    result = ReconcileRegisteredPickMonitoring(
-        repository, POLICY, clock=lambda: NOW
-    ).execute()
+    result = ReconcileRegisteredPickMonitoring(repository, POLICY, clock=lambda: NOW).execute()
     assert result.started_pick_ids == ("p1", "p2")
     assert [call[0] for call in repository.started] == ["p1", "p2"]

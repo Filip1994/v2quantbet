@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -12,6 +13,12 @@ from h2h.domain.pick_monitoring import (
     PickOddsLifecycle,
 )
 from h2h.domain.fixture_identity import ResolvedFixtureIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class PickQuoteRefreshTarget:
+    fixture_identity: ResolvedFixtureIdentity
+    bookmaker_id: int
 
 
 class PickMonitoringConflictError(ValueError):
@@ -44,3 +51,7 @@ class PickMonitoringRepository(Protocol):
     def fixture_identities_for_picks(
         self, pick_ids: tuple[str, ...]
     ) -> tuple[ResolvedFixtureIdentity, ...]: ...
+
+    def quote_refresh_targets_for_picks(
+        self, pick_ids: tuple[str, ...]
+    ) -> tuple[PickQuoteRefreshTarget, ...]: ...

@@ -1,5 +1,16 @@
 # QuantBet — Progress
 
+## 2026-09-23 — Issue #14 multi-bookmaker execution
+
+- Preliminary production requests ingest Bet365 (8), 1xBet (11) and Superbet (34) together.
+- Exact-semantic eligible prices are ranked; mandatory final verification falls back through
+  ranked approved candidates and rejects when none remains.
+- Monitoring targets the bookmaker registered on each pick, preserving same-book Closing/CLV.
+- Metrics cover compared quotes, preliminary/final refreshes, fallbacks, no-valid outcomes
+  and wins by bookmaker.
+- Dashboard/API distinguish Pick, same-book current, best current and same-book Closing with
+  accessible movement cues, bookmaker badges and glossary.
+
 ## Trenutno stanje
 
 QuantBet više nije samo repository-level implementacija: **production Railway servis je aktivan i live runtime je verifikovan**.

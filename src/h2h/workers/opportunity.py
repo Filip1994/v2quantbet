@@ -10,6 +10,8 @@ from hashlib import sha256
 from time import monotonic
 
 from h2h.domain.quote_normalizer import QuoteNormalizationError
+from h2h.domain.best_price import rank_best_prices
+from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.domain.final_quote import FinalQuoteRejectionCode, FinalQuoteStatus
 from h2h.domain.market_snapshot import MarketSnapshot
 from h2h.odds import ApiBudgetExceededError
@@ -68,6 +70,12 @@ class OpportunityCycle:
     stale_retries_suppressed_by_budget: int = 0
     stale_retries_stopped: int = 0
     odds_fetches: int = 0
+    compared_quotes: int = 0
+    preliminary_refreshes: int = 0
+    final_refreshes: int = 0
+    fallback_attempts: int = 0
+    no_valid_quote_count: int = 0
+    bookmaker_wins: tuple[tuple[int, int], ...] = ()
 
 
 class OpportunityOddsUnavailableError(RuntimeError):
@@ -114,6 +122,7 @@ class OpportunityWorker:
         register: RegisterEligiblePick,
         *,
         bookmaker_id: int,
+        bookmaker_ids: tuple[int, ...] | None = None,
         allowed_statuses: tuple[str, ...],
         ensure_model_available: Callable[[OpportunityFixture], None],
         should_stop: Callable[[], bool],
@@ -137,6 +146,11 @@ class OpportunityWorker:
         self._evaluator = evaluator
         self._register = register
         self._bookmaker_id = bookmaker_id
+        self._bookmaker_ids = tuple(dict.fromkeys(bookmaker_ids or (bookmaker_id,)))
+        if not self._bookmaker_ids or any(
+            item not in API_FOOTBALL_BOOKMAKERS for item in self._bookmaker_ids
+        ):
+            raise ValueError("bookmaker_ids must use the approved API-Football allowlist")
         self._allowed_statuses = allowed_statuses
         self._ensure_model_available = ensure_model_available
         self._model_scope_status = model_scope_status
@@ -232,6 +246,12 @@ class OpportunityWorker:
         stale_retries_cleared = 0
         stale_retries_suppressed_by_budget = 0
         odds_fetches = 0
+        compared_quotes = 0
+        preliminary_refreshes = 0
+        final_refreshes = 0
+        fallback_attempts = 0
+        no_valid_quote_count = 0
+        bookmaker_wins: dict[int, int] = {}
         try:
             for fixture in due:
                 if self._should_stop():
@@ -269,8 +289,11 @@ class OpportunityWorker:
                         stale_retries_requested += 1
                     quotes = self._source.fetch_quotes(
                         fixture_identity=fixture.identity,
-                        bookmaker_id=self._bookmaker_id,
+                        bookmaker_id=(
+                            self._bookmaker_id if len(self._bookmaker_ids) == 1 else None
+                        ),
                     )
+                    preliminary_refreshes += 1
                 except ApiBudgetExceededError:
                     if fixture.stale_retry:
                         stale_retries_suppressed_by_budget += 1
@@ -316,19 +339,27 @@ class OpportunityWorker:
                 odds_fetches += 1
                 fresh_quotes += self._ingestion.ingest(quotes)
                 attempted_at = self._now()
-                market_states = self._repository.latest_complete_market_states(
-                    fixture.fixture_id, self._bookmaker_id
+                states_by_bookmaker = {
+                    approved_id: self._repository.latest_complete_market_states(
+                        fixture.fixture_id, approved_id
+                    )
+                    for approved_id in self._bookmaker_ids
+                }
+                market_states = tuple(
+                    state for states in states_by_bookmaker.values() for state in states
                 )
                 if not market_states:
-                    self._repository.record_quote_refresh_state(
-                        fixture.fixture_id,
-                        self._bookmaker_id,
-                        freshness_state="NO_USABLE_QUOTE",
-                        attempted_at=attempted_at,
-                        latest_observed_at=None,
-                        latest_captured_at=None,
-                        stale_retry_policy=self._stale_retry_policy,
-                    )
+                    no_valid_quote_count += 1
+                    for approved_id in self._bookmaker_ids:
+                        self._repository.record_quote_refresh_state(
+                            fixture.fixture_id,
+                            approved_id,
+                            freshness_state="NO_USABLE_QUOTE",
+                            attempted_at=attempted_at,
+                            latest_observed_at=None,
+                            latest_captured_at=None,
+                            stale_retry_policy=self._stale_retry_policy,
+                        )
                     error = OpportunityOddsUnavailableError(
                         "provider returned no complete supported two-way market"
                     )
@@ -346,67 +377,104 @@ class OpportunityWorker:
                 )
                 fresh_market_count += len(market_states) - len(stale_markets)
                 stale_market_count += len(stale_markets)
-                if stale_markets:
-                    oldest = min(stale_markets, key=lambda market: market.observed_at)
-                    refresh_state = self._repository.record_quote_refresh_state(
-                        fixture.fixture_id,
-                        self._bookmaker_id,
-                        freshness_state="STALE",
-                        attempted_at=attempted_at,
-                        latest_observed_at=oldest.observed_at,
-                        latest_captured_at=oldest.captured_at,
-                        stale_retry_policy=self._stale_retry_policy,
+                fresh_bookmaker_ids: list[int] = []
+                for approved_id, states in states_by_bookmaker.items():
+                    if not states:
+                        self._repository.record_quote_refresh_state(
+                            fixture.fixture_id,
+                            approved_id,
+                            freshness_state="NO_USABLE_QUOTE",
+                            attempted_at=attempted_at,
+                            latest_observed_at=None,
+                            latest_captured_at=None,
+                            stale_retry_policy=self._stale_retry_policy,
+                        )
+                        continue
+                    stale_for_book = tuple(
+                        state
+                        for state in states
+                        if attempted_at - state.observed_at
+                        > timedelta(seconds=self._maximum_quote_age_seconds)
                     )
-                    if refresh_state.next_retry_at is not None:
-                        stale_retries_scheduled += 1
-                    LOGGER.info(
-                        "stale provider quote observed",
-                        extra={
-                            "worker": WORKER_NAME,
-                            "fixture_id": fixture.fixture_id,
-                            "quote_observed_age_seconds": (
-                                attempted_at - oldest.observed_at
-                            ).total_seconds(),
-                            "captured_at": oldest.captured_at,
-                            "observed_at": oldest.observed_at,
-                            "stale_retry_attempt": refresh_state.stale_attempt_count,
-                            "stale_retry_at": refresh_state.next_retry_at,
-                            "stale_retry_delay_seconds": (
-                                None
-                                if refresh_state.next_retry_at is None
-                                else (refresh_state.next_retry_at - attempted_at).total_seconds()
-                            ),
-                        },
-                    )
-                else:
+                    if stale_for_book:
+                        oldest = min(stale_for_book, key=lambda state: state.observed_at)
+                        refresh_state = self._repository.record_quote_refresh_state(
+                            fixture.fixture_id,
+                            approved_id,
+                            freshness_state="STALE",
+                            attempted_at=attempted_at,
+                            latest_observed_at=oldest.observed_at,
+                            latest_captured_at=oldest.captured_at,
+                            stale_retry_policy=self._stale_retry_policy,
+                        )
+                        if refresh_state.next_retry_at is not None:
+                            stale_retries_scheduled += 1
+                        # Preserve the legacy single-bookmaker worker contract. The
+                        # production multi-bookmaker path fails closed on stale prices.
+                        if len(self._bookmaker_ids) == 1:
+                            fresh_bookmaker_ids.append(approved_id)
+                        continue
+                    fresh_bookmaker_ids.append(approved_id)
                     self._repository.record_quote_refresh_state(
                         fixture.fixture_id,
-                        self._bookmaker_id,
+                        approved_id,
                         freshness_state="FRESH",
                         attempted_at=attempted_at,
-                        latest_observed_at=min(market.observed_at for market in market_states),
-                        latest_captured_at=max(market.captured_at for market in market_states),
+                        latest_observed_at=min(state.observed_at for state in states),
+                        latest_captured_at=max(state.captured_at for state in states),
                         stale_retry_policy=self._stale_retry_policy,
                     )
-                    if fixture.quote_freshness_state == "STALE":
-                        stale_retries_cleared += 1
-                        LOGGER.info(
-                            "stale provider quote condition cleared",
-                            extra={
-                                "worker": WORKER_NAME,
-                                "fixture_id": fixture.fixture_id,
-                            },
-                        )
+                if fixture.quote_freshness_state == "STALE" and fresh_bookmaker_ids:
+                    stale_retries_cleared += 1
+                if not fresh_bookmaker_ids:
+                    no_valid_quote_count += 1
+                    error = OpportunityOddsUnavailableError(
+                        "no fresh complete market from an approved bookmaker"
+                    )
+                    failures_to_persist.append(
+                        (WORKER_NAME, fixture.fixture_id, error, attempted_at)
+                    )
+                    failed.append(fixture.fixture_id)
+                    odds_unavailable.append(fixture.fixture_id)
+                    continue
 
                 try:
                     prediction = self._predictor.execute(fixture.fixture_id)
                     predictions.append(prediction.prediction_id)
-                    snapshot_ids = self._repository.latest_complete_snapshot_ids(
-                        fixture.fixture_id, self._bookmaker_id
+                    snapshot_ids = tuple(
+                        snapshot_id
+                        for approved_id in fresh_bookmaker_ids
+                        for snapshot_id in self._repository.latest_complete_snapshot_ids(
+                            fixture.fixture_id, approved_id
+                        )
                     )
-                    for snapshot_id in snapshot_ids:
-                        preliminary = self._evaluator.execute(prediction.prediction_id, snapshot_id)
-                        evaluations.append(preliminary.evaluation_id)
+                    preliminary_evaluations = tuple(
+                        self._evaluator.execute(prediction.prediction_id, snapshot_id)
+                        for snapshot_id in snapshot_ids
+                    )
+                    evaluations.extend(
+                        preliminary.evaluation_id for preliminary in preliminary_evaluations
+                    )
+                    if len(self._bookmaker_ids) == 1:
+                        ordered_preliminaries = preliminary_evaluations
+                    else:
+                        ranked_sets = rank_best_prices(preliminary_evaluations)
+                        ordered_preliminaries = tuple(
+                            candidate for group in ranked_sets for candidate in group.candidates
+                        )
+                    compared_quotes += len(ordered_preliminaries)
+                    registered_selection_keys: set[tuple[object, object]] = set()
+                    for preliminary in ordered_preliminaries:
+                        selection_key = (
+                            getattr(preliminary.market, "value", preliminary.market),
+                            getattr(
+                                preliminary.selected_selection,
+                                "value",
+                                preliminary.selected_selection,
+                            ),
+                        )
+                        if selection_key in registered_selection_keys:
+                            continue
                         preliminary_rejections = self._register.preliminary_rejection_codes(
                             preliminary.evaluation_id
                         )
@@ -433,6 +501,7 @@ class OpportunityWorker:
                         if claim.status is FinalQuoteStatus.REJECTED:
                             rejected_picks += 1
                             decisions += 1
+                            fallback_attempts += 1
                             continue
                         if claim.status is FinalQuoteStatus.READY:
                             registration = self._register.execute(
@@ -443,8 +512,13 @@ class OpportunityWorker:
                             decisions += 1
                             if registration.pick is not None:
                                 picks.append(registration.pick.pick_id)
+                                registered_selection_keys.add(selection_key)
+                                bookmaker_wins[preliminary.bookmaker_id] = (
+                                    bookmaker_wins.get(preliminary.bookmaker_id, 0) + 1
+                                )
                             else:
                                 rejected_picks += 1
+                                fallback_attempts += 1
                             continue
                         if not claim.should_fetch:
                             LOGGER.info(
@@ -479,9 +553,10 @@ class OpportunityWorker:
                         try:
                             final_quotes = self._source.fetch_quotes(
                                 fixture_identity=fixture.identity,
-                                bookmaker_id=self._bookmaker_id,
+                                bookmaker_id=preliminary.bookmaker_id,
                             )
                             odds_fetches += 1
+                            final_refreshes += 1
                         except ApiBudgetExceededError:
                             self._register.reject_final_quote_verification(
                                 claim.verification_id,
@@ -522,6 +597,7 @@ class OpportunityWorker:
                             )
                             decisions += 1
                             rejected_picks += 1
+                            fallback_attempts += 1
                             LOGGER.warning(
                                 "mandatory final quote verification provider failure",
                                 extra={
@@ -556,6 +632,7 @@ class OpportunityWorker:
                             )
                             decisions += 1
                             rejected_picks += 1
+                            fallback_attempts += 1
                             continue
 
                         quote_age = (captured_at - final_market.observed_at).total_seconds()
@@ -570,12 +647,13 @@ class OpportunityWorker:
                             )
                             decisions += 1
                             rejected_picks += 1
+                            fallback_attempts += 1
                             continue
                         stale_quote = quote_age > self._maximum_quote_age_seconds
                         if stale_quote:
                             self._repository.record_quote_refresh_state(
                                 fixture.fixture_id,
-                                self._bookmaker_id,
+                                preliminary.bookmaker_id,
                                 freshness_state="STALE",
                                 attempted_at=captured_at,
                                 latest_observed_at=final_market.observed_at,
@@ -596,10 +674,23 @@ class OpportunityWorker:
                                     "warning_codes": ("STALE_QUOTE_WARNING",),
                                 },
                             )
+                            if len(self._bookmaker_ids) > 1:
+                                self._register.reject_final_quote_verification(
+                                    claim.verification_id,
+                                    reason_codes=(FinalQuoteRejectionCode.FINAL_QUOTE_STALE.value,),
+                                    returned_source=selected_quote.source,
+                                    returned_observed_at=final_market.observed_at,
+                                    returned_captured_at=captured_at,
+                                    quote_age_seconds=quote_age,
+                                )
+                                decisions += 1
+                                rejected_picks += 1
+                                fallback_attempts += 1
+                                continue
 
                         exact_snapshots = self._repository.snapshot_ids_for_market_observation(
                             fixture.fixture_id,
-                            self._bookmaker_id,
+                            preliminary.bookmaker_id,
                             preliminary.market.value,
                             final_market.observed_at,
                             selected_quote.source,
@@ -621,6 +712,7 @@ class OpportunityWorker:
                             )
                             decisions += 1
                             rejected_picks += 1
+                            fallback_attempts += 1
                             continue
 
                         final_evaluation = self._evaluator.execute(
@@ -649,6 +741,7 @@ class OpportunityWorker:
                             )
                             decisions += 1
                             rejected_picks += 1
+                            fallback_attempts += 1
                             continue
                         ready = self._register.complete_final_quote_verification(
                             claim.verification_id,
@@ -667,8 +760,13 @@ class OpportunityWorker:
                         decisions += 1
                         if registration.pick is not None:
                             picks.append(registration.pick.pick_id)
+                            registered_selection_keys.add(selection_key)
+                            bookmaker_wins[final_evaluation.bookmaker_id] = (
+                                bookmaker_wins.get(final_evaluation.bookmaker_id, 0) + 1
+                            )
                         else:
                             rejected_picks += 1
+                            fallback_attempts += 1
                         LOGGER.info(
                             "mandatory final quote verification decided",
                             extra={
@@ -754,6 +852,12 @@ class OpportunityWorker:
             stale_retries_suppressed_by_budget=stale_retries_suppressed_by_budget,
             stale_retries_stopped=selection.stale_retries_stopped,
             odds_fetches=odds_fetches,
+            compared_quotes=compared_quotes,
+            preliminary_refreshes=preliminary_refreshes,
+            final_refreshes=final_refreshes,
+            fallback_attempts=fallback_attempts,
+            no_valid_quote_count=no_valid_quote_count,
+            bookmaker_wins=tuple(sorted(bookmaker_wins.items())),
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -791,6 +895,12 @@ class OpportunityWorker:
                 "stale_retries_suppressed_by_budget": (cycle.stale_retries_suppressed_by_budget),
                 "stale_retries_stopped": cycle.stale_retries_stopped,
                 "odds_fetches": cycle.odds_fetches,
+                "compared_quotes": cycle.compared_quotes,
+                "preliminary_refreshes": cycle.preliminary_refreshes,
+                "final_refreshes": cycle.final_refreshes,
+                "fallback_attempts": cycle.fallback_attempts,
+                "no_valid_quote_count": cycle.no_valid_quote_count,
+                "bookmaker_wins": dict(cycle.bookmaker_wins),
                 "max_items": self._max_items,
                 "duration_seconds": self._monotonic() - started,
             },
