@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
+import os
 from dataclasses import asdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -10,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
 from typing import Any
 
+from h2h.api.dashboard import DashboardService
 from h2h.production import ProductionApplication
 
 
@@ -42,15 +46,23 @@ class HealthService:
     ) -> None:
         self._application = application
         self._state = state
+        self._dashboard = DashboardService(application)
         service = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
-                if self.path == "/livez":
+                path = self.path.split("?", 1)[0]
+                if path == "/livez":
                     service._respond(self, 200, service.liveness())
-                elif self.path == "/readyz":
+                elif path == "/readyz":
                     body = service.readiness()
                     service._respond(self, 200 if body["ready"] else 503, body)
+                elif path == "/dashboard":
+                    if service._authorize_dashboard(self):
+                        service._respond_html(self, 200, service._dashboard.render_html())
+                elif path == "/api/picks":
+                    if service._authorize_dashboard(self):
+                        service._respond(self, 200, service._dashboard.snapshot())
                 else:
                     service._respond(self, 404, {"error": "not_found"})
 
@@ -68,6 +80,43 @@ class HealthService:
         handler.send_header("Content-Length", str(len(encoded)))
         handler.end_headers()
         handler.wfile.write(encoded)
+
+    @staticmethod
+    def _respond_html(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
+        encoded = body.encode("utf-8")
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    def _authorize_dashboard(self, handler: BaseHTTPRequestHandler) -> bool:
+        password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
+        username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
+        if not password:
+            self._respond(handler, 404, {"error": "not_found"})
+            return False
+        authorization = handler.headers.get("Authorization", "")
+        if authorization.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+                supplied_user, supplied_password = decoded.split(":", 1)
+            except (ValueError, UnicodeDecodeError):
+                supplied_user = supplied_password = ""
+            if hmac.compare_digest(supplied_user, username) and hmac.compare_digest(
+                supplied_password, password
+            ):
+                return True
+        encoded = json.dumps({"error": "authentication_required"}).encode("utf-8")
+        handler.send_response(401)
+        handler.send_header("WWW-Authenticate", 'Basic realm="QuantBet Dashboard"')
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+        return False
 
     def start(self) -> None:
         self._thread.start()
