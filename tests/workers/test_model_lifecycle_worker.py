@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from h2h.domain.model_coverage import ModelCoverageStatus, ProductionTrainingPolicy
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.persistence.postgres_model_coverage import ModelCoverageRecord
+from h2h.quant.dixon_coles import DixonColesFitAbortedError
 from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError
 from h2h.workers.model_lifecycle import ModelLifecycleWorker, ModelQualityError
 
@@ -118,7 +119,7 @@ def test_training_cycle_claims_only_configured_scope_bound() -> None:
     trainer_calls = []
 
     class Trainer:
-        def execute(self, _training_scope, _config, *, target_scope):
+        def execute(self, _training_scope, _config, *, target_scope, should_abort):
             trainer_calls.append(target_scope)
             usage[0] += 1
             return version(target_scope)
@@ -177,7 +178,7 @@ def test_valid_new_model_replaces_active_pointer_with_cas_generation() -> None:
     activator = ActivatorFake(generation=5)
 
     class Trainer:
-        def execute(self, _scope, _config, *, target_scope):
+        def execute(self, _scope, _config, *, target_scope, should_abort):
             usage[0] += 1
             return version(target_scope, "model-new")
 
@@ -243,13 +244,45 @@ def test_insufficient_data_never_reaches_activation() -> None:
     assert activator.calls == []
 
 
+def test_wall_clock_abort_fails_scope_and_returns_control() -> None:
+    coverage = CoverageFake([record(39)])
+    usage = [0]
+    elapsed = [0.0]
+
+    class Trainer:
+        def execute(self, _scope, _config, *, target_scope, should_abort):
+            assert target_scope == record(39).scope
+            while not should_abort():
+                elapsed[0] += 10.0
+            raise DixonColesFitAbortedError(
+                "Dixon-Coles fit aborted by shutdown or wall-clock guard"
+            )
+
+    lifecycle = worker(
+        coverage,
+        Trainer(),
+        ActiveFake(),
+        ActivatorFake(),
+        usage,
+    )
+    lifecycle._monotonic = lambda: elapsed[0]
+
+    cycle = lifecycle.run_once()
+
+    assert cycle.wall_budget_exhausted
+    assert cycle.failed_scopes == 1
+    assert not cycle.interrupted
+    assert coverage.failed == [record(39).scope]
+    assert elapsed[0] >= 45.0
+
+
 def test_invalid_artifact_quality_gate_never_changes_active_pointer() -> None:
     coverage = CoverageFake([record(39)])
     usage = [0]
     activator = ActivatorFake()
 
     class Trainer:
-        def execute(self, _scope, _config, *, target_scope):
+        def execute(self, _scope, _config, *, target_scope, should_abort):
             usage[0] += 1
             return version(target_scope)
 
