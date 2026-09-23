@@ -516,6 +516,7 @@ class OpportunityWorker:
                                 bookmaker_wins[preliminary.bookmaker_id] = (
                                     bookmaker_wins.get(preliminary.bookmaker_id, 0) + 1
                                 )
+                                break
                             else:
                                 rejected_picks += 1
                                 fallback_attempts += 1
@@ -764,6 +765,7 @@ class OpportunityWorker:
                             bookmaker_wins[final_evaluation.bookmaker_id] = (
                                 bookmaker_wins.get(final_evaluation.bookmaker_id, 0) + 1
                             )
+                            break
                         else:
                             rejected_picks += 1
                             fallback_attempts += 1
