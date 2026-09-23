@@ -243,9 +243,8 @@ class PostgreSQLPickRegistrationRepository:
             )
             open_exposure = int(cursor.fetchone()[0])
             cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM registered_picks "
-                "WHERE fixture_id = %s AND market = %s)",
-                (evaluation.fixture_id, evaluation.market.value),
+                "SELECT EXISTS (SELECT 1 FROM registered_picks WHERE fixture_id = %s)",
+                (evaluation.fixture_id,),
             )
             duplicate = bool(cursor.fetchone()[0])
             stake = fixed_stake(policy)
@@ -257,7 +256,7 @@ class PostgreSQLPickRegistrationRepository:
                 policy.max_stake_per_pick_minor,
                 policy.max_open_exposure_minor,
             )
-            risk = evaluate_risk(stake, snapshot, duplicate_fixture_market=duplicate)
+            risk = evaluate_risk(stake, snapshot, duplicate_fixture=duplicate)
             if risk:
                 decision = PickDecision(
                     decision_id,
@@ -408,12 +407,11 @@ class PostgreSQLPickRegistrationRepository:
                 )
             ]
             cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM registered_picks "
-                "WHERE fixture_id = %s AND market = %s)",
-                (evaluation.fixture_id, evaluation.market.value),
+                "SELECT EXISTS (SELECT 1 FROM registered_picks WHERE fixture_id = %s)",
+                (evaluation.fixture_id,),
             )
             if bool(cursor.fetchone()[0]):
-                failures.append("DUPLICATE_FIXTURE_MARKET")
+                failures.append("DUPLICATE_FIXTURE")
             if policy.fixed_stake_minor > policy.max_stake_per_pick_minor:
                 failures.append("STAKE_EXCEEDS_PER_PICK_LIMIT")
             cursor.execute(
