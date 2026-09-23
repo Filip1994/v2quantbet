@@ -445,7 +445,6 @@ def test_fitting_bridge_derives_namespace_and_forwards_configuration() -> None:
         xi=0.001,
         ridge=0.02,
         min_matches=1,
-        should_abort=None,
     )
     with pytest.raises(TypeError, match="unexpected keyword"):
         fit_api_football_dixon_coles(
