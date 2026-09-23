@@ -17,6 +17,7 @@ from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.production import ProductionApplication, build_production_application
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
+from h2h.workers.daily_bulletin import DailyBulletinWorker
 from h2h.workers.runtime import install_shutdown_handlers
 
 
@@ -95,6 +96,12 @@ def _run_active_leader(
     if durable is None:
         raise RuntimeError("durable fixture discovery is not composed")
 
+    bulletin_worker = DailyBulletinWorker(
+        application.monitoring.bulletin,
+        horizon=timedelta(hours=application.settings.discovery_lookahead_hours),
+        timezone=application.settings.application.bulletin_timezone,
+    )
+
     def discovery_cycle() -> int:
         if stop.is_set():
             return 0
@@ -129,8 +136,11 @@ def _run_active_leader(
             application.opportunity.run_once,
             has_pending_work=lambda: application.opportunity.has_pending,
         ),
+        ScheduledJob("daily_bulletin", 60.0, bulletin_worker.run_once),
         ScheduledJob(
-            "monitoring", float(lifecycle.monitoring_interval_seconds), application.monitoring.worker.run_once
+            "monitoring",
+            float(lifecycle.monitoring_interval_seconds),
+            application.monitoring.worker.run_once,
         ),
         ScheduledJob(
             "results",

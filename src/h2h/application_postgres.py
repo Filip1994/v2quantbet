@@ -273,6 +273,7 @@ def build_postgres_pick_registration_application(
     database_url: str | None = None,
     *,
     clock: Callable[[], datetime] | None = None,
+    require_final_quote_verification: bool = False,
 ) -> PostgreSQLPickRegistrationApplication:
     """Build the durable Task #10 boundary without bootstrap or registration side effects."""
 
@@ -282,7 +283,12 @@ def build_postgres_pick_registration_application(
     repository = PostgreSQLPickRegistrationRepository(database_url=database_url)
     return PostgreSQLPickRegistrationApplication(
         repository=repository,
-        register_pick=RegisterEligiblePick(repository, policy, clock=registration_clock),
+        register_pick=RegisterEligiblePick(
+            repository,
+            policy,
+            clock=registration_clock,
+            require_final_quote_verification=require_final_quote_verification,
+        ),
         bootstrap_bankroll=BootstrapBankroll(repository, policy, clock=registration_clock),
     )
 
@@ -317,9 +323,7 @@ def build_postgres_pick_monitoring_application(
         should_stop=should_stop,
     )
     finalize = FinalizePickClosingOdds(repository, clock=lifecycle_clock)
-    reconcile = ReconcileRegisteredPickMonitoring(
-        repository, policy, clock=lifecycle_clock
-    )
+    reconcile = ReconcileRegisteredPickMonitoring(repository, policy, clock=lifecycle_clock)
     read = ReadPickOddsLifecycle(repository, clock=lifecycle_clock)
     bulletin_repository = PostgreSQLDailyBulletinRepository(repository)
     return PostgreSQLPickMonitoringApplication(

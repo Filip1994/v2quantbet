@@ -10,6 +10,8 @@ from hashlib import sha256
 from time import monotonic
 
 from h2h.domain.quote_normalizer import QuoteNormalizationError
+from h2h.domain.final_quote import FinalQuoteRejectionCode, FinalQuoteStatus
+from h2h.domain.market_snapshot import MarketSnapshot
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.api_football_service import ApiFootballOddsService
 from h2h.odds.http import TransportError
@@ -72,6 +74,35 @@ class OpportunityOddsUnavailableError(RuntimeError):
     """The provider returned no usable quotes for a due fixture."""
 
 
+def _final_market(quotes: tuple[object, ...], evaluation: object) -> MarketSnapshot | None:
+    """Select one newest exact complete market from only the final response."""
+    groups: dict[tuple[object, ...], list[object]] = {}
+    for quote in quotes:
+        if (
+            quote.fixture_id == evaluation.fixture_id
+            and quote.bookmaker_id == evaluation.bookmaker_id
+            and quote.market == evaluation.market
+        ):
+            key = (
+                quote.fixture_id,
+                quote.bookmaker_id,
+                quote.market,
+                quote.source,
+                quote.bookmaker_name,
+                quote.observed_at,
+            )
+            groups.setdefault(key, []).append(quote)
+    complete: list[MarketSnapshot] = []
+    for grouped in groups.values():
+        try:
+            complete.append(MarketSnapshot.from_quotes(grouped))
+        except (TypeError, ValueError):
+            continue
+    if not complete:
+        return None
+    return max(complete, key=lambda market: (market.observed_at, market.quotes[0].source))
+
+
 class OpportunityWorker:
     def __init__(
         self,
@@ -127,9 +158,7 @@ class OpportunityWorker:
     def _now(self) -> datetime:
         return self._clock().astimezone(UTC)
 
-    def _flush_failures(
-        self, pending: list[tuple[str, str, BaseException, datetime]]
-    ) -> None:
+    def _flush_failures(self, pending: list[tuple[str, str, BaseException, datetime]]) -> None:
         if not pending:
             return
         batch = getattr(self._repository, "record_item_failures", None)
@@ -137,18 +166,14 @@ class OpportunityWorker:
             batch(pending)
         else:
             for worker, item_id, error, failed_at in pending:
-                self._repository.record_item_failure(
-                    worker, item_id, error, failed_at=failed_at
-                )
+                self._repository.record_item_failure(worker, item_id, error, failed_at=failed_at)
         pending.clear()
 
     def run_once(self) -> OpportunityCycle:
         started = self._monotonic()
         selection_time = self._now()
         prior_cursor = self._cursor
-        priority_selector = getattr(
-            self._repository, "select_due_stale_quote_retries", None
-        )
+        priority_selector = getattr(self._repository, "select_due_stale_quote_retries", None)
         priority_selection = (
             priority_selector(
                 bookmaker_id=self._bookmaker_id,
@@ -180,9 +205,7 @@ class OpportunityWorker:
         due = tuple(
             {
                 fixture.fixture_id: fixture
-                for fixture in (
-                    priority_selection.due_fixtures + selection.due_fixtures
-                )
+                for fixture in (priority_selection.due_fixtures + selection.due_fixtures)
             }.values()
         )[: self._max_items]
         processed: list[str] = []
@@ -263,9 +286,7 @@ class OpportunityWorker:
                         break
                     raise
                 except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:
-                    failures_to_persist.append(
-                        (WORKER_NAME, fixture.fixture_id, exc, self._now())
-                    )
+                    failures_to_persist.append((WORKER_NAME, fixture.fixture_id, exc, self._now()))
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
                     LOGGER.warning(
@@ -353,9 +374,7 @@ class OpportunityWorker:
                             "stale_retry_delay_seconds": (
                                 None
                                 if refresh_state.next_retry_at is None
-                                else (
-                                    refresh_state.next_retry_at - attempted_at
-                                ).total_seconds()
+                                else (refresh_state.next_retry_at - attempted_at).total_seconds()
                             ),
                         },
                     )
@@ -365,12 +384,8 @@ class OpportunityWorker:
                         self._bookmaker_id,
                         freshness_state="FRESH",
                         attempted_at=attempted_at,
-                        latest_observed_at=min(
-                            market.observed_at for market in market_states
-                        ),
-                        latest_captured_at=max(
-                            market.captured_at for market in market_states
-                        ),
+                        latest_observed_at=min(market.observed_at for market in market_states),
+                        latest_captured_at=max(market.captured_at for market in market_states),
                         stale_retry_policy=self._stale_retry_policy,
                     )
                     if fixture.quote_freshness_state == "STALE":
@@ -390,33 +405,311 @@ class OpportunityWorker:
                         fixture.fixture_id, self._bookmaker_id
                     )
                     for snapshot_id in snapshot_ids:
-                        evaluation = self._evaluator.execute(prediction.prediction_id, snapshot_id)
-                        evaluations.append(evaluation.evaluation_id)
+                        preliminary = self._evaluator.execute(prediction.prediction_id, snapshot_id)
+                        evaluations.append(preliminary.evaluation_id)
+                        preliminary_rejections = self._register.preliminary_rejection_codes(
+                            preliminary.evaluation_id
+                        )
+                        if preliminary_rejections:
+                            LOGGER.info(
+                                "opportunity did not qualify for final quote refresh",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "preliminary_odds": preliminary.selected_odd,
+                                    "preliminary_edge": preliminary.edge,
+                                    "preliminary_ev": preliminary.expected_value,
+                                    "rejection_reasons": preliminary_rejections,
+                                    "final_quote_refresh_requested": False,
+                                },
+                            )
+                            continue
+
+                        claim = self._register.begin_final_quote_verification(
+                            preliminary.evaluation_id
+                        )
+                        if claim.status is FinalQuoteStatus.REJECTED:
+                            rejected_picks += 1
+                            decisions += 1
+                            continue
+                        if claim.status is FinalQuoteStatus.READY:
+                            registration = self._register.execute(
+                                claim.final_evaluation_id,
+                                registration_request_id(preliminary.evaluation_id),
+                                final_quote_verification_id=claim.verification_id,
+                            )
+                            decisions += 1
+                            if registration.pick is not None:
+                                picks.append(registration.pick.pick_id)
+                            else:
+                                rejected_picks += 1
+                            continue
+                        if not claim.should_fetch:
+                            LOGGER.info(
+                                "duplicate final quote verification suppressed",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "verification_id": claim.verification_id,
+                                },
+                            )
+                            continue
+
+                        request_at = self._now()
+                        LOGGER.info(
+                            "mandatory final quote verification requested",
+                            extra={
+                                "worker": WORKER_NAME,
+                                "fixture_id": fixture.fixture_id,
+                                "market": preliminary.market.value,
+                                "selection": preliminary.selected_selection.value,
+                                "preliminary_odds": preliminary.selected_odd,
+                                "preliminary_edge": preliminary.edge,
+                                "preliminary_ev": preliminary.expected_value,
+                                "final_refresh_request_timestamp": request_at,
+                                "provider": "api-football",
+                                "bookmaker": preliminary.bookmaker_key,
+                                "api_budget_outcome": "PENDING",
+                            },
+                        )
+                        try:
+                            final_quotes = self._source.fetch_quotes(
+                                fixture_identity=fixture.identity,
+                                bookmaker_id=self._bookmaker_id,
+                            )
+                            odds_fetches += 1
+                        except ApiBudgetExceededError:
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.FINAL_QUOTE_REFRESH_BUDGET_UNAVAILABLE.value,
+                                ),
+                                budget_outcome="DENIED",
+                            )
+                            budget_exhausted = True
+                            decisions += 1
+                            rejected_picks += 1
+                            LOGGER.warning(
+                                "mandatory final quote verification rejected",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": (
+                                        FinalQuoteRejectionCode.FINAL_QUOTE_REFRESH_BUDGET_UNAVAILABLE.value,
+                                    ),
+                                    "api_budget_outcome": "DENIED",
+                                },
+                            )
+                            break
+                        except (
+                            TransportError,
+                            QuoteNormalizationError,
+                            TypeError,
+                            RuntimeError,
+                        ) as exc:
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.FINAL_QUOTE_REFRESH_PROVIDER_ERROR.value,
+                                ),
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            LOGGER.warning(
+                                "mandatory final quote verification provider failure",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "error_class": type(exc).__name__,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": (
+                                        FinalQuoteRejectionCode.FINAL_QUOTE_REFRESH_PROVIDER_ERROR.value,
+                                    ),
+                                    "api_budget_outcome": "ALLOWED",
+                                },
+                            )
+                            continue
+
+                        captured_at = self._now()
+                        final_quotes = tuple(final_quotes)
+                        quotes_fetched += len(final_quotes)
+                        fresh_quotes += self._ingestion.ingest(
+                            final_quotes, captured_at=captured_at
+                        )
+                        final_market = _final_market(final_quotes, preliminary)
+                        if final_market is None:
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.FINAL_QUOTE_MARKET_INCOMPLETE.value,
+                                ),
+                                returned_captured_at=captured_at,
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            continue
+
+                        quote_age = (captured_at - final_market.observed_at).total_seconds()
+                        selected_quote = final_market.quote_for(preliminary.selected_selection)
+                        if quote_age < 0:
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=("QUOTE_NOT_YET_AVAILABLE",),
+                                returned_source=selected_quote.source,
+                                returned_observed_at=final_market.observed_at,
+                                returned_captured_at=captured_at,
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            continue
+                        stale_quote = quote_age > self._maximum_quote_age_seconds
+                        if stale_quote:
+                            self._repository.record_quote_refresh_state(
+                                fixture.fixture_id,
+                                self._bookmaker_id,
+                                freshness_state="STALE",
+                                attempted_at=captured_at,
+                                latest_observed_at=final_market.observed_at,
+                                latest_captured_at=captured_at,
+                                stale_retry_policy=self._stale_retry_policy,
+                            )
+                            LOGGER.warning(
+                                "final quote verification returned stale provider observation",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "returned_observed_at": final_market.observed_at,
+                                    "captured_at": captured_at,
+                                    "quote_age_seconds": quote_age,
+                                    "stale_quote": True,
+                                    "warning_codes": ("STALE_QUOTE_WARNING",),
+                                },
+                            )
+
+                        exact_snapshots = self._repository.snapshot_ids_for_market_observation(
+                            fixture.fixture_id,
+                            self._bookmaker_id,
+                            preliminary.market.value,
+                            final_market.observed_at,
+                            selected_quote.source,
+                        )
+                        snapshot_by_selection = dict(exact_snapshots)
+                        selected_snapshot_id = snapshot_by_selection.get(
+                            preliminary.selected_selection.value
+                        )
+                        if selected_snapshot_id is None or len(exact_snapshots) != 2:
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.FINAL_QUOTE_MARKET_INCOMPLETE.value,
+                                ),
+                                returned_source=selected_quote.source,
+                                returned_observed_at=final_market.observed_at,
+                                returned_captured_at=captured_at,
+                                quote_age_seconds=quote_age,
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            continue
+
+                        final_evaluation = self._evaluator.execute(
+                            prediction.prediction_id, selected_snapshot_id
+                        )
+                        evaluations.append(final_evaluation.evaluation_id)
+                        # Model lifecycle may change during the network request.
+                        self._ensure_model_available(fixture)
+                        final_preview = self._register.preliminary_rejection_codes(
+                            final_evaluation.evaluation_id
+                        )
+                        if (
+                            self._model_scope_status(fixture) != "ACTIVE"
+                            or FinalQuoteRejectionCode.MODEL_INACTIVE_OR_STALE.value
+                            in final_preview
+                        ):
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.MODEL_INACTIVE_OR_STALE.value,
+                                ),
+                                returned_source=selected_quote.source,
+                                returned_observed_at=final_market.observed_at,
+                                returned_captured_at=captured_at,
+                                quote_age_seconds=quote_age,
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            continue
+                        ready = self._register.complete_final_quote_verification(
+                            claim.verification_id,
+                            final_evaluation.evaluation_id,
+                            captured_at=captured_at,
+                            quote_age_seconds=quote_age,
+                            snapshot_ids=tuple(value for _, value in exact_snapshots),
+                            stale_quote=stale_quote,
+                            model_probability=final_evaluation.model_probability,
+                        )
                         registration = self._register.execute(
-                            evaluation.evaluation_id,
-                            registration_request_id(evaluation.evaluation_id),
+                            final_evaluation.evaluation_id,
+                            registration_request_id(preliminary.evaluation_id),
+                            final_quote_verification_id=ready.verification_id,
                         )
                         decisions += 1
                         if registration.pick is not None:
                             picks.append(registration.pick.pick_id)
                         else:
                             rejected_picks += 1
+                        LOGGER.info(
+                            "mandatory final quote verification decided",
+                            extra={
+                                "worker": WORKER_NAME,
+                                "fixture_id": fixture.fixture_id,
+                                "market": final_evaluation.market.value,
+                                "selection": final_evaluation.selected_selection.value,
+                                "preliminary_odds": preliminary.selected_odd,
+                                "preliminary_edge": preliminary.edge,
+                                "preliminary_ev": preliminary.expected_value,
+                                "provider": final_evaluation.source,
+                                "bookmaker": final_evaluation.bookmaker_key,
+                                "returned_observed_at": final_market.observed_at,
+                                "captured_at": captured_at,
+                                "quote_age_seconds": quote_age,
+                                "stale_quote": stale_quote,
+                                "warning_codes": (("STALE_QUOTE_WARNING",) if stale_quote else ()),
+                                "final_odds": final_evaluation.selected_odd,
+                                "minimum_playable_odds": (
+                                    self._register.minimum_playable_odds(
+                                        final_evaluation.model_probability
+                                    )
+                                ),
+                                "final_edge": final_evaluation.edge,
+                                "final_ev": final_evaluation.expected_value,
+                                "final_decision": registration.decision.outcome.value,
+                                "rejection_reasons": registration.decision.reason_codes,
+                                "api_budget_outcome": "ALLOWED",
+                            },
+                        )
                     self._repository.clear_item_failure(WORKER_NAME, fixture.fixture_id)
                     processed.append(fixture.fixture_id)
                 except (ActiveModelUnavailableError, DixonColesFitError) as exc:
-                    failures_to_persist.append(
-                        (WORKER_NAME, fixture.fixture_id, exc, self._now())
-                    )
+                    failures_to_persist.append((WORKER_NAME, fixture.fixture_id, exc, self._now()))
                     failed.append(fixture.fixture_id)
                     if isinstance(exc, ActiveModelUnavailableError):
                         model_unavailable.append(fixture.fixture_id)
         finally:
             self._flush_failures(failures_to_persist)
         self._has_pending = bool(
-            priority_selection.has_more
-            or selection.has_more
-            or interrupted
-            or budget_exhausted
+            priority_selection.has_more or selection.has_more or interrupted or budget_exhausted
         )
         self._cursor = prior_cursor if (interrupted or budget_exhausted) else selection.continuation
         unavailable_scope_counts = tuple(
@@ -495,9 +788,7 @@ class OpportunityWorker:
                 "stale_retries_requested": cycle.stale_retries_requested,
                 "stale_retries_scheduled": cycle.stale_retries_scheduled,
                 "stale_retries_cleared": cycle.stale_retries_cleared,
-                "stale_retries_suppressed_by_budget": (
-                    cycle.stale_retries_suppressed_by_budget
-                ),
+                "stale_retries_suppressed_by_budget": (cycle.stale_retries_suppressed_by_budget),
                 "stale_retries_stopped": cycle.stale_retries_stopped,
                 "odds_fetches": cycle.odds_fetches,
                 "max_items": self._max_items,

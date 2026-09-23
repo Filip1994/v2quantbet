@@ -4,7 +4,7 @@
 
 This document is the canonical execution plan for QuantBet. It summarizes the product goal, the decisions made during planning, the current architectural direction, and the implementation order.
 
-The system is not intended to be only a one-time prediction generator. Its first useful product is a daily bulletin of value picks, followed by continuous pre-kickoff odds monitoring. Later phases add research and intraday strong signals.
+The system is not a one-time prediction generator. Production continuously scans the rolling future horizon and publishes newly qualifying picks immediately. A durable Daily Bulletin is a once-per-day snapshot over still-actionable registered picks, followed by continuous pre-kickoff monitoring. Research remains a separate concern.
 
 ## 2. Product goal
 
@@ -178,11 +178,11 @@ Phase II is complete when QuantBet has:
 
 # Phase III — Intraday strong signals
 
-This phase adds a second live output channel after the bulletin and research foundations are reliable.
+This live output channel is part of the production opportunity lifecycle and does not wait for a later product phase.
 
 ### 5.1 Strong-signal objective
 
-During the day, QuantBet continuously evaluates the broader upcoming-fixture universe. If a fixture or market that did not qualify for the bulletin later satisfies the configured criteria, the system may emit a strong signal immediately rather than waiting for another batch.
+Throughout the day, QuantBet continuously evaluates every eligible fixture in the configured rolling horizon. If a fixture or market qualifies later, the system registers it immediately rather than waiting for midnight. The next bulletin may include that same durable pick if it is still actionable.
 
 Signals may be emitted one at a time.
 

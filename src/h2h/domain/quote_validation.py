@@ -25,9 +25,7 @@ def validate_quotes(quotes: Iterable[CanonicalQuote]) -> tuple[CanonicalQuote, .
     selections = {quote.selection for quote in normalized}
 
     if len(normalized) != len(expected) or selections != expected:
-        raise ValueError(
-            f"quotes must contain exactly one selection per market in {expected!r}"
-        )
+        raise ValueError(f"quotes must contain exactly one selection per market in {expected!r}")
 
     for quote in normalized[1:]:
         if quote.fixture_id != first.fixture_id:
@@ -38,5 +36,7 @@ def validate_quotes(quotes: Iterable[CanonicalQuote]) -> tuple[CanonicalQuote, .
             raise ValueError("all quotes must belong to the same market")
         if quote.observed_at != first.observed_at:
             raise ValueError("all quotes must have the same observation timestamp")
+        if quote.source != first.source:
+            raise ValueError("all quotes must come from the same source")
 
     return normalized

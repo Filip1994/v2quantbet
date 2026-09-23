@@ -109,7 +109,9 @@ class PostgreSQLLeaderLock:
 
     def try_acquire(self) -> bool:
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT pg_try_advisory_lock(hashtextextended(%s, 0))", (LEADER_LOCK_NAME,))
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(hashtextextended(%s, 0))", (LEADER_LOCK_NAME,)
+            )
             self.acquired = bool(cursor.fetchone()[0])
         return self.acquired
 
@@ -288,22 +290,22 @@ class PostgreSQLRuntimeRepository:
         has_more = len(rows) > scan_limit
         for row in rows[:scan_limit]:
             (
-            fixture_id,
-            provider_id,
-            league_id,
-            season,
-            kickoff_at,
-            country,
-            competition_name,
-            competition_type,
-            last_captured,
-            next_retry_at,
-            freshness_state,
-            stale_attempt_count,
-            stale_next_retry_at,
-            refresh_last_attempt_at,
-            latest_complete_observed_at,
-            _latest_complete_captured_at,
+                fixture_id,
+                provider_id,
+                league_id,
+                season,
+                kickoff_at,
+                country,
+                competition_name,
+                competition_type,
+                last_captured,
+                next_retry_at,
+                freshness_state,
+                stale_attempt_count,
+                stale_next_retry_at,
+                refresh_last_attempt_at,
+                latest_complete_observed_at,
+                _latest_complete_captured_at,
             ) = row
             continuation = OpportunityCursor(kickoff_at, fixture_id)
             scope = classify_phase_i(
@@ -510,9 +512,7 @@ class PostgreSQLRuntimeRepository:
             latest_captured_at,
         )
 
-    def latest_complete_snapshot_ids(
-        self, fixture_id: str, bookmaker_id: int
-    ) -> tuple[str, ...]:
+    def latest_complete_snapshot_ids(self, fixture_id: str, bookmaker_id: int) -> tuple[str, ...]:
         """Return both selections for each latest complete market observation."""
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -531,6 +531,29 @@ class PostgreSQLRuntimeRepository:
                 (fixture_id, bookmaker_id, fixture_id, bookmaker_id),
             )
             return tuple(row[0] for row in cursor.fetchall())
+
+    def snapshot_ids_for_market_observation(
+        self,
+        fixture_id: str,
+        bookmaker_id: int,
+        market: str,
+        observed_at: datetime,
+        source: str,
+    ) -> tuple[tuple[str, str], ...]:
+        """Resolve an exact returned market without mixing observation contexts."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.selection, q.snapshot_id FROM quote_series s "
+                "JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = %s AND s.bookmaker_id = %s AND s.market = %s "
+                "AND q.observed_at = %s AND q.source = %s "
+                "ORDER BY s.selection, q.snapshot_id",
+                (fixture_id, bookmaker_id, market, _utc(observed_at), source),
+            )
+            rows = tuple((str(row[0]), str(row[1])) for row in cursor.fetchall())
+            if len(rows) != 2 or len({selection for selection, _ in rows}) != 2:
+                return ()
+            return rows
 
     def item_retry_due(self, worker: str, item_id: str, *, now: datetime) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -664,9 +687,7 @@ class PostgreSQLRuntimeRepository:
                 "('OpportunityOddsUnavailableError', 'TransportError', "
                 "'QuoteNormalizationError')) FROM production_item_failures"
             )
-            retry, model_unavailable, odds_unavailable = (
-                int(value) for value in cursor.fetchone()
-            )
+            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
             )
@@ -696,6 +717,20 @@ class PostgreSQLRuntimeRepository:
             quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
                 int(value) for value in cursor.fetchone()
             )
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE status = 'REQUESTED'), "
+                "COUNT(*) FILTER (WHERE status = 'READY'), "
+                "COUNT(*) FILTER (WHERE status = 'REJECTED'), "
+                "COUNT(*) FILTER (WHERE stale_quote) FROM final_quote_verifications"
+            )
+            final_requested, final_ready, final_rejected, final_stale = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*), COALESCE((SELECT COUNT(*) FROM "
+                "daily_bulletin_memberships), 0) FROM daily_bulletins"
+            )
+            bulletins, bulletin_memberships = (int(value) for value in cursor.fetchone())
         return statuses, {
             "retry": retry,
             "model_unavailable": model_unavailable,
@@ -712,6 +747,12 @@ class PostgreSQLRuntimeRepository:
             "quote_stale": quote_stale,
             "quote_unusable": quote_unusable,
             "stale_retry_scheduled": stale_retry_scheduled,
+            "final_quote_requested": final_requested,
+            "final_quote_ready": final_ready,
+            "final_quote_rejected": final_rejected,
+            "final_quote_stale_warnings": final_stale,
+            "daily_bulletins": bulletins,
+            "daily_bulletin_memberships": bulletin_memberships,
         }
 
     def operational_counts(self) -> dict[str, int]:
@@ -722,9 +763,7 @@ class PostgreSQLRuntimeRepository:
                 "('OpportunityOddsUnavailableError', 'TransportError', "
                 "'QuoteNormalizationError')) FROM production_item_failures"
             )
-            retry, model_unavailable, odds_unavailable = (
-                int(value) for value in cursor.fetchone()
-            )
+            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
             )
@@ -754,6 +793,20 @@ class PostgreSQLRuntimeRepository:
             quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
                 int(value) for value in cursor.fetchone()
             )
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE status = 'REQUESTED'), "
+                "COUNT(*) FILTER (WHERE status = 'READY'), "
+                "COUNT(*) FILTER (WHERE status = 'REJECTED'), "
+                "COUNT(*) FILTER (WHERE stale_quote) FROM final_quote_verifications"
+            )
+            final_requested, final_ready, final_rejected, final_stale = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*), COALESCE((SELECT COUNT(*) FROM "
+                "daily_bulletin_memberships), 0) FROM daily_bulletins"
+            )
+            bulletins, bulletin_memberships = (int(value) for value in cursor.fetchone())
         return {
             "retry": retry,
             "model_unavailable": model_unavailable,
@@ -770,4 +823,10 @@ class PostgreSQLRuntimeRepository:
             "quote_stale": quote_stale,
             "quote_unusable": quote_unusable,
             "stale_retry_scheduled": stale_retry_scheduled,
+            "final_quote_requested": final_requested,
+            "final_quote_ready": final_ready,
+            "final_quote_rejected": final_rejected,
+            "final_quote_stale_warnings": final_stale,
+            "daily_bulletins": bulletins,
+            "daily_bulletin_memberships": bulletin_memberships,
         }

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from h2h.read_models.daily_bulletin import DailyBulletin
@@ -8,27 +8,27 @@ class Repository:
     def __init__(self):
         self.call = None
 
-    def entries_registered_between(self, *, start_at, end_at, as_of):
+    def actionable_entries(self, *, start_at, end_at, as_of):
         self.call = (start_at, end_at, as_of)
         return ()
 
 
-def test_belgrade_daily_boundary_uses_half_open_utc_interval() -> None:
+def test_bulletin_projects_rolling_72_hours_not_local_registration_day() -> None:
     repository = Repository()
     bulletin = DailyBulletin(repository, ZoneInfo("Europe/Belgrade"))
-    bulletin.execute(date(2026, 9, 16), as_of=datetime(2026, 9, 16, 12, tzinfo=UTC))
+    as_of = datetime(2026, 9, 16, 12, tzinfo=UTC)
+    bulletin.execute(date(2026, 9, 16), as_of=as_of)
     assert repository.call[:2] == (
-        datetime(2026, 9, 15, 22, tzinfo=UTC),
-        datetime(2026, 9, 16, 22, tzinfo=UTC),
+        as_of,
+        as_of + timedelta(hours=72),
     )
 
 
-def test_dst_days_have_correct_non_twenty_four_hour_utc_span() -> None:
+def test_calendar_date_does_not_restrict_actionable_horizon() -> None:
     repository = Repository()
     bulletin = DailyBulletin(repository, ZoneInfo("Europe/Belgrade"))
-    bulletin.execute(date(2026, 3, 29), as_of=datetime(2026, 3, 29, 12, tzinfo=UTC))
+    as_of = datetime(2026, 3, 29, 12, tzinfo=UTC)
+    bulletin.execute(date(2026, 3, 29), as_of=as_of, horizon=timedelta(hours=48))
     start, end, _ = repository.call
-    assert (end - start).total_seconds() == 23 * 3600
-    bulletin.execute(date(2026, 10, 25), as_of=datetime(2026, 10, 25, 12, tzinfo=UTC))
-    start, end, _ = repository.call
-    assert (end - start).total_seconds() == 25 * 3600
+    assert start == as_of
+    assert end - start == timedelta(hours=48)

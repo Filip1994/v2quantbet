@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,8 @@ class BulletinEntry:
     bookmaker_id: int
     bookmaker_key: str
     source: str
+    final_odds: float
+    minimum_playable_odds: float
     model_probability: float
     raw_implied_probability: float
     devig_probability: float
@@ -49,13 +51,36 @@ class BulletinEntry:
 
 
 class DailyBulletinReadRepository(Protocol):
-    def entries_registered_between(
+    def actionable_entries(
         self, *, start_at: datetime, end_at: datetime, as_of: datetime
     ) -> tuple[BulletinEntry, ...]: ...
 
+    def create_snapshot(
+        self,
+        *,
+        local_date: date,
+        timezone: str,
+        as_of: datetime,
+        horizon: timedelta,
+        entries: tuple[BulletinEntry, ...],
+    ) -> DailyBulletinSnapshot: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DailyBulletinSnapshot:
+    bulletin_id: str
+    bulletin_version: str
+    local_date: date
+    timezone: str
+    generated_at: datetime
+    as_of: datetime
+    horizon_seconds: int
+    pick_ids: tuple[str, ...]
+    created: bool = False
+
 
 class DailyBulletin:
-    """Read registered picks whose registration belongs to one local calendar day."""
+    """Project actionable durable picks, independently of their registration date."""
 
     def __init__(self, repository: DailyBulletinReadRepository, timezone: ZoneInfo) -> None:
         if not isinstance(timezone, ZoneInfo):
@@ -67,15 +92,30 @@ class DailyBulletin:
     def timezone(self) -> ZoneInfo:
         return self._timezone
 
-    def execute(self, day: date, *, as_of: datetime) -> tuple[BulletinEntry, ...]:
+    def execute(
+        self, day: date, *, as_of: datetime, horizon: timedelta = timedelta(hours=72)
+    ) -> tuple[BulletinEntry, ...]:
         if not isinstance(day, date) or isinstance(day, datetime):
             raise TypeError("day must be a date")
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
-        local_start = datetime.combine(day, time.min, tzinfo=self._timezone)
-        local_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=self._timezone)
-        return self._repository.entries_registered_between(
-            start_at=local_start.astimezone(UTC),
-            end_at=local_end.astimezone(UTC),
+        if horizon <= timedelta(0):
+            raise ValueError("horizon must be positive")
+        current = as_of.astimezone(UTC)
+        return self._repository.actionable_entries(
+            start_at=current,
+            end_at=current + horizon,
+            as_of=current,
+        )
+
+    def generate(
+        self, day: date, *, as_of: datetime, horizon: timedelta = timedelta(hours=72)
+    ) -> DailyBulletinSnapshot:
+        entries = self.execute(day, as_of=as_of, horizon=horizon)
+        return self._repository.create_snapshot(
+            local_date=day,
+            timezone=self._timezone.key,
             as_of=as_of.astimezone(UTC),
+            horizon=horizon,
+            entries=entries,
         )

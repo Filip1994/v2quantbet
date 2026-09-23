@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
 from h2h.decisions.pick_eligibility import evaluate_persisted_eligibility
+from h2h.domain.final_quote import FinalQuoteClaim, FinalQuoteStatus
 from h2h.domain.fixture_record import FixtureObservation
 from h2h.domain.odds import Market, Selection
 from h2h.domain.pick_decision import (
@@ -135,6 +136,7 @@ class PostgreSQLPickRegistrationRepository:
         policy: RegistrationPolicyConfig,
         *,
         decided_at: datetime,
+        final_quote_verification_id: str | None = None,
     ) -> RegistrationResult:
         decided = _utc(decided_at, "decided_at")
         if not isinstance(registration_request_id, str) or not registration_request_id.strip():
@@ -160,8 +162,24 @@ class PostgreSQLPickRegistrationRepository:
                 return replay
             fixture = self._latest_fixture_observation(cursor, evaluation.fixture_id, decided)
             eligibility = evaluate_persisted_eligibility(
-                evaluation, fixture, policy, decided_at=decided
+                evaluation,
+                fixture,
+                policy,
+                decided_at=decided,
+                quote_age_is_warning=final_quote_verification_id is not None,
             )
+            if (
+                not eligibility
+                and final_quote_verification_id is not None
+                and not self._valid_final_verification(
+                    cursor,
+                    final_quote_verification_id,
+                    evaluation.evaluation_id,
+                )
+            ):
+                from h2h.domain.pick_decision import EligibilityRejectionCode
+
+                eligibility = (EligibilityRejectionCode.FINAL_QUOTE_REFRESH_REQUIRED,)
             if eligibility:
                 decision = PickDecision(
                     decision_id,
@@ -174,7 +192,7 @@ class PostgreSQLPickRegistrationRepository:
                     RejectionStage.ELIGIBILITY,
                     tuple(code.value for code in eligibility),
                 )
-                self._insert_decision(cursor, decision)
+                self._insert_decision(cursor, decision, final_quote_verification_id)
                 return RegistrationResult(decision, None)
 
             # Lock ordering is part of the production contract: fixture, then bankroll.
@@ -254,7 +272,7 @@ class PostgreSQLPickRegistrationRepository:
                     stake,
                     snapshot,
                 )
-                self._insert_decision(cursor, decision)
+                self._insert_decision(cursor, decision, final_quote_verification_id)
                 return RegistrationResult(decision, None)
 
             decision = PickDecision(
@@ -270,7 +288,7 @@ class PostgreSQLPickRegistrationRepository:
                 stake,
                 snapshot,
             )
-            self._insert_decision(cursor, decision)
+            self._insert_decision(cursor, decision, final_quote_verification_id)
             pick = RegisteredPick(
                 _fact_id("registered-pick-v1", decision_id),
                 decision_id,
@@ -351,9 +369,271 @@ class PostgreSQLPickRegistrationRepository:
             "JOIN dixon_coles_model_versions m ON m.model_version_id = p.model_version_id "
             "AND m.provider = p.provider AND m.team_id_namespace = p.team_id_namespace "
             "AND m.league_id = p.league_id AND m.season = p.season "
-            "WHERE p.prediction_id = %s AND p.fixture_id = %s AND p.model_version_id = %s",
+            "JOIN dixon_coles_active_models a ON a.provider = p.provider "
+            "AND a.team_id_namespace = p.team_id_namespace AND a.league_id = p.league_id "
+            "AND a.season = p.season AND a.model_version_id = p.model_version_id "
+            "AND a.generation = p.active_generation AND a.activated_at = p.model_activated_at "
+            "LEFT JOIN model_coverage_scopes c ON c.provider = p.provider "
+            "AND c.team_id_namespace = p.team_id_namespace AND c.league_id = p.league_id "
+            "AND c.season = p.season "
+            "WHERE p.prediction_id = %s AND p.fixture_id = %s AND p.model_version_id = %s "
+            "AND (c.status IS NULL OR c.status = 'ACTIVE')",
             (evaluation.prediction_id, evaluation.fixture_id, evaluation.model_version_id),
         )
+
+    def preliminary_rejection_codes(
+        self,
+        evaluation_id: str,
+        policy: RegistrationPolicyConfig,
+        *,
+        checked_at: datetime,
+    ) -> tuple[str, ...]:
+        """Read-only candidate gate; final registration repeats every check under locks."""
+        checked = _utc(checked_at, "checked_at")
+        with self.connect() as connection, connection.cursor() as cursor:
+            evaluation = self._load_evaluation(cursor, evaluation_id)
+            try:
+                self._verify_prediction_provenance(cursor, evaluation)
+            except RegistrationProvenanceError:
+                return ("MODEL_INACTIVE_OR_STALE",)
+            fixture = self._latest_fixture_observation(cursor, evaluation.fixture_id, checked)
+            failures = [
+                code.value
+                for code in evaluate_persisted_eligibility(
+                    evaluation,
+                    fixture,
+                    policy,
+                    decided_at=checked,
+                    quote_age_is_warning=True,
+                )
+            ]
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM registered_picks "
+                "WHERE fixture_id = %s AND market = %s)",
+                (evaluation.fixture_id, evaluation.market.value),
+            )
+            if bool(cursor.fetchone()[0]):
+                failures.append("DUPLICATE_FIXTURE_MARKET")
+            if policy.fixed_stake_minor > policy.max_stake_per_pick_minor:
+                failures.append("STAKE_EXCEEDS_PER_PICK_LIMIT")
+            cursor.execute(
+                "SELECT balance_after_minor FROM bankroll_ledger_entries "
+                "WHERE bankroll_account_id = %s ORDER BY account_sequence DESC LIMIT 1",
+                (policy.bankroll_account_id,),
+            )
+            ledger = cursor.fetchone()
+            if ledger is None or int(ledger[0]) < policy.fixed_stake_minor:
+                failures.append("INSUFFICIENT_AVAILABLE_BANKROLL")
+            cursor.execute(
+                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
+                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
+                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+                "WHERE successor.prior_event_id = e.settlement_event_id))",
+                (policy.bankroll_account_id,),
+            )
+            exposure = int(cursor.fetchone()[0])
+            if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
+                failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
+            return tuple(failures)
+
+    def begin_final_quote_verification(
+        self, preliminary_evaluation_id: str, *, requested_at: datetime
+    ) -> FinalQuoteClaim:
+        requested = _utc(requested_at, "requested_at")
+        verification_id = _fact_id("final-quote-verification-v1", preliminary_evaluation_id)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (verification_id,),
+            )
+            existing = self._load_final_quote_claim(cursor, verification_id)
+            if existing is not None:
+                if existing.status is FinalQuoteStatus.REQUESTED:
+                    cursor.execute(
+                        "UPDATE final_quote_verifications SET requested_at = %s "
+                        "WHERE verification_id = %s AND status = 'REQUESTED' "
+                        "AND requested_at <= %s",
+                        (requested, verification_id, requested - timedelta(minutes=5)),
+                    )
+                    if cursor.rowcount == 1:
+                        return FinalQuoteClaim(
+                            verification_id,
+                            preliminary_evaluation_id,
+                            FinalQuoteStatus.REQUESTED,
+                            True,
+                        )
+                return existing
+            evaluation = self._load_evaluation(cursor, preliminary_evaluation_id)
+            cursor.execute(
+                "INSERT INTO final_quote_verifications "
+                "(verification_id, preliminary_evaluation_id, fixture_id, market, selection, "
+                "bookmaker_id, requested_provider, requested_at, budget_outcome, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'api-football', %s, 'PENDING', 'REQUESTED')",
+                (
+                    verification_id,
+                    evaluation.evaluation_id,
+                    evaluation.fixture_id,
+                    evaluation.market.value,
+                    evaluation.selected_selection.value,
+                    evaluation.bookmaker_id,
+                    requested,
+                ),
+            )
+            return FinalQuoteClaim(
+                verification_id,
+                preliminary_evaluation_id,
+                FinalQuoteStatus.REQUESTED,
+                True,
+            )
+
+    def reject_final_quote_verification(
+        self,
+        verification_id: str,
+        *,
+        reason_codes: tuple[str, ...],
+        budget_outcome: str,
+        returned_source: str | None,
+        returned_observed_at: datetime | None,
+        returned_captured_at: datetime | None,
+        quote_age_seconds: float | None,
+        decided_at: datetime,
+    ) -> FinalQuoteClaim:
+        if not reason_codes:
+            raise ValueError("final quote rejection requires at least one reason")
+        decided = _utc(decided_at, "decided_at")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE final_quote_verifications SET status = 'REJECTED', "
+                "budget_outcome = %s, returned_source = %s, returned_observed_at = %s, "
+                "returned_captured_at = %s, quote_age_seconds = %s, reason_codes = %s, "
+                "decided_at = %s WHERE verification_id = %s AND status = 'REQUESTED'",
+                (
+                    budget_outcome,
+                    returned_source,
+                    returned_observed_at,
+                    returned_captured_at,
+                    quote_age_seconds,
+                    list(reason_codes),
+                    decided,
+                    verification_id,
+                ),
+            )
+            claim = self._load_final_quote_claim(cursor, verification_id)
+            if claim is None:
+                raise LookupError(f"final quote verification {verification_id!r} does not exist")
+            return claim
+
+    def complete_final_quote_verification(
+        self,
+        verification_id: str,
+        final_evaluation_id: str,
+        *,
+        captured_at: datetime,
+        quote_age_seconds: float,
+        snapshot_ids: tuple[str, str],
+        stale_quote: bool,
+        minimum_playable_odds: float,
+        decided_at: datetime,
+    ) -> FinalQuoteClaim:
+        captured = _utc(captured_at, "captured_at")
+        decided = _utc(decided_at, "decided_at")
+        if len(snapshot_ids) != 2 or len(set(snapshot_ids)) != 2:
+            raise ValueError("final verification requires two distinct snapshot IDs")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT preliminary_evaluation_id, fixture_id, market, selection, bookmaker_id "
+                "FROM final_quote_verifications WHERE verification_id = %s FOR UPDATE",
+                (verification_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise LookupError(f"final quote verification {verification_id!r} does not exist")
+            existing = self._load_final_quote_claim(cursor, verification_id)
+            if existing is not None and existing.status is not FinalQuoteStatus.REQUESTED:
+                return existing
+            final = self._load_evaluation(cursor, final_evaluation_id)
+            preliminary = self._load_evaluation(cursor, row[0])
+            if (
+                final.fixture_id,
+                final.market.value,
+                final.selected_selection.value,
+                final.bookmaker_id,
+                final.prediction_id,
+            ) != (
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                preliminary.prediction_id,
+            ):
+                raise RegistrationProvenanceError(
+                    "final evaluation does not match preliminary candidate identity"
+                )
+            cursor.execute(
+                "UPDATE final_quote_verifications SET status = 'READY', "
+                "budget_outcome = 'ALLOWED', returned_source = %s, "
+                "returned_bookmaker_key = %s, returned_observed_at = %s, "
+                "returned_captured_at = %s, quote_age_seconds = %s, stale_quote = %s, "
+                "warning_codes = %s, returned_snapshot_ids = %s, "
+                "final_evaluation_id = %s, final_odd = %s, "
+                "final_devig_probability = %s, final_model_probability = %s, "
+                "final_edge = %s, final_expected_value = %s, minimum_playable_odds = %s, "
+                "reason_codes = '{}', "
+                "decided_at = %s WHERE verification_id = %s AND status = 'REQUESTED'",
+                (
+                    final.source,
+                    final.bookmaker_key,
+                    final.quote_observed_at,
+                    captured,
+                    quote_age_seconds,
+                    stale_quote,
+                    ["STALE_QUOTE_WARNING"] if stale_quote else [],
+                    list(snapshot_ids),
+                    final.evaluation_id,
+                    final.selected_odd,
+                    final.selected_devig_probability,
+                    final.model_probability,
+                    final.edge,
+                    final.expected_value,
+                    minimum_playable_odds,
+                    decided,
+                    verification_id,
+                ),
+            )
+            claim = self._load_final_quote_claim(cursor, verification_id)
+            if claim is None:
+                raise RegistrationProvenanceError("final verification disappeared")
+            return claim
+
+    @staticmethod
+    def _load_final_quote_claim(cursor: Any, verification_id: str) -> FinalQuoteClaim | None:
+        cursor.execute(
+            "SELECT verification_id, preliminary_evaluation_id, status, "
+            "final_evaluation_id, reason_codes FROM final_quote_verifications "
+            "WHERE verification_id = %s",
+            (verification_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        status = FinalQuoteStatus(row[2])
+        return FinalQuoteClaim(row[0], row[1], status, False, row[3], tuple(row[4]))
+
+    @staticmethod
+    def _valid_final_verification(
+        cursor: Any, verification_id: str | None, evaluation_id: str
+    ) -> bool:
+        if verification_id is None:
+            return False
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM final_quote_verifications "
+            "WHERE verification_id = %s AND status = 'READY' "
+            "AND final_evaluation_id = %s)",
+            (verification_id, evaluation_id),
+        )
+        return bool(cursor.fetchone()[0])
         if cursor.fetchone() is None:
             raise RegistrationProvenanceError("prediction/model provenance does not resolve")
 
@@ -403,7 +683,9 @@ class PostgreSQLPickRegistrationRepository:
             raise RegistrationPersistenceConflictError("policy fingerprint conflicts")
 
     @staticmethod
-    def _insert_decision(cursor: Any, decision: PickDecision) -> None:
+    def _insert_decision(
+        cursor: Any, decision: PickDecision, final_quote_verification_id: str | None
+    ) -> None:
         snapshot, stake = decision.risk_snapshot, decision.stake
         cursor.execute(
             "INSERT INTO pick_decisions "
@@ -411,8 +693,8 @@ class PostgreSQLPickRegistrationRepository:
             "config_fingerprint, decided_at, outcome, rejection_stage, reason_codes, "
             "proposed_stake_minor, currency, bankroll_account_id, "
             "bankroll_reference_entry_id, bankroll_balance_before_minor, "
-            "open_exposure_before_minor) VALUES "
-            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "open_exposure_before_minor, final_quote_verification_id) VALUES "
+            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 decision.decision_id,
                 decision.registration_request_id,
@@ -429,6 +711,7 @@ class PostgreSQLPickRegistrationRepository:
                 None if snapshot is None else snapshot.reference_ledger_entry_id,
                 None if snapshot is None else snapshot.balance_before_minor,
                 None if snapshot is None else snapshot.open_exposure_before_minor,
+                final_quote_verification_id,
             ),
         )
 

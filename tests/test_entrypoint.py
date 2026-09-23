@@ -1,6 +1,7 @@
 from datetime import timedelta
 from threading import Event
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -61,6 +62,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
                 registration_policy=registration_policy,
                 odds_lifecycle_policy=SimpleNamespace(monitoring_interval_seconds=300),
                 result_settlement_policy=SimpleNamespace(poll_interval_seconds=300),
+                bulletin_timezone=ZoneInfo("Europe/Belgrade"),
             ),
         ),
         runtime=SimpleNamespace(
@@ -71,6 +73,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         monitoring=SimpleNamespace(
             reconcile=SimpleNamespace(execute=lambda: None),
             worker=SimpleNamespace(run_once=lambda: None),
+            bulletin=SimpleNamespace(generate=lambda *_args, **_kwargs: None),
         ),
         results=SimpleNamespace(
             repository=SimpleNamespace(reconcile=lambda **_kwargs: None),
@@ -87,13 +90,16 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         lambda *_args, **_kwargs: SimpleNamespace(run_forever=lambda: True),
     )
 
-    assert _run_active_leader(
-        application,
-        RuntimeHealthState(),
-        Event(),
-        SimpleNamespace(healthy=lambda: True),
-        "instance",
-    ) is True
+    assert (
+        _run_active_leader(
+            application,
+            RuntimeHealthState(),
+            Event(),
+            SimpleNamespace(healthy=lambda: True),
+            "instance",
+        )
+        is True
+    )
     assert len(calls) == 1
     assert calls[0]["maximum_quote_age_seconds"] == 300
     assert calls[0]["minimum_time_to_kickoff_seconds"] == 600

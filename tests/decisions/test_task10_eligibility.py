@@ -116,6 +116,10 @@ def test_stale_future_and_post_kickoff_boundaries() -> None:
     assert EligibilityRejectionCode.QUOTE_TOO_OLD in evaluate_persisted_eligibility(
         stale, fixture(), policy(), decided_at=NOW
     )
+    warning_only = evaluate_persisted_eligibility(
+        stale, fixture(), policy(), decided_at=NOW, quote_age_is_warning=True
+    )
+    assert EligibilityRejectionCode.QUOTE_TOO_OLD not in warning_only
     post_quote = evaluation(quote_observed_at=NOW - timedelta(seconds=300))
     past_fixture = fixture(kickoff_at=NOW - timedelta(seconds=301))
     result = evaluate_persisted_eligibility(post_quote, past_fixture, policy(), decided_at=NOW)

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
+from hashlib import sha256
 
 from h2h.persistence.postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
-from h2h.read_models.daily_bulletin import BulletinEntry
+from h2h.read_models.daily_bulletin import BulletinEntry, DailyBulletinSnapshot
 
 
 class PostgreSQLDailyBulletinRepository:
     def __init__(self, monitoring: PostgreSQLPickMonitoringRepository) -> None:
         self._monitoring = monitoring
 
-    def entries_registered_between(
+    def actionable_entries(
         self, *, start_at: datetime, end_at: datetime, as_of: datetime
     ) -> tuple[BulletinEntry, ...]:
         with self._monitoring.connect() as connection, connection.cursor() as cursor:
@@ -22,21 +23,30 @@ class PostgreSQLDailyBulletinRepository:
                 "latest.fixture_observation_id, latest.kickoff_at, "
                 "registration.fixture_observation_id, registration.kickoff_at, "
                 "r.market, r.selection, e.bookmaker_id, e.bookmaker_key, e.source, "
+                "e.selected_odd, (1 + (policy.configuration->>'minimum_expected_value')::numeric) "
+                "/ e.model_probability, "
                 "e.model_probability, e.selected_raw_implied_probability, "
                 "e.selected_devig_probability, e.edge, e.expected_value, "
                 "r.stake_minor, r.currency, e.model_version_id, r.config_fingerprint, "
                 "r.registered_at "
                 "FROM registered_picks r "
                 "JOIN pick_decisions d ON d.decision_id = r.decision_id "
+                "JOIN pick_policy_configurations policy "
+                "ON policy.config_fingerprint = r.config_fingerprint "
                 "JOIN fixture_observations registration "
                 "ON registration.fixture_observation_id = d.fixture_observation_id "
                 "JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id "
                 "JOIN LATERAL (SELECT f.fixture_observation_id, f.home_team, f.away_team, "
-                "f.competition_name, f.kickoff_at FROM fixture_observations f "
+                "f.competition_name, f.kickoff_at, f.provider_status FROM fixture_observations f "
                 "WHERE f.fixture_id = r.fixture_id AND f.observed_at <= %s "
                 "AND f.persisted_at <= %s ORDER BY f.observed_at DESC, "
                 "f.fixture_observation_id DESC LIMIT 1) latest ON TRUE "
-                "WHERE r.registered_at >= %s AND r.registered_at < %s "
+                "WHERE latest.kickoff_at > %s AND latest.kickoff_at <= %s "
+                "AND latest.provider_status = 'NS' "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events settled "
+                "WHERE settled.pick_id = r.pick_id AND settled.outcome IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+                "WHERE successor.prior_event_id = settled.settlement_event_id)) "
                 "ORDER BY r.registered_at, r.pick_id",
                 (as_of, as_of, start_at, end_at),
             )
@@ -92,3 +102,66 @@ class PostgreSQLDailyBulletinRepository:
                 )
             )
         return tuple(entries)
+
+    def create_snapshot(
+        self,
+        *,
+        local_date: date,
+        timezone: str,
+        as_of: datetime,
+        horizon: timedelta,
+        entries: tuple[BulletinEntry, ...],
+    ) -> DailyBulletinSnapshot:
+        version = "DAILY_BULLETIN_V1"
+        semantic = f"{version}|{timezone}|{local_date.isoformat()}"
+        bulletin_id = "daily-bulletin-v1:" + sha256(semantic.encode()).hexdigest()
+        current = as_of.astimezone(UTC)
+        horizon_seconds = int(horizon.total_seconds())
+        with self._monitoring.connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (bulletin_id,))
+            cursor.execute(
+                "INSERT INTO daily_bulletins (bulletin_id, bulletin_version, local_date, "
+                "timezone, generated_at, as_of, horizon_seconds) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (
+                    bulletin_id,
+                    version,
+                    local_date,
+                    timezone,
+                    current,
+                    current,
+                    horizon_seconds,
+                ),
+            )
+            inserted = cursor.rowcount == 1
+            if inserted:
+                for ordinal, entry in enumerate(entries, start=1):
+                    cursor.execute(
+                        "INSERT INTO daily_bulletin_memberships "
+                        "(bulletin_id, pick_id, ordinal, fixture_kickoff_at, "
+                        "actionable_status) VALUES (%s, %s, %s, %s, 'ACTIONABLE')",
+                        (bulletin_id, entry.pick_id, ordinal, entry.current_kickoff_at),
+                    )
+            cursor.execute(
+                "SELECT bulletin_version, local_date, timezone, generated_at, as_of, "
+                "horizon_seconds FROM daily_bulletins WHERE bulletin_id = %s",
+                (bulletin_id,),
+            )
+            row = cursor.fetchone()
+            cursor.execute(
+                "SELECT pick_id FROM daily_bulletin_memberships WHERE bulletin_id = %s "
+                "ORDER BY ordinal",
+                (bulletin_id,),
+            )
+            pick_ids = tuple(value[0] for value in cursor.fetchall())
+        return DailyBulletinSnapshot(
+            bulletin_id,
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            int(row[5]),
+            pick_ids,
+            inserted,
+        )

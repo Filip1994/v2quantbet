@@ -63,18 +63,14 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
     try:
         with psycopg.connect(DATABASE_URL) as connection:
             connection.execute(
-                psycopg.sql.SQL("SET search_path TO {}").format(
-                    psycopg.sql.Identifier(schema)
-                )
+                psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
-            assert applied[-1] == "011_stale_quote_refresh_state.sql"
+            assert applied[-1] == "013_daily_bulletin_snapshots.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
-                psycopg.sql.SQL("SET search_path TO {}").format(
-                    psycopg.sql.Identifier(schema)
-                )
+                psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
             )
             row = inspection.execute("SELECT to_regclass('pick_closing_finalizations')").fetchone()
             assert row[0] == "pick_closing_finalizations"
@@ -83,9 +79,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
     finally:
         with psycopg.connect(DATABASE_URL) as admin, admin.cursor() as cursor:
             cursor.execute(
-                psycopg.sql.SQL("DROP SCHEMA {} CASCADE").format(
-                    psycopg.sql.Identifier(schema)
-                )
+                psycopg.sql.SQL("DROP SCHEMA {} CASCADE").format(psycopg.sql.Identifier(schema))
             )
 
 
@@ -112,7 +106,11 @@ def _selected_context(candidate: DurableCandidate):
 
 
 def _ingest_selected(
-    candidate: DurableCandidate, *, observed_at: datetime, captured_at: datetime, odd: float,
+    candidate: DurableCandidate,
+    *,
+    observed_at: datetime,
+    captured_at: datetime,
+    odd: float,
     source: str = "api-football",
 ) -> str:
     series_id, bookmaker_id, market, selection, _ = _selected_context(candidate)
@@ -186,9 +184,9 @@ def test_opening_current_closing_markers_bulletin_and_late_quote_freeze() -> Non
         with ThreadPoolExecutor(max_workers=2) as executor:
             starts = list(
                 executor.map(
-                    lambda _: PostgreSQLPickMonitoringRepository(
-                        database_url=DATABASE_URL
-                    ).start(pick.pick_id, LIFECYCLE, started_at=pick.registered_at),
+                    lambda _: PostgreSQLPickMonitoringRepository(database_url=DATABASE_URL).start(
+                        pick.pick_id, LIFECYCLE, started_at=pick.registered_at
+                    ),
                     range(2),
                 )
             )
@@ -262,9 +260,7 @@ def test_opening_current_closing_markers_bulletin_and_late_quote_freeze() -> Non
             pick.registered_at.astimezone(ZoneInfo("Europe/Belgrade")).date(),
             as_of=cutoff + timedelta(hours=1),
         )
-        entry = next(item for item in entries if item.pick_id == pick.pick_id)
-        assert entry.odds.closing.snapshot_id == closing_id
-        assert entry.model_version_id
+        assert all(item.pick_id != pick.pick_id for item in entries)
     finally:
         _cleanup(account, (candidate,))
 
@@ -296,9 +292,7 @@ def test_closing_freshness_boundary_and_stale_candidate(age_minutes, expected) -
         result = repository.finalize(pick.pick_id, finalized_at=cutoff)
         assert result.outcome is expected
         assert result.candidate_snapshot_id == candidate_id
-        assert (result.closing_snapshot_id is not None) is (
-            expected is ClosingOutcome.CAPTURED
-        )
+        assert (result.closing_snapshot_id is not None) is (expected is ClosingOutcome.CAPTURED)
     finally:
         _cleanup(account, (candidate,))
 
@@ -357,9 +351,7 @@ def test_reschedule_before_finalization_moves_cutoff_but_after_close_does_not() 
             kickoff_at=moved_cutoff + timedelta(hours=1),
             observed_at=moved_cutoff + timedelta(minutes=1),
         )
-        replay = repository.finalize(
-            pick.pick_id, finalized_at=moved_cutoff + timedelta(hours=1)
-        )
+        replay = repository.finalize(pick.pick_id, finalized_at=moved_cutoff + timedelta(hours=1))
         assert replay == closed
         assert replay.cutoff_at == moved_cutoff
     finally:
@@ -388,9 +380,9 @@ def test_quote_insert_and_finalization_share_series_serialization() -> None:
 
         def finalize():
             barrier.wait()
-            return PostgreSQLPickMonitoringRepository(
-                database_url=DATABASE_URL
-            ).finalize(pick.pick_id, finalized_at=cutoff)
+            return PostgreSQLPickMonitoringRepository(database_url=DATABASE_URL).finalize(
+                pick.pick_id, finalized_at=cutoff
+            )
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             inserted_future = executor.submit(ingest)

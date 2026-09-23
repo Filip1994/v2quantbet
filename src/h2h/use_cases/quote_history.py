@@ -36,7 +36,9 @@ class QuoteHistoryIngestionService:
 
     @staticmethod
     def _snapshot_id(series_id: str, quote: CanonicalQuote, captured_at: datetime) -> str:
-        value = f"{series_id}|{quote.observed_at.isoformat()}|{captured_at.isoformat()}|{quote.source}"
+        value = (
+            f"{series_id}|{quote.observed_at.isoformat()}|{captured_at.isoformat()}|{quote.source}"
+        )
         return "snapshot-" + sha256(value.encode("utf-8")).hexdigest()
 
     def _existing_series(self, quote: CanonicalQuote) -> QuoteSeries | None:
@@ -49,9 +51,11 @@ class QuoteHistoryIngestionService:
                 return series
         return None
 
-    def ingest(self, quotes: Iterable[CanonicalQuote]) -> int:
+    def ingest(
+        self, quotes: Iterable[CanonicalQuote], *, captured_at: datetime | None = None
+    ) -> int:
         """Persist one collection cycle and return newly observed quote count."""
-        captured_at = self._capture_clock()
+        captured_at = self._capture_clock() if captured_at is None else captured_at
         snapshots: list[QuoteSnapshot] = []
         fresh_observations = 0
         incoming_observations: set[tuple[str, datetime, str]] = set()
