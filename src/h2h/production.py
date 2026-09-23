@@ -18,6 +18,7 @@ from h2h.application_postgres import (
     build_postgres_result_settlement_application,
 )
 from h2h.config import ProductionSettings
+from h2h.domain.fixture_identity import ResolvedFixtureIdentity
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
 from h2h.odds.http import UrllibJsonTransport
@@ -59,6 +60,22 @@ class ProviderOperationalState:
             self.last_error_class = None
             self.last_error_message = None
             self.last_error_at = None
+
+
+@dataclass(frozen=True)
+class BookmakerBoundOddsSource:
+    """Bind monitoring refreshes to the same configured bookmaker as registration."""
+
+    service: ApiFootballOddsService
+    bookmaker_id: int
+
+    def fetch_quotes(
+        self, *, fixture_identity: ResolvedFixtureIdentity
+    ) -> tuple[object, ...]:
+        return self.service.fetch_quotes(
+            fixture_identity=fixture_identity,
+            bookmaker_id=self.bookmaker_id,
+        )
 
 
 @dataclass
@@ -146,7 +163,10 @@ def build_production_application(
     )
     monitoring = build_postgres_pick_monitoring_application(
         application_settings.odds_lifecycle_policy,
-        ApiFootballOddsService(monitoring_client),
+        BookmakerBoundOddsSource(
+            ApiFootballOddsService(monitoring_client),
+            settings.bookmaker_id,
+        ),
         database_url=application_settings.database_url,
         bulletin_timezone=application_settings.bulletin_timezone,
         on_item_failure=item_failure("monitoring"),
