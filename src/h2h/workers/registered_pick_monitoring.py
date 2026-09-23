@@ -28,7 +28,14 @@ class RegisteredPickMonitoringWorker:
     ) -> None:
         self._reconcile = reconcile
         self._refresh = refresh
+        self._has_pending = False
+
+    @property
+    def has_pending(self) -> bool:
+        return self._has_pending
 
     def run_once(self) -> MonitoringCycleResult:
-        return MonitoringCycleResult(self._reconcile.execute(), self._refresh.execute())
+        result = MonitoringCycleResult(self._reconcile.execute(), self._refresh.execute())
+        self._has_pending = result.refresh.pending_work
+        return result
 
