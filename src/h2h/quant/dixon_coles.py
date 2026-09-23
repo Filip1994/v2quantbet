@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -12,6 +13,10 @@ from scipy.optimize import minimize
 
 class DixonColesFitError(RuntimeError):
     pass
+
+
+class DixonColesFitAbortedError(DixonColesFitError):
+    """Raised when a production fit is stopped by its cooperative deadline guard."""
 
 
 def _sum_zero_basis(size: int) -> np.ndarray:
@@ -71,8 +76,17 @@ class DixonColesModel:
         xi: float,
         ridge: float = 0.01,
         min_matches: int = 80,
+        should_abort: Callable[[], bool] | None = None,
     ) -> DixonColesModel:
         cls._validate_team_id_namespace(team_id_namespace)
+
+        def check_abort() -> None:
+            if should_abort is not None and should_abort():
+                raise DixonColesFitAbortedError(
+                    "Dixon-Coles fit aborted by shutdown or wall-clock guard"
+                )
+
+        check_abort()
         records = [record for record in records if record.date < reference_time]
         if len(records) < min_matches:
             raise DixonColesFitError(
@@ -127,6 +141,7 @@ class DixonColesModel:
             return attacks, defenses, float(intercept), float(home_advantage), float(rho)
 
         def objective(params: np.ndarray) -> float:
+            check_abort()
             attacks, defenses, intercept, home_advantage, rho = unpack(params)
             log_lambda_home = np.clip(
                 intercept + home_advantage + attacks[home_indices] + defenses[away_indices],
@@ -183,6 +198,7 @@ class DixonColesModel:
             + [(-3.0, 3.0)] * (n_teams - 1)
             + [(-2.0, 2.0), (-1.0, 1.0), (-0.20, 0.20)]
         )
+        check_abort()
         result = minimize(
             objective,
             initial,
@@ -190,6 +206,7 @@ class DixonColesModel:
             bounds=bounds,
             options={"maxiter": 2_000, "ftol": 1e-10},
         )
+        check_abort()
         if not result.success or not np.isfinite(result.fun):
             raise DixonColesFitError(f"Optimizacija nije konvergirala: {result.message}")
 
