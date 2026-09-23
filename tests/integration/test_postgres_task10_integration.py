@@ -219,7 +219,7 @@ def _cleanup(account_id: str, candidates: tuple[DurableCandidate, ...]) -> None:
     model_ids = [item.model_version_id for item in candidates]
     with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
         cursor.execute(
-            "TRUNCATE daily_bulletin_memberships, daily_bulletins, "
+            "TRUNCATE pick_operator_state_events, daily_bulletin_memberships, daily_bulletins, "
             "pick_realized_clv, pick_settlement_events, "
             "fixture_result_acquisition_states, fixture_result_observations, "
             "pick_closing_finalizations, pick_monitoring_transitions, "
