@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import base64
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+import pytest
+
+from h2h.api.dashboard import DashboardHTTPService, DashboardService
+
+
+NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+
+
+def _pick(**changes: object) -> dict[str, object]:
+    pick: dict[str, object] = {
+        "pick_id": "registered-pick-v1:0123456789abcdef",
+        "home_team": "Red & <script>alert(1)</script>",
+        "away_team": "Blue",
+        "competition_name": "Premier <League>",
+        "kickoff_at": NOW,
+        "market": "OU_25",
+        "selection": "OVER",
+        "first_seen_odd": 1.91,
+        "pick_odd": 1.95,
+        "current_odd": 2.01,
+        "closing_odd": 2.05,
+        "bookmaker_key": "bet365",
+        "source": "api-football",
+        "first_seen_observed_at": NOW,
+        "pick_observed_at": NOW,
+        "current_observed_at": NOW,
+        "closing_observed_at": NOW,
+        "model_probability": 0.58,
+        "implied_probability": 0.5236,
+        "devig_probability": 0.51,
+        "edge": 0.07,
+        "expected_value": 0.131,
+        "stake_minor": 100_000,
+        "realized_pnl_minor": 95_000,
+        "settlement_outcome": "WIN",
+        "settled_at": NOW,
+        "clv_ppm": 50_000,
+        "warning_codes": ["SOURCE_<STALE>"],
+        "stale_quote": True,
+        "closing_status": "CAPTURED",
+        "model_version_id": "dc-v7",
+        "config_fingerprint": "pick-policy-config-v1:abc",
+        "prediction_method_version": "DIXON_COLES_V1",
+        "eligibility_policy_version": "ELIGIBILITY_V1",
+        "risk_policy_version": "RISK_V1",
+        "staking_policy_version": "FIXED_STAKE_V1",
+    }
+    pick.update(changes)
+    return pick
+
+
+def _snapshot(picks: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "generated_at": NOW,
+        "bankroll": {
+            "initial_minor": 3_000_000,
+            "available_minor": 3_095_000,
+            "open_exposure_minor": 0,
+            "total_staked_minor": 100_000,
+            "settled_stake_minor": 100_000,
+            "gross_returns_minor": 195_000,
+            "realized_pnl_minor": 95_000,
+            "pending_minor": 0,
+            "currency": "RSD",
+        },
+        "counts": {"all": len(picks), "active": 0, "won": 1, "lost": 0, "void": 0},
+        "provider_budget": {
+            "used": 32,
+            "remaining": 7468,
+            "effective_limit": 7500,
+            "by_category": {"discovery": 32},
+        },
+        "operations": {
+            "database_reachable": True,
+            "workers": [],
+            "last_engine_refresh": NOW,
+            "last_discovery": NOW,
+            "last_odds_ingestion": NOW,
+            "recent_failures": 0,
+            "stale_workers": [],
+            "counts": {},
+        },
+        "picks": picks,
+    }
+
+
+class RenderingDashboard(DashboardService):
+    def __init__(self, snapshot: dict[str, object]) -> None:
+        self._snapshot = snapshot
+
+    def snapshot(self) -> dict[str, object]:
+        return self._snapshot
+
+
+def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html() -> None:
+    html = RenderingDashboard(_snapshot([_pick()])).render_html()
+
+    assert "1.91" in html
+    assert "1.95" in html
+    assert "2.01" in html
+    assert "2.05" in html
+    assert "950.00 RSD" in html
+    assert "+5.00%" in html
+    assert "SOURCE_&lt;STALE&gt;" in html
+    assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<script>alert(1)</script>" not in html
+    assert "FIXED_STAKE_V1" in html
+
+
+def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> None:
+    empty = RenderingDashboard(_snapshot([])).render_html()
+    missing = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    first_seen_odd=None,
+                    current_odd=None,
+                    closing_odd=None,
+                    realized_pnl_minor=None,
+                    settlement_outcome=None,
+                    settled_at=None,
+                    clv_ppm=None,
+                    warning_codes=[],
+                    stale_quote=False,
+                    monitoring_state="MONITORING",
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "No registered picks yet." in empty
+    assert "MONITORING" in missing
+    assert "None" in missing
+    assert "—" in missing
+
+
+def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
+    performance = SimpleNamespace(
+        available_bankroll_minor=3_095_000,
+        open_exposure_minor=50_000,
+        resolved_stake_minor=100_000,
+        realized_pnl_minor=95_000,
+        pending_stake_minor=50_000,
+        currency="RSD",
+        pending_count=1,
+        win_count=1,
+        loss_count=0,
+        void_count=0,
+    )
+    application = SimpleNamespace(
+        settings=SimpleNamespace(
+            application=SimpleNamespace(
+                registration_policy=SimpleNamespace(
+                    bankroll_account_id="pilot", initial_bankroll_minor=3_000_000
+                )
+            )
+        ),
+        results=SimpleNamespace(
+            performance=SimpleNamespace(summary=lambda _account: performance)
+        ),
+        budget=SimpleNamespace(
+            usage_by_category=lambda: {"discovery": 10, "results_monitoring": 5},
+            effective_limit=7500,
+        ),
+    )
+
+    class Projection(DashboardService):
+        def _picks(self) -> list[dict[str, object]]:
+            return [
+                {"stake_minor": 100_000, "gross_return_minor": 195_000,
+                 "settlement_outcome": "WIN"},
+                {"stake_minor": 50_000, "gross_return_minor": None,
+                 "settlement_outcome": None},
+            ]
+
+        def _operations(self, _generated_at: datetime) -> dict[str, object]:
+            return {"database_reachable": True}
+
+    data = Projection(application).snapshot()
+
+    assert data["bankroll"]["total_staked_minor"] == 150_000
+    assert data["bankroll"]["settled_stake_minor"] == 100_000
+    assert data["bankroll"]["gross_returns_minor"] == 195_000
+    assert data["bankroll"]["realized_pnl_minor"] == 95_000
+    assert data["provider_budget"]["remaining"] == 7485
+
+
+@pytest.fixture
+def dashboard_server(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
+    monkeypatch.setenv("QUANTBET_DASHBOARD_PASSWORD", "correct horse")
+    service = DashboardHTTPService(
+        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
+    )
+    service.start()
+    try:
+        yield service
+    finally:
+        service.close()
+
+
+def test_dashboard_http_auth_security_headers_and_no_write_path(dashboard_server) -> None:
+    url = f"http://127.0.0.1:{dashboard_server.port}/"
+    with pytest.raises(HTTPError) as unauthorized:
+        urlopen(url)
+    assert unauthorized.value.code == 401
+    assert unauthorized.value.headers["WWW-Authenticate"]
+
+    token = base64.b64encode(b"operator:correct horse").decode()
+    request = Request(url, headers={"Authorization": f"Basic {token}"})
+    with urlopen(request) as response:
+        assert response.status == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.headers["Content-Security-Policy"]
+
+    with pytest.raises(HTTPError) as post_response:
+        urlopen(Request(url, method="POST", data=b""))
+    assert post_response.value.code == 501
+
+
+def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
+    service = DashboardHTTPService(
+        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
+    )
+    service.start()
+    try:
+        with pytest.raises(HTTPError) as response:
+            urlopen(f"http://127.0.0.1:{service.port}/dashboard")
+        assert response.value.code == 404
+    finally:
+        service.close()
