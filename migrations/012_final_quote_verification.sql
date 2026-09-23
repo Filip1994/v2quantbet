@@ -62,4 +62,3 @@ CREATE INDEX idx_final_quote_verifications_status
 ALTER TABLE pick_decisions
     ADD COLUMN final_quote_verification_id TEXT
         REFERENCES final_quote_verifications(verification_id) ON DELETE RESTRICT;
-
