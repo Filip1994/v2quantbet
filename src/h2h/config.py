@@ -226,15 +226,15 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
     if mode not in {"create", "verify"}:
         raise ConfigError("QUANTBET_BANKROLL_BOOTSTRAP_MODE must be create or verify")
     api_limit = _positive_integer(values, "QUANTBET_API_DAILY_LIMIT", "7500")
-    api_reserve = int(values.get("QUANTBET_API_RESERVE", "1500").strip())
+    api_reserve = int(values.get("QUANTBET_API_RESERVE", "0").strip())
     if api_reserve < 0 or api_reserve >= api_limit:
         raise ConfigError("QUANTBET_API_RESERVE must be non-negative and below the daily limit")
     effective_limit = api_limit - api_reserve
     training_daily_limit = _positive_integer(
-        values, "QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT", "25"
+        values, "QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT", str(effective_limit)
     )
     training_operational_reserve = _nonnegative_integer(
-        values, "QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE", "500"
+        values, "QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE", "0"
     )
     if training_daily_limit > effective_limit:
         raise ConfigError(
