@@ -204,6 +204,86 @@ def _second_evaluation(candidate: DurableCandidate) -> str:
     )
 
 
+def _btts_evaluation(candidate: DurableCandidate) -> str:
+    """Create an independently eligible BTTS evaluation on the same fixture."""
+    assert DATABASE_URL is not None
+    observed_at = datetime.now(UTC)
+    token = uuid4().int
+    quote_repo = PostgreSQLQuoteHistoryRepository(database_url=DATABASE_URL)
+    QuoteHistoryIngestionService(quote_repo, capture_clock=lambda: observed_at).ingest(
+        (
+            CanonicalQuote(
+                candidate.fixture_id,
+                8,
+                "Bet365",
+                Market.BTTS,
+                Selection.YES,
+                1.7,
+                observed_at,
+                "api-football",
+            ),
+            CanonicalQuote(
+                candidate.fixture_id,
+                8,
+                "Bet365",
+                Market.BTTS,
+                Selection.NO,
+                2.2,
+                observed_at,
+                "api-football",
+            ),
+        )
+    )
+    with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT fixture_observation_id FROM fixture_observations WHERE fixture_id = %s "
+            "ORDER BY observed_at DESC LIMIT 1",
+            (candidate.fixture_id,),
+        )
+        observation_id = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT q.snapshot_id FROM quote_snapshots q JOIN quote_series s "
+            "ON s.series_id = q.series_id WHERE s.fixture_id = %s "
+            "AND s.market = 'BTTS' AND s.selection = 'NO' "
+            "ORDER BY q.captured_at DESC LIMIT 1",
+            (candidate.fixture_id,),
+        )
+        snapshot_id = cursor.fetchone()[0]
+    prediction = PersistedFixturePrediction(
+        prediction_id="fixture-prediction-v1:" + f"{token:064x}"[-64:],
+        fixture_id=candidate.fixture_id,
+        fixture_observation_id=observation_id,
+        model_version_id=candidate.model_version_id,
+        active_generation=2,
+        model_activated_at=TRAINED_AT,
+        provider="api-football",
+        team_id_namespace="api-football",
+        league_id=39,
+        season=2024,
+        provider_home_team_id=1,
+        provider_away_team_id=2,
+        prediction_method_version="DIXON_COLES_MARKET_PROBABILITIES_V1",
+        max_goals=10,
+        over_2_5_probability=0.5,
+        under_2_5_probability=0.5,
+        btts_yes_probability=0.4,
+        predicted_at=observed_at,
+        persisted_at=observed_at,
+    )
+    predictions = PostgreSQLFixturePredictionRepository(database_url=DATABASE_URL)
+    predictions.add(prediction)
+    return (
+        EvaluatePersistedPredictionQuote(
+            predictions,
+            quote_repo,
+            PostgreSQLValueEvaluationRepository(database_url=DATABASE_URL),
+            clock=lambda: observed_at,
+        )
+        .execute(prediction.prediction_id, snapshot_id)
+        .evaluation_id
+    )
+
+
 def _policy(account_id: str, **changes):
     return replace(
         base_policy(),
@@ -401,7 +481,7 @@ def test_concurrent_different_evaluations_same_fixture_market_register_once() ->
             results = [future.result() for future in futures]
         assert sum(result.pick is not None for result in results) == 1
         rejected = next(result for result in results if result.pick is None)
-        assert RiskRejectionCode.DUPLICATE_FIXTURE_MARKET.value in rejected.decision.reason_codes
+        assert RiskRejectionCode.DUPLICATE_FIXTURE.value in rejected.decision.reason_codes
         with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT (SELECT COUNT(*) FROM pick_decisions), "
@@ -410,6 +490,41 @@ def test_concurrent_different_evaluations_same_fixture_market_register_once() ->
                 "WHERE entry_type = 'STAKE_RESERVED')"
             )
             assert cursor.fetchone() == (2, 1, 1)
+    finally:
+        _cleanup(account, (candidate,))
+
+
+def test_different_markets_on_same_fixture_register_only_one_pick() -> None:
+    _migrate()
+    candidate = _candidate()
+    btts_evaluation_id = _btts_evaluation(candidate)
+    account = f"task10-{uuid4()}"
+    configured = _policy(account)
+    repository = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
+    try:
+        repository.bootstrap_bankroll(configured, occurred_at=NOW)
+        first = repository.register(
+            candidate.evaluation_id,
+            "ou-" + account,
+            configured,
+            decided_at=datetime.now(UTC),
+        )
+        second = repository.register(
+            btts_evaluation_id,
+            "btts-" + account,
+            configured,
+            decided_at=datetime.now(UTC),
+        )
+
+        assert first.pick is not None
+        assert second.pick is None
+        assert RiskRejectionCode.DUPLICATE_FIXTURE.value in second.decision.reason_codes
+        with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM registered_picks WHERE fixture_id = %s",
+                (candidate.fixture_id,),
+            )
+            assert cursor.fetchone()[0] == 1
     finally:
         _cleanup(account, (candidate,))
 
