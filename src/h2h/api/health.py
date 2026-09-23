@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
 from typing import Any
 
-from h2h.api.dashboard import DashboardService
+from h2h.api.dashboard import DashboardService, dashboard_is_public
 from h2h.production import ProductionApplication
 
 
@@ -92,6 +92,8 @@ class HealthService:
         handler.wfile.write(encoded)
 
     def _authorize_dashboard(self, handler: BaseHTTPRequestHandler) -> bool:
+        if dashboard_is_public():
+            return True
         password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
         username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
         if not password:

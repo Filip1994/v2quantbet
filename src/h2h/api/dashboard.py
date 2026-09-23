@@ -1,42 +1,85 @@
-"""Read-only server-rendered QuantBet dashboard."""
+"""Read-only, server-rendered QuantBet operations dashboard."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import base64
+import hmac
+import json
+import os
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from html import escape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from typing import Any
 
-from h2h.production import ProductionApplication
+
+WORKER_FRESHNESS_SECONDS = 120
+
+
+def dashboard_is_public() -> bool:
+    """Return whether dashboard read routes are intentionally public."""
+    return os.environ.get("QUANTBET_DASHBOARD_PUBLIC", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _policy(application: Any) -> Any:
+    policy = application.settings.application.registration_policy
+    if policy is None:
+        raise RuntimeError("dashboard requires a registration policy")
+    return policy
 
 
 class DashboardService:
-    """Project durable production state into a compact read-only dashboard."""
+    """Project durable PostgreSQL facts without mutating or recomputing them."""
 
-    def __init__(self, application: ProductionApplication) -> None:
+    def __init__(self, application: Any) -> None:
         self._application = application
 
     def snapshot(self) -> dict[str, Any]:
-        app = self._application
-        policy = app.settings.application.registration_policy
-        assert policy is not None
-        performance = app.results.performance.summary(policy.bankroll_account_id)
+        generated_at = datetime.now(UTC)
+        policy = _policy(self._application)
+        performance = self._application.results.performance.summary(policy.bankroll_account_id)
         picks = self._picks()
-        usage = app.budget.usage_by_category()
+        operations = self._operations(generated_at)
+        usage = self._application.budget.usage_by_category()
         used = sum(usage.values())
+        gross_returns = sum(
+            int(pick["gross_return_minor"] or 0)
+            for pick in picks
+            if pick.get("settlement_outcome") is not None
+        )
         return {
-            "generated_at": datetime.now(UTC),
+            "generated_at": generated_at,
             "bankroll": {
+                "initial_minor": policy.initial_bankroll_minor,
                 "available_minor": performance.available_bankroll_minor,
                 "open_exposure_minor": performance.open_exposure_minor,
+                "total_staked_minor": sum(int(pick["stake_minor"] or 0) for pick in picks),
+                "settled_stake_minor": performance.resolved_stake_minor,
+                "gross_returns_minor": gross_returns,
+                "realized_pnl_minor": performance.realized_pnl_minor,
+                "pending_minor": performance.pending_stake_minor,
                 "currency": performance.currency,
+            },
+            "counts": {
+                "all": len(picks),
+                "active": performance.pending_count,
+                "won": performance.win_count,
+                "lost": performance.loss_count,
+                "void": performance.void_count,
             },
             "provider_budget": {
                 "used": used,
-                "remaining": max(0, app.budget.effective_limit - used),
-                "effective_limit": app.budget.effective_limit,
+                "remaining": max(0, self._application.budget.effective_limit - used),
+                "effective_limit": self._application.budget.effective_limit,
                 "by_category": usage,
             },
-            "pick_count": len(picks),
+            "operations": operations,
             "picks": picks,
         }
 
@@ -44,185 +87,453 @@ class DashboardService:
         sql = """
             WITH latest_fixture AS (
                 SELECT DISTINCT ON (fo.fixture_id)
-                    fo.fixture_id,
-                    fo.home_team,
-                    fo.away_team,
-                    fo.competition_name,
-                    fo.kickoff_at,
-                    fo.provider_status
+                    fo.fixture_id, fo.home_team, fo.away_team, fo.competition_name,
+                    fo.kickoff_at, fo.provider_status
                 FROM fixture_observations fo
                 ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC
+            ), effective_settlement AS (
+                SELECT event.* FROM pick_settlement_events event
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pick_settlement_events successor
+                    WHERE successor.prior_event_id = event.settlement_event_id
+                )
             )
             SELECT
-                r.pick_id,
-                r.registered_at,
-                r.fixture_id,
-                latest.home_team,
-                latest.away_team,
-                latest.competition_name,
-                latest.kickoff_at,
-                latest.provider_status,
-                r.market,
-                r.selection,
-                r.stake_minor,
-                r.currency,
-                fq.final_odd,
-                fq.minimum_playable_odds,
-                fq.final_model_probability,
-                fq.final_devig_probability,
-                fq.final_edge,
-                fq.final_expected_value,
-                fq.stale_quote,
-                fq.quote_age_seconds,
-                fq.warning_codes,
-                fq.returned_bookmaker_key,
-                fq.returned_observed_at,
-                opening.odd AS opening_odd,
+                r.pick_id, r.registered_at, r.fixture_id,
+                latest.home_team, latest.away_team, latest.competition_name,
+                latest.kickoff_at, latest.provider_status,
+                r.market, r.selection, r.stake_minor, r.currency,
+                entry.odd AS pick_odd, entry.observed_at AS pick_observed_at,
+                entry.captured_at AS pick_captured_at,
+                opening.odd AS first_seen_odd,
+                opening.observed_at AS first_seen_observed_at,
+                opening.captured_at AS first_seen_captured_at,
                 current_quote.odd AS current_odd,
                 current_quote.observed_at AS current_observed_at,
                 current_quote.captured_at AS current_captured_at,
+                closing.outcome AS closing_status,
+                closing.finalized_at AS closing_finalized_at,
+                closing_quote.odd AS closing_odd,
+                closing_quote.observed_at AS closing_observed_at,
+                closing_quote.captured_at AS closing_captured_at,
+                e.bookmaker_key, e.source, e.model_probability,
+                e.selected_raw_implied_probability AS implied_probability,
+                e.selected_devig_probability AS devig_probability,
+                e.edge, e.expected_value,
+                prediction.model_version_id, prediction.prediction_method_version,
+                r.config_fingerprint,
+                config.eligibility_policy_version, config.risk_policy_version,
+                config.staking_policy_version,
+                fq.stale_quote, fq.quote_age_seconds, fq.warning_codes,
                 monitoring.state AS monitoring_state,
-                monitoring.next_refresh_at,
-                closing.outcome AS closing_outcome,
-                closing_quote.odd AS closing_odd
+                settlement.outcome AS settlement_outcome,
+                settlement.gross_return_minor, settlement.realized_pnl_minor,
+                settlement.occurred_at AS settled_at,
+                clv.clv_ppm, clv.method_version AS clv_method_version
             FROM registered_picks r
-            JOIN pick_decisions d ON d.decision_id = r.decision_id
+            JOIN pick_decisions decision ON decision.decision_id = r.decision_id
             JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
+            JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id
+            JOIN pick_policy_configurations config
+                ON config.config_fingerprint = r.config_fingerprint
+            JOIN quote_snapshots entry ON entry.snapshot_id = r.entry_snapshot_id
             LEFT JOIN final_quote_verifications fq
-                ON fq.verification_id = d.final_quote_verification_id
+                ON fq.verification_id = decision.final_quote_verification_id
             LEFT JOIN latest_fixture latest ON latest.fixture_id = r.fixture_id
             LEFT JOIN LATERAL (
-                SELECT q.odd
+                SELECT q.odd, q.observed_at, q.captured_at
                 FROM quote_snapshots q
-                WHERE q.series_id = e.selected_series_id
-                  AND q.source = e.source
+                WHERE q.series_id = e.selected_series_id AND q.source = e.source
                   AND q.observed_at < latest.kickoff_at
                   AND q.captured_at < latest.kickoff_at
-                ORDER BY q.captured_at ASC, q.observed_at ASC, q.snapshot_id ASC
+                ORDER BY q.captured_at, q.observed_at, q.snapshot_id
                 LIMIT 1
             ) opening ON TRUE
             LEFT JOIN LATERAL (
                 SELECT q.odd, q.observed_at, q.captured_at
                 FROM quote_snapshots q
-                WHERE q.series_id = e.selected_series_id
-                  AND q.source = e.source
+                WHERE q.series_id = e.selected_series_id AND q.source = e.source
                   AND q.observed_at < latest.kickoff_at
                   AND q.captured_at < latest.kickoff_at
                 ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
                 LIMIT 1
             ) current_quote ON TRUE
-            LEFT JOIN pick_monitoring_states monitoring
-                ON monitoring.pick_id = r.pick_id
-            LEFT JOIN pick_closing_finalizations closing
-                ON closing.pick_id = r.pick_id
+            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
+            LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
+            LEFT JOIN effective_settlement settlement ON settlement.pick_id = r.pick_id
+            LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
             ORDER BY r.registered_at DESC, r.pick_id DESC
         """
-        with (
-            self._application.monitoring.repository.connect() as connection,
-            connection.cursor() as cursor,
-        ):
+        with self._application.runtime.connect() as connection, connection.cursor() as cursor:
             cursor.execute(sql)
             columns = [item.name for item in cursor.description]
             rows = cursor.fetchall()
         return [dict(zip(columns, row, strict=True)) for row in rows]
 
+    def _operations(self, generated_at: datetime) -> dict[str, Any]:
+        statuses, counts = self._application.runtime.readiness_snapshot()
+        workers = []
+        for status in statuses:
+            item = asdict(status)
+            item["stale"] = bool(
+                status.next_due_at
+                and generated_at
+                > status.next_due_at + timedelta(seconds=WORKER_FRESHNESS_SECONDS)
+            )
+            workers.append(item)
+        last_success = max(
+            (item["last_success_at"] for item in workers if item["last_success_at"]),
+            default=None,
+        )
+        by_name = {item["worker_name"]: item for item in workers}
+        discovery = by_name.get("discovery", {})
+        ingestion_candidates = [
+            item.get("last_success_at")
+            for name, item in by_name.items()
+            if name in {"opportunity", "monitoring"}
+        ]
+        last_ingestion = max((value for value in ingestion_candidates if value), default=None)
+        return {
+            "database_reachable": True,
+            "workers": workers,
+            "last_engine_refresh": last_success,
+            "last_discovery": discovery.get("last_success_at"),
+            "last_odds_ingestion": last_ingestion,
+            "recent_failures": counts.get("retry", 0),
+            "stale_workers": [item["worker_name"] for item in workers if item["stale"]],
+            "counts": counts,
+        }
+
     @staticmethod
     def _money(minor: int | None, currency: str | None) -> str:
         if minor is None:
             return "—"
-        return f"{minor / 100:,.2f} {currency or ''}".replace(",", " ")
+        amount = Decimal(minor) / Decimal(100)
+        return f"{amount:,.2f} {currency or ''}".replace(",", " ")
 
     @staticmethod
-    def _pct(value: float | None) -> str:
-        return "—" if value is None else f"{value * 100:.2f}%"
+    def _pct(value: float | Decimal | None) -> str:
+        return "—" if value is None else f"{Decimal(str(value)) * 100:.2f}%"
 
     @staticmethod
-    def _odd(value: float | None) -> str:
-        return "—" if value is None else f"{value:.2f}"
+    def _odd(value: float | Decimal | None) -> str:
+        return "—" if value is None else f"{Decimal(str(value)):.2f}"
 
     @staticmethod
     def _dt(value: datetime | None) -> str:
         if value is None:
             return "—"
-        return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        return value.astimezone(UTC).strftime("%d %b %Y · %H:%M UTC")
+
+    @staticmethod
+    def _checkpoint_time(value: datetime | None) -> str:
+        if value is None:
+            return "—"
+        return value.astimezone(UTC).strftime("%d %b %H:%M")
+
+    @staticmethod
+    def _short_id(value: Any) -> str:
+        text = str(value or "")
+        return text[-10:] if len(text) > 10 else text or "—"
+
+    @staticmethod
+    def _status(pick: dict[str, Any]) -> tuple[str, str]:
+        outcome = pick.get("settlement_outcome")
+        if outcome:
+            return str(outcome), str(outcome).lower()
+        state = pick.get("monitoring_state") or "REGISTERED"
+        return str(state).replace("_", " "), "active"
+
+    @staticmethod
+    def _warnings(pick: dict[str, Any]) -> list[str]:
+        warnings = [str(value) for value in (pick.get("warning_codes") or ())]
+        if pick.get("stale_quote"):
+            warnings.append("STALE QUOTE")
+        if pick.get("closing_status") in {"NO_VALID_QUOTE", "STALE_QUOTE"}:
+            warnings.append(str(pick["closing_status"]).replace("_", " "))
+        return list(dict.fromkeys(warnings))
+
+    def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
+        fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
+        status, status_class = self._status(pick)
+        warnings = self._warnings(pick)
+        warning_html = (
+            "".join(f'<span class="warning">{escape(item)}</span>' for item in warnings)
+            if warnings
+            else '<span class="muted">None</span>'
+        )
+        clv = (
+            "—"
+            if pick.get("clv_ppm") is None
+            else f"{Decimal(pick['clv_ppm']) / Decimal(10000):+.2f}%"
+        )
+        provenance = " · ".join(
+            filter(
+                None,
+                [
+                    str(pick.get("model_version_id") or ""),
+                    str(pick.get("config_fingerprint") or ""),
+                    str(pick.get("prediction_method_version") or ""),
+                    str(pick.get("eligibility_policy_version") or ""),
+                    str(pick.get("risk_policy_version") or ""),
+                    str(pick.get("staking_policy_version") or ""),
+                ],
+            )
+        )
+        odds = (
+            '<div class="odds-grid">'
+            f'<span title="{escape(self._dt(pick.get("first_seen_observed_at")))}">'
+            f'<b>First</b>{self._odd(pick.get("first_seen_odd"))}</span>'
+            f'<span title="{escape(self._dt(pick.get("pick_observed_at")))}">'
+            f'<b>Pick</b>{self._odd(pick.get("pick_odd"))}</span>'
+            f'<span title="{escape(self._dt(pick.get("current_observed_at")))}">'
+            f'<b>Current</b>{self._odd(pick.get("current_odd"))}</span>'
+            f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
+            f'<b>Close</b>{self._odd(pick.get("closing_odd"))}</span>'
+            "</div>"
+        )
+        checkpoint_times = " · ".join(
+            [
+                f"F {self._checkpoint_time(pick.get('first_seen_observed_at'))}",
+                f"P {self._checkpoint_time(pick.get('pick_observed_at'))}",
+                f"C {self._checkpoint_time(pick.get('current_observed_at'))}",
+                f"X {self._checkpoint_time(pick.get('closing_observed_at'))}",
+            ]
+        )
+        return (
+            "<tr>"
+            f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
+            f'{escape(self._short_id(pick.get("pick_id")))}</code></td>'
+            f'<td class="fixture"><strong>{escape(fixture)}</strong><small>'
+            f'{escape(str(pick.get("competition_name") or "—"))} · '
+            f'{escape(self._dt(pick.get("kickoff_at")))}</small></td>'
+            f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
+            f'<strong>{escape(str(pick.get("selection") or "—"))}</strong></td>'
+            f"<td>{odds}<small>{escape(str(pick.get('bookmaker_key') or '—'))} · "
+            f"{escape(str(pick.get('source') or '—'))}</small>"
+            f'<small class="timestamps">{escape(checkpoint_times)}</small></td>'
+            f'<td class="num"><strong>{self._pct(pick.get("model_probability"))}</strong>'
+            f'<small>implied {self._pct(pick.get("implied_probability"))} · '
+            f'de-vig {self._pct(pick.get("devig_probability"))}</small></td>'
+            f'<td class="num value"><strong>{self._pct(pick.get("edge"))}</strong>'
+            f'<small>EV {self._pct(pick.get("expected_value"))}</small></td>'
+            f'<td class="num"><strong>{escape(self._money(pick.get("stake_minor"), currency))}'
+            f'</strong><small>P/L {escape(self._money(pick.get("realized_pnl_minor"), currency))}'
+            f" · CLV {escape(clv)}</small></td>"
+            f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
+            f'<small>{escape(self._dt(pick.get("settled_at")))}</small></td>'
+            f"<td>{warning_html}</td>"
+            f'<td class="provenance" title="{escape(provenance)}">'
+            f"{escape(provenance or '—')}</td>"
+            "</tr>"
+        )
 
     def render_html(self) -> str:
         data = self.snapshot()
         bankroll = data["bankroll"]
-        budget = data["provider_budget"]
-        rows: list[str] = []
-        for pick in data["picks"]:
-            fixture = f"{pick.get('home_team') or '?'} – {pick.get('away_team') or '?'}"
-            warning = "STALE" if pick.get("stale_quote") else ""
-            rows.append(
-                "<tr>"
-                f"<td>{escape(self._dt(pick.get('registered_at')))}</td>"
-                f"<td><strong>{escape(fixture)}</strong><br><small>{escape(str(pick.get('competition_name') or ''))}</small></td>"
-                f"<td>{escape(self._dt(pick.get('kickoff_at')))}</td>"
-                f"<td>{escape(str(pick.get('market') or ''))} / <strong>{escape(str(pick.get('selection') or ''))}</strong></td>"
-                f"<td>{self._odd(pick.get('final_odd'))}</td>"
-                f"<td>{self._odd(pick.get('minimum_playable_odds'))}</td>"
-                f"<td>{self._odd(pick.get('current_odd'))}</td>"
-                f"<td>{self._pct(pick.get('final_model_probability'))}</td>"
-                f"<td>{self._pct(pick.get('final_edge'))}</td>"
-                f"<td>{self._pct(pick.get('final_expected_value'))}</td>"
-                f"<td>{escape(self._money(pick.get('stake_minor'), pick.get('currency')))}</td>"
-                f"<td>{escape(str(pick.get('monitoring_state') or 'REGISTERED'))}</td>"
-                f"<td>{escape(warning)}</td>"
-                f"<td><code>{escape(str(pick.get('fixture_id') or ''))}</code></td>"
-                "</tr>"
+        ops = data["operations"]
+        currency = bankroll["currency"]
+        rows = "".join(self._render_pick_row(pick, currency) for pick in data["picks"])
+        if not rows:
+            rows = (
+                '<tr><td class="empty" colspan="10"><strong>No registered picks yet.</strong>'
+                "<br>Durable pick history will appear here after registration.</td></tr>"
             )
-        table_rows = "".join(rows) or '<tr><td colspan="14">No registered picks.</td></tr>'
-        generated = self._dt(data["generated_at"])
+        worker_rows = "".join(
+            "<tr>"
+            f'<td><strong>{escape(item["worker_name"])}</strong></td>'
+            f'<td><span class="status {"lost" if item["stale"] else "win"}">'
+            f'{"STALE" if item["stale"] else "CURRENT"}</span></td>'
+            f'<td>{escape(self._dt(item["last_success_at"]))}</td>'
+            f'<td>{item["consecutive_failures"]}</td>'
+            "</tr>"
+            for item in ops["workers"]
+        ) or '<tr><td colspan="4" class="empty">No worker heartbeat records.</td></tr>'
+        return self._document(
+            rows=rows,
+            worker_rows=worker_rows,
+            bankroll=bankroll,
+            counts=data["counts"],
+            budget=data["provider_budget"],
+            ops=ops,
+            generated_at=data["generated_at"],
+        )
+
+    def _document(self, **context: Any) -> str:
+        bankroll = context["bankroll"]
+        counts = context["counts"]
+        budget = context["budget"]
+        ops = context["ops"]
+        currency = bankroll["currency"]
+        cards = [
+            ("Current bankroll", self._money(bankroll["available_minor"], currency), "primary"),
+            ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
+            ("Open exposure", self._money(bankroll["open_exposure_minor"], currency), "warn"),
+            ("Realized P/L", self._money(bankroll["realized_pnl_minor"], currency), "value"),
+            ("Total staked", self._money(bankroll["total_staked_minor"], currency), ""),
+            ("Settled stakes", self._money(bankroll["settled_stake_minor"], currency), ""),
+            ("Gross returns", self._money(bankroll["gross_returns_minor"], currency), ""),
+            ("Pending", self._money(bankroll["pending_minor"], currency), "warn"),
+        ]
+        cards_html = "".join(
+            f'<article class="kpi {css}"><span>{escape(label)}</span><strong>{escape(value)}</strong>'
+            "</article>"
+            for label, value, css in cards
+        )
+        stale = ", ".join(ops["stale_workers"]) or "None"
         return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>QuantBet Dashboard</title>
+<meta name="robots" content="noindex,nofollow"><title>QuantBet · Operations</title>
 <style>
-:root {{ color-scheme: dark; }}
-body {{ font-family: ui-sans-serif,system-ui,-apple-system,sans-serif; margin: 0; background:#0f1117; color:#e7e9ee; }}
-main {{ max-width: 1500px; margin: 0 auto; padding: 24px; }}
-h1 {{ margin: 0 0 18px; }}
-.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }}
-.card {{ background:#171a22; border:1px solid #2b303b; border-radius:10px; padding:14px; }}
-.card small {{ color:#9da5b4; display:block; margin-bottom:5px; }}
-.card strong {{ font-size:1.25rem; }}
-.wrap {{ overflow-x:auto; border:1px solid #2b303b; border-radius:10px; }}
-table {{ border-collapse:collapse; width:100%; min-width:1400px; background:#171a22; }}
-th,td {{ padding:10px 12px; border-bottom:1px solid #2b303b; text-align:left; white-space:nowrap; }}
-th {{ position:sticky; top:0; background:#20242e; }}
-small {{ color:#9da5b4; }}
-code {{ font-size:.85em; }}
-footer {{ margin-top:14px; color:#9da5b4; font-size:.85rem; }}
-</style>
-</head>
-<body>
-<main>
-<h1>QuantBet Production Dashboard</h1>
-<section class="cards">
-<div class="card"><small>Available bankroll</small><strong>{escape(self._money(bankroll["available_minor"], bankroll["currency"]))}</strong></div>
-<div class="card"><small>Open exposure</small><strong>{escape(self._money(bankroll["open_exposure_minor"], bankroll["currency"]))}</strong></div>
-<div class="card"><small>Registered picks</small><strong>{data["pick_count"]}</strong></div>
-<div class="card"><small>API calls used</small><strong>{budget["used"]} / {budget["effective_limit"]}</strong></div>
-<div class="card"><small>API calls remaining</small><strong>{budget["remaining"]}</strong></div>
-</section>
-<div class="wrap">
-<table>
-<thead><tr>
-<th>Registered</th><th>Fixture</th><th>Kickoff</th><th>Pick</th>
-<th>Entry odds</th><th>Min playable</th><th>Current odds</th>
-<th>Model p</th><th>Edge</th><th>EV</th><th>Stake</th>
-<th>Monitoring</th><th>Warning</th><th>Fixture ID</th>
-</tr></thead>
-<tbody>{table_rows}</tbody>
-</table>
-</div>
-<footer>Generated {escape(generated)}. Read-only. No bets are placed from this page.</footer>
-</main>
-</body>
-</html>"""
+:root{{--bg:#090c12;--panel:#111722;--panel2:#161e2b;--line:#253044;--text:#e7edf7;
+--muted:#8592a6;--blue:#4e8cff;--green:#36d399;--red:#fb7185;--amber:#f5b942}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:13px/1.45
+Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}}.shell{{max-width:1800px;margin:auto;padding:24px}}
+header{{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:20px}}
+.eyebrow,.section-label{{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}}
+h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--muted)}}
+.live{{display:flex;align-items:center;gap:8px;color:var(--muted)}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--green)}}
+.kpis{{display:grid;grid-template-columns:repeat(8,minmax(140px,1fr));gap:9px;margin-bottom:12px}}
+.kpi{{background:var(--panel);border:1px solid var(--line);padding:13px 14px;min-height:76px}}
+.kpi span{{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}}.kpi strong{{font-size:17px;font-variant-numeric:tabular-nums}}
+.kpi.primary{{border-top:2px solid var(--blue)}}.kpi.value strong,.value strong{{color:var(--green)}}.kpi.warn strong{{color:var(--amber)}}
+.overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:var(--panel);border:1px solid var(--line)}}
+.overview .panel:first-child{{display:flex;flex-direction:column}}
+.panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line)}}h2{{font-size:14px;margin:0}}
+.scoreboard{{display:grid;grid-template-columns:repeat(5,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
+.score:last-child{{border:0}}.score span{{display:block;color:var(--muted)}}.score strong{{font-size:22px;font-variant-numeric:tabular-nums}}
+.won{{color:var(--green)}}.lost{{color:var(--red)}}.ops{{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}}
+.fact{{background:var(--panel2);padding:10px}}.fact span{{display:block;color:var(--muted);font-size:11px}}.fact strong{{display:block;margin-top:4px}}
+.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1450px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}}
+th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
+tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
+.market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
+.odds-grid{{display:grid;grid-template-columns:repeat(4,44px);gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid span{{background:var(--panel2);padding:5px;text-align:center}}.odds-grid b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase}}
+.status,.warning{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
+.status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
+.status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}.warning{{color:var(--amber);border-color:#6c5425;margin:2px}}
+.provenance{{max-width:210px;overflow:hidden;text-overflow:ellipsis}}.timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
+.empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
+.workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
+@media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
+@media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
+.scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}}}
+</style></head><body><main class="shell">
+<header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
+<div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
+<div class="live"><span class="dot"></span>Database Connected · Generated {escape(self._dt(context["generated_at"]))}</div></header>
+<section class="kpis">{cards_html}</section>
+<section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
+<div class="scoreboard"><div class="score"><span>All picks</span><strong>{counts["all"]}</strong></div>
+<div class="score"><span>Active</span><strong>{counts["active"]}</strong></div><div class="score"><span>Won</span><strong class="won">{counts["won"]}</strong></div>
+<div class="score"><span>Lost</span><strong class="lost">{counts["lost"]}</strong></div><div class="score"><span>Void</span><strong>{counts["void"]}</strong></div></div></article>
+<article class="panel"><div class="panel-head"><h2>Operational pulse</h2><span class="section-label">Evidence-backed</span></div><div class="ops">
+<div class="fact"><span>Last engine cycle</span><strong>{escape(self._dt(ops["last_engine_refresh"]))}</strong></div>
+<div class="fact"><span>Last discovery</span><strong>{escape(self._dt(ops["last_discovery"]))}</strong></div>
+<div class="fact"><span>Odds ingestion</span><strong>{escape(self._dt(ops["last_odds_ingestion"]))}</strong></div>
+<div class="fact"><span>Provider budget</span><strong>{budget["used"]} / {budget["effective_limit"]} · {budget["remaining"]} left</strong></div>
+<div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
+</div></article></section><section class="panel"><div class="panel-head"><h2>Complete pick history</h2><span class="section-label">Newest first</span></div>
+<div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
+<th class="num">Edge</th><th class="num">Accounting</th><th>Status</th><th>Quality</th><th>Provenance</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
+<section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
+<div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
+<tbody>{context["worker_rows"]}</tbody></table></div></section><footer><span>Read-only · no betting, settlement or worker controls</span>
+<span>Refresh page for current durable state</span></footer></main></body></html>"""
+
+
+class DashboardHTTPService:
+    """Small standalone HTTP surface for a Railway dashboard service."""
+
+    def __init__(self, dashboard: DashboardService, *, host: str, port: int) -> None:
+        self._dashboard = dashboard
+        service = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                path = self.path.split("?", 1)[0]
+                if path == "/livez":
+                    service._json(self, 200, {"live": True})
+                elif path in {"/", "/dashboard"}:
+                    if service._authorize(self):
+                        try:
+                            service._html(self, 200, dashboard.render_html())
+                        except Exception as exc:  # noqa: BLE001 - bounded failure response
+                            service._json(self, 503, {"error": type(exc).__name__})
+                else:
+                    service._json(self, 404, {"error": "not_found"})
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        self._server = ThreadingHTTPServer((host, port), Handler)
+        self._thread = Thread(target=self._server.serve_forever, daemon=True)
+
+    @staticmethod
+    def _json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, Any]) -> None:
+        encoded = json.dumps(body).encode()
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    @staticmethod
+    def _html(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
+        encoded = body.encode()
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.send_header("X-Frame-Options", "DENY")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    def _authorize(self, handler: BaseHTTPRequestHandler) -> bool:
+        if dashboard_is_public():
+            return True
+        password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
+        username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
+        if not password:
+            self._json(handler, 404, {"error": "not_found"})
+            return False
+        supplied_user = supplied_password = ""
+        authorization = handler.headers.get("Authorization", "")
+        if authorization.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(authorization[6:], validate=True).decode()
+                supplied_user, supplied_password = decoded.split(":", 1)
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if hmac.compare_digest(supplied_user, username) and hmac.compare_digest(
+            supplied_password, password
+        ):
+            return True
+        encoded = b'{"error":"authentication_required"}'
+        handler.send_response(401)
+        handler.send_header("WWW-Authenticate", 'Basic realm="QuantBet Dashboard"')
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+        return False
+
+    def start(self) -> None:
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self._server.server_address[1])
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
