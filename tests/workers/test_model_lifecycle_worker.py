@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from threading import Event
 
 from h2h.domain.model_coverage import ModelCoverageStatus, ProductionTrainingPolicy
 from h2h.domain.model_lifecycle import DixonColesModelScope
@@ -9,6 +10,7 @@ from h2h.persistence.postgres_model_coverage import ModelCoverageRecord
 from h2h.quant.dixon_coles import DixonColesFitAbortedError
 from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError
 from h2h.workers.model_lifecycle import ModelLifecycleWorker, ModelQualityError
+from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 
 
 NOW = datetime(2026, 9, 23, 12, tzinfo=UTC)
@@ -274,6 +276,65 @@ def test_wall_clock_abort_fails_scope_and_returns_control() -> None:
     assert not cycle.interrupted
     assert coverage.failed == [record(39).scope]
     assert elapsed[0] >= 45.0
+
+
+def test_wall_clock_abort_does_not_starve_following_scheduler_jobs() -> None:
+    coverage = CoverageFake([record(39)])
+    usage = [0]
+    elapsed = [0.0]
+    stop = Event()
+    later_runs: list[str] = []
+
+    class Trainer:
+        def execute(self, _scope, _config, *, target_scope, should_abort):
+            assert target_scope == record(39).scope
+            while not should_abort():
+                elapsed[0] += 10.0
+            raise DixonColesFitAbortedError(
+                "Dixon-Coles fit aborted by shutdown or wall-clock guard"
+            )
+
+    lifecycle = worker(
+        coverage,
+        Trainer(),
+        ActiveFake(),
+        ActivatorFake(),
+        usage,
+    )
+    lifecycle._monotonic = lambda: elapsed[0]
+
+    class Runtime:
+        def worker_started(self, *_args, **_kwargs):
+            return None
+
+        def worker_succeeded(self, *_args, **_kwargs):
+            return None
+
+        def worker_failed(self, *_args, **_kwargs):
+            raise AssertionError("model timeout must be contained by model lifecycle")
+
+    def run_after_model(name: str) -> None:
+        later_runs.append(name)
+        if name == "results":
+            stop.set()
+
+    jobs = (
+        ScheduledJob("model_lifecycle", 60, lifecycle.run_once),
+        ScheduledJob("opportunity", 60, lambda: run_after_model("opportunity")),
+        ScheduledJob("monitoring", 60, lambda: run_after_model("monitoring")),
+        ScheduledJob("results", 60, lambda: run_after_model("results")),
+    )
+    ProductionOrchestrator(
+        jobs,
+        Runtime(),  # type: ignore[arg-type]
+        instance_id="test",
+        stop=stop,
+        tick_seconds=1,
+        leader_healthy=lambda: True,
+    ).run_forever()
+
+    assert later_runs == ["opportunity", "monitoring", "results"]
+    assert coverage.failed == [record(39).scope]
 
 
 def test_invalid_artifact_quality_gate_never_changes_active_pointer() -> None:
