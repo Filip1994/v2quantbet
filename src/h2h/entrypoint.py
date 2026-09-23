@@ -86,6 +86,9 @@ def _run_active_leader(
         bookmaker_id=application.settings.bookmaker_id,
         allowed_statuses=policy.allowed_fixture_statuses,
         now=datetime.now(UTC),
+        maximum_quote_age_seconds=policy.maximum_quote_age_seconds,
+        minimum_time_to_kickoff_seconds=policy.minimum_time_to_kickoff_seconds,
+        stale_retry_policy=application.settings.stale_quote_retry_policy,
     )
 
     durable = application.prediction.durable_discovery
