@@ -11,6 +11,7 @@ from h2h.read_models.performance import (
     BankrollCurvePoint,
     PerformanceGroup,
     PerformanceSummary,
+    OperatorPerformanceSummary,
 )
 
 
@@ -44,8 +45,7 @@ class PostgreSQLPerformanceRepository:
     def summary(self, bankroll_account_id: str) -> PerformanceSummary:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                self._effective_cte()
-                + "SELECT a.currency, latest.balance_after_minor, "
+                self._effective_cte() + "SELECT a.currency, latest.balance_after_minor, "
                 "COALESCE(SUM(r.stake_minor) FILTER (WHERE e.outcome IS NULL), 0), "
                 "COALESCE(SUM(e.realized_pnl_minor) FILTER (WHERE e.outcome IS NOT NULL), 0), "
                 "COALESCE(SUM(r.stake_minor) FILTER (WHERE e.outcome IS NOT NULL), 0), "
@@ -76,12 +76,86 @@ class PostgreSQLPerformanceRepository:
             roi = None if graded == 0 else Decimal(int(row[3])) / Decimal(graded)
             curve = self.curve(bankroll_account_id)
             return PerformanceSummary(
-                bankroll_account_id, row[0], available, exposure, available + exposure,
-                int(row[3]), int(row[4]), graded, int(row[6]), exposure, roi,
-                int(row[7]), int(row[8]), int(row[9]), int(row[10]), int(row[11]),
-                int(row[12]), int(row[13]), int(row[14]),
-                None if row[15] is None else Decimal(row[15]), curve,
+                bankroll_account_id,
+                row[0],
+                available,
+                exposure,
+                available + exposure,
+                int(row[3]),
+                int(row[4]),
+                graded,
+                int(row[6]),
+                exposure,
+                roi,
+                int(row[7]),
+                int(row[8]),
+                int(row[9]),
+                int(row[10]),
+                int(row[11]),
+                int(row[12]),
+                int(row[13]),
+                int(row[14]),
+                None if row[15] is None else Decimal(row[15]),
+                curve,
             )
+
+    def operator_summary(self, bankroll_account_id: str) -> OperatorPerformanceSummary:
+        """Project actual finances from PLAYED picks without mutating the system ledger."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH latest_operator AS ("
+                "SELECT DISTINCT ON (pick_id) pick_id, state FROM pick_operator_state_events "
+                "ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC), "
+                "played_picks AS (SELECT r.* FROM registered_picks r "
+                "LEFT JOIN latest_operator operator_state ON operator_state.pick_id = r.pick_id "
+                "WHERE COALESCE(operator_state.state, 'PLAYED') = 'PLAYED'), "
+                "effective AS (SELECT e.* FROM pick_settlement_events e WHERE NOT EXISTS ("
+                "SELECT 1 FROM pick_settlement_events n "
+                "WHERE n.prior_event_id = e.settlement_event_id)), "
+                "initial AS (SELECT amount_minor FROM bankroll_ledger_entries "
+                "WHERE bankroll_account_id = %s AND entry_type = 'INITIAL_BANKROLL' "
+                "ORDER BY account_sequence LIMIT 1) "
+                "SELECT a.currency, initial.amount_minor, "
+                "COALESCE(SUM(r.stake_minor), 0), "
+                "COALESCE(SUM(r.stake_minor) FILTER (WHERE e.outcome IS NULL), 0), "
+                "COALESCE(SUM(r.stake_minor) FILTER (WHERE e.outcome IS NOT NULL), 0), "
+                "COALESCE(SUM(e.gross_return_minor) FILTER (WHERE e.outcome IS NOT NULL), 0), "
+                "COALESCE(SUM(e.realized_pnl_minor) FILTER (WHERE e.outcome IS NOT NULL), 0), "
+                "COUNT(r.pick_id), COUNT(r.pick_id) FILTER (WHERE e.outcome IS NULL), "
+                "COUNT(r.pick_id) FILTER (WHERE e.outcome = 'WIN'), "
+                "COUNT(r.pick_id) FILTER (WHERE e.outcome = 'LOSS'), "
+                "COUNT(r.pick_id) FILTER (WHERE e.outcome = 'VOID') "
+                "FROM bankroll_accounts a CROSS JOIN initial "
+                "LEFT JOIN played_picks r ON r.bankroll_account_id = a.bankroll_account_id "
+                "LEFT JOIN effective e ON e.pick_id = r.pick_id "
+                "WHERE a.bankroll_account_id = %s "
+                "GROUP BY a.currency, initial.amount_minor",
+                (bankroll_account_id, bankroll_account_id),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise LookupError(f"bankroll account {bankroll_account_id!r} does not exist")
+        initial = int(row[1])
+        total_staked = int(row[2])
+        pending = int(row[3])
+        gross_returns = int(row[5])
+        return OperatorPerformanceSummary(
+            bankroll_account_id=bankroll_account_id,
+            currency=row[0],
+            initial_bankroll_minor=initial,
+            available_bankroll_minor=initial - total_staked + gross_returns,
+            open_exposure_minor=pending,
+            total_staked_minor=total_staked,
+            resolved_stake_minor=int(row[4]),
+            gross_returns_minor=gross_returns,
+            realized_pnl_minor=int(row[6]),
+            pending_stake_minor=pending,
+            played_count=int(row[7]),
+            pending_count=int(row[8]),
+            win_count=int(row[9]),
+            loss_count=int(row[10]),
+            void_count=int(row[11]),
+        )
 
     def curve(self, bankroll_account_id: str) -> tuple[BankrollCurvePoint, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -97,7 +171,17 @@ class PostgreSQLPerformanceRepository:
             )
             exposure = 0
             points = []
-            for sequence, occurred, entry_type, _amount, balance, _pick, stake, kind, prior_kind in cursor.fetchall():
+            for (
+                sequence,
+                occurred,
+                entry_type,
+                _amount,
+                balance,
+                _pick,
+                stake,
+                kind,
+                prior_kind,
+            ) in cursor.fetchall():
                 if entry_type == "STAKE_RESERVED":
                     exposure += int(stake)
                 elif kind == "NORMAL":
@@ -131,7 +215,13 @@ class PostgreSQLPerformanceRepository:
             )
             return tuple(
                 PerformanceGroup(
-                    int(row[0]), row[1], row[2], row[3], int(row[4]), int(row[5]), int(row[6]),
+                    int(row[0]),
+                    row[1],
+                    row[2],
+                    row[3],
+                    int(row[4]),
+                    int(row[5]),
+                    int(row[6]),
                     None if row[7] is None else Decimal(row[7]),
                 )
                 for row in cursor.fetchall()

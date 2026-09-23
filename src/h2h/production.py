@@ -27,6 +27,7 @@ from h2h.persistence import (
     PostgreSQLDixonColesModelVersionRepository,
 )
 from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
+from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
@@ -77,6 +78,7 @@ class ProductionApplication:
     model_coverage: PostgreSQLModelCoverageRepository
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
+    operator_picks: PostgreSQLOperatorPickStateRepository
 
     def close(self) -> None:
         self.prediction.close()
@@ -112,6 +114,9 @@ def build_production_application(
     )
     source = ApiFootballOddsService(client)
     provider_state = ProviderOperationalState()
+    operator_picks = PostgreSQLOperatorPickStateRepository(
+        database_url=application_settings.database_url
+    )
 
     scoped = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
     prediction = build_postgres_production_prediction_application(
@@ -268,4 +273,5 @@ def build_production_application(
         coverage,
         model_lifecycle,
         opportunity,
+        operator_picks,
     )

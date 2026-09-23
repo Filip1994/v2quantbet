@@ -13,12 +13,17 @@ psycopg = pytest.importorskip("psycopg")
 
 from h2h.domain.fixture_result import ApiFootballSettlementResultNormalizer
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
+from h2h.domain.operator_pick_state import OperatorPickState
 from h2h.domain.settlement import ClvAvailability, ResultSettlementPolicy, SettlementOutcome
 from h2h.persistence.migrations import apply_migrations
 from h2h.persistence.postgres_performance import PostgreSQLPerformanceRepository
 from h2h.persistence.postgres_pick_monitoring import PostgreSQLPickMonitoringRepository
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
+from h2h.persistence.operator_pick_state import (
+    OperatorPickStateConflictError,
+    PostgreSQLOperatorPickStateRepository,
+)
 from tests.integration.test_postgres_task10_integration import (
     _candidate,
     _cleanup,
@@ -95,7 +100,10 @@ def _confirm(repository, candidate, kickoff, *, score=(2, 1), start=None):
     )
     repository.persist_result(second, checked_at=second_at)
     assert second.result_observation_id == first.result_observation_id
-    assert repository.stable_result(candidate.fixture_id, as_of=second_at) == first.result_observation_id
+    assert (
+        repository.stable_result(candidate.fixture_id, as_of=second_at)
+        == first.result_observation_id
+    )
     return first, second_at
 
 
@@ -108,7 +116,9 @@ def test_result_settlement_ledger_clv_performance_and_replay() -> None:
     cutoff = _fixture_cutoff(candidate)
     try:
         monitor = PostgreSQLPickMonitoringRepository(database_url=DATABASE_URL)
-        monitor.start(pick.pick_id, OddsLifecyclePolicy(300, 600, 900), started_at=pick.registered_at)
+        monitor.start(
+            pick.pick_id, OddsLifecyclePolicy(300, 600, 900), started_at=pick.registered_at
+        )
         closing_id = _ingest_selected(
             candidate,
             observed_at=cutoff - timedelta(minutes=5),
@@ -142,7 +152,10 @@ def test_result_settlement_ledger_clv_performance_and_replay() -> None:
         assert repository.finalize_clv(pick.pick_id, realized_at=settled_at) == clv
 
         performance = PostgreSQLPerformanceRepository(database_url=DATABASE_URL).summary(account)
-        assert performance.available_bankroll_minor == _policy(account).initial_bankroll_minor + pick.stake_minor
+        assert (
+            performance.available_bankroll_minor
+            == _policy(account).initial_bankroll_minor + pick.stake_minor
+        )
         assert performance.open_exposure_minor == 0
         assert performance.equity_at_cost_minor == performance.available_bankroll_minor
         assert performance.realized_pnl_minor == pick.stake_minor
@@ -155,8 +168,13 @@ def test_result_settlement_ledger_clv_performance_and_replay() -> None:
                 "WHERE pick_id = %s ORDER BY account_sequence",
                 (pick.pick_id,),
             )
-            assert cursor.fetchall() == [("STAKE_RESERVED", -pick.stake_minor), ("PAYOUT", 2 * pick.stake_minor)]
-            cursor.execute("SELECT COUNT(*) FROM pick_settlement_events WHERE pick_id = %s", (pick.pick_id,))
+            assert cursor.fetchall() == [
+                ("STAKE_RESERVED", -pick.stake_minor),
+                ("PAYOUT", 2 * pick.stake_minor),
+            ]
+            cursor.execute(
+                "SELECT COUNT(*) FROM pick_settlement_events WHERE pick_id = %s", (pick.pick_id,)
+            )
             assert cursor.fetchone()[0] == 1
             with pytest.raises(psycopg.errors.RaiseException):
                 cursor.execute(
@@ -165,6 +183,106 @@ def test_result_settlement_ledger_clv_performance_and_replay() -> None:
                 )
     finally:
         _cleanup(account, (candidate,))
+
+
+def test_operator_state_defaults_played_and_excludes_skipped_from_actual_finances() -> None:
+    _migrate()
+    candidate = _candidate()
+    account = f"operator-{uuid4()}"
+    pick = _registered(candidate, account)
+    settlement = PostgreSQLResultSettlementRepository(RESULT_POLICY, database_url=DATABASE_URL)
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+    cutoff = _fixture_cutoff(candidate)
+
+    settlement.reconcile(reconciled_at=cutoff)
+    result, settled_at = _confirm(settlement, candidate, cutoff)
+    settlement.settle_pick(pick.pick_id, result.result_observation_id, settled_at=settled_at)
+    performance = PostgreSQLPerformanceRepository(database_url=DATABASE_URL)
+
+    assert operator.current_state(pick.pick_id) is OperatorPickState.PLAYED
+    assert operator.resolve_short_pick_id(pick.pick_id[-10:]) == pick.pick_id
+    actual_played = performance.operator_summary(account)
+    system_before = performance.summary(account)
+    assert actual_played.realized_pnl_minor == pick.stake_minor
+    assert actual_played.total_staked_minor == pick.stake_minor
+
+    skip_request = f"skip-{pick.pick_id}"
+    restore_request = f"restore-{pick.pick_id}"
+    skipped = operator.set_state(
+        pick.pick_id, OperatorPickState.SKIPPED, skip_request, occurred_at=settled_at
+    )
+    assert (
+        operator.set_state(
+            pick.pick_id, OperatorPickState.SKIPPED, skip_request, occurred_at=settled_at
+        )
+        == skipped
+    )
+    actual_skipped = performance.operator_summary(account)
+    system_after = performance.summary(account)
+    assert actual_skipped.realized_pnl_minor == 0
+    assert actual_skipped.total_staked_minor == 0
+    assert actual_skipped.available_bankroll_minor == _policy(account).initial_bankroll_minor
+    assert system_after.realized_pnl_minor == system_before.realized_pnl_minor
+    assert system_after.win_count == system_before.win_count == 1
+
+    restored = operator.set_state(
+        pick.pick_id,
+        OperatorPickState.PLAYED,
+        restore_request,
+        occurred_at=settled_at + timedelta(seconds=1),
+    )
+    assert restored.state is OperatorPickState.PLAYED
+    assert [event.state for event in operator.history(pick.pick_id)] == [
+        OperatorPickState.SKIPPED,
+        OperatorPickState.PLAYED,
+    ]
+    assert performance.operator_summary(account).realized_pnl_minor == pick.stake_minor
+
+    with pytest.raises(OperatorPickStateConflictError):
+        operator.set_state(
+            pick.pick_id, OperatorPickState.PLAYED, skip_request, occurred_at=settled_at
+        )
+    with pytest.raises(LookupError):
+        operator.current_state("registered-pick-v1:" + "0" * 64)
+
+    with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM registered_picks WHERE pick_id = %s", (pick.pick_id,))
+        assert cursor.fetchone()[0] == 1
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'pick_operator_state_events'"
+        )
+        columns = {row[0] for row in cursor.fetchall()}
+        assert "reason" not in columns
+        assert "bookmaker_id" not in columns
+
+
+def test_skipped_pending_pick_releases_only_operator_exposure() -> None:
+    _migrate()
+    candidate = _candidate()
+    account = f"operator-pending-{uuid4()}"
+    pick = _registered(candidate, account)
+    performance = PostgreSQLPerformanceRepository(database_url=DATABASE_URL)
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+
+    played = performance.operator_summary(account)
+    assert played.open_exposure_minor == pick.stake_minor
+    assert (
+        played.available_bankroll_minor
+        == _policy(account).initial_bankroll_minor - pick.stake_minor
+    )
+
+    operator.set_state(
+        pick.pick_id,
+        OperatorPickState.SKIPPED,
+        f"skip-pending-{pick.pick_id}",
+        occurred_at=datetime.now(UTC),
+    )
+    skipped = performance.operator_summary(account)
+    system = performance.summary(account)
+    assert skipped.open_exposure_minor == 0
+    assert skipped.available_bankroll_minor == _policy(account).initial_bankroll_minor
+    assert system.open_exposure_minor == pick.stake_minor
 
 
 @pytest.mark.parametrize(
@@ -189,9 +307,13 @@ def test_loss_and_void_release_reservation(status, score, entry_type, amount_fac
         first = normalizer.normalize(payload, fixture_id=candidate.fixture_id, acquired_at=first_at)
         repository.persist_result(first, checked_at=first_at)
         second_at = first_at + timedelta(minutes=15)
-        replay = normalizer.normalize(payload, fixture_id=candidate.fixture_id, acquired_at=second_at)
+        replay = normalizer.normalize(
+            payload, fixture_id=candidate.fixture_id, acquired_at=second_at
+        )
         repository.persist_result(replay, checked_at=second_at)
-        settled = repository.settle_pick(pick.pick_id, first.result_observation_id, settled_at=second_at)
+        settled = repository.settle_pick(
+            pick.pick_id, first.result_observation_id, settled_at=second_at
+        )
         assert settled.realized_pnl_minor == pnl_factor * pick.stake_minor
         with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -216,9 +338,7 @@ def test_changed_result_requires_correction_without_financial_mutation() -> None
         original, settled_at = _confirm(repository, candidate, kickoff, score=(2, 1))
         repository.settle_pick(pick.pick_id, original.result_observation_id, settled_at=settled_at)
         changed_start = settled_at + timedelta(hours=1)
-        changed, _ = _confirm(
-            repository, candidate, kickoff, score=(1, 0), start=changed_start
-        )
+        changed, _ = _confirm(repository, candidate, kickoff, score=(1, 0), start=changed_start)
         assert changed.result_observation_id != original.result_observation_id
         with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -227,9 +347,13 @@ def test_changed_result_requires_correction_without_financial_mutation() -> None
                 (candidate.fixture_id,),
             )
             assert cursor.fetchone() == (True, changed.result_observation_id)
-            cursor.execute("SELECT COUNT(*) FROM pick_settlement_events WHERE pick_id = %s", (pick.pick_id,))
+            cursor.execute(
+                "SELECT COUNT(*) FROM pick_settlement_events WHERE pick_id = %s", (pick.pick_id,)
+            )
             assert cursor.fetchone()[0] == 1
-            cursor.execute("SELECT COUNT(*) FROM bankroll_ledger_entries WHERE pick_id = %s", (pick.pick_id,))
+            cursor.execute(
+                "SELECT COUNT(*) FROM bankroll_ledger_entries WHERE pick_id = %s", (pick.pick_id,)
+            )
             assert cursor.fetchone()[0] == 2
     finally:
         _cleanup(account, (candidate,))

@@ -352,7 +352,12 @@ def test_health_http_exposes_liveness_and_structured_readiness() -> None:
                 registration_policy=SimpleNamespace(bankroll_account_id="pilot")
             )
         ),
-        results=SimpleNamespace(performance=SimpleNamespace(summary=lambda _account: performance)),
+        results=SimpleNamespace(
+            performance=SimpleNamespace(
+                summary=lambda _account: performance,
+                operator_summary=lambda _account: performance,
+            )
+        ),
     )
     state = RuntimeHealthState(
         schema_current=True, leadership="active", scheduler_alive=True, accepting_work=True

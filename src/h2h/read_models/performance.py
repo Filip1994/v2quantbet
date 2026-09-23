@@ -51,3 +51,24 @@ class PerformanceGroup:
     graded_stake_minor: int
     realized_pnl_minor: int
     mean_clv_ppm: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorPerformanceSummary:
+    """Actual bankroll projection derived only from picks currently marked PLAYED."""
+
+    bankroll_account_id: str
+    currency: str
+    initial_bankroll_minor: int
+    available_bankroll_minor: int
+    open_exposure_minor: int
+    total_staked_minor: int
+    resolved_stake_minor: int
+    gross_returns_minor: int
+    realized_pnl_minor: int
+    pending_stake_minor: int
+    played_count: int
+    pending_count: int
+    win_count: int
+    loss_count: int
+    void_count: int

@@ -6,6 +6,7 @@ import base64
 import hmac
 import json
 import os
+from uuid import uuid4
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -13,6 +14,9 @@ from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Any
+from urllib.parse import parse_qs, quote, unquote, urlsplit
+
+from h2h.domain.operator_pick_state import OperatorPickState
 
 
 WORKER_FRESHNESS_SECONDS = 120
@@ -43,35 +47,47 @@ class DashboardService:
     def snapshot(self) -> dict[str, Any]:
         generated_at = datetime.now(UTC)
         policy = _policy(self._application)
-        performance = self._application.results.performance.summary(policy.bankroll_account_id)
+        system_performance = self._application.results.performance.summary(
+            policy.bankroll_account_id
+        )
+        performance = self._application.results.performance.operator_summary(
+            policy.bankroll_account_id
+        )
         picks = self._picks()
         operations = self._operations(generated_at)
         usage = self._application.budget.usage_by_category()
         used = sum(usage.values())
-        gross_returns = sum(
-            int(pick["gross_return_minor"] or 0)
-            for pick in picks
-            if pick.get("settlement_outcome") is not None
-        )
+        played = sum(pick.get("operator_state") == "PLAYED" for pick in picks)
+        skipped = len(picks) - played
         return {
             "generated_at": generated_at,
             "bankroll": {
-                "initial_minor": policy.initial_bankroll_minor,
+                "initial_minor": performance.initial_bankroll_minor,
                 "available_minor": performance.available_bankroll_minor,
                 "open_exposure_minor": performance.open_exposure_minor,
-                "total_staked_minor": sum(int(pick["stake_minor"] or 0) for pick in picks),
+                "total_staked_minor": performance.total_staked_minor,
                 "settled_stake_minor": performance.resolved_stake_minor,
-                "gross_returns_minor": gross_returns,
+                "gross_returns_minor": performance.gross_returns_minor,
                 "realized_pnl_minor": performance.realized_pnl_minor,
                 "pending_minor": performance.pending_stake_minor,
                 "currency": performance.currency,
             },
             "counts": {
                 "all": len(picks),
+                "played": played,
+                "skipped": skipped,
                 "active": performance.pending_count,
                 "won": performance.win_count,
                 "lost": performance.loss_count,
                 "void": performance.void_count,
+            },
+            "system_performance": {
+                "registered_picks": len(picks),
+                "pending": system_performance.pending_count,
+                "won": system_performance.win_count,
+                "lost": system_performance.loss_count,
+                "void": system_performance.void_count,
+                "realized_pnl_minor": system_performance.realized_pnl_minor,
             },
             "provider_budget": {
                 "used": used,
@@ -134,6 +150,7 @@ class DashboardService:
                 settlement.gross_return_minor, settlement.realized_pnl_minor,
                 settlement.occurred_at AS settled_at,
                 clv.clv_ppm, clv.method_version AS clv_method_version
+                , COALESCE(operator_state.state, 'PLAYED') AS operator_state
             FROM registered_picks r
             JOIN pick_decisions decision ON decision.decision_id = r.decision_id
             JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
@@ -192,6 +209,11 @@ class DashboardService:
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
             LEFT JOIN effective_settlement settlement ON settlement.pick_id = r.pick_id
             LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
+            LEFT JOIN LATERAL (
+                SELECT state FROM pick_operator_state_events operator_event
+                WHERE operator_event.pick_id = r.pick_id
+                ORDER BY occurred_at DESC, persisted_at DESC, event_id DESC LIMIT 1
+            ) operator_state ON TRUE
             ORDER BY r.registered_at DESC, r.pick_id DESC
         """
         with self._application.runtime.connect() as connection, connection.cursor() as cursor:
@@ -199,6 +221,21 @@ class DashboardService:
             columns = [item.name for item in cursor.description]
             rows = cursor.fetchall()
         return [dict(zip(columns, row, strict=True)) for row in rows]
+
+    def set_operator_state(self, pick_id: str, state: str, request_id: str) -> dict[str, Any]:
+        event = self._application.operator_picks.set_state(
+            pick_id,
+            OperatorPickState(state),
+            request_id,
+            occurred_at=datetime.now(UTC),
+        )
+        return {
+            "event_id": event.event_id,
+            "pick_id": event.pick_id,
+            "state": event.state.value,
+            "occurred_at": event.occurred_at,
+            "request_id": event.request_id,
+        }
 
     def _operations(self, generated_at: datetime) -> dict[str, Any]:
         statuses, counts = self._application.runtime.readiness_snapshot()
@@ -337,6 +374,17 @@ class DashboardService:
         registered_bookmaker = self._bookmaker_badge(pick.get("bookmaker_key"))
         best_bookmaker = self._bookmaker_badge(pick.get("best_current_bookmaker_key"))
         movement = self._movement(pick)
+        operator_state = str(pick.get("operator_state") or "PLAYED")
+        action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
+        operator_controls = "".join(
+            f'<form method="post" action="{action}">'
+            f'<input type="hidden" name="request_id" value="dashboard:{uuid4().hex}">'
+            f'<button name="state" value="{candidate}" '
+            f'class="operator-button {candidate.casefold()}" '
+            f"{'disabled' if candidate == operator_state else ''}>{candidate.title()}</button>"
+            "</form>"
+            for candidate in ("PLAYED", "SKIPPED")
+        )
         odds = (
             '<div class="odds-grid">'
             f'<span title="{escape(self._dt(pick.get("first_seen_observed_at")))}">'
@@ -377,10 +425,13 @@ class DashboardService:
             f'<td class="num value"><strong>{self._pct(pick.get("edge"))}</strong>'
             f"<small>EV {self._pct(pick.get('expected_value'))}</small></td>"
             f'<td class="num"><strong>{escape(self._money(pick.get("stake_minor"), currency))}'
-            f"</strong><small>P/L {escape(self._money(pick.get('realized_pnl_minor'), currency))}"
+            f"</strong><small>System P/L {escape(self._money(pick.get('realized_pnl_minor'), currency))}"
             f" · CLV {escape(clv)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
             f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
+            f'<td><span class="status operator-{operator_state.casefold()}">'
+            f'{escape(operator_state)}</span><div class="operator-controls">'
+            f"{operator_controls}</div></td>"
             f"<td>{warning_html}</td>"
             "</tr>"
         )
@@ -393,7 +444,7 @@ class DashboardService:
         rows = "".join(self._render_pick_row(pick, currency) for pick in data["picks"])
         if not rows:
             rows = (
-                '<tr><td class="empty" colspan="9"><strong>No registered picks yet.</strong>'
+                '<tr><td class="empty" colspan="10"><strong>No registered picks yet.</strong>'
                 "<br>Durable pick history will appear here after registration.</td></tr>"
             )
         worker_rows = (
@@ -461,7 +512,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:var(--panel);border:1px solid var(--line)}}
 .overview .panel:first-child{{display:flex;flex-direction:column}}
 .panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line)}}h2{{font-size:14px;margin:0}}
-.scoreboard{{display:grid;grid-template-columns:repeat(5,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
+.scoreboard{{display:grid;grid-template-columns:repeat(7,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
 .score:last-child{{border:0}}.score span{{display:block;color:var(--muted)}}.score strong{{font-size:22px;font-variant-numeric:tabular-nums}}
 .won{{color:var(--green)}}.lost{{color:var(--red)}}.ops{{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}}
 .fact{{background:var(--panel2);padding:10px}}.fact span{{display:block;color:var(--muted);font-size:11px}}.fact strong{{display:block;margin-top:4px}}
@@ -477,6 +528,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .status,.warning{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
 .status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}.warning{{color:var(--amber);border-color:#6c5425;margin:2px}}
+.operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
+.operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
@@ -490,8 +543,9 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="live"><span class="dot"></span>Database Connected · Generated {escape(self._dt(context["generated_at"]))}</div></header>
 <section class="kpis">{cards_html}</section>
 <section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
-<div class="scoreboard"><div class="score"><span>All picks</span><strong>{counts["all"]}</strong></div>
-<div class="score"><span>Active</span><strong>{counts["active"]}</strong></div><div class="score"><span>Won</span><strong class="won">{counts["won"]}</strong></div>
+<div class="scoreboard"><div class="score"><span>System picks</span><strong>{counts["all"]}</strong></div>
+<div class="score"><span>Played</span><strong class="won">{counts["played"]}</strong></div><div class="score"><span>Skipped</span><strong>{counts["skipped"]}</strong></div>
+<div class="score"><span>Active played</span><strong>{counts["active"]}</strong></div><div class="score"><span>Won</span><strong class="won">{counts["won"]}</strong></div>
 <div class="score"><span>Lost</span><strong class="lost">{counts["lost"]}</strong></div><div class="score"><span>Void</span><strong>{counts["void"]}</strong></div></div></article>
 <article class="panel"><div class="panel-head"><h2>Operational pulse</h2><span class="section-label">Evidence-backed</span></div><div class="ops">
 <div class="fact"><span>Last engine cycle</span><strong>{escape(self._dt(ops["last_engine_refresh"]))}</strong></div>
@@ -501,7 +555,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
 </div></article></section><section class="panel"><div class="panel-head"><h2>Complete pick history</h2><span class="section-label">Newest first</span></div>
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
-<th class="num">Edge</th><th class="num">Accounting</th><th>Status</th><th>Quality</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
+<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
@@ -539,6 +593,37 @@ class DashboardHTTPService:
                 else:
                     service._json(self, 404, {"error": "not_found"})
 
+            def do_POST(self) -> None:
+                path = self.path.split("?", 1)[0]
+                prefix, suffix = "/api/picks/", "/operator-state"
+                if not path.startswith(prefix) or not path.endswith(suffix):
+                    service._json(self, 404, {"error": "not_found"})
+                    return
+                if not service._same_origin(self):
+                    service._json(self, 403, {"error": "origin_forbidden"})
+                    return
+                if not service._authorize(self, allow_public=False):
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length <= 0 or length > 4096:
+                        raise ValueError("invalid body length")
+                    values = parse_qs(self.rfile.read(length).decode("utf-8"), strict_parsing=True)
+                    pick_id = unquote(path[len(prefix) : -len(suffix)])
+                    result = dashboard.set_operator_state(
+                        pick_id, values["state"][0], values["request_id"][0]
+                    )
+                except (KeyError, LookupError, UnicodeDecodeError, ValueError) as exc:
+                    service._json(self, 400, {"error": type(exc).__name__})
+                    return
+                if "application/json" in self.headers.get("Accept", ""):
+                    service._json(self, 200, result)
+                else:
+                    self.send_response(303)
+                    self.send_header("Location", "/dashboard")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+
             def log_message(self, _format: str, *_args: object) -> None:
                 return
 
@@ -570,8 +655,8 @@ class DashboardHTTPService:
         handler.end_headers()
         handler.wfile.write(encoded)
 
-    def _authorize(self, handler: BaseHTTPRequestHandler) -> bool:
-        if dashboard_is_public():
+    def _authorize(self, handler: BaseHTTPRequestHandler, *, allow_public: bool = True) -> bool:
+        if allow_public and dashboard_is_public():
             return True
         password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
         username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
@@ -599,6 +684,14 @@ class DashboardHTTPService:
         handler.end_headers()
         handler.wfile.write(encoded)
         return False
+
+    @staticmethod
+    def _same_origin(handler: BaseHTTPRequestHandler) -> bool:
+        origin = handler.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlsplit(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == handler.headers.get("Host")
 
     def start(self) -> None:
         self._thread.start()
