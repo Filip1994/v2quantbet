@@ -217,6 +217,7 @@ class PostgreSQLRuntimeRepository:
         stale_retry_policy: StaleQuoteRetryPolicy,
         item_limit: int = 10,
         after: OpportunityCursor | None = None,
+        stale_only: bool = False,
     ) -> OpportunitySelection:
         if item_limit <= 0:
             raise ValueError("item_limit must be positive")
@@ -257,6 +258,8 @@ class PostgreSQLRuntimeRepository:
                 "WHERE latest.kickoff_at > %s "
                 "AND latest.kickoff_at <= %s "
                 "AND latest.provider_status = ANY(%s) "
+                "AND (%s = FALSE OR (refresh.freshness_state = 'STALE' "
+                "AND refresh.next_retry_at IS NOT NULL AND refresh.next_retry_at <= %s)) "
                 "AND (%s::timestamptz IS NULL OR (latest.kickoff_at, f.fixture_id) > (%s, %s)) "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
                 (
@@ -266,6 +269,8 @@ class PostgreSQLRuntimeRepository:
                     current,
                     current + timedelta(hours=72),
                     list(allowed_statuses),
+                    stale_only,
+                    current,
                     after_kickoff,
                     after_kickoff,
                     after_fixture_id,
@@ -390,6 +395,29 @@ class PostgreSQLRuntimeRepository:
             continuation=continuation,
             has_more=has_more,
             stale_retries_stopped=stale_retries_stopped,
+        )
+
+    def select_due_stale_quote_retries(
+        self,
+        *,
+        bookmaker_id: int,
+        allowed_statuses: tuple[str, ...],
+        now: datetime,
+        maximum_quote_age_seconds: int,
+        minimum_time_to_kickoff_seconds: int,
+        stale_retry_policy: StaleQuoteRetryPolicy,
+        item_limit: int = 1,
+    ) -> OpportunitySelection:
+        """Reserve a bounded slot for due stale retries independently of the normal cursor."""
+        return self.select_opportunity_fixtures(
+            bookmaker_id=bookmaker_id,
+            allowed_statuses=allowed_statuses,
+            now=now,
+            maximum_quote_age_seconds=maximum_quote_age_seconds,
+            minimum_time_to_kickoff_seconds=minimum_time_to_kickoff_seconds,
+            stale_retry_policy=stale_retry_policy,
+            item_limit=item_limit,
+            stale_only=True,
         )
 
     def latest_complete_market_states(

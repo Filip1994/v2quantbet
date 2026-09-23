@@ -17,6 +17,7 @@ from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.postgres_runtime import (
     OpportunityCursor,
     OpportunityFixture,
+    OpportunitySelection,
     PostgreSQLRuntimeRepository,
 )
 from h2h.quant import DixonColesFitError
@@ -145,17 +146,45 @@ class OpportunityWorker:
         started = self._monotonic()
         selection_time = self._now()
         prior_cursor = self._cursor
-        selection = self._repository.select_opportunity_fixtures(
-            bookmaker_id=self._bookmaker_id,
-            allowed_statuses=self._allowed_statuses,
-            now=selection_time,
-            item_limit=self._max_items,
-            after=prior_cursor,
-            maximum_quote_age_seconds=self._maximum_quote_age_seconds,
-            minimum_time_to_kickoff_seconds=self._minimum_time_to_kickoff_seconds,
-            stale_retry_policy=self._stale_retry_policy,
+        priority_selector = getattr(
+            self._repository, "select_due_stale_quote_retries", None
         )
-        due = selection.due_fixtures
+        priority_selection = (
+            priority_selector(
+                bookmaker_id=self._bookmaker_id,
+                allowed_statuses=self._allowed_statuses,
+                now=selection_time,
+                maximum_quote_age_seconds=self._maximum_quote_age_seconds,
+                minimum_time_to_kickoff_seconds=self._minimum_time_to_kickoff_seconds,
+                stale_retry_policy=self._stale_retry_policy,
+                item_limit=1,
+            )
+            if priority_selector is not None
+            else OpportunitySelection(0, 0, 0, 0, ())
+        )
+        normal_limit = self._max_items - len(priority_selection.due_fixtures)
+        selection = (
+            self._repository.select_opportunity_fixtures(
+                bookmaker_id=self._bookmaker_id,
+                allowed_statuses=self._allowed_statuses,
+                now=selection_time,
+                item_limit=normal_limit,
+                after=prior_cursor,
+                maximum_quote_age_seconds=self._maximum_quote_age_seconds,
+                minimum_time_to_kickoff_seconds=self._minimum_time_to_kickoff_seconds,
+                stale_retry_policy=self._stale_retry_policy,
+            )
+            if normal_limit > 0
+            else OpportunitySelection(0, 0, 0, 0, (), prior_cursor, True)
+        )
+        due = tuple(
+            {
+                fixture.fixture_id: fixture
+                for fixture in (
+                    priority_selection.due_fixtures + selection.due_fixtures
+                )
+            }.values()
+        )[: self._max_items]
         processed: list[str] = []
         failed: list[str] = []
         model_unavailable: list[str] = []
@@ -383,7 +412,12 @@ class OpportunityWorker:
                         model_unavailable.append(fixture.fixture_id)
         finally:
             self._flush_failures(failures_to_persist)
-        self._has_pending = bool(selection.has_more or interrupted or budget_exhausted)
+        self._has_pending = bool(
+            priority_selection.has_more
+            or selection.has_more
+            or interrupted
+            or budget_exhausted
+        )
         self._cursor = prior_cursor if (interrupted or budget_exhausted) else selection.continuation
         unavailable_scope_counts = tuple(
             (

@@ -132,6 +132,28 @@ def test_persisted_stale_retry_waits_until_due_without_tight_loop() -> None:
     assert due.due_fixtures[0].stale_retry is True
 
 
+def test_due_stale_retry_can_be_selected_independently_of_normal_cursor() -> None:
+    row = selection_row(
+        freshness_state="STALE",
+        stale_attempt_count=1,
+        stale_next_retry_at=NOW,
+        observed_at=NOW - timedelta(minutes=30),
+    )
+    repository = PostgreSQLRuntimeRepository(connect=lambda: SelectionConnection([row]))
+
+    result = repository.select_due_stale_quote_retries(
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        now=NOW,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=POLICY,
+    )
+
+    assert result.due_fixtures[0].fixture_id == "api-football:1549793"
+    assert result.due_fixtures[0].stale_retry is True
+
+
 def test_exhausted_stale_path_uses_last_attempt_for_normal_cadence() -> None:
     result = select(
         selection_row(

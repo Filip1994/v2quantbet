@@ -271,3 +271,34 @@ def test_five_hundred_missing_models_drain_across_fair_scheduler_slices() -> Non
         "results": 50,
     }
     assert subject.has_pending is False
+
+
+def test_stale_retry_reserves_one_slot_while_normal_cursor_keeps_progressing() -> None:
+    all_fixtures = fixtures(500)
+
+    class PriorityRepository(RepositoryFake):
+        def select_due_stale_quote_retries(self, **_kwargs):
+            stale = all_fixtures[-1]
+            return OpportunitySelection(1, 0, 0, 0, (stale,), has_more=True)
+
+    repository = PriorityRepository(all_fixtures)
+    subject = worker(
+        repository,
+        lambda _fixture: (_ for _ in ()).throw(ActiveModelUnavailableError("missing")),
+        max_items=10,
+    )
+
+    first = subject.run_once()
+    second = subject.run_once()
+
+    assert first.due_fixture_ids == ("api-football:0499",) + tuple(
+        f"api-football:{index:04d}" for index in range(9)
+    )
+    assert second.due_fixture_ids == ("api-football:0499",) + tuple(
+        f"api-football:{index:04d}" for index in range(9, 18)
+    )
+    assert repository.selection_calls == [
+        (9, None),
+        (9, OpportunityCursor(all_fixtures[8].kickoff_at, "api-football:0008")),
+    ]
+    assert all(len(cycle.due_fixture_ids) == 10 for cycle in (first, second))
