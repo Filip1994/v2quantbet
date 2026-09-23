@@ -2,8 +2,9 @@
 
 Quote freshness and transport recency are separate facts:
 
-- `observed_at` is the provider's observation/update time and remains the only
-  timestamp used by `QUOTE_TOO_OLD`.
+- `observed_at` is the provider's observation/update time and remains the
+  authoritative quote-age timestamp. A mandatory final pull preserves an old
+  value as `STALE_QUOTE_WARNING`; request time and `captured_at` never replace it.
 - `captured_at` is when QuantBet first persisted that immutable provider
   observation. Re-fetching the same semantic observation does not rewrite it.
 - `last_attempt_at` is operational scheduling state for a provider pull. It
@@ -36,6 +37,8 @@ Configuration:
 - `QUANTBET_STALE_QUOTE_MAX_ATTEMPTS`
 - `QUANTBET_STALE_QUOTE_RETRY_HORIZON_SECONDS`
 
-These values affect operational scheduling only and do not change betting
-eligibility or the registration-policy fingerprint. In particular,
-`QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS` is unchanged.
+These values affect operational scheduling only and do not change the
+registration-policy fingerprint. `QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS` is
+unchanged and still classifies telemetry/retry state; after the mandatory final
+provider pull, quote age alone is no longer an independent acceptance rejection.
+All non-age model, market, kickoff, edge, EV, risk, and budget gates remain hard.

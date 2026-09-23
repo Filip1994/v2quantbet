@@ -88,7 +88,7 @@ Each checkpoint must be timestamped and traceable to the underlying odds snapsho
 
 ## 9. Daily bulletin
 
-After midnight, the system must produce a daily bulletin containing the best current value opportunities for the configured future horizon.
+Shortly after midnight in Europe/Belgrade, the system produces one durable Daily Bulletin snapshot containing registered picks that remain actionable in the configured future horizon. Picks are created continuously throughout the day; the bulletin does not create or duplicate them and is not limited to picks registered on its local date.
 
 The bulletin should include, at minimum:
 
@@ -111,8 +111,10 @@ fixture discovery
 → model probability
 → bookmaker odds
 → value comparison
-→ ranking
-→ bulletin generation
+→ preliminary candidate
+→ mandatory final quote pull and repricing
+→ immediate durable registration
+→ daily actionable-pick snapshot
 ```
 
 This screening layer must remain deterministic, production-oriented, and focused on finding current opportunities. It must not perform uncontrolled experimentation or silently alter model/ranking rules.

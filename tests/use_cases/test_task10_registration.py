@@ -47,6 +47,12 @@ def test_registration_use_case_supplies_one_utc_decision_time() -> None:
     assert repository.register_call[3] == NOW
 
 
+def test_minimum_playable_odds_uses_configured_minimum_ev() -> None:
+    subject = RegisterEligiblePick(Repository(), policy(), clock=lambda: NOW)
+
+    assert subject.minimum_playable_odds(0.5) == 2.04
+
+
 def test_bankroll_bootstrap_is_explicit_not_a_composition_side_effect() -> None:
     repository = Repository()
     assert BootstrapBankroll(repository, policy(), clock=lambda: NOW).execute() == "bootstrapped"

@@ -57,6 +57,7 @@ def evaluate_persisted_eligibility(
     policy: RegistrationPolicyConfig,
     *,
     decided_at: datetime,
+    quote_age_is_warning: bool = False,
 ) -> tuple[EligibilityRejectionCode, ...]:
     """Return every applicable V1 rejection in stable enum order."""
 
@@ -87,10 +88,11 @@ def evaluate_persisted_eligibility(
         or evaluation.companion_captured_at > decided_at
     ):
         failures.add(EligibilityRejectionCode.QUOTE_NOT_YET_AVAILABLE)
-    if evaluation.quote_observed_at <= decided_at and (
-        decided_at - evaluation.quote_observed_at
-    ).total_seconds() > (
-        policy.maximum_quote_age_seconds
+    if (
+        not quote_age_is_warning
+        and evaluation.quote_observed_at <= decided_at
+        and (decided_at - evaluation.quote_observed_at).total_seconds()
+        > (policy.maximum_quote_age_seconds)
     ):
         failures.add(EligibilityRejectionCode.QUOTE_TOO_OLD)
     if evaluation.quote_observed_at >= fixture.kickoff_at:

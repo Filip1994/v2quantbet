@@ -16,9 +16,7 @@ from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
 NOW = datetime(2026, 9, 23, 12, tzinfo=UTC)
-POLICY = StaleQuoteRetryPolicy(
-    timedelta(minutes=2), timedelta(minutes=8), 5, timedelta(minutes=30)
-)
+POLICY = StaleQuoteRetryPolicy(timedelta(minutes=2), timedelta(minutes=8), 5, timedelta(minutes=30))
 
 
 class SelectionCursor:
@@ -282,7 +280,14 @@ def build_worker(repository, source, *, clock=lambda: NOW):
 
     def evaluate(_prediction_id, snapshot_id):
         evaluations.append(snapshot_id)
-        return SimpleNamespace(evaluation_id=f"evaluation:{snapshot_id}")
+        return SimpleNamespace(
+            evaluation_id=f"evaluation:{snapshot_id}",
+            market=SimpleNamespace(value="BTTS"),
+            selected_selection=SimpleNamespace(value="YES"),
+            selected_odd=1.5,
+            edge=-0.1,
+            expected_value=-0.1,
+        )
 
     def register(evaluation_id, _request_id):
         decisions.append(evaluation_id)
@@ -294,7 +299,10 @@ def build_worker(repository, source, *, clock=lambda: NOW):
         SimpleNamespace(ingest=lambda _quotes: 0),
         SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
         SimpleNamespace(execute=evaluate),
-        SimpleNamespace(execute=register),
+        SimpleNamespace(
+            execute=register,
+            preliminary_rejection_codes=lambda _evaluation_id: ("EDGE_BELOW_MINIMUM",),
+        ),
         bookmaker_id=8,
         allowed_statuses=("NS",),
         ensure_model_available=lambda _fixture: None,
@@ -324,7 +332,7 @@ def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     assert repository.state.stale_attempt_count == 2
     assert repository.state.next_retry_at == NOW + timedelta(minutes=4)
     assert evaluations == ["snapshot-btts-no", "snapshot-btts-no"]
-    assert decisions == ["evaluation:snapshot-btts-no"] * 2
+    assert decisions == []
 
 
 def test_later_fresh_payload_clears_stale_state_automatically() -> None:

@@ -15,7 +15,7 @@ from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.postgres_runtime import OpportunityFixture, OpportunitySelection, WorkerStatus
 from h2h.quant import DixonColesFitError
 from h2h.production import build_production_application
-from h2h.workers.opportunity import OpportunityWorker, registration_request_id
+from h2h.workers.opportunity import OpportunityWorker
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
@@ -176,7 +176,14 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
         execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction-1")
     )
     evaluator = SimpleNamespace(
-        execute=lambda _prediction, snapshot: SimpleNamespace(evaluation_id=f"eval-{snapshot}")
+        execute=lambda _prediction, snapshot: SimpleNamespace(
+            evaluation_id=f"eval-{snapshot}",
+            market=SimpleNamespace(value="BTTS"),
+            selected_selection=SimpleNamespace(value="YES"),
+            selected_odd=1.5,
+            edge=-0.1,
+            expected_value=-0.1,
+        )
     )
 
     def register(evaluation_id, request_id):
@@ -190,7 +197,10 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
         ingestion,
         predictor,
         evaluator,
-        SimpleNamespace(execute=register),
+        SimpleNamespace(
+            execute=register,
+            preliminary_rejection_codes=lambda _evaluation_id: ("EDGE_BELOW_MINIMUM",),
+        ),
         bookmaker_id=8,
         allowed_statuses=("NS",),
         ensure_model_available=lambda fixture: model_scopes.append(
@@ -203,16 +213,15 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     )
     first = worker.run_once()
     second = worker.run_once()
-    assert first.registered_pick_ids == ("pick-1",)
+    assert first.registered_pick_ids == ()
     assert first.quotes_fetched == 1
     assert first.fresh_quotes == 0
-    assert first.decisions == 2
+    assert first.decisions == 0
     assert second.evaluation_ids == first.evaluation_ids
     assert repository.bookmakers == [8, 8]
     assert [request["bookmaker_id"] for request in quote_requests] == [8, 8]
     assert model_scopes == [(140, 2026), (140, 2026)]
-    assert requests[0][1] == registration_request_id(requests[0][0])
-    assert requests[2] == requests[0]
+    assert requests == []
 
 
 def test_due_non_epl_fixture_without_model_is_explicit_and_stops_before_odds() -> None:
@@ -355,9 +364,7 @@ def test_health_http_exposes_liveness_and_structured_readiness() -> None:
             assert json.load(response)["ready"] is True
         old = datetime.now(UTC) - timedelta(minutes=10)
         runtime.worker_statuses = lambda: (
-            WorkerStatus(
-                "opportunity", old, old, None, old, 0, 1, 1, 0, None, None, "test", old
-            ),
+            WorkerStatus("opportunity", old, old, None, old, 0, 1, 1, 0, None, None, "test", old),
         )
         readiness = service.readiness()
         assert readiness["ready"] is False

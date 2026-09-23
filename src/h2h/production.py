@@ -120,6 +120,7 @@ def build_production_application(
     registration = build_postgres_pick_registration_application(
         application_settings.registration_policy,
         database_url=application_settings.database_url,
+        require_final_quote_verification=True,
     )
 
     def item_failure(worker: str):
@@ -167,9 +168,7 @@ def build_production_application(
         database_url=application_settings.database_url
     )
     loader = LoadActiveDixonColesModel(versions, active)
-    coverage = PostgreSQLModelCoverageRepository(
-        database_url=application_settings.database_url
-    )
+    coverage = PostgreSQLModelCoverageRepository(database_url=application_settings.database_url)
     training_client = build_api_football_client(
         UrllibJsonTransport(),
         application_settings,

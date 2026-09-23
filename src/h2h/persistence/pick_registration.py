@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from h2h.domain.pick_decision import RegistrationResult
+from h2h.domain.final_quote import FinalQuoteClaim
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 
 
@@ -46,4 +47,13 @@ class PickRegistrationRepository(Protocol):
         policy: RegistrationPolicyConfig,
         *,
         decided_at: datetime,
+        final_quote_verification_id: str | None = None,
     ) -> RegistrationResult: ...
+
+    def preliminary_rejection_codes(
+        self, evaluation_id: str, policy: RegistrationPolicyConfig, *, checked_at: datetime
+    ) -> tuple[str, ...]: ...
+
+    def begin_final_quote_verification(
+        self, preliminary_evaluation_id: str, *, requested_at: datetime
+    ) -> FinalQuoteClaim: ...

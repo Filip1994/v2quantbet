@@ -219,10 +219,12 @@ def _cleanup(account_id: str, candidates: tuple[DurableCandidate, ...]) -> None:
     model_ids = [item.model_version_id for item in candidates]
     with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
         cursor.execute(
-            "TRUNCATE pick_realized_clv, pick_settlement_events, "
+            "TRUNCATE daily_bulletin_memberships, daily_bulletins, "
+            "pick_realized_clv, pick_settlement_events, "
             "fixture_result_acquisition_states, fixture_result_observations, "
             "pick_closing_finalizations, pick_monitoring_transitions, "
-            "pick_monitoring_states, registered_picks, pick_decisions, bankroll_ledger_entries, "
+            "pick_monitoring_states, registered_picks, pick_decisions, "
+            "final_quote_verifications, bankroll_ledger_entries, "
             "bankroll_accounts, pick_policy_configurations"
         )
         cursor.execute("DELETE FROM value_evaluations WHERE fixture_id = ANY(%s)", (fixture_ids,))
@@ -260,10 +262,10 @@ def test_concurrent_identical_registration_request_is_idempotent() -> None:
                     lambda _: PostgreSQLPickRegistrationRepository(
                         database_url=DATABASE_URL
                     ).register(
-                            candidate.evaluation_id,
-                            "same-" + account,
-                            configured,
-                            decided_at=decision_at,
+                        candidate.evaluation_id,
+                        "same-" + account,
+                        configured,
+                        decided_at=decision_at,
                     ),
                     range(2),
                 )
@@ -282,7 +284,10 @@ def test_bankroll_bootstrap_idempotency_conflict_and_restart_reconstruction() ->
     repository = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
     try:
         first = repository.bootstrap_bankroll(configured, occurred_at=NOW)
-        assert repository.bootstrap_bankroll(configured, occurred_at=NOW + timedelta(seconds=1)) == first
+        assert (
+            repository.bootstrap_bankroll(configured, occurred_at=NOW + timedelta(seconds=1))
+            == first
+        )
         with pytest.raises(BankrollBootstrapConflictError):
             repository.bootstrap_bankroll(
                 replace(configured, initial_bankroll_minor=2_000_000),
