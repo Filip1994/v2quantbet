@@ -76,7 +76,28 @@ class DixonColesModel:
         xi: float,
         ridge: float = 0.01,
         min_matches: int = 80,
-        should_abort: Callable[[], bool] | None = None,
+    ) -> DixonColesModel:
+        return cls._fit_with_abort(
+            records,
+            team_id_namespace=team_id_namespace,
+            reference_time=reference_time,
+            xi=xi,
+            ridge=ridge,
+            min_matches=min_matches,
+            should_abort=None,
+        )
+
+    @classmethod
+    def _fit_with_abort(
+        cls,
+        records: list[Any],
+        *,
+        team_id_namespace: str,
+        reference_time: datetime,
+        xi: float,
+        ridge: float = 0.01,
+        min_matches: int = 80,
+        should_abort: Callable[[], bool] | None,
     ) -> DixonColesModel:
         cls._validate_team_id_namespace(team_id_namespace)
 
