@@ -10,7 +10,7 @@ from typing import Any
 
 from h2h.domain.competition_scope import CompetitionMetadata, classify_phase_i
 from h2h.domain.fixture_identity import ProviderFixtureReference, ResolvedFixtureIdentity
-from h2h.workers.quote_refresh_schedule import quote_refresh_decision
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy, quote_refresh_decision
 
 
 ConnectionFactory = Callable[[], Any]
@@ -38,6 +38,29 @@ class OpportunityFixture:
     kickoff_at: datetime
     last_captured_at: datetime | None
     next_retry_at: datetime | None = None
+    quote_freshness_state: str | None = None
+    stale_quote_attempt_count: int = 0
+    stale_quote_next_retry_at: datetime | None = None
+    stale_retry: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteMarketQuoteState:
+    market: str
+    observed_at: datetime
+    captured_at: datetime
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class QuoteRefreshState:
+    freshness_state: str
+    stale_attempt_count: int
+    first_stale_at: datetime | None
+    last_attempt_at: datetime
+    next_retry_at: datetime | None
+    latest_observed_at: datetime | None
+    latest_captured_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +80,7 @@ class OpportunitySelection:
     due_fixtures: tuple[OpportunityFixture, ...]
     continuation: OpportunityCursor | None = None
     has_more: bool = False
+    stale_retries_stopped: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,12 +192,18 @@ class PostgreSQLRuntimeRepository:
         bookmaker_id: int,
         allowed_statuses: tuple[str, ...],
         now: datetime,
+        maximum_quote_age_seconds: int,
+        minimum_time_to_kickoff_seconds: int,
+        stale_retry_policy: StaleQuoteRetryPolicy,
     ) -> tuple[OpportunityFixture, ...]:
         return self.select_opportunity_fixtures(
             bookmaker_id=bookmaker_id,
             allowed_statuses=allowed_statuses,
             now=now,
             item_limit=10,
+            maximum_quote_age_seconds=maximum_quote_age_seconds,
+            minimum_time_to_kickoff_seconds=minimum_time_to_kickoff_seconds,
+            stale_retry_policy=stale_retry_policy,
         ).due_fixtures
 
     def select_opportunity_fixtures(
@@ -182,6 +212,9 @@ class PostgreSQLRuntimeRepository:
         bookmaker_id: int,
         allowed_statuses: tuple[str, ...],
         now: datetime,
+        maximum_quote_age_seconds: int,
+        minimum_time_to_kickoff_seconds: int,
+        stale_retry_policy: StaleQuoteRetryPolicy,
         item_limit: int = 10,
         after: OpportunityCursor | None = None,
     ) -> OpportunitySelection:
@@ -198,24 +231,37 @@ class PostgreSQLRuntimeRepository:
             cursor.execute(
                 "SELECT f.fixture_id, f.provider_fixture_id::bigint, f.league_id, f.season, "
                 "latest.kickoff_at, latest.country, latest.competition_name, "
-                "latest.competition_type, MAX(q.captured_at), failures.next_retry_at "
+                "latest.competition_type, captures.last_captured_at, failures.next_retry_at, "
+                "refresh.freshness_state, refresh.stale_attempt_count, refresh.next_retry_at, "
+                "refresh.last_attempt_at, "
+                "complete.latest_observed_at, complete.latest_captured_at "
                 "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
                 "competition_name, competition_type "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
-                "LEFT JOIN quote_series s ON s.fixture_id = f.fixture_id AND s.bookmaker_id = %s "
-                "LEFT JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "LEFT JOIN LATERAL (SELECT MAX(q.captured_at) AS last_captured_at "
+                "FROM quote_series s JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = f.fixture_id AND s.bookmaker_id = %s) captures ON TRUE "
+                "LEFT JOIN LATERAL (SELECT MIN(markets.observed_at) AS latest_observed_at, "
+                "MAX(markets.captured_at) AS latest_captured_at FROM (SELECT DISTINCT ON (market) "
+                "market, observed_at, captured_at FROM (SELECT s.market, q.observed_at, q.source, "
+                "MAX(q.captured_at) AS captured_at FROM quote_series s JOIN quote_snapshots q "
+                "ON q.series_id = s.series_id WHERE s.fixture_id = f.fixture_id "
+                "AND s.bookmaker_id = %s GROUP BY s.market, q.observed_at, q.source "
+                "HAVING COUNT(DISTINCT s.selection) = 2) complete_observations "
+                "ORDER BY market, observed_at DESC, captured_at DESC, source) markets) complete ON TRUE "
+                "LEFT JOIN production_quote_refresh_states refresh ON refresh.fixture_id = "
+                "f.fixture_id AND refresh.bookmaker_id = %s "
                 "LEFT JOIN production_item_failures failures ON failures.worker_name = "
                 "'opportunity' AND failures.item_id = f.fixture_id "
                 "WHERE latest.kickoff_at > %s "
                 "AND latest.kickoff_at <= %s "
                 "AND latest.provider_status = ANY(%s) "
                 "AND (%s::timestamptz IS NULL OR (latest.kickoff_at, f.fixture_id) > (%s, %s)) "
-                "GROUP BY f.fixture_id, f.provider_fixture_id, f.league_id, f.season, "
-                "latest.kickoff_at, latest.country, latest.competition_name, "
-                "latest.competition_type, failures.next_retry_at "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
                 (
+                    bookmaker_id,
+                    bookmaker_id,
                     bookmaker_id,
                     current,
                     current + timedelta(hours=72),
@@ -232,6 +278,7 @@ class PostgreSQLRuntimeRepository:
         excluded = 0
         waiting_for_window = 0
         waiting_for_refresh = 0
+        stale_retries_stopped = 0
         continuation: OpportunityCursor | None = None
         has_more = len(rows) > scan_limit
         for row in rows[:scan_limit]:
@@ -246,6 +293,12 @@ class PostgreSQLRuntimeRepository:
             competition_type,
             last_captured,
             next_retry_at,
+            freshness_state,
+            stale_attempt_count,
+            stale_next_retry_at,
+            refresh_last_attempt_at,
+            latest_complete_observed_at,
+            _latest_complete_captured_at,
             ) = row
             continuation = OpportunityCursor(kickoff_at, fixture_id)
             scope = classify_phase_i(
@@ -265,7 +318,42 @@ class PostgreSQLRuntimeRepository:
             if not decision.eligible or decision.interval is None:
                 waiting_for_window += 1
                 continue
-            if last_captured is not None and last_captured + decision.interval > current:
+            derived_stale = bool(
+                latest_complete_observed_at is not None
+                and current - latest_complete_observed_at
+                > timedelta(seconds=maximum_quote_age_seconds)
+            )
+            persisted_stale = freshness_state == "STALE"
+            scheduling_anchor = last_captured
+            if refresh_last_attempt_at is not None and (
+                scheduling_anchor is None or refresh_last_attempt_at > scheduling_anchor
+            ):
+                scheduling_anchor = refresh_last_attempt_at
+            stale_retry = False
+            if derived_stale or persisted_stale:
+                if kickoff_at - current <= timedelta(seconds=minimum_time_to_kickoff_seconds):
+                    waiting_for_window += 1
+                    stale_retries_stopped += 1
+                    continue
+                if persisted_stale:
+                    if stale_next_retry_at is not None:
+                        if stale_next_retry_at > current:
+                            waiting_for_refresh += 1
+                            continue
+                        stale_retry = True
+                    elif scheduling_anchor is not None and (
+                        scheduling_anchor + decision.interval > current
+                    ):
+                        # The accelerated path has reached its explicit bound. Normal
+                        # cadence remains available without creating a tight loop.
+                        waiting_for_refresh += 1
+                        continue
+                else:
+                    # A pre-existing stale complete observation has no retry row yet
+                    # (for example immediately after migration). Do not let its recent
+                    # transport capture suppress the first stale-aware pull.
+                    stale_retry = True
+            elif scheduling_anchor is not None and scheduling_anchor + decision.interval > current:
                 waiting_for_refresh += 1
                 continue
             due.append(
@@ -282,6 +370,10 @@ class PostgreSQLRuntimeRepository:
                     kickoff_at=kickoff_at,
                     last_captured_at=last_captured,
                     next_retry_at=next_retry_at,
+                    quote_freshness_state=freshness_state,
+                    stale_quote_attempt_count=int(stale_attempt_count or 0),
+                    stale_quote_next_retry_at=stale_next_retry_at,
+                    stale_retry=stale_retry,
                 )
             )
             if len(due) >= item_limit:
@@ -297,6 +389,97 @@ class PostgreSQLRuntimeRepository:
             due_fixtures=tuple(due),
             continuation=continuation,
             has_more=has_more,
+            stale_retries_stopped=stale_retries_stopped,
+        )
+
+    def latest_complete_market_states(
+        self, fixture_id: str, bookmaker_id: int
+    ) -> tuple[CompleteMarketQuoteState, ...]:
+        """Return one exact, latest two-way observation per supported market."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH complete AS (SELECT s.market, q.observed_at, q.source, "
+                "MAX(q.captured_at) AS captured_at FROM quote_series s "
+                "JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = %s AND s.bookmaker_id = %s "
+                "GROUP BY s.market, q.observed_at, q.source "
+                "HAVING COUNT(DISTINCT s.selection) = 2) "
+                "SELECT DISTINCT ON (market) market, observed_at, captured_at, source "
+                "FROM complete ORDER BY market, observed_at DESC, captured_at DESC, source",
+                (fixture_id, bookmaker_id),
+            )
+            return tuple(CompleteMarketQuoteState(*row) for row in cursor.fetchall())
+
+    def record_quote_refresh_state(
+        self,
+        fixture_id: str,
+        bookmaker_id: int,
+        *,
+        freshness_state: str,
+        attempted_at: datetime,
+        latest_observed_at: datetime | None,
+        latest_captured_at: datetime | None,
+        stale_retry_policy: StaleQuoteRetryPolicy,
+    ) -> QuoteRefreshState:
+        """Persist freshness separately from generic transport/item failures."""
+        if freshness_state not in {"FRESH", "STALE", "NO_USABLE_QUOTE"}:
+            raise ValueError("unsupported quote freshness state")
+        attempted = _utc(attempted_at)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT freshness_state, stale_attempt_count, first_stale_at "
+                "FROM production_quote_refresh_states WHERE fixture_id = %s "
+                "AND bookmaker_id = %s FOR UPDATE",
+                (fixture_id, bookmaker_id),
+            )
+            prior = cursor.fetchone()
+            if freshness_state == "STALE":
+                if latest_observed_at is None or latest_captured_at is None:
+                    raise ValueError("stale state requires complete market provenance")
+                prior_stale = prior is not None and prior[0] == "STALE"
+                attempt_count = int(prior[1]) + 1 if prior_stale else 1
+                first_stale_at = prior[2] if prior_stale else attempted
+                next_retry_at = stale_retry_policy.next_retry_at(
+                    stale_attempt_count=attempt_count,
+                    first_stale_at=first_stale_at,
+                    attempted_at=attempted,
+                )
+            else:
+                attempt_count = 0
+                first_stale_at = None
+                next_retry_at = None
+            cursor.execute(
+                "INSERT INTO production_quote_refresh_states (fixture_id, bookmaker_id, "
+                "freshness_state, stale_attempt_count, first_stale_at, last_attempt_at, "
+                "next_retry_at, latest_observed_at, latest_captured_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET freshness_state = "
+                "EXCLUDED.freshness_state, stale_attempt_count = EXCLUDED.stale_attempt_count, "
+                "first_stale_at = EXCLUDED.first_stale_at, last_attempt_at = EXCLUDED.last_attempt_at, "
+                "next_retry_at = EXCLUDED.next_retry_at, latest_observed_at = "
+                "EXCLUDED.latest_observed_at, latest_captured_at = EXCLUDED.latest_captured_at, "
+                "updated_at = EXCLUDED.updated_at",
+                (
+                    fixture_id,
+                    bookmaker_id,
+                    freshness_state,
+                    attempt_count,
+                    first_stale_at,
+                    attempted,
+                    next_retry_at,
+                    latest_observed_at,
+                    latest_captured_at,
+                    attempted,
+                ),
+            )
+        return QuoteRefreshState(
+            freshness_state,
+            attempt_count,
+            first_stale_at,
+            attempted,
+            next_retry_at,
+            latest_observed_at,
+            latest_captured_at,
         )
 
     def latest_complete_snapshot_ids(
@@ -475,6 +658,16 @@ class PostgreSQLRuntimeRepository:
             decisions, approved, rejected = (int(value) for value in cursor.fetchone())
             cursor.execute("SELECT COUNT(*) FROM registered_picks")
             registered_picks = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE freshness_state = 'FRESH'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'NO_USABLE_QUOTE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE' AND next_retry_at IS NOT NULL) "
+                "FROM production_quote_refresh_states"
+            )
+            quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
+                int(value) for value in cursor.fetchone()
+            )
         return statuses, {
             "retry": retry,
             "model_unavailable": model_unavailable,
@@ -487,6 +680,10 @@ class PostgreSQLRuntimeRepository:
             "decisions_approved": approved,
             "decisions_rejected": rejected,
             "registered_picks": registered_picks,
+            "quote_fresh": quote_fresh,
+            "quote_stale": quote_stale,
+            "quote_unusable": quote_unusable,
+            "stale_retry_scheduled": stale_retry_scheduled,
         }
 
     def operational_counts(self) -> dict[str, int]:
@@ -519,6 +716,16 @@ class PostgreSQLRuntimeRepository:
             decisions, approved, rejected = (int(value) for value in cursor.fetchone())
             cursor.execute("SELECT COUNT(*) FROM registered_picks")
             registered_picks = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE freshness_state = 'FRESH'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'NO_USABLE_QUOTE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE' AND next_retry_at IS NOT NULL) "
+                "FROM production_quote_refresh_states"
+            )
+            quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
+                int(value) for value in cursor.fetchone()
+            )
         return {
             "retry": retry,
             "model_unavailable": model_unavailable,
@@ -531,4 +738,8 @@ class PostgreSQLRuntimeRepository:
             "decisions_approved": approved,
             "decisions_rejected": rejected,
             "registered_picks": registered_picks,
+            "quote_fresh": quote_fresh,
+            "quote_stale": quote_stale,
+            "quote_unusable": quote_unusable,
+            "stale_retry_scheduled": stale_retry_scheduled,
         }

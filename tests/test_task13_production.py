@@ -17,8 +17,14 @@ from h2h.quant import DixonColesFitError
 from h2h.production import build_production_application
 from h2h.workers.opportunity import OpportunityWorker, registration_request_id
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 from tests.test_config import lifecycle_environment, registration_environment
+
+
+STALE_RETRY_POLICY = StaleQuoteRetryPolicy(
+    timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
+)
 
 
 def production_environment() -> dict[str, str]:
@@ -49,6 +55,10 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert settings.model_training_policy.min_matches == 80
     assert settings.model_training_policy.xi == 0.0018
     assert settings.model_training_policy.previous_seasons == 1
+    assert settings.stale_quote_retry_policy.initial_interval == timedelta(seconds=120)
+    assert settings.stale_quote_retry_policy.max_interval == timedelta(seconds=900)
+    assert settings.stale_quote_retry_policy.max_attempts == 5
+    assert settings.stale_quote_retry_policy.horizon == timedelta(seconds=3600)
 
 
 @pytest.mark.parametrize(
@@ -60,12 +70,23 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
         ("LOG_LEVEL", "VERBOSE"),
         ("QUANTBET_MODEL_TRAINING_MAX_SCOPES", "0"),
         ("QUANTBET_MODEL_XI", "nan"),
+        ("QUANTBET_STALE_QUOTE_INITIAL_RETRY_SECONDS", "0"),
+        ("QUANTBET_STALE_QUOTE_MAX_ATTEMPTS", "0"),
     ],
 )
 def test_production_config_rejects_partial_or_invalid_values(name: str, value: str) -> None:
     environment = production_environment()
     environment[name] = value
     with pytest.raises(ConfigError):
+        load_production_settings(environment)
+
+
+def test_production_config_rejects_inverted_stale_retry_bounds() -> None:
+    environment = production_environment()
+    environment["QUANTBET_STALE_QUOTE_INITIAL_RETRY_SECONDS"] = "600"
+    environment["QUANTBET_STALE_QUOTE_MAX_RETRY_SECONDS"] = "300"
+
+    with pytest.raises(ConfigError, match="stale quote max interval"):
         load_production_settings(environment)
 
 
@@ -120,6 +141,18 @@ class OpportunityRepositoryFake:
         self.bookmakers.append(bookmaker_id)
         return ("snapshot-a", "snapshot-b")
 
+    def latest_complete_market_states(self, _fixture_id, _bookmaker_id):
+        now = datetime.now(UTC)
+        return (SimpleNamespace(observed_at=now, captured_at=now),)
+
+    def record_quote_refresh_state(self, *_args, freshness_state, attempted_at, **_kwargs):
+        return SimpleNamespace(
+            freshness_state=freshness_state,
+            stale_attempt_count=0,
+            next_retry_at=None,
+            last_attempt_at=attempted_at,
+        )
+
     def record_item_failure(self, *_args, **_kwargs):
         raise AssertionError("unexpected item failure")
 
@@ -164,6 +197,9 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
             (fixture.league_id, fixture.season)
         ),
         should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=STALE_RETRY_POLICY,
     )
     first = worker.run_once()
     second = worker.run_once()
@@ -201,6 +237,9 @@ def test_due_non_epl_fixture_without_model_is_explicit_and_stops_before_odds() -
         allowed_statuses=("NS",),
         ensure_model_available=unavailable,
         should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=STALE_RETRY_POLICY,
     )
 
     result = worker.run_once()
@@ -234,6 +273,9 @@ def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
         allowed_statuses=("NS",),
         ensure_model_available=lambda _fixture: None,
         should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=STALE_RETRY_POLICY,
     )
 
     result = worker.run_once()

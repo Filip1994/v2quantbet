@@ -16,6 +16,7 @@ from h2h.persistence.migrations import apply_migrations
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.persistence.pick_registration import BankrollBootstrapConflictError
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 from tests.test_config import registration_environment
 
 
@@ -50,7 +51,7 @@ def test_fresh_schema_runtime_leadership_and_bankroll(isolated_database) -> None
         applied = apply_migrations(connection, MIGRATION_DIR)
     expected = tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
     assert applied == expected
-    assert expected[-1] == "010_model_coverage_training.sql"
+    assert expected[-1] == "011_stale_quote_refresh_state.sql"
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     assert runtime.check_database()
@@ -117,6 +118,106 @@ def test_durable_opportunity_query_uses_phase_i_policy_not_manual_scope(isolated
         bookmaker_id=8,
         allowed_statuses=("NS",),
         now=now,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=StaleQuoteRetryPolicy(
+            timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
+        ),
     )
     assert tuple(item.fixture_id for item in due) == (fixture_id,)
     assert due[0].league_id == 140
+
+
+def test_stale_complete_market_retry_is_exact_and_restart_safe(isolated_database) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        apply_migrations(connection, MIGRATION_DIR)
+    now = datetime.now(UTC)
+    old = now - timedelta(minutes=30)
+    fixture_id = "api-football:1549793"
+    policy = StaleQuoteRetryPolicy(
+        timedelta(minutes=2), timedelta(minutes=8), 5, timedelta(minutes=30)
+    )
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO fixtures (fixture_id, provider, provider_fixture_id, league_id, "
+            "season, provider_home_team_id, provider_away_team_id, created_at) "
+            "VALUES (%s, 'api-football', '1549793', 239, 2026, 1, 2, %s)",
+            (fixture_id, now),
+        )
+        cursor.execute(
+            "INSERT INTO fixture_observations (fixture_observation_id, fixture_id, home_team, "
+            "away_team, competition_name, country, competition_type, kickoff_at, "
+            "provider_status, source, observed_at) VALUES (%s, %s, 'América de Cali', "
+            "'Águilas Doradas', 'Primera A', 'Colombia', 'League', %s, 'NS', "
+            "'api-football', %s)",
+            ("fixture-observation-v1:" + "b" * 64, fixture_id, now + timedelta(hours=4), now),
+        )
+        for selection in ("YES", "NO"):
+            cursor.execute(
+                "INSERT INTO quote_series (series_id, fixture_id, bookmaker_id, market, "
+                "selection, created_at) VALUES (%s, %s, 8, 'BTTS', %s, %s)",
+                (f"series-{selection.lower()}", fixture_id, selection, now),
+            )
+        # Different observation timestamps must not form a complete market.
+        cursor.execute(
+            "INSERT INTO quote_snapshots VALUES "
+            "('snapshot-yes-new', 'series-yes', 1.80, %s, %s, 'api-football'), "
+            "('snapshot-no-old', 'series-no', 1.73, %s, %s, 'api-football')",
+            (now, now, old, now),
+        )
+
+    runtime = PostgreSQLRuntimeRepository(connect=connect)
+    assert runtime.latest_complete_market_states(fixture_id, 8) == ()
+
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO quote_snapshots VALUES "
+            "('snapshot-yes-old', 'series-yes', 2.10, %s, %s, 'api-football')",
+            (old, now),
+        )
+
+    markets = runtime.latest_complete_market_states(fixture_id, 8)
+    assert len(markets) == 1
+    assert markets[0].observed_at == old
+    due = runtime.select_opportunity_fixtures(
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        now=now,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=policy,
+    )
+    assert due.due_fixtures[0].stale_retry is True
+
+    state = runtime.record_quote_refresh_state(
+        fixture_id,
+        8,
+        freshness_state="STALE",
+        attempted_at=now,
+        latest_observed_at=old,
+        latest_captured_at=now,
+        stale_retry_policy=policy,
+    )
+    assert state.next_retry_at == now + timedelta(minutes=2)
+
+    # A new repository instance proves the retry boundary is durable across restart.
+    restarted = PostgreSQLRuntimeRepository(connect=connect)
+    waiting = restarted.select_opportunity_fixtures(
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        now=now + timedelta(minutes=1),
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=policy,
+    )
+    retry = restarted.select_opportunity_fixtures(
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        now=now + timedelta(minutes=2),
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=policy,
+    )
+    assert waiting.due_fixtures == ()
+    assert retry.due_fixtures[0].stale_retry is True

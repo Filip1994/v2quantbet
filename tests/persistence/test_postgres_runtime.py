@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
 class FakeCursor:
@@ -52,6 +53,12 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "League",
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             ),
             (
                 "api-football:2",
@@ -62,6 +69,12 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "Premier League",
                 "League",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -76,6 +89,12 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "League",
                 now,
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             ),
             (
                 "api-football:4",
@@ -86,6 +105,12 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "League Two",
                 "League",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -100,6 +125,11 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
         allowed_statuses=("NS",),
         now=now,
         item_limit=2,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=StaleQuoteRetryPolicy(
+            timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
+        ),
     )
 
     assert tuple(item.fixture_id for item in selection.due_fixtures) == (
@@ -111,6 +141,8 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
     assert selection.waiting_for_refresh_count == 1
     assert "f.league_id =" not in cursor.query
     assert cursor.parameters == (
+        8,
+        8,
         8,
         now,
         now + timedelta(hours=72),
