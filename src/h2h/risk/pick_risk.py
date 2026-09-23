@@ -18,7 +18,7 @@ def evaluate_risk(
     stake: FixedStakeDecision,
     snapshot: BankrollRiskSnapshot,
     *,
-    duplicate_fixture_market: bool,
+    duplicate_fixture: bool,
 ) -> tuple[RiskRejectionCode, ...]:
     failures: set[RiskRejectionCode] = set()
     if duplicate_fixture_market:
