@@ -70,6 +70,10 @@ class BookmakerBoundOddsSource:
     service: ApiFootballOddsService
     bookmaker_id: int
 
+    @property
+    def client(self) -> object:
+        return self.service.client
+
     def fetch_quotes(
         self, *, fixture_identity: ResolvedFixtureIdentity
     ) -> tuple[CanonicalQuote, ...]:
