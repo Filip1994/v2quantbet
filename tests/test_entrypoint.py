@@ -6,8 +6,10 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from h2h.api.health import RuntimeHealthState
+from h2h.dashboard_entrypoint import build_dashboard_application
 from h2h.domain.fixture_identity import api_football_fixture_identity
 from h2h.entrypoint import _fixture_identities_from_environment, _run_active_leader
+from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
@@ -19,6 +21,19 @@ def test_manual_fixture_allowlist_resolves_api_football_canonical_identities(
     assert _fixture_identities_from_environment() == (
         api_football_fixture_identity(123),
         api_football_fixture_identity(456),
+    )
+
+
+def test_standalone_dashboard_composes_operator_state_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/quantbet")
+    monkeypatch.setenv("QUANTBET_BANKROLL_ACCOUNT_ID", "bankroll")
+
+    application = build_dashboard_application()
+
+    assert isinstance(
+        application.operator_picks, PostgreSQLOperatorPickStateRepository
     )
 
 
