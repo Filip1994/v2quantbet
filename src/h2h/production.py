@@ -245,6 +245,13 @@ def build_production_application(
         ),
         max_items=settings.opportunity_max_items,
         max_wall_seconds=settings.opportunity_max_wall_seconds,
+        maximum_quote_age_seconds=(
+            application_settings.registration_policy.maximum_quote_age_seconds
+        ),
+        minimum_time_to_kickoff_seconds=(
+            application_settings.registration_policy.minimum_time_to_kickoff_seconds
+        ),
+        stale_retry_policy=settings.stale_quote_retry_policy,
     )
     return ProductionApplication(
         settings,

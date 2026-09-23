@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import timedelta
 
 from h2h.domain.odds import Market, Selection
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
@@ -15,6 +16,7 @@ from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.domain.settlement import ResultSettlementPolicy
 from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.domain.model_coverage import ProductionTrainingPolicy
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
 class ConfigError(ValueError):
@@ -78,6 +80,7 @@ class ProductionSettings:
     opportunity_interval_seconds: float
     opportunity_max_items: int
     opportunity_max_wall_seconds: float
+    stale_quote_retry_policy: StaleQuoteRetryPolicy
     model_training_interval_seconds: float
     model_training_max_scopes: int
     model_training_max_provider_requests: int
@@ -285,6 +288,7 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         opportunity_max_wall_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
         ),
+        stale_quote_retry_policy=_stale_quote_retry_policy(values),
         model_training_interval_seconds=_positive_number(
             values, "QUANTBET_MODEL_TRAINING_INTERVAL_SECONDS", "60"
         ),
@@ -317,6 +321,28 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         ),
         port=port,
     )
+
+
+def _stale_quote_retry_policy(values: Mapping[str, str]) -> StaleQuoteRetryPolicy:
+    initial = _positive_integer(
+        values, "QUANTBET_STALE_QUOTE_INITIAL_RETRY_SECONDS", "120"
+    )
+    maximum = _positive_integer(
+        values, "QUANTBET_STALE_QUOTE_MAX_RETRY_SECONDS", "900"
+    )
+    attempts = _positive_integer(values, "QUANTBET_STALE_QUOTE_MAX_ATTEMPTS", "5")
+    horizon = _positive_integer(
+        values, "QUANTBET_STALE_QUOTE_RETRY_HORIZON_SECONDS", "3600"
+    )
+    try:
+        return StaleQuoteRetryPolicy(
+            initial_interval=timedelta(seconds=initial),
+            max_interval=timedelta(seconds=maximum),
+            max_attempts=attempts,
+            horizon=timedelta(seconds=horizon),
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid stale quote retry configuration: {exc}") from exc
 
 
 _RESULT_ENV = {

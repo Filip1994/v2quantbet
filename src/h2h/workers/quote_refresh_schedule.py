@@ -16,6 +16,58 @@ class QuoteRefreshDecision:
     reason: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class StaleQuoteRetryPolicy:
+    """Operational retry bounds for stale provider observations."""
+
+    initial_interval: timedelta
+    max_interval: timedelta
+    max_attempts: int
+    horizon: timedelta
+
+    def __post_init__(self) -> None:
+        if self.initial_interval <= timedelta(0):
+            raise ValueError("stale quote initial interval must be positive")
+        if self.max_interval < self.initial_interval:
+            raise ValueError("stale quote max interval must be at least the initial interval")
+        if self.max_attempts <= 0:
+            raise ValueError("stale quote max attempts must be positive")
+        if self.horizon < self.initial_interval:
+            raise ValueError("stale quote retry horizon must be at least the initial interval")
+
+    def next_retry_at(
+        self,
+        *,
+        stale_attempt_count: int,
+        first_stale_at: datetime,
+        attempted_at: datetime,
+    ) -> datetime | None:
+        """Return the next bounded retry after a stale response.
+
+        ``stale_attempt_count`` includes the initial normal-cadence pull that
+        first discovered stale provider data.  The configured attempt bound
+        therefore also bounds the number of stale responses that can keep the
+        accelerated path active.
+        """
+        if stale_attempt_count <= 0:
+            raise ValueError("stale_attempt_count must be positive")
+        for value, name in (
+            (first_stale_at, "first_stale_at"),
+            (attempted_at, "attempted_at"),
+        ):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if stale_attempt_count >= self.max_attempts:
+            return None
+        interval = min(
+            self.initial_interval * (2 ** (stale_attempt_count - 1)),
+            self.max_interval,
+        )
+        candidate = attempted_at + interval
+        deadline = first_stale_at + self.horizon
+        return candidate if candidate <= deadline else None
+
+
 # The policy is intentionally conservative. Boundary points belong to the
 # tighter (more frequent) window, except the 72-hour upper boundary which is
 # included in the first window.

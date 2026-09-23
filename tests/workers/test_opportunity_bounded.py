@@ -11,6 +11,7 @@ from h2h.persistence.postgres_runtime import (
 )
 from h2h.workers.opportunity import OpportunityWorker
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
 class RepositoryFake:
@@ -75,6 +76,11 @@ def worker(repository, ensure_model, **kwargs):
         allowed_statuses=("NS",),
         ensure_model_available=ensure_model,
         should_stop=kwargs.pop("should_stop", lambda: False),
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=StaleQuoteRetryPolicy(
+            timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
+        ),
         **kwargs,
     )
 

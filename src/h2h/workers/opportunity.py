@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from time import monotonic
 
@@ -24,6 +24,7 @@ from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.use_cases.register_pick import RegisterEligiblePick
 from h2h.use_cases.value_evaluation import EvaluatePersistedPredictionQuote
+from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
 LOGGER = logging.getLogger("quantbet.opportunity")
@@ -56,6 +57,14 @@ class OpportunityCycle:
     model_deferred_fixture_ids: tuple[str, ...] = ()
     pending_work: bool = False
     budget_exhausted: bool = False
+    fresh_market_count: int = 0
+    stale_market_count: int = 0
+    stale_retries_requested: int = 0
+    stale_retries_scheduled: int = 0
+    stale_retries_cleared: int = 0
+    stale_retries_suppressed_by_budget: int = 0
+    stale_retries_stopped: int = 0
+    odds_fetches: int = 0
 
 
 class OpportunityOddsUnavailableError(RuntimeError):
@@ -79,11 +88,16 @@ class OpportunityWorker:
         model_scope_status: Callable[[OpportunityFixture], str | None] = lambda _fixture: "ACTIVE",
         max_items: int = 10,
         max_wall_seconds: float = 30.0,
+        maximum_quote_age_seconds: int,
+        minimum_time_to_kickoff_seconds: int,
+        stale_retry_policy: StaleQuoteRetryPolicy,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
         if max_items <= 0 or max_wall_seconds <= 0:
             raise ValueError("opportunity budgets must be positive")
+        if maximum_quote_age_seconds <= 0 or minimum_time_to_kickoff_seconds <= 0:
+            raise ValueError("quote age and kickoff bounds must be positive")
         self._repository = repository
         self._source = source
         self._ingestion = ingestion
@@ -97,6 +111,9 @@ class OpportunityWorker:
         self._should_stop = should_stop
         self._max_items = max_items
         self._max_wall_seconds = max_wall_seconds
+        self._maximum_quote_age_seconds = maximum_quote_age_seconds
+        self._minimum_time_to_kickoff_seconds = minimum_time_to_kickoff_seconds
+        self._stale_retry_policy = stale_retry_policy
         self._clock = clock
         self._monotonic = monotonic_clock
         self._cursor: OpportunityCursor | None = None
@@ -134,6 +151,9 @@ class OpportunityWorker:
             now=selection_time,
             item_limit=self._max_items,
             after=prior_cursor,
+            maximum_quote_age_seconds=self._maximum_quote_age_seconds,
+            minimum_time_to_kickoff_seconds=self._minimum_time_to_kickoff_seconds,
+            stale_retry_policy=self._stale_retry_policy,
         )
         due = selection.due_fixtures
         processed: list[str] = []
@@ -153,6 +173,13 @@ class OpportunityWorker:
         failures_to_persist: list[tuple[str, str, BaseException, datetime]] = []
         interrupted = False
         budget_exhausted = False
+        fresh_market_count = 0
+        stale_market_count = 0
+        stale_retries_requested = 0
+        stale_retries_scheduled = 0
+        stale_retries_cleared = 0
+        stale_retries_suppressed_by_budget = 0
+        odds_fetches = 0
         try:
             for fixture in due:
                 if self._should_stop():
@@ -186,11 +213,25 @@ class OpportunityWorker:
                     model_unavailable.append(fixture.fixture_id)
                     continue
                 try:
+                    if fixture.stale_retry:
+                        stale_retries_requested += 1
                     quotes = self._source.fetch_quotes(
                         fixture_identity=fixture.identity,
                         bookmaker_id=self._bookmaker_id,
                     )
                 except ApiBudgetExceededError:
+                    if fixture.stale_retry:
+                        stale_retries_suppressed_by_budget += 1
+                        budget_exhausted = True
+                        LOGGER.warning(
+                            "stale quote retry suppressed by provider budget",
+                            extra={
+                                "worker": WORKER_NAME,
+                                "fixture_id": fixture.fixture_id,
+                                "stale_retry_attempt": fixture.stale_quote_attempt_count + 1,
+                            },
+                        )
+                        break
                     raise
                 except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:
                     failures_to_persist.append(
@@ -222,7 +263,96 @@ class OpportunityWorker:
                 # Persistence conflicts and database integrity failures are deliberately
                 # outside the provider-error boundary and must reach the orchestrator.
                 quotes_fetched += len(quotes)
+                odds_fetches += 1
                 fresh_quotes += self._ingestion.ingest(quotes)
+                attempted_at = self._now()
+                market_states = self._repository.latest_complete_market_states(
+                    fixture.fixture_id, self._bookmaker_id
+                )
+                if not market_states:
+                    self._repository.record_quote_refresh_state(
+                        fixture.fixture_id,
+                        self._bookmaker_id,
+                        freshness_state="NO_USABLE_QUOTE",
+                        attempted_at=attempted_at,
+                        latest_observed_at=None,
+                        latest_captured_at=None,
+                        stale_retry_policy=self._stale_retry_policy,
+                    )
+                    error = OpportunityOddsUnavailableError(
+                        "provider returned no complete supported two-way market"
+                    )
+                    failures_to_persist.append(
+                        (WORKER_NAME, fixture.fixture_id, error, attempted_at)
+                    )
+                    failed.append(fixture.fixture_id)
+                    odds_unavailable.append(fixture.fixture_id)
+                    continue
+                stale_markets = tuple(
+                    market
+                    for market in market_states
+                    if attempted_at - market.observed_at
+                    > timedelta(seconds=self._maximum_quote_age_seconds)
+                )
+                fresh_market_count += len(market_states) - len(stale_markets)
+                stale_market_count += len(stale_markets)
+                if stale_markets:
+                    oldest = min(stale_markets, key=lambda market: market.observed_at)
+                    refresh_state = self._repository.record_quote_refresh_state(
+                        fixture.fixture_id,
+                        self._bookmaker_id,
+                        freshness_state="STALE",
+                        attempted_at=attempted_at,
+                        latest_observed_at=oldest.observed_at,
+                        latest_captured_at=oldest.captured_at,
+                        stale_retry_policy=self._stale_retry_policy,
+                    )
+                    if refresh_state.next_retry_at is not None:
+                        stale_retries_scheduled += 1
+                    LOGGER.info(
+                        "stale provider quote observed",
+                        extra={
+                            "worker": WORKER_NAME,
+                            "fixture_id": fixture.fixture_id,
+                            "quote_observed_age_seconds": (
+                                attempted_at - oldest.observed_at
+                            ).total_seconds(),
+                            "captured_at": oldest.captured_at,
+                            "observed_at": oldest.observed_at,
+                            "stale_retry_attempt": refresh_state.stale_attempt_count,
+                            "stale_retry_at": refresh_state.next_retry_at,
+                            "stale_retry_delay_seconds": (
+                                None
+                                if refresh_state.next_retry_at is None
+                                else (
+                                    refresh_state.next_retry_at - attempted_at
+                                ).total_seconds()
+                            ),
+                        },
+                    )
+                else:
+                    self._repository.record_quote_refresh_state(
+                        fixture.fixture_id,
+                        self._bookmaker_id,
+                        freshness_state="FRESH",
+                        attempted_at=attempted_at,
+                        latest_observed_at=min(
+                            market.observed_at for market in market_states
+                        ),
+                        latest_captured_at=max(
+                            market.captured_at for market in market_states
+                        ),
+                        stale_retry_policy=self._stale_retry_policy,
+                    )
+                    if fixture.quote_freshness_state == "STALE":
+                        stale_retries_cleared += 1
+                        LOGGER.info(
+                            "stale provider quote condition cleared",
+                            extra={
+                                "worker": WORKER_NAME,
+                                "fixture_id": fixture.fixture_id,
+                            },
+                        )
 
                 try:
                     prediction = self._predictor.execute(fixture.fixture_id)
@@ -289,6 +419,14 @@ class OpportunityWorker:
             model_deferred_fixture_ids=tuple(model_deferred),
             pending_work=self._has_pending,
             budget_exhausted=budget_exhausted,
+            fresh_market_count=fresh_market_count,
+            stale_market_count=stale_market_count,
+            stale_retries_requested=stale_retries_requested,
+            stale_retries_scheduled=stale_retries_scheduled,
+            stale_retries_cleared=stale_retries_cleared,
+            stale_retries_suppressed_by_budget=stale_retries_suppressed_by_budget,
+            stale_retries_stopped=selection.stale_retries_stopped,
+            odds_fetches=odds_fetches,
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -318,6 +456,16 @@ class OpportunityWorker:
                 },
                 "pending_work": cycle.pending_work,
                 "budget_exhausted": cycle.budget_exhausted,
+                "fresh_market_count": cycle.fresh_market_count,
+                "stale_market_count": cycle.stale_market_count,
+                "stale_retries_requested": cycle.stale_retries_requested,
+                "stale_retries_scheduled": cycle.stale_retries_scheduled,
+                "stale_retries_cleared": cycle.stale_retries_cleared,
+                "stale_retries_suppressed_by_budget": (
+                    cycle.stale_retries_suppressed_by_budget
+                ),
+                "stale_retries_stopped": cycle.stale_retries_stopped,
+                "odds_fetches": cycle.odds_fetches,
                 "max_items": self._max_items,
                 "duration_seconds": self._monotonic() - started,
             },
