@@ -25,6 +25,9 @@ pull), and a 3600-second retry horizon. After the bound, normal kickoff-aware
 cadence resumes from the latest actual attempt. Retries stop inside the
 configured minimum-to-kickoff window. All requests use the existing
 `opportunity_odds` budget category and the existing bounded opportunity slice.
+One slot per opportunity cycle is reserved for a due stale retry independently
+of the normal kickoff keyset cursor; the remaining slots keep normal backlog
+progressing, so neither workload can monopolize the worker.
 
 Configuration:
 
