@@ -83,7 +83,7 @@ def test_fit_aborts_cooperatively_during_optimizer() -> None:
         return checks[0] >= 3
 
     with pytest.raises(DixonColesFitAbortedError, match="wall-clock guard"):
-        DixonColesModel.fit(
+        DixonColesModel._fit_with_abort(
             records,
             team_id_namespace="synthetic-test",
             reference_time=datetime(2025, 1, 1, tzinfo=UTC),
