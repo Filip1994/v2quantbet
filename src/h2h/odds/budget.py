@@ -45,7 +45,7 @@ class DailyApiBudget:
     """Thread-safe UTC-day budget that counts every attempted request."""
 
     daily_limit: int = 7500
-    reserve: int = 1500
+    reserve: int = 0
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     _day: date = field(init=False)
     _used: int = field(default=0, init=False)
