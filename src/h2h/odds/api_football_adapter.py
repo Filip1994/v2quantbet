@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from datetime import datetime
 import math
+import re
 from typing import Any
 
 from h2h.domain.bookmaker_policy import (
@@ -29,7 +30,7 @@ class ApiFootballQuoteAdapter:
         *,
         fixture_identity: ResolvedFixtureIdentity,
     ) -> CanonicalQuote:
-        """Convert one flattened API-Football quote into ``CanonicalQuote``."""
+        """Convert one flattened API-Football quote into CanonicalQuote."""
         try:
             if not isinstance(payload, Mapping):
                 raise TypeError("payload must be a mapping")
@@ -48,11 +49,16 @@ class ApiFootballQuoteAdapter:
             bookmaker_name = self._nonempty_string(bookmaker.get("name"), "bookmaker.name")
             bookmaker_identity = resolve_api_football_bookmaker(bookmaker_id, bookmaker_name)
             bet_id = self._positive_int(bet.get("id"), "bet.id")
+            bet_name = self._nonempty_string(bet.get("name"), "bet.name")
             selection_value = self._nonempty_string(value.get("value"), "value.value")
             odd = self._finite_float(value.get("odd"), "value.odd")
             observed_at = self._parse_datetime(payload.get("observed_at") or payload.get("update"))
 
-            market, selection = self._map_market_selection(bet_id, selection_value)
+            market, selection = self._map_market_selection(
+                bet_id,
+                bet_name,
+                selection_value,
+            )
             return CanonicalQuote(
                 fixture_id=fixture_identity.fixture_id,
                 bookmaker_id=bookmaker_identity.provider_id,
@@ -106,8 +112,38 @@ class ApiFootballQuoteAdapter:
             raise ValueError(f"{field} must be finite")
         return result
 
+    @staticmethod
+    def _normalized_bet_name(value: str) -> str:
+        return " ".join(re.findall(r"[A-Z0-9]+", value.upper()))
+
     @classmethod
-    def _map_market_selection(cls, bet_id: int, provider_selection: str) -> tuple[Market, Selection]:
+    def _validate_bet_identity(cls, bet_id: int, provider_bet_name: str) -> None:
+        """Fail closed when provider bet ID and human-readable market name disagree."""
+        normalized = cls._normalized_bet_name(provider_bet_name)
+        tokens = set(normalized.split())
+        if bet_id == cls._BTTS_BET_ID:
+            valid = (
+                "BOTH" in tokens
+                and bool({"TEAM", "TEAMS"} & tokens)
+                and ("SCORE" in tokens or "SCORING" in tokens)
+            )
+        elif bet_id in cls._OU25_BET_IDS:
+            valid = "OVER" in tokens and "UNDER" in tokens
+        else:
+            raise ValueError(f"unsupported API-Football bet id: {bet_id}")
+        if not valid:
+            raise ValueError(
+                f"API-Football bet id/name mismatch: id={bet_id}, name={provider_bet_name!r}"
+            )
+
+    @classmethod
+    def _map_market_selection(
+        cls,
+        bet_id: int,
+        provider_bet_name: str,
+        provider_selection: str,
+    ) -> tuple[Market, Selection]:
+        cls._validate_bet_identity(bet_id, provider_bet_name)
         if bet_id == cls._BTTS_BET_ID:
             selection_map = {"YES": Selection.YES, "NO": Selection.NO}
             market = Market.BTTS
