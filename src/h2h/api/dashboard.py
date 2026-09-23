@@ -119,11 +119,13 @@ class DashboardService:
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
             ORDER BY r.registered_at DESC, r.pick_id DESC
         """
-        with self._application.monitoring.repository.connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(sql)
-                columns = [item.name for item in cursor.description]
-                rows = cursor.fetchall()
+        with (
+            self._application.monitoring.repository.connect() as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(sql)
+            columns = [item.name for item in cursor.description]
+            rows = cursor.fetchall()
         return [dict(zip(columns, row, strict=True)) for row in rows]
 
     @staticmethod
