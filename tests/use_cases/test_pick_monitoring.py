@@ -18,6 +18,8 @@ class Repository:
     def __init__(self):
         self.started = []
         self.finalized = []
+        self.claim_limits = []
+        self.pending = False
 
     def start(self, pick_id, policy, *, started_at):
         self.started.append((pick_id, policy, started_at))
@@ -30,7 +32,11 @@ class Repository:
         return ()
 
     def claim_due(self, *, claimed_at, limit):
+        self.claim_limits.append(limit)
         return ("p1", "p2")
+
+    def has_due_refreshes(self, *, as_of):
+        return self.pending
 
     def fixture_identities_for_picks(self, pick_ids):
         return (
@@ -71,6 +77,19 @@ def test_refresh_claims_picks_and_groups_one_fixture() -> None:
     assert result.refreshed_fixture_ids == ("api-football:42",)
     assert result.persisted_snapshot_count == 1
     assert source.calls == 1
+    assert repository.claim_limits == [2]
+    assert not result.pending_work
+
+
+def test_refresh_reports_remaining_due_work_for_fair_rescheduling() -> None:
+    repository, source = Repository(), Source()
+    repository.pending = True
+
+    result = RefreshRegisteredPickOdds(
+        repository, source, Ingestion(), clock=lambda: NOW
+    ).execute()
+
+    assert result.pending_work
 
 
 def test_refresh_targets_the_bookmaker_registered_on_each_pick() -> None:

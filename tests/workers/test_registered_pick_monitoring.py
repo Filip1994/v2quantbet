@@ -24,8 +24,12 @@ def test_worker_reconciles_before_refreshing() -> None:
     class Refresh:
         def execute(self):
             order.append("refresh")
-            return SimpleNamespace(persisted_snapshot_count=0)
+            return SimpleNamespace(persisted_snapshot_count=0, pending_work=True)
 
-    result = RegisteredPickMonitoringWorker(Reconcile(), Refresh()).run_once()
+    worker = RegisteredPickMonitoringWorker(Reconcile(), Refresh())
+    assert not worker.has_pending
+    result = worker.run_once()
     assert order == ["reconcile", "refresh"]
     assert result.refresh.persisted_snapshot_count == 0
+    assert result.refresh.pending_work
+    assert worker.has_pending

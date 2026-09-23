@@ -141,11 +141,13 @@ def _run_active_leader(
             "monitoring",
             float(lifecycle.monitoring_interval_seconds),
             application.monitoring.worker.run_once,
+            has_pending_work=lambda: application.monitoring.worker.has_pending,
         ),
         ScheduledJob(
             "results",
             float(application.settings.application.result_settlement_policy.poll_interval_seconds),
             application.results.worker.run_once,
+            has_pending_work=lambda: application.results.worker.has_pending,
         ),
     )
 

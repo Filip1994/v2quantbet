@@ -88,8 +88,15 @@ class PostgreSQLResultSettlementRepository:
             )
             return tuple(row[0] for row in cursor.fetchall())
 
-    def claim_due(self, *, claimed_at: datetime) -> tuple[str, ...]:
+    def claim_due(
+        self, *, claimed_at: datetime, limit: int | None = None
+    ) -> tuple[str, ...]:
         now = _utc(claimed_at, "claimed_at")
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer")
+        claim_limit = self.policy.claim_limit if limit is None else min(limit, self.policy.claim_limit)
         lease = now + timedelta(seconds=self.policy.claim_lease_seconds)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -97,7 +104,7 @@ class PostgreSQLResultSettlementRepository:
                 "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
                 "AND (lease_expires_at IS NULL OR lease_expires_at <= %s) "
                 "ORDER BY next_check_at, fixture_id FOR UPDATE SKIP LOCKED LIMIT %s",
-                (now, now, self.policy.claim_limit),
+                (now, now, claim_limit),
             )
             rows = cursor.fetchall()
             if rows:
@@ -107,6 +114,17 @@ class PostgreSQLResultSettlementRepository:
                     (lease, now, [row[0] for row in rows]),
                 )
             return tuple(row[0] for row in rows)
+
+    def has_due_results(self, *, as_of: datetime) -> bool:
+        now = _utc(as_of, "as_of")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM fixture_result_acquisition_states "
+                "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= %s))",
+                (now, now),
+            )
+            return bool(cursor.fetchone()[0])
 
     def provider_contexts(self, fixture_ids: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
         if not fixture_ids:

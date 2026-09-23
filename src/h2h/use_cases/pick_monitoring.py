@@ -60,6 +60,7 @@ class RefreshResult:
     claimed_pick_ids: tuple[str, ...]
     refreshed_fixture_ids: tuple[str, ...]
     persisted_snapshot_count: int
+    pending_work: bool = False
 
 
 class RefreshRegisteredPickOdds:
@@ -70,7 +71,7 @@ class RefreshRegisteredPickOdds:
         ingestion: QuoteHistoryIngestionService,
         *,
         clock: Callable[[], datetime],
-        claim_limit: int = 100,
+        claim_limit: int = 2,
         on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
         on_item_success: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] = lambda: False,
@@ -115,7 +116,8 @@ class RefreshRegisteredPickOdds:
             count += self._ingestion.ingest(quotes)
             refreshed.append(identity.fixture_id)
             self._on_item_success(identity.fixture_id)
-        return RefreshResult(claimed, tuple(refreshed), count)
+        pending = self._repository.has_due_refreshes(as_of=_now(self._clock))
+        return RefreshResult(claimed, tuple(refreshed), count, pending)
 
 
 class FinalizePickClosingOdds:

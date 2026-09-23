@@ -131,6 +131,16 @@ class PostgreSQLPickMonitoringRepository:
                 )
             return tuple(row[0] for row in rows)
 
+    def has_due_refreshes(self, *, as_of: datetime) -> bool:
+        current = _utc(as_of, "as_of")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pick_monitoring_states "
+                "WHERE state = 'MONITORING' AND next_refresh_at <= %s)",
+                (current,),
+            )
+            return bool(cursor.fetchone()[0])
+
     def finalize(self, pick_id: str, *, finalized_at: datetime) -> ClosingFinalization:
         finalized = _utc(finalized_at, "finalized_at")
         with self.connect() as connection, connection.cursor() as cursor:
