@@ -44,6 +44,7 @@ def test_fetch_quotes_uses_numeric_transport_and_canonical_quote_identity() -> N
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
@@ -80,6 +81,7 @@ def test_fetch_quotes_pins_and_filters_one_provider_bookmaker() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
