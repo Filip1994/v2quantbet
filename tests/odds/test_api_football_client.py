@@ -121,6 +121,43 @@ def test_fetch_odds_can_pin_one_provider_bookmaker() -> None:
     )
 
 
+def test_fetch_odds_can_pin_one_provider_bet_type() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+
+    ApiFootballClient(transport, "secret").fetch_odds(
+        fixture_id=42, bookmaker_id=8, bet_id=8
+    )
+
+    transport.get_json.assert_called_once_with(
+        "https://v3.football.api-sports.io/odds?fixture=42&bookmaker=8&bet=8",
+        headers={"x-apisports-key": "secret"},
+        timeout=10.0,
+    )
+
+
+def test_odds_cache_is_separated_by_bet_type() -> None:
+    transport = Mock()
+    transport.get_json.side_effect = [{"response": ["btts"]}, {"response": ["ou"]}]
+    client = ApiFootballClient(transport, "secret", cache_ttl_seconds=30)
+
+    assert client.fetch_odds(fixture_id=42, bookmaker_id=8, bet_id=8) == {
+        "response": ["btts"]
+    }
+    assert client.fetch_odds(fixture_id=42, bookmaker_id=8, bet_id=5) == {
+        "response": ["ou"]
+    }
+    assert transport.get_json.call_count == 2
+
+
+@pytest.mark.parametrize("bet_id", [0, -1, True, 8.0, "8"])
+def test_bet_id_must_be_positive_integer(bet_id: object) -> None:
+    with pytest.raises(ValueError, match="bet_id"):
+        ApiFootballClient(Mock(), "secret").fetch_odds(
+            fixture_id=42, bet_id=bet_id  # type: ignore[arg-type]
+        )
+
+
 def test_fetch_fixtures_for_date_uses_global_date_query(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
