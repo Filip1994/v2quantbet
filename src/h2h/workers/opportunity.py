@@ -455,13 +455,10 @@ class OpportunityWorker:
                     evaluations.extend(
                         preliminary.evaluation_id for preliminary in preliminary_evaluations
                     )
-                    if len(self._bookmaker_ids) == 1:
-                        ordered_preliminaries = preliminary_evaluations
-                    else:
-                        ranked_sets = rank_best_prices(preliminary_evaluations)
-                        ordered_preliminaries = tuple(
-                            candidate for group in ranked_sets for candidate in group.candidates
-                        )
+                    ranked_sets = rank_best_prices(preliminary_evaluations)
+                    ordered_preliminaries = tuple(
+                        candidate for group in ranked_sets for candidate in group.candidates
+                    )
                     compared_quotes += len(ordered_preliminaries)
                     registered_selection_keys: set[tuple[object, object]] = set()
                     for preliminary in ordered_preliminaries:
@@ -555,6 +552,7 @@ class OpportunityWorker:
                             final_quotes = self._source.fetch_quotes(
                                 fixture_identity=fixture.identity,
                                 bookmaker_id=preliminary.bookmaker_id,
+                                market=preliminary.market,
                             )
                             odds_fetches += 1
                             final_refreshes += 1
