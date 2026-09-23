@@ -111,6 +111,10 @@ class DashboardService:
                 current_quote.odd AS current_odd,
                 current_quote.observed_at AS current_observed_at,
                 current_quote.captured_at AS current_captured_at,
+                best_current.odd AS best_current_odd,
+                best_current.observed_at AS best_current_observed_at,
+                best_current.captured_at AS best_current_captured_at,
+                best_current.bookmaker_key AS best_current_bookmaker_key,
                 closing.outcome AS closing_status,
                 closing.finalized_at AS closing_finalized_at,
                 closing_quote.odd AS closing_odd,
@@ -158,6 +162,30 @@ class DashboardService:
                 ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
                 LIMIT 1
             ) current_quote ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT latest_price.odd, latest_price.observed_at,
+                    latest_price.captured_at,
+                    CASE series.bookmaker_id
+                        WHEN 8 THEN 'bet365'
+                        WHEN 11 THEN '1xbet'
+                        WHEN 34 THEN 'superbet'
+                    END AS bookmaker_key
+                FROM quote_series series
+                JOIN LATERAL (
+                    SELECT q.odd, q.observed_at, q.captured_at
+                    FROM quote_snapshots q
+                    WHERE q.series_id = series.series_id AND q.source = e.source
+                      AND q.observed_at < latest.kickoff_at
+                      AND q.captured_at < latest.kickoff_at
+                    ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
+                    LIMIT 1
+                ) latest_price ON TRUE
+                WHERE series.fixture_id = r.fixture_id
+                  AND series.market = r.market AND series.selection = r.selection
+                  AND series.bookmaker_id = ANY(ARRAY[8, 11, 34]::bigint[])
+                ORDER BY latest_price.odd DESC, series.bookmaker_id
+                LIMIT 1
+            ) best_current ON TRUE
             LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
@@ -179,8 +207,7 @@ class DashboardService:
             item = asdict(status)
             item["stale"] = bool(
                 status.next_due_at
-                and generated_at
-                > status.next_due_at + timedelta(seconds=WORKER_FRESHNESS_SECONDS)
+                and generated_at > status.next_due_at + timedelta(seconds=WORKER_FRESHNESS_SECONDS)
             )
             workers.append(item)
         last_success = max(
@@ -255,6 +282,31 @@ class DashboardService:
             warnings.append(str(pick["closing_status"]).replace("_", " "))
         return list(dict.fromkeys(warnings))
 
+    @staticmethod
+    def _bookmaker_badge(bookmaker: Any) -> str:
+        key = str(bookmaker or "").casefold()
+        label = {"bet365": "B365", "1xbet": "1X", "superbet": "SB"}.get(key, "BK")
+        name = str(bookmaker or "Unavailable")
+        return (
+            f'<span class="bookmaker-icon bookmaker-{escape(key)}" aria-hidden="true">'
+            f"{escape(label)}</span><span>{escape(name)}</span>"
+        )
+
+    @staticmethod
+    def _movement(pick: dict[str, Any]) -> str:
+        entry = pick.get("pick_odd")
+        current = pick.get("current_odd")
+        if entry is None or current is None or Decimal(str(current)) == Decimal(str(entry)):
+            css, symbol, label = "neutral", "→", "Same-bookmaker price unchanged"
+        elif Decimal(str(current)) > Decimal(str(entry)):
+            css, symbol, label = "up", "↑", "Same-bookmaker price moved up"
+        else:
+            css, symbol, label = "down", "↓", "Same-bookmaker price moved down"
+        return (
+            f'<span class="movement {css}" role="img" aria-label="{label}" title="{label}">'
+            f'{symbol}<span class="sr-only">{label}</span></span>'
+        )
+
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
@@ -282,16 +334,22 @@ class DashboardService:
                 ],
             )
         )
+        registered_bookmaker = self._bookmaker_badge(pick.get("bookmaker_key"))
+        best_bookmaker = self._bookmaker_badge(pick.get("best_current_bookmaker_key"))
+        movement = self._movement(pick)
         odds = (
             '<div class="odds-grid">'
             f'<span title="{escape(self._dt(pick.get("first_seen_observed_at")))}">'
-            f'<b>First</b>{self._odd(pick.get("first_seen_odd"))}</span>'
+            f"<b>First</b>{self._odd(pick.get('first_seen_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("pick_observed_at")))}">'
-            f'<b>Pick</b>{self._odd(pick.get("pick_odd"))}</span>'
+            f"<b>Pick</b>{self._odd(pick.get('pick_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("current_observed_at")))}">'
-            f'<b>Current</b>{self._odd(pick.get("current_odd"))}</span>'
+            f"<b>Same-book current</b>{self._odd(pick.get('current_odd'))}{movement}</span>"
+            f'<span title="{escape(self._dt(pick.get("best_current_observed_at")))}">'
+            f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
+            f'<small class="inline-book">{best_bookmaker}</small></span>'
             f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
-            f'<b>Close</b>{self._odd(pick.get("closing_odd"))}</span>'
+            f"<b>Close</b>{self._odd(pick.get('closing_odd'))}</span>"
             "</div>"
         )
         checkpoint_times = " · ".join(
@@ -303,30 +361,27 @@ class DashboardService:
             ]
         )
         return (
-            "<tr>"
+            f'<tr data-provenance="{escape(provenance)}">'
             f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
-            f'{escape(self._short_id(pick.get("pick_id")))}</code></td>'
+            f"{escape(self._short_id(pick.get('pick_id')))}</code></td>"
             f'<td class="fixture"><strong>{escape(fixture)}</strong><small>'
-            f'{escape(str(pick.get("competition_name") or "—"))} · '
-            f'{escape(self._dt(pick.get("kickoff_at")))}</small></td>'
+            f"{escape(str(pick.get('competition_name') or '—'))} · "
+            f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
-            f'<strong>{escape(str(pick.get("selection") or "—"))}</strong></td>'
-            f"<td>{odds}<small>{escape(str(pick.get('bookmaker_key') or '—'))} · "
-            f"{escape(str(pick.get('source') or '—'))}</small>"
+            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
+            f'<td>{odds}<small class="registered-book">Registered: {registered_bookmaker}</small>'
             f'<small class="timestamps">{escape(checkpoint_times)}</small></td>'
             f'<td class="num"><strong>{self._pct(pick.get("model_probability"))}</strong>'
-            f'<small>implied {self._pct(pick.get("implied_probability"))} · '
-            f'de-vig {self._pct(pick.get("devig_probability"))}</small></td>'
+            f"<small>implied {self._pct(pick.get('implied_probability'))} · "
+            f"de-vig {self._pct(pick.get('devig_probability'))}</small></td>"
             f'<td class="num value"><strong>{self._pct(pick.get("edge"))}</strong>'
-            f'<small>EV {self._pct(pick.get("expected_value"))}</small></td>'
+            f"<small>EV {self._pct(pick.get('expected_value'))}</small></td>"
             f'<td class="num"><strong>{escape(self._money(pick.get("stake_minor"), currency))}'
-            f'</strong><small>P/L {escape(self._money(pick.get("realized_pnl_minor"), currency))}'
+            f"</strong><small>P/L {escape(self._money(pick.get('realized_pnl_minor'), currency))}"
             f" · CLV {escape(clv)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
-            f'<small>{escape(self._dt(pick.get("settled_at")))}</small></td>'
+            f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
             f"<td>{warning_html}</td>"
-            f'<td class="provenance" title="{escape(provenance)}">'
-            f"{escape(provenance or '—')}</td>"
             "</tr>"
         )
 
@@ -338,19 +393,22 @@ class DashboardService:
         rows = "".join(self._render_pick_row(pick, currency) for pick in data["picks"])
         if not rows:
             rows = (
-                '<tr><td class="empty" colspan="10"><strong>No registered picks yet.</strong>'
+                '<tr><td class="empty" colspan="9"><strong>No registered picks yet.</strong>'
                 "<br>Durable pick history will appear here after registration.</td></tr>"
             )
-        worker_rows = "".join(
-            "<tr>"
-            f'<td><strong>{escape(item["worker_name"])}</strong></td>'
-            f'<td><span class="status {"lost" if item["stale"] else "win"}">'
-            f'{"STALE" if item["stale"] else "CURRENT"}</span></td>'
-            f'<td>{escape(self._dt(item["last_success_at"]))}</td>'
-            f'<td>{item["consecutive_failures"]}</td>'
-            "</tr>"
-            for item in ops["workers"]
-        ) or '<tr><td colspan="4" class="empty">No worker heartbeat records.</td></tr>'
+        worker_rows = (
+            "".join(
+                "<tr>"
+                f"<td><strong>{escape(item['worker_name'])}</strong></td>"
+                f'<td><span class="status {"lost" if item["stale"] else "win"}">'
+                f"{'STALE' if item['stale'] else 'CURRENT'}</span></td>"
+                f"<td>{escape(self._dt(item['last_success_at']))}</td>"
+                f"<td>{item['consecutive_failures']}</td>"
+                "</tr>"
+                for item in ops["workers"]
+            )
+            or '<tr><td colspan="4" class="empty">No worker heartbeat records.</td></tr>'
+        )
         return self._document(
             rows=rows,
             worker_rows=worker_rows,
@@ -411,12 +469,16 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(4,44px);gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid{{display:grid;grid-template-columns:repeat(5,minmax(58px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid span{{background:var(--panel2);padding:5px;text-align:center}}.odds-grid b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase}}
+.movement{{display:inline!important;background:transparent!important;padding:0 0 0 4px!important;font-weight:900}}.movement.up{{color:var(--green)}}.movement.down{{color:var(--red)}}.movement.neutral{{color:var(--muted)}}
+.bookmaker-icon{{display:inline-flex;width:26px;height:18px;align-items:center;justify-content:center;margin-right:5px;border:1px solid var(--line);font-size:8px;font-weight:900}}.registered-book,.inline-book{{display:flex!important;align-items:center;justify-content:center;gap:2px}}.registered-book{{justify-content:flex-start;margin-top:7px!important}}
+.sr-only{{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .status,.warning{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
 .status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}.warning{{color:var(--amber);border-color:#6c5425;margin:2px}}
-.provenance{{max-width:210px;overflow:hidden;text-overflow:ellipsis}}.timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
+.timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
+.glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
@@ -439,10 +501,20 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
 </div></article></section><section class="panel"><div class="panel-head"><h2>Complete pick history</h2><span class="section-label">Newest first</span></div>
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
-<th class="num">Edge</th><th class="num">Accounting</th><th>Status</th><th>Quality</th><th>Provenance</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
+<th class="num">Edge</th><th class="num">Accounting</th><th>Status</th><th>Quality</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
-<tbody>{context["worker_rows"]}</tbody></table></div></section><footer><span>Read-only · no betting, settlement or worker controls</span>
+<tbody>{context["worker_rows"]}</tbody></table></div></section>
+<section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
+<dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
+<dt>Same-book current</dt><dd>Latest valid price at the registered bookmaker. The arrow compares it with Pick odds.</dd>
+<dt>Best current</dt><dd>Highest latest price for the same fixture, market and selection across Bet365, 1xBet and Superbet.</dd>
+<dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
+<dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
+<dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>
+<dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>
+<dt>CLV</dt><dd>Closing-line value compares Pick odds only with the closing price at the same registered bookmaker.</dd>
+</dl></section><footer><span>Read-only · no betting, settlement or worker controls</span>
 <span>Refresh page for current durable state</span></footer></main></body></html>"""
 
 
@@ -489,7 +561,9 @@ class DashboardHTTPService:
         handler.send_response(status)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        handler.send_header(
+            "Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'"
+        )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")
         handler.send_header("Content-Length", str(len(encoded)))

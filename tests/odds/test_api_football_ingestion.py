@@ -55,6 +55,53 @@ def test_flattens_api_football_odds_response() -> None:
     assert payloads[1]["value"] == {"value": "No", "odd": "1.62"}
 
 
+def test_unfiltered_response_skips_books_outside_the_hard_allowlist() -> None:
+    response = {
+        "response": [
+            {
+                "fixture": {"id": 1493129},
+                "bookmakers": [
+                    {
+                        "id": 999,
+                        "name": "Unknown",
+                        "bets": [
+                            {
+                                "id": 8,
+                                "values": [
+                                    {"value": "Yes", "odd": "9.00"},
+                                    {"value": "No", "odd": "1.01"},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": 34,
+                        "name": "Superbet",
+                        "bets": [
+                            {
+                                "id": 8,
+                                "values": [
+                                    {"value": "Yes", "odd": "2.10"},
+                                    {"value": "No", "odd": "1.80"},
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+    payloads = tuple(
+        iter_api_football_quote_payloads(
+            response, fixture_identity=api_football_fixture_identity(1493129)
+        )
+    )
+
+    assert len(payloads) == 2
+    assert {payload["bookmaker"]["id"] for payload in payloads} == {34}
+
+
 def test_ingests_api_football_quotes() -> None:
     response = {
         "response": [

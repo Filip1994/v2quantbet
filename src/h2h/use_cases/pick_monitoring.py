@@ -18,6 +18,7 @@ from h2h.domain.pick_monitoring import (
 from h2h.persistence.pick_monitoring import (
     PickClosingNotDueError,
     PickMonitoringRepository,
+    PickQuoteRefreshTarget,
 )
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.domain.quote_normalizer import QuoteNormalizationError
@@ -34,7 +35,7 @@ def _now(clock: Callable[[], datetime]) -> datetime:
 
 class RegisteredPickQuoteSource(Protocol):
     def fetch_quotes(
-        self, *, fixture_identity: ResolvedFixtureIdentity
+        self, *, fixture_identity: ResolvedFixtureIdentity, bookmaker_id: int | None = None
     ) -> tuple[CanonicalQuote, ...]: ...
 
 
@@ -84,17 +85,28 @@ class RefreshRegisteredPickOdds:
         self._should_stop = should_stop
 
     def execute(self) -> RefreshResult:
-        claimed = self._repository.claim_due(
-            claimed_at=_now(self._clock), limit=self._claim_limit
-        )
-        identities = self._repository.fixture_identities_for_picks(claimed)
+        claimed = self._repository.claim_due(claimed_at=_now(self._clock), limit=self._claim_limit)
+        target_loader = getattr(self._repository, "quote_refresh_targets_for_picks", None)
+        if target_loader is None:
+            targets = tuple(
+                PickQuoteRefreshTarget(identity, 0)
+                for identity in self._repository.fixture_identities_for_picks(claimed)
+            )
+        else:
+            targets = target_loader(claimed)
         refreshed: list[str] = []
         count = 0
-        for identity in identities:
+        for target in targets:
             if self._should_stop():
                 break
+            identity = target.fixture_identity
             try:
-                quotes = self._source.fetch_quotes(fixture_identity=identity)
+                if target.bookmaker_id:
+                    quotes = self._source.fetch_quotes(
+                        fixture_identity=identity, bookmaker_id=target.bookmaker_id
+                    )
+                else:
+                    quotes = self._source.fetch_quotes(fixture_identity=identity)
             except ApiBudgetExceededError:
                 raise
             except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:

@@ -1,5 +1,12 @@
 # Pick monitoring, odds lifecycle, and Daily Bulletin
 
+## Bookmaker continuity
+
+Monitoring refreshes the bookmaker frozen on each registered pick. Pick odds, current
+same-bookmaker, closing same-bookmaker and CLV therefore remain one continuous series. Best
+current is a separate read-only comparison across the approved bookmakers and never rewrites
+Entry, Closing, CLV, settlement, exposure or stake.
+
 Task #11 extends durable `registered_picks`; it does not reinterpret Task #10 Entry.
 
 ## Odds checkpoints

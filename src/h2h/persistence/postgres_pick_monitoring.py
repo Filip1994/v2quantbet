@@ -23,6 +23,7 @@ from h2h.persistence.pick_monitoring import (
     PickClosingNotDueError,
     PickMonitoringConflictError,
     PickMonitoringNotStartedError,
+    PickQuoteRefreshTarget,
 )
 
 
@@ -229,9 +230,7 @@ class PostgreSQLPickMonitoringRepository:
         with self.connect() as connection, connection.cursor() as cursor:
             context = self._require_context(cursor, pick_id)
             state_record = self._load_state(cursor, pick_id)
-            state = (
-                MonitoringState.REGISTERED if state_record is None else state_record.state
-            )
+            state = MonitoringState.REGISTERED if state_record is None else state_record.state
             finalization = self._load_finalization(cursor, pick_id)
             if finalization is not None:
                 cutoff = finalization.cutoff_at
@@ -371,6 +370,34 @@ class PostgreSQLPickMonitoringRepository:
                 for row in cursor.fetchall()
             )
 
+    def quote_refresh_targets_for_picks(
+        self, pick_ids: tuple[str, ...]
+    ) -> tuple[PickQuoteRefreshTarget, ...]:
+        """Return one same-bookmaker refresh target per registered pick context."""
+        if not pick_ids:
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT f.fixture_id, f.provider, f.provider_fixture_id, "
+                "e.bookmaker_id FROM registered_picks r "
+                "JOIN fixtures f ON f.fixture_id = r.fixture_id "
+                "JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id "
+                "JOIN pick_monitoring_states m ON m.pick_id = r.pick_id "
+                "WHERE r.pick_id = ANY(%s) AND m.state = 'MONITORING' "
+                "ORDER BY f.fixture_id, e.bookmaker_id",
+                (list(pick_ids),),
+            )
+            return tuple(
+                PickQuoteRefreshTarget(
+                    ResolvedFixtureIdentity(
+                        fixture_id=row[0],
+                        provider_reference=ProviderFixtureReference(row[1], row[2]),
+                    ),
+                    int(row[3]),
+                )
+                for row in cursor.fetchall()
+            )
+
     @staticmethod
     def _require_context(cursor: Any, pick_id: str) -> tuple[Any, ...]:
         cursor.execute(
@@ -421,8 +448,19 @@ class PostgreSQLPickMonitoringRepository:
     @staticmethod
     def _row_finalization(row: tuple[Any, ...]) -> ClosingFinalization:
         return ClosingFinalization(
-            row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7],
-            ClosingOutcome(row[8]), row[9], row[10], row[11], int(row[12])
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            row[6],
+            row[7],
+            ClosingOutcome(row[8]),
+            row[9],
+            row[10],
+            row[11],
+            int(row[12]),
         )
 
     def _load_finalization(
@@ -476,8 +514,7 @@ class PostgreSQLPickMonitoringRepository:
             "AND q.captured_at < %s AND q.captured_at <= %s "
             "AND observed_fixture.provider_status = ANY(%s) "
             "AND q.observed_at < observed_fixture.kickoff_at "
-            "AND q.captured_at < observed_fixture.kickoff_at ORDER BY "
-            + ordering
+            "AND q.captured_at < observed_fixture.kickoff_at ORDER BY " + ordering
         )
 
     def _candidate(
@@ -495,7 +532,15 @@ class PostgreSQLPickMonitoringRepository:
         available = cutoff_at if available_at is None else available_at
         cursor.execute(
             self._candidate_sql(order) + " LIMIT 1",
-            (fixture_id, series_id, source, cutoff_at, cutoff_at, available, list(allowed_statuses)),
+            (
+                fixture_id,
+                series_id,
+                source,
+                cutoff_at,
+                cutoff_at,
+                available,
+                list(allowed_statuses),
+            ),
         )
         row = cursor.fetchone()
         return None if row is None else self._checkpoint(row)
