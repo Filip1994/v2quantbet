@@ -19,6 +19,7 @@ def payload(
     bookmaker_id: int = 8,
     bookmaker_name: str = "Bet365",
     bet_id: int = 8,
+    bet_name: object = "Both Teams Score",
     selection: str = "Yes",
     odd: object = "2.20",
     update: object = "2026-09-13T20:03:16+00:00",
@@ -26,7 +27,7 @@ def payload(
     return {
         "fixture": {"id": 1493129, "date": "2026-09-14T00:30:00+00:00"},
         "bookmaker": {"id": bookmaker_id, "name": bookmaker_name},
-        "bet": {"id": bet_id, "name": "Both Teams Score"},
+        "bet": {"id": bet_id, "name": bet_name},
         "value": {"value": selection, "odd": odd},
         "update": update,
     }
@@ -50,6 +51,22 @@ def test_adapts_api_football_btts_quote(adapter: ApiFootballQuoteAdapter) -> Non
     assert quote.odd == 2.20
     assert quote.observed_at == datetime(2026, 9, 13, 20, 3, 16, tzinfo=UTC)
     assert quote.source == "api-football"
+
+
+def test_adapts_api_football_ou25_quote(adapter: ApiFootballQuoteAdapter) -> None:
+    quote = adapt(
+        adapter,
+        payload(
+            bet_id=5,
+            bet_name="Goals Over/Under",
+            selection="Under 2.5",
+            odd="2.50",
+        ),
+    )
+
+    assert quote.market is Market.OU_25
+    assert quote.selection is Selection.UNDER
+    assert quote.odd == 2.50
 
 
 @pytest.mark.parametrize(
@@ -90,6 +107,40 @@ def test_adapts_api_football_btts_no_selection(adapter: ApiFootballQuoteAdapter)
     assert quote.market is Market.BTTS
     assert quote.selection is Selection.NO
     assert quote.odd == 1.62
+
+
+@pytest.mark.parametrize(
+    ("bet_id", "bet_name", "selection"),
+    [
+        (8, "Goals Over/Under", "No"),
+        (5, "Both Teams Score", "Under 2.5"),
+    ],
+)
+def test_rejects_provider_bet_id_name_mismatch(
+    adapter: ApiFootballQuoteAdapter,
+    bet_id: int,
+    bet_name: str,
+    selection: str,
+) -> None:
+    with pytest.raises(QuoteNormalizationError, match="bet id/name mismatch"):
+        adapt(
+            adapter,
+            payload(
+                bet_id=bet_id,
+                bet_name=bet_name,
+                selection=selection,
+                odd="2.50",
+            ),
+        )
+
+
+@pytest.mark.parametrize("bet_name", [None, "", "   "])
+def test_rejects_missing_provider_bet_name(
+    adapter: ApiFootballQuoteAdapter,
+    bet_name: object,
+) -> None:
+    with pytest.raises(QuoteNormalizationError, match="bet.name"):
+        adapt(adapter, payload(bet_name=bet_name))
 
 
 @pytest.mark.parametrize(
