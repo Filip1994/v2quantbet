@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from h2h.api.dashboard import DashboardHTTPService, DashboardService
+from h2h import entrypoint
 
 
 NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
@@ -238,3 +239,22 @@ def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch
         assert response.value.code == 404
     finally:
         service.close()
+
+
+def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setenv("QUANTBET_PROCESS", "dashboard")
+    monkeypatch.setattr(
+        "h2h.dashboard_entrypoint.main", lambda: calls.append("dashboard")
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "load_production_settings",
+        lambda: pytest.fail("worker settings must not load for the dashboard process"),
+    )
+
+    entrypoint.main()
+
+    assert calls == ["dashboard"]

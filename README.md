@@ -61,6 +61,10 @@ QUANTBET_DASHBOARD_USER=quantbet
 QUANTBET_DASHBOARD_PASSWORD=<strong-random-password>
 ```
 
+Set `QUANTBET_PROCESS=dashboard` when the platform uses the repository's root
+`railway.json` instead of `railway.dashboard.json`; the root entrypoint then dispatches
+directly to the dashboard-only process and never composes or starts the worker scheduler.
+
 Budget display uses `QUANTBET_API_DAILY_LIMIT`, `QUANTBET_API_RESERVE`,
 `QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT`, and
 `QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE`, with the same defaults as the worker.

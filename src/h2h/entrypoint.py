@@ -174,6 +174,11 @@ def _run_active_leader(
 
 
 def main() -> None:
+    if os.getenv("QUANTBET_PROCESS", "worker").strip().lower() == "dashboard":
+        from h2h.dashboard_entrypoint import main as dashboard_main
+
+        dashboard_main()
+        return
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     settings = load_production_settings()
     stop = Event()
