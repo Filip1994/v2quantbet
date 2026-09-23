@@ -1,5 +1,14 @@
 # QuantBet — Progress
 
+## 2026-09-23 — Issue #15 operator pick tracking
+
+- Registered picks derive `PLAYED` by default; there is no `UNREPORTED` state.
+- Explicit PLAYED/SKIPPED changes are append-only, idempotent and linked only to `pick_id`.
+- Actual/operator bankroll excludes SKIPPED picks while system settlement, CLV and model
+  history remain complete.
+- Dashboard shows system status and operator status separately, with authenticated controls
+  and played/skipped summary totals.
+
 ## 2026-09-23 — Issue #14 multi-bookmaker execution
 
 - Preliminary production requests ingest Bet365 (8), 1xBet (11) and Superbet (34) together.

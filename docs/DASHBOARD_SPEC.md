@@ -1,5 +1,14 @@
 # QuantBet — Dashboard Specification
 
+## Operator PLAYED/SKIPPED tracking
+
+Every registered system pick is shown and defaults to operator state `PLAYED` when no
+override exists. Authenticated one-click controls append either a `PLAYED` or `SKIPPED`
+event; they never mutate the registered pick. The summary separates all system picks,
+played picks and skipped picks. Bankroll, exposure, stake and realized P/L cards are actual
+operator figures derived only from picks whose latest operator state is `PLAYED`. Per-pick
+settlement and CLV remain visible as system facts even when a pick is skipped.
+
 ## Multi-bookmaker price fields
 
 Each pick exposes registered bookmaker, immutable Pick odds, current same-bookmaker odds,

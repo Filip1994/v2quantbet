@@ -1,5 +1,15 @@
 # Results, settlement, bankroll release, P&L, and realized CLV
 
+## System versus operator performance
+
+Settlement continues for every immutable registered pick. Existing settlement events, CLV
+facts and the bankroll ledger remain the complete theoretical/system record. Operator/actual
+performance is a separate read projection: the latest append-only operator event determines
+whether a pick is `PLAYED` or `SKIPPED`, with `PLAYED` derived when no event exists. Only
+PLAYED picks contribute to actual available bankroll, exposure, total stake, gross returns
+and realized P/L. Restoring a pick to PLAYED restores its derived financial contribution
+without rewriting any settlement or ledger fact.
+
 Task #12 adds an append-only production result and financial lifecycle to durable registered
 picks. API-Football result records are content-addressed and retain their normalized score
 breakdown plus canonical provider JSON. Operational polling state is mutable; result,

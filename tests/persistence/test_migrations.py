@@ -149,3 +149,17 @@ def test_task12_migration_has_result_settlement_ledger_and_clv_boundaries() -> N
     assert "uq_pick_one_normal_settlement" in migration
     assert "uq_bankroll_one_reservation_per_pick" in migration
     assert "bankroll_ledger_entries_append_only" in migration
+
+
+def test_operator_state_migration_is_minimal_and_append_only() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "014_pick_operator_state.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE pick_operator_state_events" in migration
+    assert "state IN ('PLAYED', 'SKIPPED')" in migration
+    assert "request_id TEXT NOT NULL UNIQUE" in migration
+    assert "append-only" in migration
+    assert "UNREPORTED" not in migration
+    assert "reason" not in migration.casefold()
+    assert "bookmaker" not in migration.casefold()

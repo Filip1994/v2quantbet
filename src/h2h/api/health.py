@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from h2h.api.dashboard import DashboardService, dashboard_is_public
 from h2h.production import ProductionApplication
@@ -66,6 +67,37 @@ class HealthService:
                 else:
                     service._respond(self, 404, {"error": "not_found"})
 
+            def do_POST(self) -> None:
+                path = self.path.split("?", 1)[0]
+                prefix, suffix = "/api/picks/", "/operator-state"
+                if not path.startswith(prefix) or not path.endswith(suffix):
+                    service._respond(self, 404, {"error": "not_found"})
+                    return
+                if not service._same_origin(self):
+                    service._respond(self, 403, {"error": "origin_forbidden"})
+                    return
+                if not service._authorize_dashboard(self, allow_public=False):
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length <= 0 or length > 4096:
+                        raise ValueError("invalid body length")
+                    values = parse_qs(self.rfile.read(length).decode("utf-8"), strict_parsing=True)
+                    pick_id = unquote(path[len(prefix) : -len(suffix)])
+                    result = service._dashboard.set_operator_state(
+                        pick_id, values["state"][0], values["request_id"][0]
+                    )
+                except (KeyError, LookupError, UnicodeDecodeError, ValueError) as exc:
+                    service._respond(self, 400, {"error": type(exc).__name__})
+                    return
+                if "application/json" in self.headers.get("Accept", ""):
+                    service._respond(self, 200, result)
+                else:
+                    self.send_response(303)
+                    self.send_header("Location", "/dashboard")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+
             def log_message(self, _format: str, *_args: object) -> None:
                 return
 
@@ -91,8 +123,10 @@ class HealthService:
         handler.end_headers()
         handler.wfile.write(encoded)
 
-    def _authorize_dashboard(self, handler: BaseHTTPRequestHandler) -> bool:
-        if dashboard_is_public():
+    def _authorize_dashboard(
+        self, handler: BaseHTTPRequestHandler, *, allow_public: bool = True
+    ) -> bool:
+        if allow_public and dashboard_is_public():
             return True
         password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
         username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
@@ -119,6 +153,14 @@ class HealthService:
         handler.end_headers()
         handler.wfile.write(encoded)
         return False
+
+    @staticmethod
+    def _same_origin(handler: BaseHTTPRequestHandler) -> bool:
+        origin = handler.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlsplit(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == handler.headers.get("Host")
 
     def start(self) -> None:
         self._thread.start()
@@ -166,7 +208,7 @@ class HealthService:
                     stale_workers.append(status.worker_name)
             policy = app.settings.application.registration_policy
             assert policy is not None
-            performance = app.results.performance.summary(policy.bankroll_account_id)
+            performance = app.results.performance.operator_summary(policy.bankroll_account_id)
             bankroll = {
                 "available_minor": performance.available_bankroll_minor,
                 "open_exposure_minor": performance.open_exposure_minor,
@@ -191,9 +233,7 @@ class HealthService:
         budget = app.budget
         try:
             usage_by_category = getattr(budget, "usage_by_category", dict)()
-            budget_used = (
-                sum(usage_by_category.values()) if usage_by_category else budget.used
-            )
+            budget_used = sum(usage_by_category.values()) if usage_by_category else budget.used
             budget_remaining = max(0, budget.effective_limit - budget_used)
             budget_exhausted = budget_remaining <= 0
             budget_store_reachable = True
@@ -227,12 +267,8 @@ class HealthService:
                 "remaining": budget_remaining,
                 "exhausted": budget_exhausted,
                 "by_category": usage_by_category,
-                "model_training_daily_limit": getattr(
-                    budget, "training_daily_limit", None
-                ),
-                "model_training_operational_reserve": getattr(
-                    budget, "operational_reserve", None
-                ),
+                "model_training_daily_limit": getattr(budget, "training_daily_limit", None),
+                "model_training_operational_reserve": getattr(budget, "operational_reserve", None),
                 "last_error_class": app.provider_state.last_error_class,
                 "last_error_message": app.provider_state.last_error_message,
                 "last_error_at": app.provider_state.last_error_at,
