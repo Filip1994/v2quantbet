@@ -12,6 +12,7 @@ from h2h.api.dashboard import DashboardHTTPService, DashboardService
 from h2h.logging_config import configure_logging
 from h2h.odds import PostgreSQLApiBudget
 from h2h.persistence import PostgreSQLPerformanceRepository
+from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.workers.runtime import install_shutdown_handlers
 
@@ -32,12 +33,13 @@ def _integer(name: str, default: str) -> int:
 
 @dataclass
 class DashboardApplication:
-    """Minimal read-only dependencies; no provider client or worker is composed."""
+    """Minimal dashboard dependencies; no provider client or worker is composed."""
 
     settings: Any
     runtime: PostgreSQLRuntimeRepository
     results: Any
     budget: PostgreSQLApiBudget
+    operator_picks: PostgreSQLOperatorPickStateRepository
 
 
 def build_dashboard_application() -> DashboardApplication:
@@ -70,6 +72,7 @@ def build_dashboard_application() -> DashboardApplication:
             operational_reserve=operational_reserve,
             database_url=database_url,
         ),
+        operator_picks=PostgreSQLOperatorPickStateRepository(database_url=database_url),
     )
 
 
