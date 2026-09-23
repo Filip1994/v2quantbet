@@ -18,11 +18,24 @@ from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.domain.quote_normalizer import QuoteNormalizationError
 
 
+API_FOOTBALL_PREMATCH_BET_IDS = {
+    Market.OU_25: 5,
+    Market.BTTS: 8,
+}
+
+
+def api_football_bet_id_for_market(market: Market) -> int:
+    try:
+        return API_FOOTBALL_PREMATCH_BET_IDS[market]
+    except KeyError as exc:
+        raise ValueError(f"unsupported canonical market: {market!r}") from exc
+
+
 class ApiFootballQuoteAdapter:
     """Translate one flattened API-Football odds value into a canonical quote."""
 
-    _BTTS_BET_ID = 8
-    _OU25_BET_IDS = frozenset({5})
+    _BTTS_BET_ID = API_FOOTBALL_PREMATCH_BET_IDS[Market.BTTS]
+    _OU25_BET_IDS = frozenset({API_FOOTBALL_PREMATCH_BET_IDS[Market.OU_25]})
 
     def adapt(
         self,
