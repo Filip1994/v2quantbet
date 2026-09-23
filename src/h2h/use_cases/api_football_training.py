@@ -283,17 +283,28 @@ def fit_api_football_dixon_coles(
     xi: float,
     ridge: float = 0.01,
     min_matches: int = 80,
+    should_abort: Callable[[], bool] | None = None,
 ) -> DixonColesModel:
     """Fit Dixon-Coles with the namespace proven by trusted acquisition."""
     if not _is_trusted_api_football_training_dataset(dataset):
         raise TypeError("dataset must come from trusted API-Football acquisition")
-    return DixonColesModel.fit(
+    if should_abort is None:
+        return DixonColesModel.fit(
+            list(dataset.records),
+            team_id_namespace=dataset.team_id_namespace,
+            reference_time=reference_time,
+            xi=xi,
+            ridge=ridge,
+            min_matches=min_matches,
+        )
+    return DixonColesModel._fit_with_abort(
         list(dataset.records),
         team_id_namespace=dataset.team_id_namespace,
         reference_time=reference_time,
         xi=xi,
         ridge=ridge,
         min_matches=min_matches,
+        should_abort=should_abort,
     )
 
 

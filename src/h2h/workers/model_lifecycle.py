@@ -17,6 +17,7 @@ from h2h.odds import ApiBudgetExceededError
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
 from h2h.persistence.postgres_model_lifecycle import PostgreSQLActiveDixonColesModelRepository
 from h2h.quant import DixonColesFitError
+from h2h.quant.dixon_coles import DixonColesFitAbortedError
 from h2h.quant.dixon_coles_artifact import DixonColesArtifactCodecV1
 from h2h.use_cases.api_football_training import ApiFootballTrainingScope
 from h2h.use_cases.model_lifecycle import (
@@ -107,6 +108,11 @@ class ModelLifecycleWorker:
         wall_exhausted = False
         handled_scopes = set()
 
+        def training_should_abort() -> bool:
+            return self._should_stop() or (
+                self._monotonic() - started >= self._max_wall_seconds
+            )
+
         for record in claimed:
             scope_started = self._monotonic()
             handled_scopes.add(record.scope)
@@ -163,6 +169,7 @@ class ModelLifecycleWorker:
                             training_scope,
                             config,
                             target_scope=record.scope,
+                            should_abort=training_should_abort,
                         )
                         best_accepted = max(
                             best_accepted,
@@ -214,6 +221,31 @@ class ModelLifecycleWorker:
                         "fitted_matches": provenance.fitted_match_count,
                     },
                 )
+            except DixonColesFitAbortedError as exc:
+                if self._should_stop():
+                    interrupted = True
+                    self._coverage.release_pending(
+                        record.scope,
+                        now=self._clock(),
+                        reason="shutdown requested during model training",
+                    )
+                else:
+                    wall_exhausted = True
+                    failed += 1
+                    self._coverage.mark_failed(
+                        record.scope,
+                        exc,
+                        duration_seconds=self._monotonic() - scope_started,
+                        now=self._clock(),
+                    )
+                    LOGGER.warning(
+                        "model scope training exceeded wall-clock budget",
+                        extra={
+                            "model_scope": self._scope_key(record.scope),
+                            "error_class": type(exc).__name__,
+                        },
+                    )
+                break
             except InsufficientTrainingDataError as exc:
                 insufficient += 1
                 self._coverage.mark_insufficient(

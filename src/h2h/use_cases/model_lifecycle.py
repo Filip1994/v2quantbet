@@ -71,6 +71,7 @@ class TrainApiFootballDixonColesModel:
         config: DixonColesTrainingConfig,
         *,
         target_scope: DixonColesModelScope | None = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> DixonColesModelVersion:
         if not isinstance(scope, ApiFootballTrainingScope):
             raise TypeError("scope must be an ApiFootballTrainingScope")
@@ -99,6 +100,7 @@ class TrainApiFootballDixonColesModel:
             xi=config.xi,
             ridge=config.ridge,
             min_matches=config.min_matches,
+            should_abort=should_abort,
         )
         if model.fitted_matches != len(dataset):
             raise InsufficientTrainingDataError(
