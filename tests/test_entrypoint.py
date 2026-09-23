@@ -87,12 +87,12 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         registration=SimpleNamespace(bootstrap_bankroll=SimpleNamespace(execute=lambda: None)),
         monitoring=SimpleNamespace(
             reconcile=SimpleNamespace(execute=lambda: None),
-            worker=SimpleNamespace(run_once=lambda: None),
+            worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
             bulletin=SimpleNamespace(generate=lambda *_args, **_kwargs: None),
         ),
         results=SimpleNamespace(
             repository=SimpleNamespace(reconcile=lambda **_kwargs: None),
-            worker=SimpleNamespace(run_once=lambda: None),
+            worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
         ),
         prediction=SimpleNamespace(
             durable_discovery=SimpleNamespace(has_pending=False, discover=lambda *_args: ())
