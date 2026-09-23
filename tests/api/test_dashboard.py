@@ -316,6 +316,25 @@ def test_operator_write_is_authenticated_even_when_dashboard_is_public(
         service.close()
 
 
+def test_operator_write_response_serializes_timestamp() -> None:
+    event = SimpleNamespace(
+        event_id="event-1",
+        pick_id="registered-pick-v1:0123456789abcdef",
+        state=SimpleNamespace(value="SKIPPED"),
+        occurred_at=NOW,
+        request_id="request-1",
+    )
+    application = SimpleNamespace(
+        operator_picks=SimpleNamespace(set_state=lambda *_args, **_kwargs: event)
+    )
+
+    result = DashboardService(application).set_operator_state(
+        event.pick_id, "SKIPPED", event.request_id
+    )
+
+    assert result["occurred_at"] == "2026-09-23T12:00:00+00:00"
+
+
 def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
     service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)

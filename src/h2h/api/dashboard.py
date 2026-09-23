@@ -233,7 +233,7 @@ class DashboardService:
             "event_id": event.event_id,
             "pick_id": event.pick_id,
             "state": event.state.value,
-            "occurred_at": event.occurred_at,
+            "occurred_at": event.occurred_at.isoformat(),
             "request_id": event.request_id,
         }
 
