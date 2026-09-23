@@ -79,6 +79,7 @@ class ResultCycle:
     persisted_result_count: int
     settled_pick_ids: tuple[str, ...]
     clv_finalized_pick_ids: tuple[str, ...]
+    pending_work: bool = False
 
 
 class ReconcileFixtureResults:
@@ -91,6 +92,7 @@ class ReconcileFixtureResults:
         on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
         on_item_success: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] = lambda: False,
+        max_items: int = 2,
     ) -> None:
         self._repository = repository
         self._source = source
@@ -99,11 +101,19 @@ class ReconcileFixtureResults:
         self._on_item_failure = on_item_failure or (lambda _item, _error, _at: None)
         self._on_item_success = on_item_success or (lambda _item: None)
         self._should_stop = should_stop
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items <= 0:
+            raise ValueError("max_items must be a positive integer")
+        self._max_items = max_items
+        self._has_pending = False
+
+    @property
+    def has_pending(self) -> bool:
+        return self._has_pending
 
     def execute(self) -> ResultCycle:
         now = _now(self._clock)
         initialized = self._repository.reconcile(reconciled_at=now)
-        claimed = self._repository.claim_due(claimed_at=now)
+        claimed = self._repository.claim_due(claimed_at=now, limit=self._max_items)
         contexts = self._repository.provider_contexts(claimed)
         records: dict[str, Mapping[str, Any]] = {}
         for context in contexts:
@@ -141,4 +151,12 @@ class ReconcileFixtureResults:
                 outcome = self._repository.finalize_clv(pick_id, realized_at=now)
                 if outcome.clv_fact_id is not None:
                     clv.append(pick_id)
-        return ResultCycle(initialized, claimed, len(records), tuple(settled), tuple(clv))
+        self._has_pending = self._repository.has_due_results(as_of=_now(self._clock))
+        return ResultCycle(
+            initialized,
+            claimed,
+            len(records),
+            tuple(settled),
+            tuple(clv),
+            self._has_pending,
+        )
