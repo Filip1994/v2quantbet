@@ -283,6 +283,7 @@ def fit_api_football_dixon_coles(
     xi: float,
     ridge: float = 0.01,
     min_matches: int = 80,
+    should_abort: Callable[[], bool] | None = None,
 ) -> DixonColesModel:
     """Fit Dixon-Coles with the namespace proven by trusted acquisition."""
     if not _is_trusted_api_football_training_dataset(dataset):
@@ -294,6 +295,7 @@ def fit_api_football_dixon_coles(
         xi=xi,
         ridge=ridge,
         min_matches=min_matches,
+        should_abort=should_abort,
     )
 
 
