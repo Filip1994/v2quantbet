@@ -57,6 +57,7 @@ service needs these variables:
 DATABASE_URL
 QUANTBET_BANKROLL_ACCOUNT_ID
 QUANTBET_INITIAL_BANKROLL_MINOR=3000000
+QUANTBET_DASHBOARD_PUBLIC=false
 QUANTBET_DASHBOARD_USER=quantbet
 QUANTBET_DASHBOARD_PASSWORD=<strong-random-password>
 ```
@@ -71,6 +72,9 @@ Budget display uses `QUANTBET_API_DAILY_LIMIT`, `QUANTBET_API_RESERVE`,
 `LOG_LEVEL` and `PORT` are optional. Railway supplies `PORT` automatically. Do not commit
 the password; configure it as a Railway variable. If the password is absent, dashboard
 routes fail closed with `404`. HTTP Basic authentication remains mandatory when enabled.
+To intentionally publish the read-only page without credentials, set
+`QUANTBET_DASHBOARD_PUBLIC=true`; this bypasses Basic Auth for dashboard read routes only.
+Do not expose this mode if fixture, model or financial reporting must remain private.
 
 The result/settlement/realized-CLV path is implemented, persisted and scheduled in production. This repository does **not** claim that a representative sample of real picks has already completed settlement or that profitability has been established.
 

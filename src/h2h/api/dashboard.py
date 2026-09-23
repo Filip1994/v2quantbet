@@ -18,6 +18,15 @@ from typing import Any
 WORKER_FRESHNESS_SECONDS = 120
 
 
+def dashboard_is_public() -> bool:
+    """Return whether dashboard read routes are intentionally public."""
+    return os.environ.get("QUANTBET_DASHBOARD_PUBLIC", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def _policy(application: Any) -> Any:
     policy = application.settings.application.registration_policy
     if policy is None:
@@ -488,6 +497,8 @@ class DashboardHTTPService:
         handler.wfile.write(encoded)
 
     def _authorize(self, handler: BaseHTTPRequestHandler) -> bool:
+        if dashboard_is_public():
+            return True
         password = os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
         username = os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
         if not password:

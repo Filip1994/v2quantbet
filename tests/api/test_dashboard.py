@@ -241,6 +241,22 @@ def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch
         service.close()
 
 
+def test_dashboard_public_mode_needs_no_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
+    monkeypatch.delenv("QUANTBET_DASHBOARD_USER", raising=False)
+    monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
+    service = DashboardHTTPService(
+        RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0
+    )
+    service.start()
+    try:
+        with urlopen(f"http://127.0.0.1:{service.port}/") as response:
+            assert response.status == 200
+            assert b"QuantBet" in response.read()
+    finally:
+        service.close()
+
+
 def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
