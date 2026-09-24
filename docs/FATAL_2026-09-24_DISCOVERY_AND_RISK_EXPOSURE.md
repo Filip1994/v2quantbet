@@ -77,7 +77,7 @@ A single poisoned provider fixture could therefore take down every worker in the
 
 ### Fix status
 
-**IMPLEMENTED ON BRANCH `fix/fatal-discovery-conflict`; production verification pending.**
+**FIXED AND PRODUCTION-VERIFIED.**
 
 The patch:
 
@@ -89,6 +89,23 @@ The patch:
 - logs stored and incoming immutable anchors plus the differing fields.
 
 A regression test proves that a conflicting fixture is skipped while subsequent fixtures in the same bounded batch continue.
+
+### Production verification
+
+- merged commit: `7c34370b404db3b0ddfe6f8132c7f47760429663`;
+- Railway deployment: `24bfa70d-7048-41c9-ab16-537389cd5ebf` — `SUCCESS`;
+- at **2026-09-24 15:57:34 UTC**, the new diagnostics identified fixture
+  `api-football:1601449`;
+- stored immutable team anchor: home `2057`, away `814`;
+- incoming provider anchor: home `814`, away `2057`;
+- conflicting fields: `provider_home_team_id`, `provider_away_team_id`;
+- the provider payload therefore represented a home/away swap relative to the stored anchor;
+- the conflicting item was quarantined;
+- that discovery slice still persisted **9** other fixtures and completed successfully;
+- subsequent model lifecycle, opportunity, bulletin, closing and later discovery cycles continued;
+- no `QuantBet worker stopped` event followed the conflict.
+
+This confirms that the immutable identity invariant remains enforced while the provider-side conflict can no longer terminate the engine.
 
 ---
 
@@ -166,9 +183,20 @@ At minimum:
 
 ### Fix status
 
-**DIAGNOSED. NOT YET PATCHED.**
+**PATCH IMPLEMENTED ON BRANCH `fix/skipped-risk-exposure`; CI and production verification pending.**
 
-FATAL-02 will be changed only after FATAL-01 is merged, deployed and verified in production.
+The patch changes the registration exposure gate so unresolved reservations consume
+`MAX_OPEN_EXPOSURE` only when the latest operator state is `PLAYED` (or no override exists,
+which preserves the default PLAYED behavior).
+
+A `SKIPPED` reservation remains present in immutable system history and remains visible in
+the diagnostic counts/amounts, but contributes zero to effective registration exposure.
+
+The dashboard `Risk exposure / cap` value is aligned to the same PLAYED-only operator
+exposure so the UI does not report a full risk cap when registration has capacity.
+
+System settlement/model history and the append-only system ledger are intentionally not
+rewritten by this fix.
 
 ---
 

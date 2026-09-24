@@ -14,6 +14,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from h2h.domain.fixture import Fixture
 from h2h.domain.odds import CanonicalQuote, Market, Selection
+from h2h.domain.operator_pick_state import OperatorPickState
 from h2h.domain.pick_decision import DecisionOutcome, RiskRejectionCode
 from h2h.domain.prediction_record import PersistedFixturePrediction
 from h2h.persistence.migrations import apply_migrations
@@ -21,6 +22,7 @@ from h2h.persistence.pick_registration import (
     BankrollBootstrapConflictError,
     RegistrationPersistenceConflictError,
 )
+from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_fixtures import PostgreSQLFixtureRepository
 from h2h.persistence.postgres_model_lifecycle import PostgreSQLDixonColesModelVersionRepository
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
@@ -650,3 +652,78 @@ def test_complete_migration_chain_reaches_task10() -> None:
         "004_fixture_prediction_value_evaluation.sql",
         "005_pick_decision_risk_registration.sql",
     } <= versions
+
+
+
+def test_skipped_pick_releases_registration_exposure_without_rewriting_ledger() -> None:
+    _migrate()
+    first = _candidate()
+    second = _candidate()
+    account = f"task10-skipped-risk-{uuid4()}"
+    configured = _policy(account, max_open_exposure_minor=30_000)
+    repository = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+    try:
+        now = datetime.now(UTC)
+        repository.bootstrap_bankroll(configured, occurred_at=now)
+        first_result = repository.register(
+            first.evaluation_id,
+            f"first-{account}",
+            configured,
+            decided_at=now,
+        )
+        assert first_result.pick is not None
+
+        before = repository.risk_exposure_breakdown(account, checked_at=now)
+        assert before["open_exposure_minor"] == 30_000
+        assert before["risk_reserved_pick_count"] == 1
+        assert before["risk_reserved_played_count"] == 1
+        assert before["risk_reserved_skipped_count"] == 0
+        assert "MAX_OPEN_EXPOSURE_EXCEEDED" in repository.preliminary_rejection_codes(
+            second.evaluation_id,
+            configured,
+            checked_at=now,
+        )
+
+        operator.set_state(
+            first_result.pick.pick_id,
+            OperatorPickState.SKIPPED,
+            f"skip-{account}",
+            occurred_at=now + timedelta(seconds=1),
+        )
+
+        after = repository.risk_exposure_breakdown(
+            account,
+            checked_at=now + timedelta(seconds=1),
+        )
+        assert after["open_exposure_minor"] == 0
+        assert after["risk_reserved_pick_count"] == 1
+        assert after["risk_reserved_played_count"] == 0
+        assert after["risk_reserved_skipped_count"] == 1
+        assert after["risk_reserved_skipped_minor"] == 30_000
+
+        rejection_codes = repository.preliminary_rejection_codes(
+            second.evaluation_id,
+            configured,
+            checked_at=now + timedelta(seconds=1),
+        )
+        assert "MAX_OPEN_EXPOSURE_EXCEEDED" not in rejection_codes
+
+        second_result = repository.register(
+            second.evaluation_id,
+            f"second-{account}",
+            configured,
+            decided_at=now + timedelta(seconds=1),
+        )
+        assert second_result.pick is not None
+        assert second_result.decision.outcome is DecisionOutcome.APPROVED
+
+        with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM bankroll_ledger_entries "
+                "WHERE bankroll_account_id = %s AND entry_type = 'STAKE_RESERVED'",
+                (account,),
+            )
+            assert cursor.fetchone()[0] == 2
+    finally:
+        _cleanup(account, (first, second))
