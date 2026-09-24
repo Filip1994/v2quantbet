@@ -142,15 +142,7 @@ class DashboardService:
                     THEN live_latest.provider_observed_at
                     ELSE current_quote.observed_at
                 END AS last_observed_at,
-                CASE
-                    WHEN live_latest.provider_observed_at IS NOT NULL
-                         AND (
-                             current_quote.observed_at IS NULL
-                             OR live_latest.provider_observed_at > current_quote.observed_at
-                         )
-                    THEN live_latest.captured_at
-                    ELSE current_quote.captured_at
-                END AS last_checked_at,
+                monitoring.updated_at AS last_checked_at,
                 CASE
                     WHEN live_latest.provider_observed_at IS NOT NULL
                          AND (
