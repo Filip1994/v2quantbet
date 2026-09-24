@@ -180,6 +180,21 @@ def test_manual_closing_override_migration_is_auditable_and_targeted() -> None:
     assert "ON CONFLICT DO NOTHING" in migration
 
 
+def test_opportunity_retry_reset_migration_is_narrow_and_transient_only() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "017_reset_opportunity_retry_backlog.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "DELETE FROM production_item_failures" in migration
+    assert "worker_name = 'opportunity'" in migration
+    assert "last_error_class = 'OpportunityOddsUnavailableError'" in migration
+    assert "registered_picks" not in migration
+    assert "quote_snapshots" not in migration
+    assert "pick_decisions" not in migration
+
+
 def test_operator_state_migration_is_minimal_and_append_only() -> None:
     migration = (
         Path(__file__).parents[2] / "migrations" / "014_pick_operator_state.sql"
