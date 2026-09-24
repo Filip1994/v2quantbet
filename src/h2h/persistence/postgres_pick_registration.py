@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
+
+LOGGER = logging.getLogger("quantbet.registration")
 
 from h2h.decisions.pick_eligibility import evaluate_persisted_eligibility
 from h2h.domain.final_quote import FinalQuoteClaim, FinalQuoteStatus
@@ -434,6 +437,18 @@ class PostgreSQLPickRegistrationRepository:
             exposure = int(cursor.fetchone()[0])
             if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
                 failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
+                LOGGER.info(
+                    "preliminary risk exposure cap reached",
+                    extra={
+                        "evaluation_id": evaluation_id,
+                        "open_exposure_minor": exposure,
+                        "fixed_stake_minor": policy.fixed_stake_minor,
+                        "max_open_exposure_minor": policy.max_open_exposure_minor,
+                        "available_bankroll_minor": (
+                            None if ledger is None else int(ledger[0])
+                        ),
+                    },
+                )
             return tuple(failures)
 
     def begin_final_quote_verification(
