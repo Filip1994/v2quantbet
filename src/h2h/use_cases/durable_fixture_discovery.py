@@ -56,9 +56,8 @@ class DurableFixtureDiscovery:
                 # but one poisoned discovery item must not terminate the whole scheduler.
                 # Consume the conflicting item from the in-memory batch, emit enough
                 # identity context for diagnosis, and continue with the next fixture.
-                LOGGER.error(
+                LOGGER.exception(
                     "fixture discovery identity conflict quarantined",
-                    exc_info=True,
                     extra={
                         "fixture_id": fixture.fixture_id,
                         "provider": fixture.provider,
