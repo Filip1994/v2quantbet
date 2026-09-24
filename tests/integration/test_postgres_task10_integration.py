@@ -22,9 +22,9 @@ from h2h.persistence.pick_registration import (
     BankrollBootstrapConflictError,
     RegistrationPersistenceConflictError,
 )
+from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_fixtures import PostgreSQLFixtureRepository
 from h2h.persistence.postgres_model_lifecycle import PostgreSQLDixonColesModelVersionRepository
-from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_predictions import PostgreSQLFixturePredictionRepository
 from h2h.persistence.postgres_quote_history import PostgreSQLQuoteHistoryRepository
