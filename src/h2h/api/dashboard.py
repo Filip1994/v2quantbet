@@ -745,8 +745,10 @@ class DashboardService:
             ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
             (
                 "Risk exposure / cap",
-                f"{self._money(bankroll['risk_exposure_minor'], currency)} / "
-                f"{self._money(bankroll['max_open_exposure_minor'], currency)}",
+                (
+                    f"{self._money(bankroll['risk_exposure_minor'], currency)} / "
+                    f"{self._money(bankroll['max_open_exposure_minor'], currency)}"
+                ),
                 "warn",
             ),
             ("Realized P/L", self._money(bankroll["realized_pnl_minor"], currency), "value"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from h2h.persistence.fixtures import FixturePersistenceConflictError
 
 
 ConnectionFactory = Callable[[], Any]
+LOGGER = logging.getLogger("quantbet.fixtures")
 
 
 def _utc(value: object, name: str) -> datetime:
@@ -127,6 +129,37 @@ class PostgreSQLFixtureRepository:
                 identity.provider_away_team_id,
             )
             if actual_anchor != expected_anchor:
+                field_names = (
+                    "fixture_id",
+                    "provider",
+                    "provider_fixture_id",
+                    "league_id",
+                    "season",
+                    "provider_home_team_id",
+                    "provider_away_team_id",
+                )
+                conflicting_fields = tuple(
+                    name
+                    for name, stored, incoming in zip(
+                        field_names, actual_anchor, expected_anchor, strict=True
+                    )
+                    if stored != incoming
+                )
+                LOGGER.error(
+                    "immutable fixture identity conflict detected",
+                    extra={
+                        "fixture_id": fixture.fixture_id,
+                        "provider": fixture.provider,
+                        "provider_fixture_id": fixture.provider_fixture_id,
+                        "league_id": fixture.competition_id,
+                        "season": fixture.season,
+                        "provider_home_team_id": fixture.provider_home_team_id,
+                        "provider_away_team_id": fixture.provider_away_team_id,
+                        "stored_fixture_identity": actual_anchor,
+                        "incoming_fixture_identity": expected_anchor,
+                        "conflicting_identity_fields": conflicting_fields,
+                    },
+                )
                 raise FixturePersistenceConflictError("immutable fixture identity conflicts")
 
             cursor.execute(

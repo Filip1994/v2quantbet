@@ -1,13 +1,17 @@
 """Record scoped fixture discovery as bounded durable observations."""
 
+import logging
 from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from h2h.domain.fixture import Fixture
 from h2h.domain.fixture_record import PersistedFixture
-from h2h.persistence.fixtures import FixtureRepository
+from h2h.persistence.fixtures import FixturePersistenceConflictError, FixtureRepository
 from h2h.use_cases.fixture_discovery import FixtureDiscovery
+
+
+LOGGER = logging.getLogger("quantbet.discovery")
 
 
 class DurableFixtureDiscovery:
@@ -41,9 +45,31 @@ class DurableFixtureDiscovery:
             raise ValueError("clock must return a timezone-aware datetime")
         observed_at = observed_at.astimezone(UTC)
         persisted: list[PersistedFixture] = []
-        while self._pending and len(persisted) < self._max_per_call:
-            persisted.append(
-                self._fixtures.record_discovery(self._pending[0], observed_at=observed_at)
-            )
+        attempts = 0
+        while self._pending and attempts < self._max_per_call:
+            fixture = self._pending[0]
+            attempts += 1
+            try:
+                durable = self._fixtures.record_discovery(fixture, observed_at=observed_at)
+            except FixturePersistenceConflictError:
+                # Provider-side identity drift must remain fail-closed for this fixture,
+                # but one poisoned discovery item must not terminate the whole scheduler.
+                # Consume the conflicting item from the in-memory batch, emit enough
+                # identity context for diagnosis, and continue with the next fixture.
+                LOGGER.exception(
+                    "fixture discovery identity conflict quarantined",
+                    extra={
+                        "fixture_id": fixture.fixture_id,
+                        "provider": fixture.provider,
+                        "provider_fixture_id": fixture.provider_fixture_id,
+                        "league_id": fixture.competition_id,
+                        "season": fixture.season,
+                        "provider_home_team_id": fixture.provider_home_team_id,
+                        "provider_away_team_id": fixture.provider_away_team_id,
+                    },
+                )
+                self._pending.popleft()
+                continue
+            persisted.append(durable)
             self._pending.popleft()
         return tuple(persisted)

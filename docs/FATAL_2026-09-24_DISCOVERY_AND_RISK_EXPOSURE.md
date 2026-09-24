@@ -1,0 +1,194 @@
+# QuantBet fatal production incidents — 2026-09-24
+
+## Scope
+
+This document records two production defects that jointly explained the long no-pick window and the later all-worker outage on 24 Sep 2026.
+
+The fixes are intentionally handled one at a time:
+
+1. **FATAL-01 — fixture discovery identity conflict terminates the entire engine**
+2. **FATAL-02 — SKIPPED picks continue reserving registration risk exposure**
+
+The fixture identity invariant itself must remain strict. A provider identity conflict must never be silently accepted or rewritten.
+
+---
+
+## FATAL-01 — discovery identity conflict kills all workers
+
+### Severity
+
+**FATAL / production outage**
+
+### Production symptoms
+
+Railway showed `quantbet-engine` as `CRASHED` while dashboard and Postgres remained available. The dashboard then showed all engine workers as stale because discovery, opportunity, monitoring, model lifecycle, closing proxy, bulletin and results share the same single-leader scheduler process.
+
+The first confirmed fatal recurrence in the inspected production sequence occurred around:
+
+- **2026-09-24 14:07:53 UTC**
+
+The same failure then recurred after restarts, with the final inspected crash at:
+
+- **2026-09-24 14:52:10 UTC**
+
+Exception:
+
+```text
+FixturePersistenceConflictError: immutable fixture identity conflicts
+```
+
+Call path:
+
+```text
+ProductionOrchestrator.run_forever
+  -> discovery_cycle
+  -> DurableFixtureDiscovery.discover
+  -> PostgreSQLFixtureRepository.record_discovery
+  -> FixturePersistenceConflictError
+```
+
+### Root cause
+
+`DurableFixtureDiscovery` processed the head of its in-memory queue like this:
+
+```python
+record_discovery(self._pending[0])
+self._pending.popleft()
+```
+
+If `record_discovery()` raised an immutable identity conflict:
+
+1. the conflicting item was not removed from the queue;
+2. `FixturePersistenceConflictError` was classified by the orchestrator as a fatal invariant error;
+3. the exception escaped the discovery job;
+4. the whole engine process terminated;
+5. after restart, discovery rebuilt work and eventually hit the same conflicting fixture again.
+
+A single poisoned provider fixture could therefore take down every worker in the engine.
+
+### Required behavior
+
+- Keep immutable fixture identity **fail-closed**.
+- Never rewrite stored identity to make the provider payload fit.
+- Isolate only the conflicting discovery item.
+- Log enough stored and incoming identity context to diagnose the mismatch.
+- Continue processing later fixtures in bounded units.
+- Do not let one provider-data conflict terminate the scheduler.
+
+### Fix status
+
+**IMPLEMENTED ON BRANCH `fix/fatal-discovery-conflict`; production verification pending.**
+
+The patch:
+
+- catches only `FixturePersistenceConflictError` at the durable discovery boundary;
+- consumes/quarantines that one in-memory item;
+- keeps per-call work bounded by attempted items, including conflicts;
+- continues later discovery items;
+- preserves repository-level strict rejection;
+- logs stored and incoming immutable anchors plus the differing fields.
+
+A regression test proves that a conflicting fixture is skipped while subsequent fixtures in the same bounded batch continue.
+
+---
+
+## FATAL-02 — SKIPPED picks keep the registration risk cap full
+
+### Severity
+
+**FATAL to pick production / no-registration lockout**
+
+This defect did not crash the process, but it could suppress every otherwise-valid new pick.
+
+### Production symptoms
+
+The last confirmed registered pick in the inspected window was:
+
+- **2026-09-24 05:03:54 UTC** (`registered_picks=1`)
+
+Later production diagnostics repeatedly showed:
+
+```text
+open_exposure_minor = 300000
+max_open_exposure_minor = 300000
+fixed_stake_minor = 30000
+
+risk_reserved_pick_count = 10
+risk_reserved_played_count = 5
+risk_reserved_skipped_count = 5
+risk_reserved_played_minor = 150000
+risk_reserved_skipped_minor = 150000
+```
+
+At the same time, valid value candidates reached the registration layer and were rejected only by:
+
+```text
+MAX_OPEN_EXPOSURE_EXCEEDED
+```
+
+Representative example from fixture `api-football:1568188`:
+
+- OU 2.5 UNDER @ 2.05
+- edge about +28.00 percentage points
+- EV about +51.81%
+- rejection: `MAX_OPEN_EXPOSURE_EXCEEDED`
+
+Additional candidates on the same fixture also passed value thresholds and were blocked by the same exposure gate.
+
+### Root cause
+
+Registration exposure currently counts unresolved `STAKE_RESERVED` ledger entries until terminal settlement.
+
+The exposure query does not exclude a pick whose latest operator state is `SKIPPED`.
+
+Therefore a pick that the operator explicitly did not place can still reserve risk capital for registration.
+
+Observed production composition:
+
+- 5 PLAYED reservations = 1,500 RSD
+- 5 SKIPPED reservations = 1,500 RSD
+- registration exposure = 3,000 RSD
+- configured cap = 3,000 RSD
+
+The five SKIPPED picks therefore occupied half of the registration cap even though no stake was actually placed.
+
+### Required behavior
+
+The registration risk gate must use exposure that reflects real operator stake commitment.
+
+At minimum:
+
+- latest operator state `SKIPPED` must not consume open registration exposure;
+- `PLAYED` and default/no-override picks retain current reservation behavior unless deliberately changed;
+- terminal settlement semantics remain authoritative for played bets;
+- duplicate-fixture protection remains independent;
+- ledger history remains append-only and auditable.
+
+### Fix status
+
+**DIAGNOSED. NOT YET PATCHED.**
+
+FATAL-02 will be changed only after FATAL-01 is merged, deployed and verified in production.
+
+---
+
+## Production repair order
+
+1. Patch, test and deploy FATAL-01.
+2. Verify engine remains alive through the formerly recurring discovery-conflict window and capture the exact conflicting fixture identity from new structured logs.
+3. Only then patch FATAL-02.
+4. Verify risk exposure drops by the SKIPPED reservation amount without changing the configured cap.
+5. Confirm that an otherwise-qualified new candidate can progress beyond the preliminary risk gate when capacity is available.
+
+---
+
+## Non-goals
+
+These incidents must not be used as justification to:
+
+- weaken model probability, edge or EV thresholds;
+- increase `MAX_OPEN_EXPOSURE`;
+- alter the fixed stake;
+- accept conflicting immutable fixture identities;
+- fabricate fresh odds;
+- rewrite historical ledger or quote facts.
