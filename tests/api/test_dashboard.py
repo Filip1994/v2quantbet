@@ -210,7 +210,7 @@ def test_quality_consolidates_live_and_historical_stale_states() -> None:
     ).render_html()
 
     assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
-    assert ">Entry stale · Closing stale</small>" in html
+    assert ">Entry stale · Same-book close stale</small>" in html
     assert "CURRENT STALE" not in html
     assert "ENTRY STALE" not in html
     assert "CLOSING STALE" not in html
