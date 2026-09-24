@@ -31,6 +31,12 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     record.fixed_stake_minor = 30000
     record.max_open_exposure_minor = 300000
     record.available_bankroll_minor = 2700000
+    record.exposure_pick_count = 10
+    record.exposure_played_count = 8
+    record.exposure_skipped_count = 2
+    record.exposure_past_kickoff_count = 3
+    record.exposure_past_10m_count = 2
+    record.exposure_future_kickoff_count = 7
     record.selection_seconds = 0.12
     record.model_gate_seconds = 0.34
     record.preliminary_fetch_seconds = 4.56
@@ -60,6 +66,12 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["fixed_stake_minor"] == 30000
     assert payload["max_open_exposure_minor"] == 300000
     assert payload["available_bankroll_minor"] == 2700000
+    assert payload["exposure_pick_count"] == 10
+    assert payload["exposure_played_count"] == 8
+    assert payload["exposure_skipped_count"] == 2
+    assert payload["exposure_past_kickoff_count"] == 3
+    assert payload["exposure_past_10m_count"] == 2
+    assert payload["exposure_future_kickoff_count"] == 7
     assert payload["selection_seconds"] == 0.12
     assert payload["model_gate_seconds"] == 0.34
     assert payload["preliminary_fetch_seconds"] == 4.56
