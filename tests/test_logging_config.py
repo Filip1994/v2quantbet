@@ -91,3 +91,42 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["registration_seconds"] == 4.56
     assert payload["final_fetch_seconds"] == 5.67
     assert payload["failure_flush_seconds"] == 0.11
+
+
+def test_json_formatter_exposes_model_lifecycle_diagnostics() -> None:
+    record = logging.LogRecord(
+        "quantbet.model_lifecycle",
+        logging.WARNING,
+        __file__,
+        1,
+        "model scope training failed",
+        (),
+        None,
+    )
+    record.model_scope = "api-football:api-football:39:2026"
+    record.active_generation = 4
+    record.eligible_model_scopes = 7
+    record.claimed_model_scopes = 1
+    record.activated_model_scopes = 0
+    record.insufficient_data_scopes = 1
+    record.training_failed_scopes = 0
+    record.training_provider_requests = 2
+    record.accepted_matches = 63
+    record.fitted_matches = 61
+    record.error_class = "DixonColesFitError"
+    record.error_message = "optimizer failed to converge"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["model_scope"] == "api-football:api-football:39:2026"
+    assert payload["active_generation"] == 4
+    assert payload["eligible_model_scopes"] == 7
+    assert payload["claimed_model_scopes"] == 1
+    assert payload["activated_model_scopes"] == 0
+    assert payload["insufficient_data_scopes"] == 1
+    assert payload["training_failed_scopes"] == 0
+    assert payload["training_provider_requests"] == 2
+    assert payload["accepted_matches"] == 63
+    assert payload["fitted_matches"] == 61
+    assert payload["error_class"] == "DixonColesFitError"
+    assert payload["error_message"] == "optimizer failed to converge"
