@@ -613,6 +613,29 @@ This verifies that stale-but-usable quotes can now reach the real model/value fu
 4. **Deployment automation:** the engine GitHub `checkSuites` gate still needs a clean committed Railway configuration fix; manual exact-commit deployment is currently the safe workaround.
 5. **Provider strategy:** API-Football is adequate for the current validation phase but its slow quote publication cadence makes a second/faster odds source a likely future requirement.
 
+### Post-deploy aggregate verification
+
+Across the first three complete opportunity cycles after PR #45 acquired production leadership:
+
+- due fixtures: 30;
+- eligible fixture observations across slices: 37;
+- preliminary provider refreshes: 3;
+- odds unavailable: 1;
+- quotes fetched: 14;
+- predictions: 2;
+- evaluations: 8;
+- compared quotes: 8;
+- usable/soft-stale markets evaluated: 4;
+- hard-stale markets: 3;
+- stale retries scheduled: 2, both from the hard-stale case;
+- stale retry states cleared: 2;
+- decisions: 0;
+- registered picks: 0.
+
+The two cycles containing usable-stale markets scheduled **zero** accelerated stale retries and still reached prediction/evaluation. The remaining zero-pick result in this short sample came after eight real value evaluations failed the existing qualification policy, not from a freshness pipeline blockage.
+
+The opportunity wall-clock issue remains visible: all three sampled cycles exceeded the nominal 30-second cooperative budget (approximately 46s, 48s, and 93s).
+
 ### Updated current conclusion
 
 The earlier observation of “no qualified picks” was partly misleading because a freshness/deduplication bug was preventing valid repeated provider snapshots from reaching prediction/evaluation.
