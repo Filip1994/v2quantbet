@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+LOGGER = logging.getLogger("quantbet.monitoring")
 
 from h2h.use_cases.pick_monitoring import (
     ReconcileRegisteredPickMonitoring,
@@ -37,5 +40,15 @@ class RegisteredPickMonitoringWorker:
     def run_once(self) -> MonitoringCycleResult:
         result = MonitoringCycleResult(self._reconcile.execute(), self._refresh.execute())
         self._has_pending = result.refresh.pending_work
+        LOGGER.info(
+            "monitoring cycle outcomes",
+            extra={
+                "worker": "monitoring",
+                "claimed_pick_count": len(result.refresh.claimed_pick_ids),
+                "refreshed_fixture_count": len(result.refresh.refreshed_fixture_ids),
+                "persisted_snapshot_count": result.refresh.persisted_snapshot_count,
+                "pending_work": result.refresh.pending_work,
+            },
+        )
         return result
 

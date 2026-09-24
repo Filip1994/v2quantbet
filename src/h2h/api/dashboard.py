@@ -148,6 +148,15 @@ class DashboardService:
                              current_quote.observed_at IS NULL
                              OR live_latest.provider_observed_at > current_quote.observed_at
                          )
+                    THEN live_latest.captured_at
+                    ELSE current_quote.captured_at
+                END AS last_checked_at,
+                CASE
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
                     THEN 'LIVE_PROXY'
                     WHEN current_quote.observed_at IS NOT NULL THEN 'SAME_BOOK'
                     ELSE 'UNAVAILABLE'
@@ -262,7 +271,7 @@ class DashboardService:
                 LIMIT 1
             ) current_quote ON TRUE
             LEFT JOIN LATERAL (
-                SELECT observation.odd, observation.provider_observed_at
+                SELECT observation.odd, observation.provider_observed_at, observation.captured_at
                 FROM pick_live_close_observations observation
                 WHERE observation.pick_id = r.pick_id
                   AND observation.provider_observed_at < latest.kickoff_at
@@ -631,7 +640,9 @@ class DashboardService:
             f"<b>Last observed</b>{self._odd(pick.get('last_observed_odd'))}"
             f"{last_meta}"
             f'<small class="quote-age">'
-            f"{escape(self._relative_age(pick.get('last_observed_at'), generated_at))}</small></span>"
+            f"{escape(self._relative_age(pick.get('last_observed_at'), generated_at))}</small>"
+            f'<small class="check-age">checked '
+            f"{escape(self._relative_age(pick.get('last_checked_at'), generated_at))}</small></span>"
             f'<span title="{escape(self._dt(pick.get("display_closing_observed_at")))}">'
             f"<b>Closing</b>{self._odd(pick.get('display_closing_odd'))}"
             f"{closing_meta}</span>"
@@ -780,6 +791,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
 .quote-age{{font-size:7px;line-height:1.1;margin-top:3px;color:#dfff63;font-weight:600}}
+.check-age{{font-size:7px!important;line-height:1.1;margin-top:2px!important;color:var(--muted)!important;font-weight:500}}
 .pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
 .bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:-.02em;line-height:1;white-space:nowrap;overflow:hidden}}
 .brand-bet365{{display:inline-flex;align-items:baseline;gap:1px;background:#087a4b;padding:6px 8px;border-radius:6px}}
