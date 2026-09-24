@@ -91,6 +91,14 @@ def test_production_config_rejects_partial_or_invalid_values(name: str, value: s
         load_production_settings(environment)
 
 
+def test_production_config_rejects_provider_age_below_strict_quote_age() -> None:
+    environment = production_environment()
+    environment["QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS"] = "299"
+
+    with pytest.raises(ConfigError, match="must be at least"):
+        load_production_settings(environment)
+
+
 def test_production_config_rejects_inverted_stale_retry_bounds() -> None:
     environment = production_environment()
     environment["QUANTBET_STALE_QUOTE_INITIAL_RETRY_SECONDS"] = "600"
