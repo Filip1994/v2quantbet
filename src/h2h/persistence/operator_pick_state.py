@@ -135,8 +135,8 @@ class PostgreSQLOperatorPickStateRepository:
             effective_after = state if becomes_latest else effective_before
 
             if (
-                effective_before is not effective_after
-                and effective_after is OperatorPickState.PLAYED
+                effective_before != effective_after
+                and effective_after == OperatorPickState.PLAYED
                 and has_unresolved_reservation(cursor, pick_id)
             ):
                 if (
