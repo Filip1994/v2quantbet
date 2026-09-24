@@ -150,9 +150,11 @@ class Registration:
 
 
 class Source:
-    def __init__(self, final):
+    def __init__(self, final, *, live=()):
         self.final = final
+        self.live = live
         self.calls = 0
+        self.live_calls = 0
 
     def fetch_quotes(self, **_kwargs):
         self.calls += 1
@@ -162,11 +164,34 @@ class Source:
             raise self.final
         return self.final
 
+    def fetch_live_quotes(self, **_kwargs):
+        self.live_calls += 1
+        if isinstance(self.live, BaseException):
+            raise self.live
+        return self.live
 
-def run(final, *, registration=None, evaluator=None):
+
+def run(
+    final,
+    *,
+    registration=None,
+    evaluator=None,
+    live=(),
+    kickoff_at=None,
+    provider_snapshot_max_age_seconds=14400,
+):
     repository = Repository()
+    if kickoff_at is not None:
+        repository.fixture = OpportunityFixture(
+            repository.fixture.fixture_id,
+            repository.fixture.identity,
+            repository.fixture.league_id,
+            repository.fixture.season,
+            kickoff_at,
+            repository.fixture.last_captured_at,
+        )
     registration = registration or Registration()
-    source = Source(final)
+    source = Source(final, live=live)
     worker = OpportunityWorker(
         repository,
         source,
@@ -181,6 +206,7 @@ def run(final, *, registration=None, evaluator=None):
         maximum_quote_age_seconds=300,
         minimum_time_to_kickoff_seconds=600,
         stale_retry_policy=POLICY,
+        provider_snapshot_max_age_seconds=provider_snapshot_max_age_seconds,
         clock=lambda: NOW,
     )
     return worker.run_once(), source, registration, repository
@@ -216,6 +242,61 @@ def test_stale_observed_at_is_preserved_as_warning_and_can_accept() -> None:
     assert registration.completed[0][2]["stale_quote"] is True
     assert registration.completed[0][2]["quote_age_seconds"] == 3 * 3600
     assert repository.refresh_states[-1]["freshness_state"] == "STALE"
+
+
+def test_provider_snapshot_beyond_bounded_age_rejects() -> None:
+    too_old = NOW - timedelta(hours=4, minutes=1)
+    cycle, _, registration, _ = run(market(2.0, observed_at=too_old))
+
+    assert cycle.registered_pick_ids == ()
+    assert registration.executed == []
+    assert registration.rejections[0][1]["reason_codes"] == ("FINAL_QUOTE_STALE",)
+
+
+def test_live_proxy_rejects_stale_bookmaker_price_that_no_longer_meets_value() -> None:
+    stale = NOW - timedelta(hours=3)
+    live = (
+        SimpleNamespace(
+            market=Market.BTTS,
+            selection=Selection.YES,
+            odd=1.70,
+        ),
+    )
+    cycle, source, registration, _ = run(
+        market(2.0, observed_at=stale),
+        live=live,
+        kickoff_at=NOW + timedelta(minutes=10),
+    )
+
+    assert source.live_calls == 1
+    assert cycle.registered_pick_ids == ()
+    assert cycle.live_corroborations == 1
+    assert cycle.live_proxy_rejections == 1
+    assert registration.rejections[-1][1]["reason_codes"] == (
+        "FINAL_QUOTE_LIVE_PROXY_BELOW_MINIMUM",
+    )
+
+
+def test_live_proxy_can_corroborate_bounded_stale_bookmaker_price() -> None:
+    stale = NOW - timedelta(hours=3)
+    live = (
+        SimpleNamespace(
+            market=Market.BTTS,
+            selection=Selection.YES,
+            odd=2.00,
+        ),
+    )
+    cycle, source, registration, _ = run(
+        market(2.0, observed_at=stale),
+        live=live,
+        kickoff_at=NOW + timedelta(minutes=10),
+    )
+
+    assert source.live_calls == 1
+    assert cycle.registered_pick_ids == ("pick-1",)
+    assert cycle.live_corroborations == 1
+    assert cycle.live_proxy_rejections == 0
+    assert registration.completed[0][2]["stale_quote"] is True
 
 
 def test_incomplete_final_market_rejects_without_registration() -> None:
