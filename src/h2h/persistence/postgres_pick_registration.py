@@ -54,6 +54,12 @@ _EXPOSURE_BREAKDOWN_SQL = (
     "FROM pick_operator_state_events e "
     "JOIN unresolved_reserved r ON r.pick_id = e.pick_id "
     "ORDER BY e.pick_id, e.occurred_at DESC, e.persisted_at DESC, e.event_id DESC"
+    "), latest_fixture AS ("
+    "SELECT DISTINCT ON (fo.fixture_id) fo.fixture_id, fo.kickoff_at "
+    "FROM fixture_observations fo "
+    "JOIN registered_picks p ON p.fixture_id = fo.fixture_id "
+    "JOIN unresolved_reserved r ON r.pick_id = p.pick_id "
+    "ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC"
     ") "
     "SELECT COALESCE(SUM(r.exposure_minor), 0), COUNT(*), "
     "COUNT(*) FILTER (WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), "
@@ -62,10 +68,15 @@ _EXPOSURE_BREAKDOWN_SQL = (
     "COALESCE(SUM(r.exposure_minor) FILTER (WHERE o.state = 'SKIPPED'), 0), "
     "COUNT(*) FILTER (WHERE m.state = 'MONITORING'), "
     "COUNT(*) FILTER (WHERE m.state = 'CLOSED_FOR_ODDS'), "
-    "COUNT(*) FILTER (WHERE m.pick_id IS NULL) "
+    "COUNT(*) FILTER (WHERE m.pick_id IS NULL), "
+    "COUNT(*) FILTER (WHERE f.kickoff_at < %s), "
+    "COUNT(*) FILTER (WHERE f.kickoff_at <= %s - interval '10 minutes'), "
+    "COUNT(*) FILTER (WHERE f.kickoff_at >= %s) "
     "FROM unresolved_reserved r "
     "LEFT JOIN latest_operator o ON o.pick_id = r.pick_id "
-    "LEFT JOIN pick_monitoring_states m ON m.pick_id = r.pick_id"
+    "LEFT JOIN pick_monitoring_states m ON m.pick_id = r.pick_id "
+    "LEFT JOIN registered_picks p ON p.pick_id = r.pick_id "
+    "LEFT JOIN latest_fixture f ON f.fixture_id = p.fixture_id"
 )
 
 
@@ -454,7 +465,10 @@ class PostgreSQLPickRegistrationRepository:
             ledger = cursor.fetchone()
             if ledger is None or int(ledger[0]) < policy.fixed_stake_minor:
                 failures.append("INSUFFICIENT_AVAILABLE_BANKROLL")
-            cursor.execute(_EXPOSURE_BREAKDOWN_SQL, (policy.bankroll_account_id,))
+            cursor.execute(
+                _EXPOSURE_BREAKDOWN_SQL,
+                (policy.bankroll_account_id, checked, checked, checked),
+            )
             exposure_row = cursor.fetchone()
             if exposure_row is None:
                 raise RegistrationProvenanceError("risk exposure diagnostic query returned no row")
@@ -479,6 +493,9 @@ class PostgreSQLPickRegistrationRepository:
                         "risk_reserved_monitoring_count": int(exposure_row[6]),
                         "risk_reserved_closed_for_odds_count": int(exposure_row[7]),
                         "risk_reserved_without_monitoring_count": int(exposure_row[8]),
+                        "risk_reserved_past_kickoff_count": int(exposure_row[9]),
+                        "risk_reserved_past_10m_count": int(exposure_row[10]),
+                        "risk_reserved_future_kickoff_count": int(exposure_row[11]),
                     },
                 )
             return tuple(failures)
