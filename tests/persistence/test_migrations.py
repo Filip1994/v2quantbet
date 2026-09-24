@@ -151,6 +151,19 @@ def test_task12_migration_has_result_settlement_ledger_and_clv_boundaries() -> N
     assert "bankroll_ledger_entries_append_only" in migration
 
 
+def test_live_closing_proxy_migration_is_append_only_and_separate_from_bookmaker_quotes() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "015_live_closing_proxy.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE pick_live_close_observations" in migration
+    assert "CREATE TABLE pick_live_close_finalizations" in migration
+    assert "api-football-live" in migration
+    assert "CLV_MARKET_PROXY_ODDS_RATIO_PPM_V1" in migration
+    assert "append-only" in migration
+    assert "quote_series" not in migration
+
+
 def test_operator_state_migration_is_minimal_and_append_only() -> None:
     migration = (
         Path(__file__).parents[2] / "migrations" / "014_pick_operator_state.sql"
