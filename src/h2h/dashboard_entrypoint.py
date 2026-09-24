@@ -46,6 +46,8 @@ def build_dashboard_application() -> DashboardApplication:
     database_url = _required("DATABASE_URL")
     account_id = _required("QUANTBET_BANKROLL_ACCOUNT_ID")
     initial_minor = _integer("QUANTBET_INITIAL_BANKROLL_MINOR", "3000000")
+    fixed_stake_minor = _integer("QUANTBET_FIXED_STAKE_MINOR", "30000")
+    max_open_exposure_minor = _integer("QUANTBET_MAX_OPEN_EXPOSURE_MINOR", "300000")
     daily_limit = _integer("QUANTBET_API_DAILY_LIMIT", "7500")
     reserve = _integer("QUANTBET_API_RESERVE", "0")
     effective_limit = daily_limit - reserve
@@ -56,6 +58,8 @@ def build_dashboard_application() -> DashboardApplication:
     policy = SimpleNamespace(
         bankroll_account_id=account_id,
         initial_bankroll_minor=initial_minor,
+        fixed_stake_minor=fixed_stake_minor,
+        max_open_exposure_minor=max_open_exposure_minor,
     )
     return DashboardApplication(
         settings=SimpleNamespace(
