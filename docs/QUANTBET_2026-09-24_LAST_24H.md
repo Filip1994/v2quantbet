@@ -472,3 +472,152 @@ A one-time production quote-monitoring audit was scheduled for approximately **2
 4. Keep model probability, market fair probability, CLV, result and P/L together in History.
 5. Preserve provider observation timestamps as authoritative; never fabricate freshness from polling time.
 6. Continue investigating opportunity wall-budget overruns and sparse provider odds separately from registered-pick monitoring.
+
+
+---
+
+## 10. Opportunity qualification and provider-odds policy correction
+
+### API-consumption audit
+
+A production log sample covering roughly the late-morning / early-afternoon opportunity workload showed that the dominant API consumer was the **opportunity scanner**, not registered-pick monitoring.
+
+In one sampled window:
+- 161 `/odds` provider requests were observed;
+- 4 fixture-date discovery requests were observed;
+- approximately 128 preliminary opportunity refresh attempts were made;
+- registered-pick monitoring was making approximately two odds requests per bounded slice.
+
+The practical conclusion is that most odds-call pressure came from searching for new opportunities, especially on fixtures for which the provider returned no usable odds.
+
+### PR #43 — repeated provider snapshots no longer block prediction
+
+**Merge commit:** `74a8f3aca815a896dd6d9dd736db50a84933ca8c`
+
+A correctness bug was found in the opportunity freshness boundary.
+
+Before this fix:
+1. the worker fetched a provider quote;
+2. quote history correctly deduplicated an identical repeated provider observation;
+3. the worker then required a local `captured_at` within 60 seconds as proof that the market had been returned in the current provider call;
+4. deduplication meant that repeated provider observations retained the old local capture time;
+5. a quote that had just been returned by API-Football could therefore be rejected before prediction/evaluation.
+
+The fix now proves current-response membership directly from the canonical quotes returned by the current provider response and matches persisted state by exact:
+- bookmaker;
+- market;
+- provider `observed_at`;
+- source.
+
+Immutable quote-history deduplication remains unchanged.
+
+### Production proof after PR #43
+
+After the fix reached the running engine, fixture `api-football:1510683` advanced through the opportunity funnel:
+
+- predictions: 1;
+- evaluations: 2;
+- compared quotes: 2;
+- odds unavailable: 0.
+
+The candidate did not proceed to final quote refresh because the resulting evaluations did not qualify under the existing value policy. This is materially different from the prior zero-pick state: the model/value layer is now actually being reached.
+
+No minimum EV, edge, odds-range, bankroll, or model-probability threshold was weakened by PR #43.
+
+### Railway engine deployment gate issue
+
+A separate infrastructure issue was identified during rollout.
+
+The engine service had:
+- path-scoped watch patterns configured for `src/h2h/**`, `migrations/**`, and `pyproject.toml`;
+- GitHub source setting `checkSuites=true`.
+
+The repository did not have a corresponding GitHub workflow/check-suite run for these commits, so Railway repeatedly created engine deployments and then marked them **SKIPPED**, while the dashboard deployed normally.
+
+Because an old staged Railway environment patch could not be safely inspected, it was not blindly committed.
+
+For the critical engine fixes, a manual service deployment of the exact `main` commit was used instead. This preserved service variables/configuration and bypassed the broken automatic check-suite gate.
+
+### PR #45 — tolerate real but stale provider quotes
+
+**Merge commit:** `7e4610d3b08ad3681fa4a8bd8862dc25d2066206`
+
+The temporary API-Football-era execution policy was deliberately relaxed so that a genuine provider-published quote does not disappear from candidate evaluation merely because the provider has not refreshed it recently.
+
+Current policy:
+
+- **FRESH**: provider observation is within the strict 5-minute signal;
+- **USABLE_STALE**: older than 5 minutes but no older than 8 hours;
+- **STALE / hard-stale**: older than 8 hours.
+
+`USABLE_STALE` quotes:
+- remain explicitly marked as stale;
+- retain the provider-published observation timestamp;
+- may be used for model/value evaluation and pick registration;
+- still require the existing model, edge and expected-value rules;
+- no longer activate the accelerated stale retry loop;
+- follow the normal kickoff-aware refresh cadence instead.
+
+Quotes older than 8 hours remain ineligible for pick generation and retain bounded accelerated retry behavior.
+
+### Migration 020
+
+Migration `020_usable_stale_quote_state.sql` added `USABLE_STALE` to the durable quote-refresh state.
+
+The production pre-deploy migration step reported:
+
+`applied 1 migration(s)`
+
+before the new engine container became healthy.
+
+### Opportunity live-proxy veto removed
+
+The stale-quote candidate path previously issued an additional live-odds call close to kickoff and could veto an otherwise qualifying stale-bookmaker pick.
+
+That veto was removed from **opportunity qualification**.
+
+Rationale for the current phase:
+- the displayed bookmaker quote is still a real provider-published observation, not a fabricated price;
+- the operator can manually mark/skip a pick if the offered price is no longer available;
+- using the live proxy as a hard qualification gate created extra API consumption and contradicted this temporary operator-first stale-price policy.
+
+The independent live closing / proxy-CLV pipeline remains intact; only the pick-generation veto was removed.
+
+### Production verification of the new stale policy
+
+The manually deployed PR #45 engine reached **SUCCESS** and acquired production leadership.
+
+Two useful production cases were observed:
+
+1. Fixture `api-football:1508557` initially returned a provider snapshot approximately 10h40m old. It remained correctly hard-stale under the new 8-hour ceiling:
+   - predictions: 0;
+   - hard-stale markets: 3;
+   - no valid quote: 1.
+
+2. Fixture `api-football:1510683` returned a provider observation approximately one hour old and was treated as usable stale:
+   - predictions: 1;
+   - evaluations: 2;
+   - compared quotes: 2;
+   - hard-stale markets: 0;
+   - stale retries scheduled: 0;
+   - prior stale retry state cleared: 1;
+   - registered picks: 0 because the evaluations did not satisfy existing qualification rules.
+
+This verifies that stale-but-usable quotes can now reach the real model/value funnel without creating accelerated retry pressure.
+
+### Current remaining bottlenecks
+
+1. **Provider coverage:** many fixture-specific odds calls still return no usable odds.
+2. **Opportunity throughput:** the configured 30-second wall budget remains cooperative rather than a strict hard cutoff; observed cycles still exceed 30 seconds.
+3. **API economics:** fixture-by-fixture opportunity odds discovery remains expensive and is the next major optimization target.
+4. **Deployment automation:** the engine GitHub `checkSuites` gate still needs a clean committed Railway configuration fix; manual exact-commit deployment is currently the safe workaround.
+5. **Provider strategy:** API-Football is adequate for the current validation phase but its slow quote publication cadence makes a second/faster odds source a likely future requirement.
+
+### Updated current conclusion
+
+The earlier observation of “no qualified picks” was partly misleading because a freshness/deduplication bug was preventing valid repeated provider snapshots from reaching prediction/evaluation.
+
+That bug is fixed and live.
+
+The opportunity funnel now reaches the model/value layer. Zero picks in an individual post-fix cycle can therefore be a legitimate result of the existing EV/edge rules, while provider no-odds responses and hard-stale data remain separate upstream constraints.
+
