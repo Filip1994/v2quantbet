@@ -28,7 +28,7 @@ def test_fetch_odds_uses_injected_transport(caplog: pytest.LogCaptureFixture) ->
 
     result = ApiFootballClient(transport, "secret").fetch_odds(fixture_id=42)
 
-    assert result == {"response": [{"fixture": {"id": 42}}]}
+    assert result == transport.get_json.return_value
     transport.get_json.assert_called_once_with(
         "https://v3.football.api-sports.io/odds?fixture=42",
         headers={"x-apisports-key": "secret"},
