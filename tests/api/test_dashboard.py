@@ -27,20 +27,17 @@ def _pick(**changes: object) -> dict[str, object]:
         "selection": "OVER",
         "first_seen_odd": 1.91,
         "pick_odd": 1.95,
-        "current_odd": 2.01,
-        "current_freshness": "FRESH",
-        "current_quote_age_seconds": 30,
-        "current_max_age_seconds": 300,
-        "best_current_odd": 2.10,
-        "best_current_bookmaker_key": "superbet",
-        "best_current_observed_at": NOW,
-        "closing_odd": 2.05,
+        "last_observed_odd": 2.01,
+        "last_observed_at": NOW,
+        "last_observed_source": "SAME_BOOK",
+        "last_observed_freshness": "FRESH",
+        "display_closing_odd": 2.05,
+        "display_closing_observed_at": NOW,
+        "display_closing_source": "SAME_BOOK",
         "bookmaker_key": "bet365",
         "source": "api-football",
         "first_seen_observed_at": NOW,
         "pick_observed_at": NOW,
-        "current_observed_at": NOW,
-        "closing_observed_at": NOW,
         "model_probability": 0.58,
         "implied_probability": 0.5236,
         "devig_probability": 0.51,
@@ -51,6 +48,9 @@ def _pick(**changes: object) -> dict[str, object]:
         "settlement_outcome": "WIN",
         "settled_at": NOW,
         "clv_ppm": 50_000,
+        "manual_clv_ppm": None,
+        "proxy_clv_ppm": None,
+        "dashboard_phase": "SETTLED",
         "warning_codes": ["SOURCE_<STALE>"],
         "stale_quote": True,
         "closing_status": "CAPTURED",
@@ -117,68 +117,53 @@ class RenderingDashboard(DashboardService):
         return self._snapshot
 
 
-def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html() -> None:
+def test_render_populated_history_preserves_core_odds_and_escapes_html() -> None:
     html = RenderingDashboard(_snapshot([_pick()])).render_html()
 
-    assert "1.91" in html
-    assert "1.95" in html
-    assert "2.01" in html
-    assert "2.10" in html
-    assert "2.05" in html
+    for value in ("1.91", "1.95", "2.01", "2.05"):
+        assert value in html
+    assert "Best current" not in html
+    assert "Same-book close" not in html
+    assert "Market close" not in html
     assert "950.00 RSD" in html
     assert "+5.00%" in html
-    assert "SOURCE_&lt;STALE&gt;" in html
-    assert ">FRESH</span>" in html
-    assert "Entry stale" in html
-    assert "Entry warning" in html
+    assert ">SETTLED</span>" in html
     assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "FIXED_STAKE_V1" in html
-    assert "Best current" in html
-    assert "superbet" in html
-    assert 'aria-label="Same-bookmaker price moved up"' in html
     assert "<th>Provenance</th>" not in html
     assert "Plain-language glossary" in html
     assert "PLAYED" in html
     assert 'value="SKIPPED"' in html
 
 
-def test_bookmaker_identity_is_shown_once_per_pick_and_best_book_only_when_different() -> None:
-    same_book = RenderingDashboard(
-        _snapshot([_pick(best_current_bookmaker_key="bet365")])
-    ).render_html()
-    different_book = RenderingDashboard(_snapshot([_pick()])).render_html()
+def test_registered_bookmaker_identity_is_shown_once_per_pick() -> None:
+    html = RenderingDashboard(_snapshot([_pick()])).render_html()
 
-    assert same_book.count('data-bookmaker="bet365"') == 1
-    assert 'class="best-book-switch"' not in same_book
-    assert 'class="pick-book"' in same_book
-
-    assert different_book.count('data-bookmaker="bet365"') == 1
-    assert different_book.count('data-bookmaker="superbet"') == 1
-    assert 'class="best-book-switch"' in different_book
-    assert "best at" in different_book
+    assert html.count('data-bookmaker="bet365"') == 1
+    assert 'class="pick-book"' in html
+    assert "best at" not in html
 
 
-def test_same_bookmaker_movement_is_accessible_for_down_and_neutral() -> None:
-    down = RenderingDashboard(_snapshot([_pick(current_odd=1.80)])).render_html()
-    neutral = RenderingDashboard(_snapshot([_pick(current_odd=1.95)])).render_html()
+def test_odds_lifecycle_has_only_four_checkpoints() -> None:
+    html = RenderingDashboard(_snapshot([_pick()])).render_html()
 
-    assert 'class="movement down"' in down
-    assert 'aria-label="Same-bookmaker price moved down"' in down
-    assert 'class="movement neutral"' in neutral
-    assert 'aria-label="Same-bookmaker price unchanged"' in neutral
+    for label in ("First seen", "Pick", "Last observed", "Closing"):
+        assert f"<b>{label}</b>" in html
+    assert "Best current" not in html
+    assert "Same-book current" not in html
+    assert "Market close" not in html
 
 
-def test_stale_current_is_labeled_as_last_observed_and_not_as_live_movement() -> None:
+def test_prematch_stale_quality_is_still_visible_before_kickoff() -> None:
     html = RenderingDashboard(
         _snapshot(
             [
                 _pick(
-                    current_freshness="STALE",
-                    current_quote_age_seconds=3900,
-                    best_current_odd=None,
-                    best_current_bookmaker_key=None,
-                    best_current_observed_at=None,
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                    last_observed_freshness="STALE",
                     warning_codes=["STALE_QUOTE_WARNING"],
                     stale_quote=True,
                 )
@@ -186,45 +171,49 @@ def test_stale_current_is_labeled_as_last_observed_and_not_as_live_movement() ->
         )
     ).render_html()
 
-    assert "<b>Last observed</b>" in html
-    assert "STALE · 1h 05m old" in html
-    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
-    assert '<small class="quality-history"' in html
+    assert "<b>Last observed</b>2.01" in html
+    assert '<span class="quality-badge stale" title="Latest pre-match observation is stale">STALE</span>' in html
     assert ">Entry stale</small>" in html
-    assert 'aria-label="Same-bookmaker price moved up"' not in html
-    assert "STALE_QUOTE_WARNING" not in html
+    assert "STALE NOW" not in html
 
 
-def test_quality_consolidates_live_and_historical_stale_states() -> None:
+@pytest.mark.parametrize(
+    ("phase", "expected"),
+    [("LIVE", "LIVE"), ("FINISHED", "FINISHED"), ("SETTLED", "SETTLED")],
+)
+def test_post_kickoff_quality_uses_fixture_lifecycle_not_quote_staleness(
+    phase: str, expected: str
+) -> None:
     html = RenderingDashboard(
         _snapshot(
             [
                 _pick(
-                    current_freshness="STALE",
-                    warning_codes=["STALE_QUOTE_WARNING"],
-                    stale_quote=True,
-                    closing_status="STALE_QUOTE",
+                    dashboard_phase=phase,
+                    last_observed_freshness="STALE",
+                    settlement_outcome="WIN" if phase == "SETTLED" else None,
+                    display_closing_source="SAME_BOOK",
                 )
             ]
         )
     ).render_html()
 
-    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
-    assert ">Entry stale · Same-book close stale</small>" in html
-    assert "CURRENT STALE" not in html
-    assert "ENTRY STALE" not in html
-    assert "CLOSING STALE" not in html
+    assert f">{expected}</span>" in html
+    assert "STALE NOW" not in html
+    assert 'quality-badge stale' not in html
 
 
-def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None:
+def test_prematch_unavailable_is_distinct_from_post_kickoff_state() -> None:
     html = RenderingDashboard(
         _snapshot(
             [
                 _pick(
-                    current_odd=None,
-                    current_observed_at=None,
-                    current_freshness="UNAVAILABLE",
-                    current_quote_age_seconds=None,
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                    last_observed_odd=None,
+                    last_observed_at=None,
+                    last_observed_source="UNAVAILABLE",
+                    last_observed_freshness="UNAVAILABLE",
                     warning_codes=[],
                     stale_quote=False,
                 )
@@ -233,21 +222,42 @@ def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None
     ).render_html()
 
     assert ">UNAVAILABLE</span>" in html
-    assert '<small class="quote-age unavailable">UNAVAILABLE</small>' in html
-    assert "ENTRY STALE" not in html
+    assert "<b>Last observed</b>—" in html
 
 
-def test_dashboard_uses_market_proxy_clv_only_when_same_book_clv_is_missing() -> None:
-    proxy = RenderingDashboard(
+def test_live_proxy_is_folded_into_last_observed_and_closing() -> None:
+    html = RenderingDashboard(
         _snapshot(
             [
                 _pick(
-                    closing_odd=None,
-                    closing_observed_at=None,
                     clv_ppm=None,
-                    proxy_closing_odd=1.88,
-                    proxy_closing_observed_at=NOW,
+                    dashboard_phase="LIVE",
+                    last_observed_odd=1.88,
+                    last_observed_source="LIVE_PROXY",
+                    display_closing_odd=1.88,
+                    display_closing_source="LIVE_PROXY",
                     proxy_clv_ppm=37_234,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "<b>Last observed</b>1.88" in html
+    assert "<b>Closing</b>1.88" in html
+    assert html.count("LIVE PROXY") >= 2
+    assert "Proxy CLV +3.72%" in html
+    assert "Market close" not in html
+
+
+def test_manual_close_is_auditable_and_drives_manual_clv_only_as_fallback() -> None:
+    manual = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    clv_ppm=None,
+                    display_closing_odd=2.01,
+                    display_closing_source="MANUAL",
+                    manual_clv_ppm=-29_851,
                 )
             ]
         )
@@ -257,19 +267,19 @@ def test_dashboard_uses_market_proxy_clv_only_when_same_book_clv_is_missing() ->
             [
                 _pick(
                     clv_ppm=50_000,
-                    proxy_closing_odd=1.88,
-                    proxy_closing_observed_at=NOW,
-                    proxy_clv_ppm=37_234,
+                    display_closing_odd=2.01,
+                    display_closing_source="MANUAL",
+                    manual_clv_ppm=-29_851,
                 )
             ]
         )
     ).render_html()
 
-    assert "<b>Market close</b>1.88" in proxy
-    assert "LIVE PROXY" in proxy
-    assert "Proxy CLV +3.72%" in proxy
+    assert "<b>Closing</b>2.01" in manual
+    assert "MANUAL" in manual
+    assert "Manual CLV -2.99%" in manual
     assert " · CLV +5.00%" in true_clv
-    assert "Proxy CLV +3.72%" not in true_clv
+    assert "Manual CLV -2.99%" not in true_clv
 
 
 def test_dashboard_renders_skipped_operator_state_without_hiding_system_pick() -> None:
