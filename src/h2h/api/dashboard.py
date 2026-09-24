@@ -459,23 +459,6 @@ class DashboardService:
             f'data-bookmaker="{escape(key)}">{mark}</span>'
         )
 
-    @staticmethod
-    def _movement(pick: dict[str, Any]) -> str:
-        if str(pick.get("current_freshness") or "").upper() != "FRESH":
-            return ""
-        entry = pick.get("pick_odd")
-        current = pick.get("current_odd")
-        if entry is None or current is None or Decimal(str(current)) == Decimal(str(entry)):
-            css, symbol, label = "neutral", "→", "Same-bookmaker price unchanged"
-        elif Decimal(str(current)) > Decimal(str(entry)):
-            css, symbol, label = "up", "↑", "Same-bookmaker price moved up"
-        else:
-            css, symbol, label = "down", "↓", "Same-bookmaker price moved down"
-        return (
-            f'<span class="movement {css}" role="img" aria-label="{label}" title="{label}">'
-            f'{symbol}<span class="sr-only">{label}</span></span>'
-        )
-
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
