@@ -65,6 +65,8 @@ class DashboardService:
                 "initial_minor": performance.initial_bankroll_minor,
                 "available_minor": performance.available_bankroll_minor,
                 "open_exposure_minor": performance.open_exposure_minor,
+                "max_open_exposure_minor": policy.max_open_exposure_minor,
+                "fixed_stake_minor": policy.fixed_stake_minor,
                 "total_staked_minor": performance.total_staked_minor,
                 "settled_stake_minor": performance.resolved_stake_minor,
                 "gross_returns_minor": performance.gross_returns_minor,
@@ -740,7 +742,12 @@ class DashboardService:
         cards = [
             ("Current bankroll", self._money(bankroll["available_minor"], currency), "primary"),
             ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
-            ("Open exposure", self._money(bankroll["open_exposure_minor"], currency), "warn"),
+            (
+                "Open exposure / cap",
+                f"{self._money(bankroll['open_exposure_minor'], currency)} / "
+                f"{self._money(bankroll['max_open_exposure_minor'], currency)}",
+                "warn",
+            ),
             ("Realized P/L", self._money(bankroll["realized_pnl_minor"], currency), "value"),
             ("Total staked", self._money(bankroll["total_staked_minor"], currency), ""),
             ("Settled stakes", self._money(bankroll["settled_stake_minor"], currency), ""),
