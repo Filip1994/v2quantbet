@@ -429,7 +429,10 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
         settings=SimpleNamespace(
             application=SimpleNamespace(
                 registration_policy=SimpleNamespace(
-                    bankroll_account_id="pilot", initial_bankroll_minor=3_000_000
+                    bankroll_account_id="pilot",
+                    initial_bankroll_minor=3_000_000,
+                    fixed_stake_minor=30_000,
+                    max_open_exposure_minor=300_000,
                 )
             )
         ),
@@ -471,6 +474,8 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     assert data["bankroll"]["settled_stake_minor"] == 100_000
     assert data["bankroll"]["gross_returns_minor"] == 195_000
     assert data["bankroll"]["realized_pnl_minor"] == 95_000
+    assert data["bankroll"]["fixed_stake_minor"] == 30_000
+    assert data["bankroll"]["max_open_exposure_minor"] == 300_000
     assert data["provider_budget"]["remaining"] == 7485
 
 
