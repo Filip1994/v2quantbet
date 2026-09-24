@@ -79,6 +79,7 @@ class OpportunityCycle:
     hard_stale_market_count: int = 0
     live_corroborations: int = 0
     live_proxy_rejections: int = 0
+    item_retry_deferred: int = 0
 
 
 class OpportunityOddsUnavailableError(RuntimeError):
@@ -264,6 +265,7 @@ class OpportunityWorker:
         hard_stale_market_count = 0
         live_corroborations = 0
         live_proxy_rejections = 0
+        item_retry_deferred = 0
         try:
             for fixture in due:
                 if self._should_stop():
@@ -274,6 +276,7 @@ class OpportunityWorker:
                     break
                 item_now = self._now()
                 if fixture.next_retry_at is not None and fixture.next_retry_at > item_now:
+                    item_retry_deferred += 1
                     continue
                 scope = (fixture.league_id, fixture.season)
                 if scope not in coverage_status_cache:
@@ -1029,6 +1032,7 @@ class OpportunityWorker:
             hard_stale_market_count=hard_stale_market_count,
             live_corroborations=live_corroborations,
             live_proxy_rejections=live_proxy_rejections,
+            item_retry_deferred=item_retry_deferred,
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -1063,6 +1067,7 @@ class OpportunityWorker:
                 "hard_stale_market_count": cycle.hard_stale_market_count,
                 "live_corroborations": cycle.live_corroborations,
                 "live_proxy_rejections": cycle.live_proxy_rejections,
+                "item_retry_deferred": cycle.item_retry_deferred,
                 "stale_retries_requested": cycle.stale_retries_requested,
                 "stale_retries_scheduled": cycle.stale_retries_scheduled,
                 "stale_retries_cleared": cycle.stale_retries_cleared,
