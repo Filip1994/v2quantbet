@@ -100,7 +100,13 @@ class ApiFootballClient:
                 headers={"x-apisports-key": self.api_key},
                 timeout=self.timeout,
             )
-        self._log_request("odds", payload)
+        self._log_request(
+            "odds",
+            payload,
+            provider_fixture_id=fixture_id,
+            provider_bookmaker_id=bookmaker_id,
+            provider_bet_id=bet_id,
+        )
         if self.cache_ttl_seconds > 0:
             self._cache[cache_key] = (
                 self.clock() + self.cache_ttl_seconds,
@@ -206,6 +212,9 @@ class ApiFootballClient:
         payload: Mapping[str, Any],
         *,
         fixture_date: date | None = None,
+        provider_fixture_id: int | None = None,
+        provider_bookmaker_id: int | None = None,
+        provider_bet_id: int | None = None,
     ) -> None:
         response = payload.get("response")
         response_items = len(response) if isinstance(response, list) else 0
@@ -216,6 +225,28 @@ class ApiFootballClient:
         }
         if fixture_date is not None:
             extra["provider_fixture_date"] = fixture_date.isoformat()
+        if provider_fixture_id is not None:
+            extra["provider_fixture_id"] = provider_fixture_id
+        if provider_bookmaker_id is not None:
+            extra["provider_bookmaker_id"] = provider_bookmaker_id
+        if provider_bet_id is not None:
+            extra["provider_bet_id"] = provider_bet_id
+
+        updates: list[str] = []
+        stack: list[Any] = [response]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, Mapping):
+                update = value.get("update")
+                if isinstance(update, str) and update.strip():
+                    updates.append(update.strip())
+                stack.extend(value.values())
+            elif isinstance(value, list):
+                stack.extend(value)
+        if updates:
+            extra["provider_update_oldest"] = min(updates)
+            extra["provider_update_latest"] = max(updates)
+
         LOGGER.info(
             "provider request completed",
             extra=extra,
