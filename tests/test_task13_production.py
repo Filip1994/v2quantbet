@@ -161,7 +161,7 @@ class OpportunityRepositoryFake:
         return ("snapshot-a", "snapshot-b")
 
     def latest_complete_market_states(self, _fixture_id, _bookmaker_id):
-        now = datetime.now(UTC)
+        now = datetime.now(UTC) - timedelta(seconds=1)
         return (SimpleNamespace(market="BTTS", observed_at=now, captured_at=now),)
 
     def record_quote_refresh_state(self, *_args, freshness_state, attempted_at, **_kwargs):
