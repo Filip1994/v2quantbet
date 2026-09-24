@@ -93,6 +93,27 @@ def select(row):
     )
 
 
+def test_selection_filters_non_ready_work_before_the_batch_limit() -> None:
+    connection = SelectionConnection([])
+    repository = PostgreSQLRuntimeRepository(connect=lambda: connection)
+
+    repository.select_opportunity_fixtures(
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        now=NOW,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=POLICY,
+    )
+
+    query = connection._cursor.query
+    assert "JOIN model_coverage_scopes coverage" in query
+    assert "coverage.active_model_version_id IS NOT NULL" in query
+    assert "failures.next_retry_at IS NULL OR failures.next_retry_at <= %s" in query
+    assert query.index("coverage.active_model_version_id IS NOT NULL") < query.index("LIMIT %s")
+    assert query.index("failures.next_retry_at IS NULL") < query.index("LIMIT %s")
+
+
 def test_fresh_capture_with_stale_observation_bypasses_normal_cadence() -> None:
     result = select(selection_row(observed_at=NOW - timedelta(minutes=30)))
 

@@ -147,6 +147,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
         now,
         now + timedelta(hours=72),
         ["NS"],
+        now,
         False,
         now,
         None,
