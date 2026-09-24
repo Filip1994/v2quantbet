@@ -1185,6 +1185,96 @@ for commit `b6e0dff...`.
 
 Production before/after timing verification is pending at this checkpoint.
 
+
+
+### PR #54 production verification
+
+PR #54 is confirmed live in production on deployment:
+
+`a3072959-d54c-4f04-90f6-324ae7365259`
+
+in **sfo**, with runtime logs reporting:
+
+`max_items = 2`
+
+Representative cycles after rollout:
+
+- around 14:13 UTC:
+  - eligible fixtures: 8;
+  - due fixtures: 0;
+  - waiting for refresh: 8;
+  - broad opportunity odds calls: 0;
+  - duration: approximately **0.040 s**.
+- around 14:14 UTC:
+  - eligible fixtures: 8;
+  - due fixtures: 0;
+  - waiting for refresh: 8;
+  - broad opportunity odds calls: 0;
+  - duration: approximately **0.046 s**.
+- around 14:15 UTC:
+  - eligible fixtures: 8;
+  - due fixtures: 0;
+  - waiting for refresh: 8;
+  - broad opportunity odds calls: 0;
+  - duration: approximately **0.054 s**.
+
+This confirms two important properties:
+
+1. the scanner is actually using the conservative two-fixture batch configuration;
+2. a non-empty eligible backlog does **not** consume provider odds calls while fixtures are not due for refresh.
+
+The first production cycle with actual due fixtures is still needed to measure the resulting broad-odds calls-per-minute under load.
+
+### Why risk exposure count can differ from monitoring count
+
+The actual code/schema audit confirms that the two populations are intentionally defined differently:
+
+- registration risk counts unresolved `STAKE_RESERVED` ledger entries that do not have a current terminal settlement;
+- quote monitoring claims only rows whose `pick_monitoring_states.state = 'MONITORING'`.
+
+Therefore a risk-reserved pick can legitimately stop appearing in monitoring after it reaches `CLOSED_FOR_ODDS` while still awaiting authoritative result settlement.
+
+This explains why the observed **10 reserved stake units** do not have to equal the **6 picks** in the recent monitoring sweep.
+
+A second possible source of difference is operator `SKIPPED` state: operator performance views can exclude skipped picks while the current registration risk exposure calculation remains ledger/settlement based.
+
+No risk semantics were changed.
+
+### PR #55 — reserved exposure lifecycle breakdown
+
+**Merge commit:** `9c9b537e7e82e804160d8c3566826b837a077e0b`
+
+A read-only diagnostic was added to the existing preliminary exposure-cap query.
+
+When `MAX_OPEN_EXPOSURE_EXCEEDED` occurs, structured logs now expose:
+
+- total unresolved reserved pick count;
+- PLAYED reserved count and amount;
+- SKIPPED reserved count and amount;
+- reserved picks currently in `MONITORING`;
+- reserved picks already `CLOSED_FOR_ODDS`;
+- reserved picks with no monitoring-state row.
+
+The diagnostic uses the same unresolved-settlement definition as the existing exposure gate and replaces the old exposure SUM query, so it does not add a separate DB round trip.
+
+It does **not**:
+- modify ledger entries;
+- modify operator state;
+- modify settlement state;
+- change the 3,000 RSD exposure cap;
+- change the 300 RSD fixed stake;
+- change registration/risk semantics.
+
+Automatic Railway deployment again entered the check-suite WAITING path.
+
+Exact-commit SFO deployment was therefore triggered:
+
+`cb45c0b6-8959-4f08-8245-d2c11949ce58`
+
+for commit `9c9b537e...`.
+
+Production lifecycle-count verification is pending at this checkpoint.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
