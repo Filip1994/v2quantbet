@@ -243,6 +243,7 @@ class ModelLifecycleWorker:
                         extra={
                             "model_scope": self._scope_key(record.scope),
                             "error_class": type(exc).__name__,
+                            "error_message": str(exc),
                         },
                     )
                 break
@@ -261,6 +262,7 @@ class ModelLifecycleWorker:
                         "model_scope": self._scope_key(record.scope),
                         "accepted_matches": best_accepted,
                         "error_class": type(exc).__name__,
+                        "error_message": str(exc),
                     },
                 )
             except (ApiBudgetExceededError, DixonColesFitError, TypeError, ValueError, RuntimeError) as exc:
@@ -276,6 +278,7 @@ class ModelLifecycleWorker:
                     extra={
                         "model_scope": self._scope_key(record.scope),
                         "error_class": type(exc).__name__,
+                        "error_message": str(exc),
                     },
                 )
                 if isinstance(exc, ApiBudgetExceededError):
