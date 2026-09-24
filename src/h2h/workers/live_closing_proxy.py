@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable
+from collections.abc import Callable
 
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.api_football_client import ApiFootballClient
