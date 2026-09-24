@@ -392,10 +392,10 @@ class DashboardService:
 
         closing_status = str(pick.get("closing_status") or "")
         if closing_status == "STALE_QUOTE":
-            history.append("Closing stale")
+            history.append("Same-book close stale")
             history_titles.append("No fresh quote was available at the closing cutoff")
         elif closing_status == "NO_VALID_QUOTE":
-            history.append("Closing unavailable")
+            history.append("Same-book close unavailable")
             history_titles.append("No valid quote was available at the closing cutoff")
 
         return live, tuple(dict.fromkeys(history)), " · ".join(history_titles)
