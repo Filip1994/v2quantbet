@@ -459,6 +459,74 @@ class DashboardService:
             f'data-bookmaker="{escape(key)}">{mark}</span>'
         )
 
+    @staticmethod
+    def _is_history_pick(pick: dict[str, Any]) -> bool:
+        return str(pick.get("dashboard_phase") or "").upper() in {
+            "FINISHED",
+            "CLOSED",
+            "SETTLED",
+        }
+
+    @staticmethod
+    def _clv_summary(pick: dict[str, Any]) -> tuple[str, str, str, str]:
+        if pick.get("clv_ppm") is not None:
+            source = "SAME-BOOK"
+            value = Decimal(pick["clv_ppm"]) / Decimal(10000)
+        elif pick.get("manual_clv_ppm") is not None:
+            source = "MANUAL"
+            value = Decimal(pick["manual_clv_ppm"]) / Decimal(10000)
+        elif pick.get("proxy_clv_ppm") is not None:
+            source = "LIVE PROXY"
+            value = Decimal(pick["proxy_clv_ppm"]) / Decimal(10000)
+        else:
+            return "—", "unavailable", "NO CLV", "UNAVAILABLE"
+
+        if value > 0:
+            css, verdict = "good", "GOOD"
+        elif value < 0:
+            css, verdict = "bad", "BAD"
+        else:
+            css, verdict = "flat", "FLAT"
+        return f"{value:+.2f}%", css, verdict, source
+
+    def _render_history_row(self, pick: dict[str, Any], currency: str) -> str:
+        fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
+        outcome = str(pick.get("settlement_outcome") or "").upper()
+        if outcome:
+            status, status_class = outcome, outcome.casefold()
+        else:
+            phase = str(pick.get("dashboard_phase") or "FINISHED").upper()
+            status = phase
+            status_class = "void" if phase == "CLOSED" else "active"
+
+        clv, clv_css, clv_verdict, clv_source = self._clv_summary(pick)
+        operator_state = str(pick.get("operator_state") or "PLAYED")
+        closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+        close_source = {
+            "SAME_BOOK": "same-book",
+            "MANUAL": "manual",
+            "LIVE_PROXY": "live proxy",
+        }.get(closing_source, "unavailable")
+        return (
+            '<tr class="history-row">'
+            f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
+            f"<small>{escape(str(pick.get('competition_name') or '—'))} · "
+            f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
+            f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
+            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong>"
+            f'<small class="history-operator">{escape(operator_state)}</small></td>'
+            f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
+            f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
+            f"<small>Pick → Closing · {escape(close_source)}</small></td>"
+            f'<td class="num history-clv {escape(clv_css)}"><strong>{escape(clv)}</strong>'
+            f"<small>{escape(clv_verdict)} · {escape(clv_source)}</small></td>"
+            f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
+            f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
+            f'<td class="num"><strong>{escape(self._money(pick.get("realized_pnl_minor"), currency))}'
+            "</strong></td>"
+            "</tr>"
+        )
+
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
@@ -580,11 +648,27 @@ class DashboardService:
         bankroll = data["bankroll"]
         ops = data["operations"]
         currency = bankroll["currency"]
-        rows = "".join(self._render_pick_row(pick, currency) for pick in data["picks"])
-        if not rows:
-            rows = (
-                '<tr><td class="empty" colspan="10"><strong>No registered picks yet.</strong>'
-                "<br>Durable pick history will appear here after registration.</td></tr>"
+        history_picks = [
+            pick for pick in data["picks"] if self._is_history_pick(pick)
+        ]
+        active_picks = [
+            pick for pick in data["picks"] if not self._is_history_pick(pick)
+        ]
+        active_rows = "".join(
+            self._render_pick_row(pick, currency) for pick in active_picks
+        )
+        if not active_rows:
+            active_rows = (
+                '<tr><td class="empty" colspan="10"><strong>No active picks.</strong>'
+                "<br>Pre-match and live picks will appear here.</td></tr>"
+            )
+        history_rows = "".join(
+            self._render_history_row(pick, currency) for pick in history_picks
+        )
+        if not history_rows:
+            history_rows = (
+                '<tr><td class="empty" colspan="6"><strong>No finished picks yet.</strong>'
+                "<br>Finished and settled picks will move here automatically.</td></tr>"
             )
         worker_rows = (
             "".join(
@@ -600,7 +684,9 @@ class DashboardService:
             or '<tr><td colspan="4" class="empty">No worker heartbeat records.</td></tr>'
         )
         return self._document(
-            rows=rows,
+            active_rows=active_rows,
+            history_rows=history_rows,
+            history_count=len(history_picks),
             worker_rows=worker_rows,
             bankroll=bankroll,
             counts=data["counts"],
