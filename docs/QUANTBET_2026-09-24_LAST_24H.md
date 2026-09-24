@@ -346,3 +346,129 @@ Both Railway services are sourced from `Filip1994/v2quantbet:main` and currently
 Result: this documentation-only update triggered a fresh Railway deployment for both `quantbet-engine` and `quantbet-dashboard`.
 
 This is not a correctness failure, but it is unnecessary build/deploy churn. The next infrastructure cleanup should define safe service-specific watch paths so changes under `docs/**` do not redeploy production code while code, migrations, dependency files, and service configuration still do.
+
+
+---
+
+## 9. Updates after the initial 06:19 CEST audit
+
+The original 24-hour snapshot above ended at 06:19 CEST. The following same-day production work happened afterwards and is part of the continuing 2026-09-24 handoff.
+
+### PR #37 — Seattle BTTS NO manual closing + Last observed timestamps
+
+**Merge commit:** `2b52d6437413ea06827d4f87fa9a3e8ee803ce82`
+
+- Added targeted migration `019_manual_close_seattle_btts_no.sql`.
+- The migration selects the latest same-book quote that was both observed and captured before kickoff for the Seattle Sounders – Real Salt Lake **BTTS NO** pick.
+- The override is append-only and explicitly tagged as operator/manual provenance.
+- Quote history is not rewritten and the manual value is not represented as a true same-book closing fact.
+- Dashboard History gained a visible Last observed timestamp.
+- Production engine startup reported that one migration was applied, confirming migration 019 reached production.
+
+### PR #38 — compact Last observed age
+
+**Merge commit:** `25abc648c89f99ac3a928774db145a13288ed37c`
+
+- Replaced the long visible UTC timestamp in the active Last observed box with a compact relative age such as `2h 36mins ago`.
+- Exact UTC timestamp remains available in the HTML title/hover for auditability.
+- Layout stays compact on mobile.
+
+### PR #39 — subtle neon-yellow quote age
+
+**Merge commit:** `06eb70a60089252089db30d3f9d09f4811e2ff0c`
+
+- The compact Last observed relative age received a subtle neon-yellow text treatment.
+- No glow, background, border, or box expansion was introduced.
+
+### Monitoring investigation triggered by apparently stale quotes
+
+Production screenshots showed provider observations several hours old. The investigation established an important distinction:
+
+- the monitoring worker was still actively cycling;
+- repeated `/odds` calls were visible in Railway logs;
+- API-Football can return the same provider-published `update` timestamp on repeated polls;
+- quote history intentionally deduplicates repeated observations with the same semantic identity.
+
+Therefore an old **provider observation age** is not, by itself, proof that the QuantBet monitoring worker has stopped.
+
+### PR #40 — monitoring freshness observability
+
+**Merge commit:** `f9557dceeb01f4443b0d8997620d0f9bf5d424ae`
+
+Changes in source:
+- active dashboard distinguishes provider quote age from a separate `checked … ago` indicator;
+- provider-request telemetry was extended with fixture/bookmaker/bet identity and provider update timestamp bounds;
+- monitoring-cycle telemetry was extended with claimed/refreshed/persisted counts.
+
+**Deployment nuance:** the dashboard part deployed successfully, but Railway marked the corresponding engine deployment as **SKIPPED**. Therefore the new engine-side telemetry from this PR must **not** yet be treated as live production evidence.
+
+### PR #41 — correct meaning of `checked … ago`
+
+**Merge commit:** `01ec4bdd156d88a3ad04df7b45c66c3b05c01e7f`
+
+The first `checked` implementation incorrectly reused the capture time of the latest *new* quote snapshot. Because repeated identical provider observations are deduplicated, that could misleadingly show a very old check age.
+
+This was corrected so the dashboard now uses:
+
+`pick_monitoring_states.updated_at`
+
+That timestamp advances when a pick is actually claimed for monitoring.
+
+Current intended semantics:
+- **neon-yellow age** = age of the provider-published quote observation;
+- **gray checked age** = age of the latest monitoring claim/attempt.
+
+This makes it possible to visually distinguish:
+- a provider that has not published a new price;
+- a QuantBet pick that truly has not been revisited by monitoring.
+
+Production monitoring evidence around 12:30–12:59 CEST showed repeated monitoring cycles with two odds requests per bounded slice and `pending_work=true`. No concrete registered-pick starvation case was identified from those logs.
+
+### PR #42 — model and market probabilities in History
+
+**Merge commit:** `886c4c914baf2c22674309c95f44fe7b070f324f`
+
+History now preserves the original decision context next to CLV:
+
+- **Model** = QuantBet model probability at pick time;
+- **Market fair** = bookmaker probability after de-vig;
+- **CLV** remains a separate market-movement metric.
+
+Raw implied probability was intentionally not duplicated into History. The de-vig / Market fair value is the direct comparator to model probability.
+
+The resulting historical evaluation chain is:
+
+`Model probability → Market fair probability → CLV → Result / P&L`
+
+This is the preferred compact representation because it answers both:
+1. **why the pick was taken**, and
+2. **how the market moved afterwards**.
+
+### Current monitoring interpretation
+
+At the time of this update:
+- no concrete stuck registered pick has been proven;
+- monitoring keeps cycling and provider requests continue;
+- `pending_work=true` indicates remaining bounded-slice work, not automatically starvation;
+- provider observations can legitimately remain hours old if API-Football keeps returning the same published snapshot;
+- any pick whose **checked age** materially lags the rest after PR #41 is a candidate for real monitoring starvation and should be investigated by pick ID.
+
+### Scheduled follow-up
+
+A one-time production quote-monitoring audit was scheduled for approximately **24 Sep 2026 18:51 CEST** to check:
+- Last observed advancement per active pick;
+- actual monitoring cadence;
+- gaps between monitoring attempts;
+- SAME_BOOK versus LIVE_PROXY provenance;
+- stale/unavailable behavior;
+- backlog/pending behavior;
+- provider-data gaps versus software defects.
+
+### Updated continuation priorities
+
+1. Verify the 12-hour monitoring audit against each active pick.
+2. Investigate any pick with abnormally old **checked age**, not merely old provider quote age.
+3. Ensure the engine-side telemetry from PR #40 is actually deployed before using those new fields as production evidence.
+4. Keep model probability, market fair probability, CLV, result and P/L together in History.
+5. Preserve provider observation timestamps as authoritative; never fabricate freshness from polling time.
+6. Continue investigating opportunity wall-budget overruns and sparse provider odds separately from registered-pick monitoring.
