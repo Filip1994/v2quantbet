@@ -775,6 +775,12 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
+.history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
+.history-fixture{{min-width:260px}}.history-operator{{font-size:8px!important;letter-spacing:.05em}}
+.history-odds strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
+.history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
+.history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
+.history-clv.flat strong{{color:var(--muted)}}.history-clv.unavailable strong{{color:var(--muted)}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
@@ -795,9 +801,12 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="fact"><span>Odds ingestion</span><strong>{escape(self._dt(ops["last_odds_ingestion"]))}</strong></div>
 <div class="fact"><span>Provider budget</span><strong>{budget["used"]} / {budget["effective_limit"]} · {budget["remaining"]} left</strong></div>
 <div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
-</div></article></section><section class="panel"><div class="panel-head"><h2>Complete pick history</h2><span class="section-label">Newest first</span></div>
+</div></article></section><section class="panel"><div class="panel-head"><h2>Active picks</h2><span class="section-label">Pre-match & live</span></div>
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
-<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
+<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
+<section class="panel history"><div class="panel-head"><h2>History</h2><span class="section-label">{context["history_count"]} finished</span></div>
+<div class="table-wrap"><table><thead><tr><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
+<tbody>{context["history_rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
