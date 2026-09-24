@@ -61,7 +61,8 @@ _EXPOSURE_BREAKDOWN_SQL = (
     "JOIN unresolved_reserved r ON r.pick_id = p.pick_id "
     "ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC"
     ") "
-    "SELECT COALESCE(SUM(r.exposure_minor), 0), COUNT(*), "
+    "SELECT COALESCE(SUM(r.exposure_minor) FILTER "
+    "(WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), 0), COUNT(*), "
     "COUNT(*) FILTER (WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), "
     "COUNT(*) FILTER (WHERE o.state = 'SKIPPED'), "
     "COALESCE(SUM(r.exposure_minor) FILTER (WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), 0), "
@@ -276,12 +277,23 @@ class PostgreSQLPickRegistrationRepository:
                     "initial bankroll funding contradicts registration policy"
                 )
             cursor.execute(
-                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
+                "WITH unresolved_reserved AS ("
+                "SELECT l.pick_id, -l.amount_minor AS exposure_minor "
+                "FROM bankroll_ledger_entries l "
                 "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
                 "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
                 "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
                 "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
-                "WHERE successor.prior_event_id = e.settlement_event_id))",
+                "WHERE successor.prior_event_id = e.settlement_event_id))"
+                "), latest_operator AS ("
+                "SELECT DISTINCT ON (e.pick_id) e.pick_id, e.state "
+                "FROM pick_operator_state_events e "
+                "JOIN unresolved_reserved r ON r.pick_id = e.pick_id "
+                "ORDER BY e.pick_id, e.occurred_at DESC, e.persisted_at DESC, e.event_id DESC"
+                ") SELECT COALESCE(SUM(r.exposure_minor) FILTER "
+                "(WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), 0) "
+                "FROM unresolved_reserved r "
+                "LEFT JOIN latest_operator o ON o.pick_id = r.pick_id",
                 (policy.bankroll_account_id,),
             )
             open_exposure = int(cursor.fetchone()[0])
