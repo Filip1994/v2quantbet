@@ -54,7 +54,7 @@ class Repository:
         return OpportunitySelection(1, 0, 0, 0, (self.fixture,))
 
     def latest_complete_market_states(self, *_args):
-        return (SimpleNamespace(observed_at=NOW, captured_at=NOW),)
+        return (SimpleNamespace(market="BTTS", observed_at=NOW, captured_at=NOW),)
 
     def record_quote_refresh_state(self, *_args, **_kwargs):
         return SimpleNamespace(next_retry_at=None)
