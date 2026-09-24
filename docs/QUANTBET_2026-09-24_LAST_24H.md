@@ -935,6 +935,48 @@ Operator/PLAYED-only bankroll and Pending figures remain unchanged.
 
 No risk rule, stake amount, exposure limit or operator state was modified.
 
+
+
+### PR #47 full 10-minute production verification
+
+The dedicated no-odds retry policy is now verified across its complete first-retry interval.
+
+Observed production window:
+- first zero-odds fixture in the verification cohort: **13:32:08 UTC**;
+- verification log window reached **13:42:50 UTC**;
+- zero-odds provider calls in that window: **18**;
+- unique zero-odds fixture IDs: **18**;
+- repeated zero-odds fixture IDs: **0**.
+
+Therefore no fixture that returned zero odds was re-polled inside the new 10-minute first backoff window.
+
+This closes the previously observed ~2-minute no-odds retry hammer as a production issue.
+
+### PR #51 — throttle pending opportunity scans to normal cadence
+
+**Merge commit:** `8873d4b9d156c307abe3bb64bbfea07967a0d31f`
+
+The orchestrator previously treated `pending_work=true` as an instruction to make the same worker due immediately on the next scheduler round.
+
+For opportunity this meant that a large backlog kept the odds scanner nearly continuously active even though the configured ordinary opportunity interval is 60 seconds.
+
+The scheduler now supports an optional `pending_delay_seconds`.
+
+Production composition sets **only the opportunity worker** to:
+
+`pending_delay_seconds = opportunity_interval_seconds`
+
+Current expected effect:
+- a pending opportunity backlog waits the normal approximately 60-second cadence before the next slice;
+- durable cursor/backlog state is preserved;
+- no fixture is discarded;
+- discovery, registered-pick monitoring and results keep their eager pending behavior;
+- model, probability, edge, EV, stake and risk rules are unchanged.
+
+This intentionally trades scanner throughput for lower API pressure, matching the current operating preference that one-by-one output is acceptable as long as opportunities are not silently lost.
+
+Production rollout verification for PR #51 is pending at this documentation checkpoint.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
