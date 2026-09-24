@@ -235,28 +235,54 @@ The PostgreSQL regression test proves both preliminary and final registration be
 the production risk snapshot proves the corrected exposure semantics are active on the live
 dataset.
 
-### Residual FATAL-02 race found during closure audit
+### Residual FATAL-02 race found and closed
 
 The first FATAL-02 patch correctly released SKIPPED exposure for registration, but a second
-failure mode remained possible:
+failure mode was found during closure audit:
 
 1. pick A is SKIPPED and frees one stake unit;
 2. pick B registers into the newly free capacity;
 3. pick A is later changed back to PLAYED;
-4. without a shared lock and cap check, effective exposure can exceed
+4. without a shared lock and cap check, effective exposure could exceed
    `max_open_exposure_minor`.
 
-This is a hard-risk invariant, so FATAL-02 is not considered fully closed until
-`SKIPPED -> PLAYED` reactivation is serialized with registration on the bankroll lock and
-re-runs the same effective PLAYED exposure calculation.
+This hard-risk invariant is now closed.
 
-Current hardening branch: `fix/fatal2-operator-reactivation-risk`.
+Final hardening:
+- PR #64 squash commit: `363ae02143b5f30e69f0756e54ff38beccb29661`;
+- registration and unresolved `SKIPPED -> PLAYED` reactivation serialize on the same
+  bankroll row lock;
+- both use the same effective PLAYED unresolved-exposure calculation;
+- if released capacity has already been consumed, reactivation is rejected instead of
+  allowing exposure above the configured cap;
+- settled/history-only PLAYED restores remain allowed because they create no open exposure;
+- no ledger history is rewritten.
 
-Required proof before final closure:
-- a skipped unresolved pick can release capacity;
-- once that capacity is consumed, reactivation to PLAYED is rejected;
-- a concurrent registration/reactivation race can produce only one winner at a one-stake cap;
-- settled/history-only PLAYED restores remain allowed because they do not create open exposure.
+CI verification:
+- lint: PASS;
+- full suite: **950 passed, 8 failed**;
+- the eight failures are the same known baseline failures that existed before this patch;
+- both new FATAL-02 hard-risk tests passed:
+  - capacity-consumed reactivation is blocked;
+  - concurrent registration/reactivation at a one-stake cap permits only one exposure winner.
+
+Production verification:
+- Railway engine deployment `326b0420-8f92-4b82-808c-b0e5b62e5f32`: **SUCCESS**;
+- no bankroll, fixed-stake, max-exposure, model or provider configuration changed;
+- production leadership acquired normally;
+- all scheduler workers resumed successfully;
+- no `QuantBet worker stopped` event was observed after rollout;
+- startup effective exposure was **1,800 RSD** from 6 PLAYED reservations, while the
+  5 SKIPPED reservations (1,500 RSD) remained auditable but excluded from hard exposure;
+- configured hard cap remained **3,000 RSD**.
+
+Live proof that the original FATAL-02 registration lockout is resolved occurred immediately
+before the hardening rollout: at **2026-09-24 16:13:51 UTC**, fixture
+`api-football:1583771` reached mandatory final quote verification and one new pick was
+registered. The next production startup therefore showed 11 unresolved reservations split
+6 PLAYED / 5 SKIPPED, with effective exposure only 1,800 RSD.
+
+FATAL-02 is now considered **closed**.
 
 ---
 
