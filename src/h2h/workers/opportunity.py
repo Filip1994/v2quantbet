@@ -86,6 +86,33 @@ class OpportunityOddsUnavailableError(RuntimeError):
     """The provider returned no usable quotes for a due fixture."""
 
 
+def _returned_complete_market_observations(
+    quotes: tuple[object, ...],
+) -> set[tuple[int, str, datetime, str]]:
+    """Identify complete two-way markets that were present in this provider response."""
+    groups: dict[tuple[int, str, datetime, str], list[object]] = {}
+    for quote in quotes:
+        try:
+            key = (
+                quote.bookmaker_id,
+                quote.market.value,
+                quote.observed_at,
+                quote.source,
+            )
+        except AttributeError as exc:
+            raise TypeError("opportunity source returned a non-canonical quote") from exc
+        groups.setdefault(key, []).append(quote)
+
+    complete: set[tuple[int, str, datetime, str]] = set()
+    for key, grouped in groups.items():
+        try:
+            MarketSnapshot.from_quotes(grouped)
+        except (TypeError, ValueError):
+            continue
+        complete.add(key)
+    return complete
+
+
 def _final_market(quotes: tuple[object, ...], evaluation: object) -> MarketSnapshot | None:
     """Select one newest exact complete market from only the final response."""
     groups: dict[tuple[object, ...], list[object]] = {}
@@ -373,12 +400,18 @@ class OpportunityWorker:
                     )
                     for approved_id in self._bookmaker_ids
                 }
-                capture_tolerance = timedelta(seconds=60)
+                returned_observations = _returned_complete_market_observations(quotes)
                 returned_states_by_bookmaker = {
                     approved_id: tuple(
                         state
                         for state in states
-                        if timedelta(0) <= attempted_at - state.captured_at <= capture_tolerance
+                        if (
+                            approved_id,
+                            state.market,
+                            state.observed_at,
+                            state.source,
+                        )
+                        in returned_observations
                     )
                     for approved_id, states in states_by_bookmaker.items()
                 }
