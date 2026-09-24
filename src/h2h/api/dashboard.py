@@ -545,6 +545,8 @@ class DashboardService:
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
             f"<small>Pick → Closing · {escape(close_source)}</small>"
             f"<small>Last observed · {escape(self._dt(pick.get('last_observed_at')))}</small></td>"
+            f'<td class="num history-probability"><strong>Model {escape(self._pct(pick.get("model_probability")))}</strong>'
+            f"<small>Market fair {escape(self._pct(pick.get('devig_probability')))}</small></td>"
             f'<td class="num history-clv {escape(clv_css)}"><strong>{escape(clv)}</strong>'
             f"<small>{escape(clv_verdict)} · {escape(clv_source)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
@@ -814,7 +816,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
 .history-fixture{{min-width:260px}}.history-operator{{display:flex;align-items:center;gap:5px;margin-top:5px}}
 .history-operator-form{{margin:0}}.history-operator-button{{background:transparent;color:var(--muted);border:0;padding:2px 3px;cursor:pointer;font:inherit;font-size:8px;text-decoration:underline}}
-.history-odds strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
+.history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
+.history-probability{{min-width:130px}}.history-probability strong{{white-space:nowrap}}
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
 .history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
 .history-clv.flat strong{{color:var(--muted)}}.history-clv.unavailable strong{{color:var(--muted)}}
@@ -842,7 +845,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
 <th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
 <section class="panel history"><div class="panel-head"><h2>History</h2><span class="section-label">{context["history_count"]} finished</span></div>
-<div class="table-wrap"><table><thead><tr><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">Probability</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
 <tbody>{context["history_rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
