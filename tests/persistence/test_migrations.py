@@ -164,6 +164,22 @@ def test_live_closing_proxy_migration_is_append_only_and_separate_from_bookmaker
     assert "quote_series" not in migration
 
 
+def test_manual_closing_override_migration_is_auditable_and_targeted() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "016_manual_closing_overrides.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE pick_manual_closing_overrides" in migration
+    assert "operator-manual-last-observed" in migration
+    assert "manual closing overrides are append-only" in migration
+    assert "Seattle" in migration
+    assert "Real Salt Lake" in migration
+    assert "America%Cali" in migration
+    assert "América%Cali" in migration
+    assert "ORDER BY q.observed_at DESC" in migration
+    assert "ON CONFLICT DO NOTHING" in migration
+
+
 def test_operator_state_migration_is_minimal_and_append_only() -> None:
     migration = (
         Path(__file__).parents[2] / "migrations" / "014_pick_operator_state.sql"
