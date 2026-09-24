@@ -126,6 +126,10 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "<h2>History</h2>" in html
     assert "1 finished" in html
     assert "1.95 → 2.05" in html
+    assert '<th class="num">Probability</th>' in html
+    assert 'class="num history-probability"' in html
+    assert "<strong>Model 58.00%</strong>" in html
+    assert "<small>Market fair 51.00%</small>" in html
     assert 'class="num history-clv good"' in html
     assert "<strong>+5.00%</strong>" in html
     assert "GOOD · SAME-BOOK" in html
@@ -350,6 +354,22 @@ def test_loss_is_red_in_history_and_operator_toggle_remains_available() -> None:
     assert "SKIPPED" in html
     assert 'value="PLAYED"' in html
     assert "-1 000.00 RSD" in html
+
+
+def test_history_probability_handles_missing_values_explicitly() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    model_probability=None,
+                    devig_probability=None,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "<strong>Model —</strong>" in html
+    assert "<small>Market fair —</small>" in html
 
 
 def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> None:
