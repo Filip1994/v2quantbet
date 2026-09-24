@@ -83,6 +83,11 @@ def _run_active_leader(
     policy = application.settings.application.registration_policy
     lifecycle = application.settings.application.odds_lifecycle_policy
     assert policy is not None and lifecycle is not None
+    risk_snapshot = application.registration.repository.risk_exposure_breakdown(
+        policy.bankroll_account_id,
+        checked_at=datetime.now(UTC),
+    )
+    LOGGER.info("production risk exposure snapshot", extra=risk_snapshot)
     application.runtime.due_opportunity_fixtures(
         bookmaker_id=application.settings.bookmaker_id,
         allowed_statuses=policy.allowed_fixture_statuses,
