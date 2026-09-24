@@ -188,8 +188,9 @@ def test_stale_current_is_labeled_as_last_observed_and_not_as_live_movement() ->
 
     assert "<b>Last observed</b>" in html
     assert "STALE · 1h 05m old" in html
-    assert "STALE NOW" in html
-    assert html.count("Entry stale") == 1
+    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
+    assert '<small class="quality-history"' in html
+    assert ">Entry stale</small>" in html
     assert 'aria-label="Same-bookmaker price moved up"' not in html
     assert "STALE_QUOTE_WARNING" not in html
 
@@ -208,8 +209,8 @@ def test_quality_consolidates_live_and_historical_stale_states() -> None:
         )
     ).render_html()
 
-    assert html.count("STALE NOW") == 1
-    assert "Entry stale · Closing stale" in html
+    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
+    assert ">Entry stale · Closing stale</small>" in html
     assert "CURRENT STALE" not in html
     assert "ENTRY STALE" not in html
     assert "CLOSING STALE" not in html
