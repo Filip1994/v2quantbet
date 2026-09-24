@@ -977,6 +977,59 @@ This intentionally trades scanner throughput for lower API pressure, matching th
 
 Production rollout verification for PR #51 is pending at this documentation checkpoint.
 
+
+
+### PR #51 production verification
+
+PR #51 is confirmed live in production.
+
+Representative post-deploy opportunity cycles:
+
+- cycle finished about **13:48:04 UTC**;
+  - `pending_work=true`;
+  - cycle duration about **34.89 s**;
+  - persisted `next_due_at = 13:49:04.933616 UTC`.
+- cycle finished about **13:50:58 UTC**;
+  - `pending_work=true`;
+  - cycle duration about **39.02 s**;
+  - persisted `next_due_at = 13:51:58.951674 UTC`.
+- cycle finished about **13:53:37 UTC**;
+  - `pending_work=true`;
+  - cycle duration about **34.94 s**;
+  - persisted `next_due_at = 13:54:37.818270 UTC`.
+
+This confirms that pending opportunity backlog no longer makes the worker immediately due again. The worker now respects the normal approximately 60-second cooldown after completion.
+
+The durable cursor continues to advance and no betting thresholds were changed.
+
+### PR #52 — opportunity phase timing instrumentation
+
+**Merge commit:** `aec6aaf2aef6dd6cbee73c4f032ae800adb3e217`
+
+Opportunity cycle structured logs now expose aggregate phase timings for:
+
+- selection;
+- model gate / active-model checks;
+- preliminary provider fetch;
+- quote ingestion and state processing;
+- prediction;
+- value evaluation;
+- registration/risk checks;
+- mandatory final quote fetch;
+- failure flush.
+
+This is observability only and is intended to identify the dominant source of the remaining wall-budget overruns.
+
+The automatic Railway engine deployment for this commit was again blocked by the source/check-suite gate and marked `SKIPPED`.
+
+An exact-commit manual production deployment was therefore triggered:
+
+`581e24e5-2e82-44db-a1d7-ae4bca421271`
+
+for commit `aec6aaf...`.
+
+At this checkpoint the deployment is still building. The phase-timing production result is pending.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
