@@ -235,6 +235,29 @@ The PostgreSQL regression test proves both preliminary and final registration be
 the production risk snapshot proves the corrected exposure semantics are active on the live
 dataset.
 
+### Residual FATAL-02 race found during closure audit
+
+The first FATAL-02 patch correctly released SKIPPED exposure for registration, but a second
+failure mode remained possible:
+
+1. pick A is SKIPPED and frees one stake unit;
+2. pick B registers into the newly free capacity;
+3. pick A is later changed back to PLAYED;
+4. without a shared lock and cap check, effective exposure can exceed
+   `max_open_exposure_minor`.
+
+This is a hard-risk invariant, so FATAL-02 is not considered fully closed until
+`SKIPPED -> PLAYED` reactivation is serialized with registration on the bankroll lock and
+re-runs the same effective PLAYED exposure calculation.
+
+Current hardening branch: `fix/fatal2-operator-reactivation-risk`.
+
+Required proof before final closure:
+- a skipped unresolved pick can release capacity;
+- once that capacity is consumed, reactivation to PLAYED is rejected;
+- a concurrent registration/reactivation race can produce only one winner at a one-stake cap;
+- settled/history-only PLAYED restores remain allowed because they do not create open exposure.
+
 ---
 
 ## Production repair order
