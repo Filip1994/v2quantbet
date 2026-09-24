@@ -385,6 +385,34 @@ def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     assert decisions == []
 
 
+def test_repeated_current_provider_observation_is_not_rejected_by_old_capture_time() -> None:
+    observed_at = NOW - timedelta(minutes=1)
+    repository = WorkerRepository(
+        fixture(),
+        (
+            CompleteMarketQuoteState(
+                "BTTS",
+                observed_at,
+                NOW - timedelta(hours=6),
+                "api-football",
+            ),
+        ),
+    )
+    worker, evaluations, _decisions = build_worker(
+        repository,
+        SimpleNamespace(
+            fetch_quotes=lambda **_kwargs: returned_btts_quotes(observed_at)
+        ),
+    )
+
+    result = worker.run_once()
+
+    assert result.odds_unavailable_fixture_ids == ()
+    assert result.prediction_ids == ("prediction",)
+    assert result.evaluation_ids == ("evaluation:snapshot-btts-no",)
+    assert evaluations == ["snapshot-btts-no"]
+
+
 def test_later_fresh_payload_clears_stale_state_automatically() -> None:
     repository = WorkerRepository(
         fixture(stale_retry=True, prior_state="STALE"),
