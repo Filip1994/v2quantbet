@@ -299,11 +299,14 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
             [
                 _pick(
                     first_seen_odd=None,
-                    current_odd=None,
-                    current_observed_at=None,
-                    current_freshness="UNAVAILABLE",
-                    current_quote_age_seconds=None,
-                    closing_odd=None,
+                    last_observed_odd=None,
+                    last_observed_at=None,
+                    last_observed_source="UNAVAILABLE",
+                    last_observed_freshness="UNAVAILABLE",
+                    display_closing_odd=None,
+                    display_closing_observed_at=None,
+                    display_closing_source="UNAVAILABLE",
+                    dashboard_phase="PREMATCH",
                     realized_pnl_minor=None,
                     settlement_outcome=None,
                     settled_at=None,
@@ -318,7 +321,6 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
 
     assert "No registered picks yet." in empty
     assert "MONITORING" in missing
-    assert "None" in missing
     assert "—" in missing
 
 
