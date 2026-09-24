@@ -31,6 +31,15 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     record.fixed_stake_minor = 30000
     record.max_open_exposure_minor = 300000
     record.available_bankroll_minor = 2700000
+    record.selection_seconds = 0.12
+    record.model_gate_seconds = 0.34
+    record.preliminary_fetch_seconds = 4.56
+    record.quote_processing_seconds = 1.23
+    record.prediction_seconds = 2.34
+    record.evaluation_seconds = 3.45
+    record.registration_seconds = 4.56
+    record.final_fetch_seconds = 5.67
+    record.failure_flush_seconds = 0.11
 
     payload = json.loads(JsonFormatter().format(record))
 
@@ -51,3 +60,12 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["fixed_stake_minor"] == 30000
     assert payload["max_open_exposure_minor"] == 300000
     assert payload["available_bankroll_minor"] == 2700000
+    assert payload["selection_seconds"] == 0.12
+    assert payload["model_gate_seconds"] == 0.34
+    assert payload["preliminary_fetch_seconds"] == 4.56
+    assert payload["quote_processing_seconds"] == 1.23
+    assert payload["prediction_seconds"] == 2.34
+    assert payload["evaluation_seconds"] == 3.45
+    assert payload["registration_seconds"] == 4.56
+    assert payload["final_fetch_seconds"] == 5.67
+    assert payload["failure_flush_seconds"] == 0.11
