@@ -139,6 +139,8 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
     assert selection.phase_i_excluded_count == 1
     assert selection.waiting_for_window_count == 1
     assert selection.waiting_for_refresh_count == 1
+    assert "JOIN model_coverage_scopes coverage" in cursor.query
+    assert "coverage.active_model_version_id IS NOT NULL" in cursor.query
     assert "f.league_id =" not in cursor.query
     assert cursor.parameters == (
         8,
