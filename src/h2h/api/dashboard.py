@@ -389,65 +389,53 @@ class DashboardService:
     def _quality_summary(
         pick: dict[str, Any],
     ) -> tuple[tuple[str, str, str], tuple[str, ...], str]:
-        """Return one live freshness badge plus compact historical context."""
-        freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
-        if freshness == "FRESH":
-            live = (
-                "FRESH",
-                "fresh",
-                "Latest registered-book quote is within its freshness limit",
-            )
-        elif freshness == "STALE":
-            live = (
-                "STALE NOW",
-                "stale",
-                "Latest registered-book provider observation is too old",
-            )
+        """Prefer fixture lifecycle after kickoff and quote freshness before kickoff."""
+        phase = str(pick.get("dashboard_phase") or "PREMATCH").upper()
+        if phase == "SETTLED":
+            primary = ("SETTLED", "fresh", "Result and settlement are durable")
+        elif phase == "FINISHED":
+            primary = ("FINISHED", "fresh", "Fixture is finished; settlement may still be pending")
+        elif phase == "CLOSED":
+            primary = ("CLOSED", "unavailable", "Fixture ended without a normal final result")
+        elif phase == "LIVE":
+            primary = ("LIVE", "active", "Fixture has started")
         else:
-            live = (
-                "UNAVAILABLE",
-                "unavailable",
-                "No current registered-book quote is available",
-            )
+            freshness = str(pick.get("last_observed_freshness") or "UNAVAILABLE").upper()
+            if freshness == "FRESH":
+                primary = ("FRESH", "fresh", "Latest pre-match observation is fresh")
+            elif freshness == "STALE":
+                primary = ("STALE", "stale", "Latest pre-match observation is stale")
+            else:
+                primary = ("UNAVAILABLE", "unavailable", "No pre-match observation is available")
 
-        warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
         history: list[str] = []
         history_titles: list[str] = []
-        if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
-            history.append("Entry stale")
-            history_titles.append(
-                "Final quote verification was stale when this pick was registered"
-            )
+        if phase == "PREMATCH":
+            warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
+            if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
+                history.append("Entry stale")
+                history_titles.append("Registration-time final quote verification was stale")
+            other_entry_warnings = [
+                warning for warning in warning_codes if warning != "STALE_QUOTE_WARNING"
+            ]
+            if other_entry_warnings:
+                history.append("Entry warning")
+                history_titles.append(
+                    "Registration warnings: " + ", ".join(other_entry_warnings)
+                )
+        else:
+            closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+            if closing_source == "MANUAL":
+                history.append("Manual close")
+                history_titles.append("Operator-confirmed closing equals the last observed quote")
+            elif closing_source == "LIVE_PROXY":
+                history.append("Proxy close")
+                history_titles.append("Closing uses the API-Football live-market proxy")
+            elif closing_source == "UNAVAILABLE":
+                history.append("No close")
+                history_titles.append("No closing quote is available")
 
-        other_entry_warnings = [
-            warning for warning in warning_codes if warning != "STALE_QUOTE_WARNING"
-        ]
-        if other_entry_warnings:
-            history.append("Entry warning")
-            history_titles.append("Registration warnings: " + ", ".join(other_entry_warnings))
-
-        closing_status = str(pick.get("closing_status") or "")
-        if closing_status == "STALE_QUOTE":
-            history.append("Same-book close stale")
-            history_titles.append("No fresh quote was available at the closing cutoff")
-        elif closing_status == "NO_VALID_QUOTE":
-            history.append("Same-book close unavailable")
-            history_titles.append("No valid quote was available at the closing cutoff")
-
-        return live, tuple(dict.fromkeys(history)), " · ".join(history_titles)
-
-    @staticmethod
-    def _quote_age(value: Any) -> str:
-        if value is None:
-            return ""
-        seconds = max(0, int(value))
-        if seconds < 60:
-            return f"{seconds}s old"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m old"
-        hours, remainder = divmod(minutes, 60)
-        return f"{hours}h {remainder:02d}m old" if remainder else f"{hours}h old"
+        return primary, tuple(dict.fromkeys(history)), " · ".join(history_titles)
 
     @staticmethod
     def _bookmaker_badge(bookmaker: Any) -> str:
