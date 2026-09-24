@@ -72,6 +72,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
             discovery_lookahead_hours=72,
             model_training_interval_seconds=60,
             opportunity_interval_seconds=60,
+            live_close_poll_seconds=60,
             scheduler_tick_seconds=5,
             application=SimpleNamespace(
                 registration_policy=registration_policy,
@@ -99,6 +100,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         ),
         model_lifecycle=SimpleNamespace(run_once=lambda: None, has_pending=False),
         opportunity=SimpleNamespace(run_once=lambda: None, has_pending=False),
+        live_closing_proxy=SimpleNamespace(run_once=lambda: None),
     )
     monkeypatch.setattr(
         "h2h.entrypoint.ProductionOrchestrator",
