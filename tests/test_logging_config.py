@@ -27,6 +27,10 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     record.preliminary_edge = 0.041
     record.preliminary_ev = 0.028
     record.rejection_reasons = ("EDGE_BELOW_MINIMUM",)
+    record.open_exposure_minor = 300000
+    record.fixed_stake_minor = 30000
+    record.max_open_exposure_minor = 300000
+    record.available_bankroll_minor = 2700000
 
     payload = json.loads(JsonFormatter().format(record))
 
@@ -43,3 +47,7 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["preliminary_edge"] == 0.041
     assert payload["preliminary_ev"] == 0.028
     assert payload["rejection_reasons"] == ["EDGE_BELOW_MINIMUM"]
+    assert payload["open_exposure_minor"] == 300000
+    assert payload["fixed_stake_minor"] == 30000
+    assert payload["max_open_exposure_minor"] == 300000
+    assert payload["available_bankroll_minor"] == 2700000

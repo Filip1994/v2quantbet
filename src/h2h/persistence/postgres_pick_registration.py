@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 from collections.abc import Callable
@@ -33,6 +34,8 @@ from h2h.persistence.pick_registration import (
 )
 from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from h2h.risk.pick_risk import evaluate_risk, fixed_stake
+
+LOGGER = logging.getLogger("quantbet.registration")
 
 
 ConnectionFactory = Callable[[], Any]
@@ -434,6 +437,18 @@ class PostgreSQLPickRegistrationRepository:
             exposure = int(cursor.fetchone()[0])
             if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
                 failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
+                LOGGER.info(
+                    "preliminary risk exposure cap reached",
+                    extra={
+                        "evaluation_id": evaluation_id,
+                        "open_exposure_minor": exposure,
+                        "fixed_stake_minor": policy.fixed_stake_minor,
+                        "max_open_exposure_minor": policy.max_open_exposure_minor,
+                        "available_bankroll_minor": (
+                            None if ledger is None else int(ledger[0])
+                        ),
+                    },
+                )
             return tuple(failures)
 
     def begin_final_quote_verification(
