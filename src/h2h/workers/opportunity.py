@@ -462,13 +462,14 @@ class OpportunityWorker:
                         )
                         continue
 
-                    stale_for_book = []
+                    hard_stale_for_book = []
+                    usable_stale_for_book = []
                     for state in states:
                         age = attempted_at - state.observed_at
                         if age < timedelta(0) or age > provider_age:
                             hard_stale_market_count += 1
                             stale_market_count += 1
-                            stale_for_book.append(state)
+                            hard_stale_for_book.append(state)
                             continue
                         usable_market_keys.add((approved_id, state.market))
                         usable_bookmaker_ids.add(approved_id)
@@ -477,10 +478,12 @@ class OpportunityWorker:
                             strict_fresh_bookmaker_ids.add(approved_id)
                         else:
                             stale_market_count += 1
-                            stale_for_book.append(state)
+                            usable_stale_for_book.append(state)
 
-                    if stale_for_book:
-                        oldest = min(stale_for_book, key=lambda state: state.observed_at)
+                    if hard_stale_for_book:
+                        oldest = min(
+                            hard_stale_for_book, key=lambda state: state.observed_at
+                        )
                         refresh_state = self._repository.record_quote_refresh_state(
                             fixture.fixture_id,
                             approved_id,
@@ -492,6 +495,19 @@ class OpportunityWorker:
                         )
                         if refresh_state.next_retry_at is not None:
                             stale_retries_scheduled += 1
+                    elif usable_stale_for_book:
+                        oldest = min(
+                            usable_stale_for_book, key=lambda state: state.observed_at
+                        )
+                        self._repository.record_quote_refresh_state(
+                            fixture.fixture_id,
+                            approved_id,
+                            freshness_state="USABLE_STALE",
+                            attempted_at=attempted_at,
+                            latest_observed_at=oldest.observed_at,
+                            latest_captured_at=max(state.captured_at for state in states),
+                            stale_retry_policy=self._stale_retry_policy,
+                        )
                     else:
                         self._repository.record_quote_refresh_state(
                             fixture.fixture_id,
@@ -505,7 +521,7 @@ class OpportunityWorker:
 
                 if (
                     fixture.quote_freshness_state == "STALE"
-                    and strict_fresh_bookmaker_ids
+                    and usable_bookmaker_ids
                 ):
                     stale_retries_cleared += 1
                 if not usable_market_keys:
@@ -782,7 +798,7 @@ class OpportunityWorker:
                             self._repository.record_quote_refresh_state(
                                 fixture.fixture_id,
                                 preliminary.bookmaker_id,
-                                freshness_state="STALE",
+                                freshness_state="USABLE_STALE",
                                 attempted_at=captured_at,
                                 latest_observed_at=final_market.observed_at,
                                 latest_captured_at=captured_at,
