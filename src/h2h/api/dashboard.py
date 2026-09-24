@@ -742,15 +742,12 @@ class DashboardService:
         budget = context["budget"]
         ops = context["ops"]
         currency = bankroll["currency"]
+        risk_exposure = self._money(bankroll["risk_exposure_minor"], currency)
+        risk_cap = self._money(bankroll["max_open_exposure_minor"], currency)
         cards = [
             ("Current bankroll", self._money(bankroll["available_minor"], currency), "primary"),
             ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
-            (
-                "Risk exposure / cap",
-                f"{self._money(bankroll['risk_exposure_minor'], currency)} / "
-                f"{self._money(bankroll['max_open_exposure_minor'], currency)}",
-                "warn",
-            ),
+            ("Risk exposure / cap", f"{risk_exposure} / {risk_cap}", "warn"),
             ("Realized P/L", self._money(bankroll["realized_pnl_minor"], currency), "value"),
             ("Total staked", self._money(bankroll["total_staked_minor"], currency), ""),
             ("Settled stakes", self._money(bankroll["settled_stake_minor"], currency), ""),
