@@ -423,6 +423,39 @@ class PostgreSQLPickRegistrationRepository:
             (evaluation.prediction_id, evaluation.fixture_id, evaluation.model_version_id),
         )
 
+    def risk_exposure_breakdown(
+        self,
+        bankroll_account_id: str,
+        *,
+        checked_at: datetime,
+    ) -> dict[str, int]:
+        """Return a read-only snapshot of unresolved reserved risk exposure."""
+        if not isinstance(bankroll_account_id, str) or not bankroll_account_id.strip():
+            raise ValueError("bankroll_account_id must be a non-empty string")
+        checked = _utc(checked_at, "checked_at")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                _EXPOSURE_BREAKDOWN_SQL,
+                (bankroll_account_id.strip(), checked, checked, checked),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise RegistrationProvenanceError("risk exposure diagnostic query returned no row")
+        return {
+            "open_exposure_minor": int(row[0]),
+            "risk_reserved_pick_count": int(row[1]),
+            "risk_reserved_played_count": int(row[2]),
+            "risk_reserved_skipped_count": int(row[3]),
+            "risk_reserved_played_minor": int(row[4]),
+            "risk_reserved_skipped_minor": int(row[5]),
+            "risk_reserved_monitoring_count": int(row[6]),
+            "risk_reserved_closed_for_odds_count": int(row[7]),
+            "risk_reserved_without_monitoring_count": int(row[8]),
+            "risk_reserved_past_kickoff_count": int(row[9]),
+            "risk_reserved_past_10m_count": int(row[10]),
+            "risk_reserved_future_kickoff_count": int(row[11]),
+        }
+
     def preliminary_rejection_codes(
         self,
         evaluation_id: str,
