@@ -101,6 +101,33 @@ def test_opportunity_batch_is_bounded_and_continues_with_keyset_cursor() -> None
     assert sum(len(batch) for batch in repository.failure_batches) == 25
 
 
+def test_wall_budget_advances_cursor_past_examined_normal_fixtures() -> None:
+    repository = RepositoryFake(fixtures(6))
+    ticks = iter(float(value) for value in range(20))
+    subject = worker(
+        repository,
+        lambda _fixture: None,
+        max_items=5,
+        max_wall_seconds=2.5,
+        monotonic_clock=lambda: next(ticks),
+    )
+
+    first = subject.run_once()
+    second = subject.run_once()
+
+    assert first.budget_exhausted is True
+    assert first.odds_unavailable_fixture_ids == (
+        "api-football:0000",
+        "api-football:0001",
+    )
+    assert repository.selection_calls[0] == (5, None)
+    assert repository.selection_calls[1][1] == OpportunityCursor(
+        repository.fixtures[1].kickoff_at,
+        "api-football:0001",
+    )
+    assert second.due_fixture_ids[0] == "api-football:0002"
+
+
 def test_failure_time_is_fresh_for_each_fixture_and_scope_check_is_shared() -> None:
     repository = RepositoryFake(fixtures(2))
     base = datetime(2026, 9, 22, 12, tzinfo=UTC)

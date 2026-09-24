@@ -232,6 +232,15 @@ class OpportunityWorker:
                 for fixture in (priority_selection.due_fixtures + selection.due_fixtures)
             }.values()
         )[: self._max_items]
+        priority_fixture_ids = {
+            fixture.fixture_id for fixture in priority_selection.due_fixtures
+        }
+        normal_fixture_ids = {
+            fixture.fixture_id
+            for fixture in selection.due_fixtures
+            if fixture.fixture_id not in priority_fixture_ids
+        }
+        last_normal_cursor = prior_cursor
         processed: list[str] = []
         failed: list[str] = []
         model_unavailable: list[str] = []
@@ -274,6 +283,10 @@ class OpportunityWorker:
                 if self._monotonic() - started >= self._max_wall_seconds:
                     budget_exhausted = True
                     break
+                if fixture.fixture_id in normal_fixture_ids:
+                    last_normal_cursor = OpportunityCursor(
+                        fixture.kickoff_at, fixture.fixture_id
+                    )
                 item_now = self._now()
                 if fixture.next_retry_at is not None and fixture.next_retry_at > item_now:
                     item_retry_deferred += 1
@@ -980,7 +993,11 @@ class OpportunityWorker:
         self._has_pending = bool(
             priority_selection.has_more or selection.has_more or interrupted or budget_exhausted
         )
-        self._cursor = prior_cursor if (interrupted or budget_exhausted) else selection.continuation
+        self._cursor = (
+            last_normal_cursor
+            if (interrupted or budget_exhausted)
+            else selection.continuation
+        )
         unavailable_scope_counts = tuple(
             (
                 league_id,
