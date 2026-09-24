@@ -410,6 +410,58 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
     assert "—" in missing
 
 
+def test_snapshot_risk_cap_uses_operator_played_exposure() -> None:
+    operator = SimpleNamespace(
+        initial_bankroll_minor=3_000_000,
+        available_bankroll_minor=2_850_000,
+        open_exposure_minor=150_000,
+        resolved_stake_minor=0,
+        realized_pnl_minor=0,
+        pending_stake_minor=150_000,
+        currency="RSD",
+        pending_count=5,
+        win_count=0,
+        loss_count=0,
+        void_count=0,
+        total_staked_minor=150_000,
+        gross_returns_minor=0,
+    )
+    system = SimpleNamespace(
+        **{**operator.__dict__, "open_exposure_minor": 300_000, "pending_count": 10}
+    )
+    application = SimpleNamespace(
+        settings=SimpleNamespace(
+            application=SimpleNamespace(
+                registration_policy=SimpleNamespace(
+                    bankroll_account_id="pilot",
+                    initial_bankroll_minor=3_000_000,
+                    fixed_stake_minor=30_000,
+                    max_open_exposure_minor=300_000,
+                )
+            )
+        ),
+        results=SimpleNamespace(
+            performance=SimpleNamespace(
+                summary=lambda _account: system,
+                operator_summary=lambda _account: operator,
+            )
+        ),
+        budget=SimpleNamespace(usage_by_category=lambda: {}, effective_limit=7500),
+    )
+
+    class Projection(DashboardService):
+        def _picks(self):
+            return []
+
+        def _operations(self, _generated_at):
+            return {"database_reachable": True}
+
+    data = Projection(application).snapshot()
+    assert data["bankroll"]["risk_exposure_minor"] == 150_000
+    assert data["bankroll"]["open_exposure_minor"] == 150_000
+    assert data["system_performance"]["pending"] == 10
+
+
 def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     performance = SimpleNamespace(
         initial_bankroll_minor=3_000_000,
@@ -556,8 +608,19 @@ def test_operator_write_response_serializes_timestamp() -> None:
         occurred_at=NOW,
         request_id="request-1",
     )
+    calls: list[dict[str, object]] = []
+
+    def set_state(*_args, **kwargs):
+        calls.append(kwargs)
+        return event
+
     application = SimpleNamespace(
-        operator_picks=SimpleNamespace(set_state=lambda *_args, **_kwargs: event)
+        settings=SimpleNamespace(
+            application=SimpleNamespace(
+                registration_policy=SimpleNamespace(max_open_exposure_minor=300_000)
+            )
+        ),
+        operator_picks=SimpleNamespace(set_state=set_state),
     )
 
     result = DashboardService(application).set_operator_state(
@@ -565,6 +628,7 @@ def test_operator_write_response_serializes_timestamp() -> None:
     )
 
     assert result["occurred_at"] == "2026-09-23T12:00:00+00:00"
+    assert calls[0]["max_open_exposure_minor"] == 300_000
 
 
 def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
