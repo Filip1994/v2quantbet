@@ -272,7 +272,7 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
     if port > 65535:
         raise ConfigError("PORT must be at most 65535")
     provider_published_max_age = _positive_integer(
-        values, "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "14400"
+        values, "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "28800"
     )
     if (
         provider_published_max_age
