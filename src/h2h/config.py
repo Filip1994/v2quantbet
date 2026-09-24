@@ -80,6 +80,9 @@ class ProductionSettings:
     opportunity_interval_seconds: float
     opportunity_max_items: int
     opportunity_max_wall_seconds: float
+    live_close_poll_seconds: float
+    live_close_window_seconds: int
+    live_close_max_age_seconds: int
     stale_quote_retry_policy: StaleQuoteRetryPolicy
     model_training_interval_seconds: float
     model_training_max_scopes: int
@@ -287,6 +290,15 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         ),
         opportunity_max_wall_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
+        ),
+        live_close_poll_seconds=_positive_number(
+            values, "QUANTBET_LIVE_CLOSE_POLL_SECONDS", "60"
+        ),
+        live_close_window_seconds=_positive_integer(
+            values, "QUANTBET_LIVE_CLOSE_WINDOW_SECONDS", "900"
+        ),
+        live_close_max_age_seconds=_positive_integer(
+            values, "QUANTBET_LIVE_CLOSE_MAX_AGE_SECONDS", "120"
         ),
         stale_quote_retry_policy=_stale_quote_retry_policy(values),
         model_training_interval_seconds=_positive_number(

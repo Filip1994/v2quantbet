@@ -158,6 +158,22 @@ def test_bet_id_must_be_positive_integer(bet_id: object) -> None:
         )
 
 
+def test_fetch_live_odds_uses_live_endpoint_without_cache() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+    client = ApiFootballClient(transport, "secret", cache_ttl_seconds=30)
+
+    client.fetch_live_odds(fixture_id=42)
+    client.fetch_live_odds(fixture_id=42)
+
+    assert transport.get_json.call_count == 2
+    transport.get_json.assert_called_with(
+        "https://v3.football.api-sports.io/odds/live?fixture=42",
+        headers={"x-apisports-key": "secret"},
+        timeout=10.0,
+    )
+
+
 def test_fetch_fixtures_for_date_uses_global_date_query(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

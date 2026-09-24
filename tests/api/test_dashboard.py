@@ -210,7 +210,7 @@ def test_quality_consolidates_live_and_historical_stale_states() -> None:
     ).render_html()
 
     assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
-    assert ">Entry stale · Closing stale</small>" in html
+    assert ">Entry stale · Same-book close stale</small>" in html
     assert "CURRENT STALE" not in html
     assert "ENTRY STALE" not in html
     assert "CLOSING STALE" not in html
@@ -235,6 +235,41 @@ def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None
     assert ">UNAVAILABLE</span>" in html
     assert '<small class="quote-age unavailable">UNAVAILABLE</small>' in html
     assert "ENTRY STALE" not in html
+
+
+def test_dashboard_uses_market_proxy_clv_only_when_same_book_clv_is_missing() -> None:
+    proxy = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    closing_odd=None,
+                    closing_observed_at=None,
+                    clv_ppm=None,
+                    proxy_closing_odd=1.88,
+                    proxy_closing_observed_at=NOW,
+                    proxy_clv_ppm=37_234,
+                )
+            ]
+        )
+    ).render_html()
+    true_clv = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    clv_ppm=50_000,
+                    proxy_closing_odd=1.88,
+                    proxy_closing_observed_at=NOW,
+                    proxy_clv_ppm=37_234,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "<b>Market close</b>1.88" in proxy
+    assert "LIVE PROXY" in proxy
+    assert "Proxy CLV +3.72%" in proxy
+    assert " · CLV +5.00%" in true_clv
+    assert "Proxy CLV +3.72%" not in true_clv
 
 
 def test_dashboard_renders_skipped_operator_state_without_hiding_system_pick() -> None:

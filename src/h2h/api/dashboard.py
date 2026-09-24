@@ -161,6 +161,10 @@ class DashboardService:
                 closing_quote.odd AS closing_odd,
                 closing_quote.observed_at AS closing_observed_at,
                 closing_quote.captured_at AS closing_captured_at,
+                proxy_close.outcome AS proxy_closing_status,
+                proxy_close.proxy_closing_odd_decimal AS proxy_closing_odd,
+                proxy_close.proxy_clv_ppm,
+                proxy_observation.provider_observed_at AS proxy_closing_observed_at,
                 e.bookmaker_key, e.source, e.model_probability,
                 e.selected_raw_implied_probability AS implied_probability,
                 e.selected_devig_probability AS devig_probability,
@@ -238,6 +242,10 @@ class DashboardService:
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
+            LEFT JOIN pick_live_close_finalizations proxy_close
+                ON proxy_close.pick_id = r.pick_id
+            LEFT JOIN pick_live_close_observations proxy_observation
+                ON proxy_observation.observation_id = proxy_close.observation_id
             LEFT JOIN effective_settlement settlement ON settlement.pick_id = r.pick_id
             LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
             LEFT JOIN LATERAL (
@@ -287,7 +295,7 @@ class DashboardService:
         ingestion_candidates = [
             item.get("last_success_at")
             for name, item in by_name.items()
-            if name in {"opportunity", "monitoring"}
+            if name in {"opportunity", "monitoring", "closing_proxy"}
         ]
         last_ingestion = max((value for value in ingestion_candidates if value), default=None)
         return {
@@ -384,10 +392,10 @@ class DashboardService:
 
         closing_status = str(pick.get("closing_status") or "")
         if closing_status == "STALE_QUOTE":
-            history.append("Closing stale")
+            history.append("Same-book close stale")
             history_titles.append("No fresh quote was available at the closing cutoff")
         elif closing_status == "NO_VALID_QUOTE":
-            history.append("Closing unavailable")
+            history.append("Same-book close unavailable")
             history_titles.append("No valid quote was available at the closing cutoff")
 
         return live, tuple(dict.fromkeys(history)), " · ".join(history_titles)
@@ -461,11 +469,15 @@ class DashboardService:
             f"{escape(quality_label)}</span>"
             f"{history_html}</div>"
         )
-        clv = (
-            "—"
-            if pick.get("clv_ppm") is None
-            else f"{Decimal(pick['clv_ppm']) / Decimal(10000):+.2f}%"
-        )
+        if pick.get("clv_ppm") is not None:
+            clv_label = "CLV"
+            clv = f"{Decimal(pick['clv_ppm']) / Decimal(10000):+.2f}%"
+        elif pick.get("proxy_clv_ppm") is not None:
+            clv_label = "Proxy CLV"
+            clv = f"{Decimal(pick['proxy_clv_ppm']) / Decimal(10000):+.2f}%"
+        else:
+            clv_label = "CLV"
+            clv = "—"
         provenance = " · ".join(
             filter(
                 None,
@@ -525,7 +537,10 @@ class DashboardService:
             f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
             f"{best_bookmaker_footer}</span>"
             f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
-            f"<b>Close</b>{self._odd(pick.get('closing_odd'))}</span>"
+            f"<b>Same-book close</b>{self._odd(pick.get('closing_odd'))}</span>"
+            f'<span title="{escape(self._dt(pick.get("proxy_closing_observed_at")))}">'
+            f"<b>Market close</b>{self._odd(pick.get('proxy_closing_odd'))}"
+            f'<small class="proxy-label">LIVE PROXY</small></span>'
             "</div>"
         )
         checkpoint_times = " · ".join(
@@ -534,6 +549,7 @@ class DashboardService:
                 f"P {self._checkpoint_time(pick.get('pick_observed_at'))}",
                 f"C {self._checkpoint_time(pick.get('current_observed_at'))}",
                 f"X {self._checkpoint_time(pick.get('closing_observed_at'))}",
+                f"M {self._checkpoint_time(pick.get('proxy_closing_observed_at'))}",
             ]
         )
         return (
@@ -554,7 +570,7 @@ class DashboardService:
             f"<small>EV {self._pct(pick.get('expected_value'))}</small></td>"
             f'<td class="num"><strong>{escape(self._money(pick.get("stake_minor"), currency))}'
             f"</strong><small>System P/L {escape(self._money(pick.get('realized_pnl_minor'), currency))}"
-            f" · CLV {escape(clv)}</small></td>"
+            f" · {escape(clv_label)} {escape(clv)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
             f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
             f'<td><span class="status operator-{operator_state.casefold()}">'
@@ -648,7 +664,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(5,minmax(72px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid{{display:grid;grid-template-columns:repeat(6,minmax(72px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
 .movement{{display:inline!important;background:transparent!important;padding:0 0 0 4px!important;font-weight:900}}.movement.up{{color:var(--green)}}.movement.down{{color:var(--red)}}.movement.neutral{{color:var(--muted)}}
@@ -673,7 +689,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .quality-badge.unavailable{{color:var(--muted)}}
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
 .quote-age{{margin-top:auto!important;padding-top:4px;font-size:8px!important;letter-spacing:.04em}}
-.quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}
+.quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}.proxy-label{{color:#a9c5ff!important;font-size:7px!important;letter-spacing:.05em}}
 .operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
 .operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
@@ -683,7 +699,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
-.odds-grid{{grid-template-columns:repeat(5,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
+.odds-grid{{grid-template-columns:repeat(6,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
@@ -713,6 +729,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <dt>Quality</dt><dd>One live status: FRESH, STALE NOW or UNAVAILABLE. Historical context such as Entry stale or Closing stale is shown as secondary text underneath.</dd>
 <dt>Current freshness</dt><dd>Live freshness is calculated from the provider observed-at timestamp, not merely from whether the monitoring worker ran successfully.</dd>
 <dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
+<dt>Market close</dt><dd>API-Football live-market proxy captured in the final 15 minutes before kickoff. It is not bookmaker-specific and never replaces the same-book closing fact.</dd>
+<dt>Proxy CLV</dt><dd>Entry odds compared with Market close when a valid same-book close is unavailable. It is labeled separately from true same-book CLV.</dd>
 <dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>
 <dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>

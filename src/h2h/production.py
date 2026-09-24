@@ -27,6 +27,7 @@ from h2h.persistence import (
     PostgreSQLDixonColesModelVersionRepository,
 )
 from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
+from h2h.persistence.postgres_live_closing_proxy import PostgreSQLLiveClosingProxyRepository
 from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
@@ -41,6 +42,7 @@ from h2h.use_cases.result_settlement import ApiFootballResultSource
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 from h2h.workers.opportunity import OpportunityWorker
 from h2h.workers.model_lifecycle import ModelLifecycleWorker
+from h2h.workers.live_closing_proxy import LiveClosingProxyWorker
 
 
 @dataclass
@@ -78,6 +80,7 @@ class ProductionApplication:
     model_coverage: PostgreSQLModelCoverageRepository
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
+    live_closing_proxy: LiveClosingProxyWorker
     operator_picks: PostgreSQLOperatorPickStateRepository
 
     def close(self) -> None:
@@ -165,6 +168,16 @@ def build_production_application(
         database_url=application_settings.database_url,
         on_item_failure=item_failure("results"),
         on_item_success=item_success("results"),
+        should_stop=should_stop,
+    )
+    live_closing_proxy = LiveClosingProxyWorker(
+        PostgreSQLLiveClosingProxyRepository(database_url=application_settings.database_url),
+        monitoring_client,
+        clock=lambda: datetime.now(UTC),
+        window_seconds=settings.live_close_window_seconds,
+        max_age_seconds=settings.live_close_max_age_seconds,
+        on_item_failure=item_failure("closing_proxy"),
+        on_item_success=item_success("closing_proxy"),
         should_stop=should_stop,
     )
     versions = PostgreSQLDixonColesModelVersionRepository(
@@ -273,5 +286,6 @@ def build_production_application(
         coverage,
         model_lifecycle,
         opportunity,
+        live_closing_proxy,
         operator_picks,
     )
