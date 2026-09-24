@@ -124,47 +124,99 @@ class DashboardService:
                 opening.odd AS first_seen_odd,
                 opening.observed_at AS first_seen_observed_at,
                 opening.captured_at AS first_seen_captured_at,
-                current_quote.odd AS current_odd,
-                current_quote.observed_at AS current_observed_at,
-                current_quote.captured_at AS current_captured_at,
                 CASE
-                    WHEN current_quote.observed_at IS NULL THEN 'UNAVAILABLE'
-                    WHEN current_quote.observed_at >=
-                        LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN live_latest.odd
+                    ELSE current_quote.odd
+                END AS last_observed_odd,
+                CASE
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN live_latest.provider_observed_at
+                    ELSE current_quote.observed_at
+                END AS last_observed_at,
+                CASE
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN 'LIVE_PROXY'
+                    WHEN current_quote.observed_at IS NOT NULL THEN 'SAME_BOOK'
+                    ELSE 'UNAVAILABLE'
+                END AS last_observed_source,
+                CASE
+                    WHEN COALESCE(
+                        live_latest.provider_observed_at,
+                        current_quote.observed_at
+                    ) IS NULL
+                    THEN 'UNAVAILABLE'
+                    WHEN (
+                        CASE
+                            WHEN live_latest.provider_observed_at IS NOT NULL
+                                 AND (
+                                     current_quote.observed_at IS NULL
+                                     OR live_latest.provider_observed_at
+                                        > current_quote.observed_at
+                                 )
+                            THEN live_latest.provider_observed_at
+                            ELSE current_quote.observed_at
+                        END
+                    ) >= LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
                         - make_interval(secs => COALESCE(
                             monitoring.current_max_age_seconds,
                             (config.configuration->>'maximum_quote_age_seconds')::integer
                         ))
                     THEN 'FRESH'
                     ELSE 'STALE'
-                END AS current_freshness,
+                END AS last_observed_freshness,
                 CASE
-                    WHEN current_quote.observed_at IS NULL THEN NULL
-                    ELSE GREATEST(
-                        0,
-                        FLOOR(EXTRACT(EPOCH FROM (
-                            LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
-                            - current_quote.observed_at
-                        )))
-                    )::bigint
-                END AS current_quote_age_seconds,
-                COALESCE(
-                    monitoring.current_max_age_seconds,
-                    (config.configuration->>'maximum_quote_age_seconds')::integer
-                ) AS current_max_age_seconds,
-                best_current.odd AS best_current_odd,
-                best_current.observed_at AS best_current_observed_at,
-                best_current.captured_at AS best_current_captured_at,
-                best_current.bookmaker_key AS best_current_bookmaker_key,
+                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.odd
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.odd
+                    WHEN proxy_close.outcome = 'CAPTURED'
+                    THEN proxy_close.proxy_closing_odd_decimal
+                    ELSE NULL
+                END AS display_closing_odd,
+                CASE
+                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.observed_at
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.observed_at
+                    WHEN proxy_close.outcome = 'CAPTURED'
+                    THEN proxy_observation.provider_observed_at
+                    ELSE NULL
+                END AS display_closing_observed_at,
+                CASE
+                    WHEN closing.outcome = 'CAPTURED' THEN 'SAME_BOOK'
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN 'MANUAL'
+                    WHEN proxy_close.outcome = 'CAPTURED' THEN 'LIVE_PROXY'
+                    ELSE 'UNAVAILABLE'
+                END AS display_closing_source,
                 closing.outcome AS closing_status,
-                closing.finalized_at AS closing_finalized_at,
-                closing_quote.odd AS closing_odd,
-                closing_quote.observed_at AS closing_observed_at,
-                closing_quote.captured_at AS closing_captured_at,
                 proxy_close.outcome AS proxy_closing_status,
-                proxy_close.proxy_closing_odd_decimal AS proxy_closing_odd,
                 proxy_close.proxy_clv_ppm,
-                proxy_observation.provider_observed_at AS proxy_closing_observed_at,
+                CASE
+                    WHEN manual_quote.odd IS NULL THEN NULL
+                    ELSE ROUND(
+                        ((entry.odd / manual_quote.odd) - 1) * 1000000
+                    )::bigint
+                END AS manual_clv_ppm,
+                CASE
+                    WHEN settlement.outcome IS NOT NULL THEN 'SETTLED'
+                    WHEN latest.provider_status IN ('FT', 'AET', 'PEN') THEN 'FINISHED'
+                    WHEN latest.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'CLOSED'
+                    WHEN latest.kickoff_at <= CURRENT_TIMESTAMP
+                         OR latest.provider_status IN (
+                             '1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT', 'LIVE'
+                         )
+                    THEN 'LIVE'
+                    ELSE 'PREMATCH'
+                END AS dashboard_phase,
                 e.bookmaker_key, e.source, e.model_probability,
                 e.selected_raw_implied_probability AS implied_probability,
                 e.selected_devig_probability AS devig_probability,
@@ -178,8 +230,8 @@ class DashboardService:
                 settlement.outcome AS settlement_outcome,
                 settlement.gross_return_minor, settlement.realized_pnl_minor,
                 settlement.occurred_at AS settled_at,
-                clv.clv_ppm, clv.method_version AS clv_method_version
-                , COALESCE(operator_state.state, 'PLAYED') AS operator_state
+                clv.clv_ppm, clv.method_version AS clv_method_version,
+                COALESCE(operator_state.state, 'PLAYED') AS operator_state
             FROM registered_picks r
             JOIN pick_decisions decision ON decision.decision_id = r.decision_id
             JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
@@ -210,38 +262,22 @@ class DashboardService:
                 LIMIT 1
             ) current_quote ON TRUE
             LEFT JOIN LATERAL (
-                SELECT latest_price.odd, latest_price.observed_at,
-                    latest_price.captured_at,
-                    CASE series.bookmaker_id
-                        WHEN 8 THEN 'bet365'
-                        WHEN 11 THEN '1xbet'
-                        WHEN 34 THEN 'superbet'
-                    END AS bookmaker_key
-                FROM quote_series series
-                JOIN LATERAL (
-                    SELECT q.odd, q.observed_at, q.captured_at
-                    FROM quote_snapshots q
-                    WHERE q.series_id = series.series_id AND q.source = e.source
-                      AND q.observed_at < latest.kickoff_at
-                      AND q.captured_at < latest.kickoff_at
-                    ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
-                    LIMIT 1
-                ) latest_price ON TRUE
-                WHERE series.fixture_id = r.fixture_id
-                  AND series.market = r.market AND series.selection = r.selection
-                  AND series.bookmaker_id = ANY(ARRAY[8, 11, 34]::bigint[])
-                  AND latest_price.observed_at >=
-                      LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
-                      - make_interval(secs => COALESCE(
-                          monitoring.current_max_age_seconds,
-                          (config.configuration->>'maximum_quote_age_seconds')::integer
-                      ))
-                ORDER BY latest_price.odd DESC, series.bookmaker_id
+                SELECT observation.odd, observation.provider_observed_at
+                FROM pick_live_close_observations observation
+                WHERE observation.pick_id = r.pick_id
+                  AND observation.provider_observed_at < latest.kickoff_at
+                  AND observation.captured_at < latest.kickoff_at
+                ORDER BY observation.provider_observed_at DESC,
+                    observation.captured_at DESC, observation.observation_id DESC
                 LIMIT 1
-            ) best_current ON TRUE
+            ) live_latest ON TRUE
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
+            LEFT JOIN pick_manual_closing_overrides manual_close
+                ON manual_close.pick_id = r.pick_id
+            LEFT JOIN quote_snapshots manual_quote
+                ON manual_quote.snapshot_id = manual_close.snapshot_id
             LEFT JOIN pick_live_close_finalizations proxy_close
                 ON proxy_close.pick_id = r.pick_id
             LEFT JOIN pick_live_close_observations proxy_observation
