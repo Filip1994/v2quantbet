@@ -302,6 +302,7 @@ def _cleanup(account_id: str, candidates: tuple[DurableCandidate, ...]) -> None:
             "TRUNCATE pick_operator_state_events, daily_bulletin_memberships, daily_bulletins, "
             "pick_realized_clv, pick_settlement_events, "
             "fixture_result_acquisition_states, fixture_result_observations, "
+            "pick_manual_closing_overrides, "
             "pick_live_close_finalizations, pick_live_close_observations, "
             "pick_closing_finalizations, pick_monitoring_transitions, "
             "pick_monitoring_states, registered_picks, pick_decisions, "
