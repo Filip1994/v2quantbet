@@ -117,36 +117,56 @@ class RenderingDashboard(DashboardService):
         return self._snapshot
 
 
-def test_render_populated_history_preserves_core_odds_and_escapes_html() -> None:
+def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None:
     html = RenderingDashboard(_snapshot([_pick()])).render_html()
 
-    for value in ("1.91", "1.95", "2.01", "2.05"):
-        assert value in html
+    assert "<h2>Active picks</h2>" in html
+    assert "No active picks." in html
+    assert "<h2>History</h2>" in html
+    assert "1 finished" in html
+    assert "1.95 → 2.05" in html
+    assert 'class="num history-clv good"' in html
+    assert "<strong>+5.00%</strong>" in html
+    assert "GOOD · SAME-BOOK" in html
+    assert '<span class="status win">WIN</span>' in html
+    assert "950.00 RSD" in html
+    assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<script>alert(1)</script>" not in html
     assert "Best current" not in html
     assert "Same-book close" not in html
     assert "Market close" not in html
-    assert "950.00 RSD" in html
-    assert "+5.00%" in html
-    assert ">SETTLED</span>" in html
-    assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
-    assert "<script>alert(1)</script>" not in html
-    assert "FIXED_STAKE_V1" in html
-    assert "<th>Provenance</th>" not in html
-    assert "Plain-language glossary" in html
-    assert "PLAYED" in html
-    assert 'value="SKIPPED"' in html
 
 
-def test_registered_bookmaker_identity_is_shown_once_per_pick() -> None:
-    html = RenderingDashboard(_snapshot([_pick()])).render_html()
+def test_registered_bookmaker_identity_is_kept_on_active_pick() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                )
+            ]
+        )
+    ).render_html()
 
     assert html.count('data-bookmaker="bet365"') == 1
     assert 'class="pick-book"' in html
     assert "best at" not in html
 
 
-def test_odds_lifecycle_has_only_four_checkpoints() -> None:
-    html = RenderingDashboard(_snapshot([_pick()])).render_html()
+def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                )
+            ]
+        )
+    ).render_html()
 
     for label in ("First seen", "Pick", "Last observed", "Closing"):
         assert f"<b>{label}</b>" in html
@@ -177,29 +197,46 @@ def test_prematch_stale_quality_is_still_visible_before_kickoff() -> None:
     assert "STALE NOW" not in html
 
 
-@pytest.mark.parametrize(
-    ("phase", "expected"),
-    [("LIVE", "LIVE"), ("FINISHED", "FINISHED"), ("SETTLED", "SETTLED")],
-)
-def test_post_kickoff_quality_uses_fixture_lifecycle_not_quote_staleness(
-    phase: str, expected: str
-) -> None:
+def test_live_pick_stays_active_and_uses_live_quality() -> None:
     html = RenderingDashboard(
         _snapshot(
             [
                 _pick(
-                    dashboard_phase=phase,
+                    dashboard_phase="LIVE",
+                    settlement_outcome=None,
+                    settled_at=None,
                     last_observed_freshness="STALE",
-                    settlement_outcome="WIN" if phase == "SETTLED" else None,
                     display_closing_source="SAME_BOOK",
                 )
             ]
         )
     ).render_html()
 
-    assert f">{expected}</span>" in html
-    assert "STALE NOW" not in html
+    assert "<h2>Active picks</h2>" in html
+    assert ">LIVE</span>" in html
     assert 'quality-badge stale' not in html
+
+
+@pytest.mark.parametrize("phase", ["FINISHED", "CLOSED", "SETTLED"])
+def test_finished_closed_and_settled_picks_move_to_history(phase: str) -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase=phase,
+                    settlement_outcome="WIN" if phase == "SETTLED" else None,
+                    settled_at=NOW if phase == "SETTLED" else None,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "No active picks." in html
+    assert "<h2>History</h2>" in html
+    if phase == "SETTLED":
+        assert '<span class="status win">WIN</span>' in html
+    else:
+        assert f">{phase}</span>" in html
 
 
 def test_prematch_unavailable_is_distinct_from_post_kickoff_state() -> None:
@@ -232,6 +269,8 @@ def test_live_proxy_is_folded_into_last_observed_and_closing() -> None:
                 _pick(
                     clv_ppm=None,
                     dashboard_phase="LIVE",
+                    settlement_outcome=None,
+                    settled_at=None,
                     last_observed_odd=1.88,
                     last_observed_source="LIVE_PROXY",
                     display_closing_odd=1.88,
@@ -249,7 +288,7 @@ def test_live_proxy_is_folded_into_last_observed_and_closing() -> None:
     assert "Market close" not in html
 
 
-def test_manual_close_is_auditable_and_drives_manual_clv_only_as_fallback() -> None:
+def test_manual_close_in_history_shows_bad_clv_and_true_clv_still_wins() -> None:
     manual = RenderingDashboard(
         _snapshot(
             [
@@ -275,21 +314,35 @@ def test_manual_close_is_auditable_and_drives_manual_clv_only_as_fallback() -> N
         )
     ).render_html()
 
-    assert "<b>Closing</b>2.01" in manual
-    assert "MANUAL" in manual
-    assert "Manual CLV -2.99%" in manual
-    assert " · CLV +5.00%" in true_clv
-    assert "Manual CLV -2.99%" not in true_clv
+    assert "1.95 → 2.01" in manual
+    assert "Pick → Closing · manual" in manual
+    assert 'class="num history-clv bad"' in manual
+    assert "<strong>-2.99%</strong>" in manual
+    assert "BAD · MANUAL" in manual
+
+    assert 'class="num history-clv good"' in true_clv
+    assert "<strong>+5.00%</strong>" in true_clv
+    assert "GOOD · SAME-BOOK" in true_clv
+    assert "BAD · MANUAL" not in true_clv
 
 
-def test_dashboard_renders_skipped_operator_state_without_hiding_system_pick() -> None:
+def test_loss_is_red_in_history_and_operator_toggle_remains_available() -> None:
     html = RenderingDashboard(
-        _snapshot([_pick(operator_state="SKIPPED", settlement_outcome="LOSS")])
+        _snapshot(
+            [
+                _pick(
+                    operator_state="SKIPPED",
+                    settlement_outcome="LOSS",
+                    realized_pnl_minor=-100_000,
+                )
+            ]
+        )
     ).render_html()
 
+    assert '<span class="status loss">LOSS</span>' in html
     assert "SKIPPED" in html
-    assert "LOSS" in html
     assert 'value="PLAYED"' in html
+    assert "-1 000.00 RSD" in html
 
 
 def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> None:
@@ -319,7 +372,8 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
         )
     ).render_html()
 
-    assert "No registered picks yet." in empty
+    assert "No active picks." in empty
+    assert "No finished picks yet." in empty
     assert "MONITORING" in missing
     assert "—" in missing
 

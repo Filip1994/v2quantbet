@@ -459,6 +459,83 @@ class DashboardService:
             f'data-bookmaker="{escape(key)}">{mark}</span>'
         )
 
+    @staticmethod
+    def _is_history_pick(pick: dict[str, Any]) -> bool:
+        return str(pick.get("dashboard_phase") or "").upper() in {
+            "FINISHED",
+            "CLOSED",
+            "SETTLED",
+        }
+
+    @staticmethod
+    def _clv_summary(pick: dict[str, Any]) -> tuple[str, str, str, str]:
+        if pick.get("clv_ppm") is not None:
+            source = "SAME-BOOK"
+            value = Decimal(pick["clv_ppm"]) / Decimal(10000)
+        elif pick.get("manual_clv_ppm") is not None:
+            source = "MANUAL"
+            value = Decimal(pick["manual_clv_ppm"]) / Decimal(10000)
+        elif pick.get("proxy_clv_ppm") is not None:
+            source = "LIVE PROXY"
+            value = Decimal(pick["proxy_clv_ppm"]) / Decimal(10000)
+        else:
+            return "—", "unavailable", "NO CLV", "UNAVAILABLE"
+
+        if value > 0:
+            css, verdict = "good", "GOOD"
+        elif value < 0:
+            css, verdict = "bad", "BAD"
+        else:
+            css, verdict = "flat", "FLAT"
+        return f"{value:+.2f}%", css, verdict, source
+
+    def _render_history_row(self, pick: dict[str, Any], currency: str) -> str:
+        fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
+        outcome = str(pick.get("settlement_outcome") or "").upper()
+        if outcome:
+            status, status_class = outcome, outcome.casefold()
+        else:
+            phase = str(pick.get("dashboard_phase") or "FINISHED").upper()
+            status = phase
+            status_class = "void" if phase == "CLOSED" else "active"
+
+        clv, clv_css, clv_verdict, clv_source = self._clv_summary(pick)
+        operator_state = str(pick.get("operator_state") or "PLAYED")
+        action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
+        alternate_state = "SKIPPED" if operator_state == "PLAYED" else "PLAYED"
+        operator_control = (
+            f'<form class="history-operator-form" method="post" action="{action}">'
+            f'<input type="hidden" name="request_id" value="dashboard:{uuid4().hex}">'
+            f'<button name="state" value="{alternate_state}" class="history-operator-button">'
+            f"{'Skip' if alternate_state == 'SKIPPED' else 'Play'}</button></form>"
+        )
+        closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+        close_source = {
+            "SAME_BOOK": "same-book",
+            "MANUAL": "manual",
+            "LIVE_PROXY": "live proxy",
+        }.get(closing_source, "unavailable")
+        return (
+            '<tr class="history-row">'
+            f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
+            f"<small>{escape(str(pick.get('competition_name') or '—'))} · "
+            f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
+            f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
+            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong>"
+            f'<div class="history-operator"><span class="status operator-{operator_state.casefold()}">'
+            f"{escape(operator_state)}</span>{operator_control}</div></td>"
+            f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
+            f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
+            f"<small>Pick → Closing · {escape(close_source)}</small></td>"
+            f'<td class="num history-clv {escape(clv_css)}"><strong>{escape(clv)}</strong>'
+            f"<small>{escape(clv_verdict)} · {escape(clv_source)}</small></td>"
+            f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
+            f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
+            f'<td class="num"><strong>{escape(self._money(pick.get("realized_pnl_minor"), currency))}'
+            "</strong></td>"
+            "</tr>"
+        )
+
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
@@ -580,11 +657,27 @@ class DashboardService:
         bankroll = data["bankroll"]
         ops = data["operations"]
         currency = bankroll["currency"]
-        rows = "".join(self._render_pick_row(pick, currency) for pick in data["picks"])
-        if not rows:
-            rows = (
-                '<tr><td class="empty" colspan="10"><strong>No registered picks yet.</strong>'
-                "<br>Durable pick history will appear here after registration.</td></tr>"
+        history_picks = [
+            pick for pick in data["picks"] if self._is_history_pick(pick)
+        ]
+        active_picks = [
+            pick for pick in data["picks"] if not self._is_history_pick(pick)
+        ]
+        active_rows = "".join(
+            self._render_pick_row(pick, currency) for pick in active_picks
+        )
+        if not active_rows:
+            active_rows = (
+                '<tr><td class="empty" colspan="10"><strong>No active picks.</strong>'
+                "<br>Pre-match and live picks will appear here.</td></tr>"
+            )
+        history_rows = "".join(
+            self._render_history_row(pick, currency) for pick in history_picks
+        )
+        if not history_rows:
+            history_rows = (
+                '<tr><td class="empty" colspan="6"><strong>No finished picks yet.</strong>'
+                "<br>Finished and settled picks will move here automatically.</td></tr>"
             )
         worker_rows = (
             "".join(
@@ -600,7 +693,9 @@ class DashboardService:
             or '<tr><td colspan="4" class="empty">No worker heartbeat records.</td></tr>'
         )
         return self._document(
-            rows=rows,
+            active_rows=active_rows,
+            history_rows=history_rows,
+            history_count=len(history_picks),
             worker_rows=worker_rows,
             bankroll=bankroll,
             counts=data["counts"],
@@ -689,6 +784,13 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
+.history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
+.history-fixture{{min-width:260px}}.history-operator{{display:flex;align-items:center;gap:5px;margin-top:5px}}
+.history-operator-form{{margin:0}}.history-operator-button{{background:transparent;color:var(--muted);border:0;padding:2px 3px;cursor:pointer;font:inherit;font-size:8px;text-decoration:underline}}
+.history-odds strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
+.history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
+.history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
+.history-clv.flat strong{{color:var(--muted)}}.history-clv.unavailable strong{{color:var(--muted)}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
@@ -709,9 +811,12 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="fact"><span>Odds ingestion</span><strong>{escape(self._dt(ops["last_odds_ingestion"]))}</strong></div>
 <div class="fact"><span>Provider budget</span><strong>{budget["used"]} / {budget["effective_limit"]} · {budget["remaining"]} left</strong></div>
 <div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
-</div></article></section><section class="panel"><div class="panel-head"><h2>Complete pick history</h2><span class="section-label">Newest first</span></div>
+</div></article></section><section class="panel"><div class="panel-head"><h2>Active picks</h2><span class="section-label">Pre-match & live</span></div>
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
-<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["rows"]}</tbody></table></div></section>
+<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
+<section class="panel history"><div class="panel-head"><h2>History</h2><span class="section-label">{context["history_count"]} finished</span></div>
+<div class="table-wrap"><table><thead><tr><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
+<tbody>{context["history_rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
