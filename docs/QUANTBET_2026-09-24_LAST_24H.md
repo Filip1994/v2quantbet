@@ -809,6 +809,81 @@ Those defaults would imply ten simultaneous full fixed-stake reservations, but *
 
 PR #48 was added specifically so the next live exposure rejection will provide authoritative production values.
 
+
+
+### Authoritative production risk snapshot
+
+PR #48 subsequently produced the first authoritative live exposure-cap log.
+
+At approximately 13:29 UTC, production reported:
+
+- `open_exposure_minor = 300000` → **3,000 RSD**;
+- `max_open_exposure_minor = 300000` → **3,000 RSD**;
+- `fixed_stake_minor = 30000` → **300 RSD**;
+- `available_bankroll_minor = 2808300` → **28,083 RSD**.
+
+Therefore the open-exposure cap is **100% occupied** and equals ten current fixed-stake units.
+
+The same cycle contained extremely strong model/value candidates that were rejected only by the exposure cap. Example:
+
+- fixture: `api-football:1568188`;
+- market: `OU_25`;
+- selection: `UNDER`;
+- odds: **2.05**;
+- edge: approximately **+28.00 percentage points**;
+- expected value: approximately **+51.81%**;
+- rejection: `MAX_OPEN_EXPOSURE_EXCEEDED`.
+
+Additional value examples on the same fixture:
+- OU_25 UNDER @ 1.94, edge about +26.77 pp, EV about +43.66%;
+- BTTS NO @ 2.13, edge about +22.89 pp, EV about +40.45%.
+
+This conclusively proves that the current zero-registration state is **not equivalent to zero qualified model/value opportunities**. The binding constraint is the configured risk exposure cap.
+
+No risk limit was changed.
+
+### Operator-state / system-ledger exposure distinction
+
+The dashboard/operator performance projection explicitly excludes latest-state `SKIPPED` picks from actual operator bankroll and exposure figures.
+
+The registration risk calculation, however, derives open exposure from unresolved `STAKE_RESERVED` ledger entries and does not currently consult operator PLAYED/SKIPPED state.
+
+This may create a lifecycle mismatch when a registered pick is later marked `SKIPPED`: dashboard actual exposure can exclude it while registration risk may continue reserving it until settlement.
+
+The dashboard specification says actual operator bankroll/exposure should derive only from `PLAYED` picks, but also defines registered picks as PLAYED by default when no override exists.
+
+No semantic change was made here because changing which picks consume the registration risk cap is a risk-policy/lifecycle decision. It remains an explicit follow-up item.
+
+### PR #49 — show exposure against cap in dashboard
+
+**Merge commit:** `7c0b0699997677925b3f93d8cb4fe445c845605e`
+
+The existing dashboard KPI was changed from a bare Open exposure amount to:
+
+`Open exposure / cap`
+
+Example at the currently observed production values:
+
+`3,000.00 RSD / 3,000.00 RSD`
+
+This is display-only. It does not change registration, staking, bankroll facts, operator state or risk limits.
+
+### Railway check-suite setting remains unresolved
+
+A second source-config repair explicitly attempted an atomic source update:
+
+- repo: `Filip1994/v2quantbet`;
+- branch: `main`;
+- `checkSuites=false`.
+
+Railway agent reported the operation as applied, but a subsequent direct service-config read still returned:
+
+`source.checkSuites = true`
+
+Therefore the direct config read remains authoritative and the deployment-gate issue is still open.
+
+Critical engine fixes can still be deployed by exact-commit Railway deployment; automatic source-trigger reliability is not yet considered fixed.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
