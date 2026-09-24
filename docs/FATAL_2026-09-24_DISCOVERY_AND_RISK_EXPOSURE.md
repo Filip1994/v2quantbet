@@ -183,7 +183,7 @@ At minimum:
 
 ### Fix status
 
-**PATCH IMPLEMENTED ON BRANCH `fix/skipped-risk-exposure`; CI and production verification pending.**
+**FIXED AND PRODUCTION-VERIFIED.**
 
 The patch changes the registration exposure gate so unresolved reservations consume
 `MAX_OPEN_EXPOSURE` only when the latest operator state is `PLAYED` (or no override exists,
@@ -197,6 +197,43 @@ exposure so the UI does not report a full risk cap when registration has capacit
 
 System settlement/model history and the append-only system ledger are intentionally not
 rewritten by this fix.
+
+### Verification
+
+Code/CI:
+- PR #62 was squash-merged as `f53afebbbc0a0c8902a28e00bdc3641d5c0a397e`;
+- lint passed;
+- the new PostgreSQL regression test passed: a first pick fills a one-stake exposure cap,
+  becomes `SKIPPED`, effective exposure becomes zero, and a second otherwise-eligible pick
+  can register successfully;
+- the immutable ledger retains both `STAKE_RESERVED` facts in that regression test;
+- the full suite still reported the same eight pre-existing baseline failures seen before
+  this patch; FATAL-02 introduced no new test failure.
+
+Production:
+- Railway engine deployment `4660b739-144a-4316-8180-12b4a5fe0a2e` reached `SUCCESS`;
+- Railway dashboard deployment `061afb29-954f-4805-be4d-7ed9d2b1d8cd` reached `SUCCESS`;
+- service configuration, bankroll parameters, fixed stake and max exposure settings were
+  preserved during the exact-commit engine deployment;
+- the first authoritative engine snapshot after rollout reported:
+  - `open_exposure_minor = 150000`;
+  - `risk_reserved_pick_count = 10`;
+  - `risk_reserved_played_count = 5`;
+  - `risk_reserved_played_minor = 150000`;
+  - `risk_reserved_skipped_count = 5`;
+  - `risk_reserved_skipped_minor = 150000`;
+- before the fix the same 10-reservation composition produced
+  `open_exposure_minor = 300000`.
+
+Therefore the five SKIPPED reservations remain fully auditable but no longer consume
+registration capacity. Effective exposure dropped from **3,000 RSD to 1,500 RSD** without
+raising the configured **3,000 RSD** cap or changing the **300 RSD** fixed stake.
+
+The first post-rollout opportunity slice had all eight eligible fixtures waiting for their
+normal refresh cadence, so it did not provide a fresh live candidate-registration example.
+The PostgreSQL regression test proves both preliminary and final registration behavior, and
+the production risk snapshot proves the corrected exposure semantics are active on the live
+dataset.
 
 ---
 
