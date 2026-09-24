@@ -1108,6 +1108,83 @@ This materially changes the wall-budget diagnosis: cross-region database round-t
 
 A quote-present opportunity cycle is still required for the final one-to-one comparison of quote processing, prediction, evaluation and registration after co-location.
 
+
+
+### PR #52 production phase-timing result
+
+The first complete production opportunity cycle with phase instrumentation exposed the dominant sources of wall-budget overrun.
+
+Representative cycle:
+- fixture: `api-football:1569112`;
+- cycle duration: **71.75 s** inside the opportunity worker;
+- orchestrator duration: **73.09 s**;
+- provider response itself arrived quickly;
+- `budget_exhausted=true`;
+- predictions: 1;
+- evaluations: 4;
+- registered picks: 0 because risk exposure was already full.
+
+Measured phase totals:
+
+- selection: **2.73 s**;
+- model gate: **4.04 s**;
+- preliminary provider fetch: **1.71 s**;
+- quote processing: **28.39 s**;
+- prediction: **5.83 s**;
+- evaluation: **17.96 s**;
+- registration/risk checks: **8.40 s**;
+- mandatory final fetch: **0 s** in this cycle;
+- failure flush: effectively **0 s**.
+
+Conclusion:
+- provider HTTP latency is **not** the primary wall-budget problem in this cycle;
+- quote-history/database processing is the largest single phase;
+- evaluator and registration DB work are the next largest contributors;
+- adding only a shorter HTTP timeout would not solve the observed overrun.
+
+The same fixture produced strong value candidates such as:
+- BTTS NO @ 2.44, edge about +21.70 pp, EV about +44.68%;
+- OU_25 UNDER @ 2.62, edge about +20.22 pp, EV about +43.37%.
+
+They were blocked by `MAX_OPEN_EXPOSURE_EXCEEDED`, consistent with the already verified full 3,000 RSD risk exposure cap.
+
+### Quote-history round-trip root cause
+
+Inspection of the PostgreSQL quote ingestion path showed that one 4-quote fixture could cause roughly thirteen separate connection-scoped persistence operations:
+
+- `series_for_fixture` repeated per quote;
+- `snapshots_for_series` repeated per quote;
+- `ensure_series` repeated per quote;
+- one final `append_snapshots` batch.
+
+This explains why quote processing could dominate the opportunity cycle even though the provider request completed in under two seconds.
+
+Existing quote-series/snapshot indexes were already present, so the primary issue was excessive round-trip/connection count rather than a missing basic index.
+
+### PR #53 — batch PostgreSQL quote-history ingestion
+
+**Merge commit:** `b6e0dffb6d770c72cd16abab474e7b529939c56a`
+
+PR #53 adds a PostgreSQL-optimized ingestion path:
+
+- preload all series definitions plus semantic observation identities for one fixture in one query/connection;
+- ensure all incoming series in one transaction/connection;
+- retain the existing batched snapshot append;
+- preserve generic/in-memory ingestion behavior;
+- preserve append-only observation identity and conflict detection.
+
+For an established four-quote fixture, the expected connection-scoped path drops from roughly thirteen operations to roughly three.
+
+The automatic Railway engine deployment again entered the source/check-suite gate.
+
+An exact-commit manual engine deployment was triggered:
+
+`6f60647f-00f2-4bb5-9dd6-e02c0847776d`
+
+for commit `b6e0dff...`.
+
+Production before/after timing verification is pending at this checkpoint.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
