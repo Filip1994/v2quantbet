@@ -185,7 +185,7 @@ def run(
     evaluator=None,
     live=(),
     kickoff_at=None,
-    provider_snapshot_max_age_seconds=14400,
+    provider_snapshot_max_age_seconds=28800,
 ):
     repository = Repository()
     if kickoff_at is not None:
@@ -248,11 +248,11 @@ def test_stale_observed_at_is_preserved_as_warning_and_can_accept() -> None:
     assert cycle.registered_pick_ids == ("pick-1",)
     assert registration.completed[0][2]["stale_quote"] is True
     assert registration.completed[0][2]["quote_age_seconds"] == 3 * 3600
-    assert repository.refresh_states[-1]["freshness_state"] == "STALE"
+    assert repository.refresh_states[-1]["freshness_state"] == "USABLE_STALE"
 
 
 def test_provider_snapshot_beyond_bounded_age_rejects() -> None:
-    too_old = NOW - timedelta(hours=4, minutes=1)
+    too_old = NOW - timedelta(hours=8, minutes=1)
     cycle, _, registration, _ = run(market(2.0, observed_at=too_old))
 
     assert cycle.registered_pick_ids == ()
