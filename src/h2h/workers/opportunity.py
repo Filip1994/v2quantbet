@@ -357,8 +357,19 @@ class OpportunityWorker:
                     )
                     for approved_id in self._bookmaker_ids
                 }
+                capture_tolerance = timedelta(seconds=60)
+                returned_states_by_bookmaker = {
+                    approved_id: tuple(
+                        state
+                        for state in states
+                        if timedelta(0) <= attempted_at - state.captured_at <= capture_tolerance
+                    )
+                    for approved_id, states in states_by_bookmaker.items()
+                }
                 market_states = tuple(
-                    state for states in states_by_bookmaker.values() for state in states
+                    state
+                    for states in returned_states_by_bookmaker.values()
+                    for state in states
                 )
                 if not market_states:
                     no_valid_quote_count += 1
@@ -373,7 +384,7 @@ class OpportunityWorker:
                             stale_retry_policy=self._stale_retry_policy,
                         )
                     error = OpportunityOddsUnavailableError(
-                        "provider returned no complete supported two-way market"
+                        "provider returned no complete supported two-way market in this cycle"
                     )
                     failures_to_persist.append(
                         (WORKER_NAME, fixture.fixture_id, error, attempted_at)
@@ -381,16 +392,13 @@ class OpportunityWorker:
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
                     continue
-                stale_markets = tuple(
-                    market
-                    for market in market_states
-                    if attempted_at - market.observed_at
-                    > timedelta(seconds=self._maximum_quote_age_seconds)
-                )
-                fresh_market_count += len(market_states) - len(stale_markets)
-                stale_market_count += len(stale_markets)
-                fresh_bookmaker_ids: list[int] = []
-                for approved_id, states in states_by_bookmaker.items():
+
+                strict_age = timedelta(seconds=self._maximum_quote_age_seconds)
+                provider_age = timedelta(seconds=self._provider_snapshot_max_age_seconds)
+                usable_market_keys: set[tuple[int, str]] = set()
+                strict_fresh_bookmaker_ids: set[int] = set()
+                usable_bookmaker_ids: set[int] = set()
+                for approved_id, states in returned_states_by_bookmaker.items():
                     if not states:
                         self._repository.record_quote_refresh_state(
                             fixture.fixture_id,
@@ -402,12 +410,24 @@ class OpportunityWorker:
                             stale_retry_policy=self._stale_retry_policy,
                         )
                         continue
-                    stale_for_book = tuple(
-                        state
-                        for state in states
-                        if attempted_at - state.observed_at
-                        > timedelta(seconds=self._maximum_quote_age_seconds)
-                    )
+
+                    stale_for_book = []
+                    for state in states:
+                        age = attempted_at - state.observed_at
+                        if age < timedelta(0) or age > provider_age:
+                            hard_stale_market_count += 1
+                            stale_market_count += 1
+                            stale_for_book.append(state)
+                            continue
+                        usable_market_keys.add((approved_id, state.market))
+                        usable_bookmaker_ids.add(approved_id)
+                        if age <= strict_age:
+                            fresh_market_count += 1
+                            strict_fresh_bookmaker_ids.add(approved_id)
+                        else:
+                            stale_market_count += 1
+                            stale_for_book.append(state)
+
                     if stale_for_book:
                         oldest = min(stale_for_book, key=lambda state: state.observed_at)
                         refresh_state = self._repository.record_quote_refresh_state(
@@ -416,32 +436,31 @@ class OpportunityWorker:
                             freshness_state="STALE",
                             attempted_at=attempted_at,
                             latest_observed_at=oldest.observed_at,
-                            latest_captured_at=oldest.captured_at,
+                            latest_captured_at=max(state.captured_at for state in states),
                             stale_retry_policy=self._stale_retry_policy,
                         )
                         if refresh_state.next_retry_at is not None:
                             stale_retries_scheduled += 1
-                        # Preserve the legacy single-bookmaker worker contract. The
-                        # production multi-bookmaker path fails closed on stale prices.
-                        if len(self._bookmaker_ids) == 1:
-                            fresh_bookmaker_ids.append(approved_id)
-                        continue
-                    fresh_bookmaker_ids.append(approved_id)
-                    self._repository.record_quote_refresh_state(
-                        fixture.fixture_id,
-                        approved_id,
-                        freshness_state="FRESH",
-                        attempted_at=attempted_at,
-                        latest_observed_at=min(state.observed_at for state in states),
-                        latest_captured_at=max(state.captured_at for state in states),
-                        stale_retry_policy=self._stale_retry_policy,
-                    )
-                if fixture.quote_freshness_state == "STALE" and fresh_bookmaker_ids:
+                    else:
+                        self._repository.record_quote_refresh_state(
+                            fixture.fixture_id,
+                            approved_id,
+                            freshness_state="FRESH",
+                            attempted_at=attempted_at,
+                            latest_observed_at=min(state.observed_at for state in states),
+                            latest_captured_at=max(state.captured_at for state in states),
+                            stale_retry_policy=self._stale_retry_policy,
+                        )
+
+                if (
+                    fixture.quote_freshness_state == "STALE"
+                    and strict_fresh_bookmaker_ids
+                ):
                     stale_retries_cleared += 1
-                if not fresh_bookmaker_ids:
+                if not usable_market_keys:
                     no_valid_quote_count += 1
                     error = OpportunityOddsUnavailableError(
-                        "no fresh complete market from an approved bookmaker"
+                        "no current provider-published market is within the bounded age policy"
                     )
                     failures_to_persist.append(
                         (WORKER_NAME, fixture.fixture_id, error, attempted_at)
@@ -455,14 +474,23 @@ class OpportunityWorker:
                     predictions.append(prediction.prediction_id)
                     snapshot_ids = tuple(
                         snapshot_id
-                        for approved_id in fresh_bookmaker_ids
+                        for approved_id in sorted(usable_bookmaker_ids)
                         for snapshot_id in self._repository.latest_complete_snapshot_ids(
                             fixture.fixture_id, approved_id
                         )
                     )
-                    preliminary_evaluations = tuple(
+                    evaluated_snapshots = tuple(
                         self._evaluator.execute(prediction.prediction_id, snapshot_id)
                         for snapshot_id in snapshot_ids
+                    )
+                    preliminary_evaluations = tuple(
+                        evaluation
+                        for evaluation in evaluated_snapshots
+                        if (
+                            evaluation.bookmaker_id,
+                            evaluation.market.value,
+                        )
+                        in usable_market_keys
                     )
                     evaluations.extend(
                         preliminary.evaluation_id for preliminary in preliminary_evaluations
