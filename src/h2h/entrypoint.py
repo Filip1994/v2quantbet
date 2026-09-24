@@ -138,6 +138,11 @@ def _run_active_leader(
         ),
         ScheduledJob("daily_bulletin", 60.0, bulletin_worker.run_once),
         ScheduledJob(
+            "closing_proxy",
+            application.settings.live_close_poll_seconds,
+            application.live_closing_proxy.run_once,
+        ),
+        ScheduledJob(
             "monitoring",
             float(lifecycle.monitoring_interval_seconds),
             application.monitoring.worker.run_once,
