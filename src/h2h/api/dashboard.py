@@ -302,11 +302,13 @@ class DashboardService:
         return [dict(zip(columns, row, strict=True)) for row in rows]
 
     def set_operator_state(self, pick_id: str, state: str, request_id: str) -> dict[str, Any]:
+        policy = _policy(self._application)
         event = self._application.operator_picks.set_state(
             pick_id,
             OperatorPickState(state),
             request_id,
             occurred_at=datetime.now(UTC),
+            max_open_exposure_minor=policy.max_open_exposure_minor,
         )
         return {
             "event_id": event.event_id,
