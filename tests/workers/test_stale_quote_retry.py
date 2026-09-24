@@ -129,6 +129,21 @@ def test_fresh_observation_uses_normal_captured_at_cadence() -> None:
     assert result.waiting_for_refresh_count == 1
 
 
+def test_persisted_usable_stale_uses_normal_cadence_without_priority_retry() -> None:
+    result = select(
+        selection_row(
+            freshness_state="USABLE_STALE",
+            stale_attempt_count=0,
+            stale_next_retry_at=None,
+            refresh_last_attempt_at=NOW,
+            observed_at=NOW - timedelta(hours=3),
+        )
+    )
+
+    assert result.due_fixtures == ()
+    assert result.waiting_for_refresh_count == 1
+
+
 def test_persisted_stale_retry_waits_until_due_without_tight_loop() -> None:
     waiting = select(
         selection_row(
@@ -363,9 +378,9 @@ def build_worker(repository, source, *, clock=lambda: NOW):
     return worker, evaluations, decisions
 
 
-def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
+def test_repeated_hard_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     stale_market = CompleteMarketQuoteState(
-        "BTTS", NOW - timedelta(minutes=30), NOW, "api-football"
+        "BTTS", NOW - timedelta(hours=9), NOW, "api-football"
     )
     repository = WorkerRepository(fixture(), (stale_market,))
     source = SimpleNamespace(
@@ -381,8 +396,37 @@ def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     assert repository.state is not None
     assert repository.state.stale_attempt_count == 2
     assert repository.state.next_retry_at == NOW + timedelta(minutes=4)
-    assert evaluations == ["snapshot-btts-no", "snapshot-btts-no"]
+    assert evaluations == []
     assert decisions == []
+
+
+def test_usable_stale_payload_is_evaluated_without_accelerated_retry() -> None:
+    observed_at = NOW - timedelta(hours=3)
+    repository = WorkerRepository(
+        fixture(),
+        (
+            CompleteMarketQuoteState(
+                "BTTS",
+                observed_at,
+                NOW - timedelta(hours=2),
+                "api-football",
+            ),
+        ),
+    )
+    worker, evaluations, _decisions = build_worker(
+        repository,
+        SimpleNamespace(fetch_quotes=lambda **_kwargs: returned_btts_quotes(observed_at)),
+    )
+
+    result = worker.run_once()
+
+    assert result.odds_unavailable_fixture_ids == ()
+    assert result.prediction_ids == ("prediction",)
+    assert evaluations == ["snapshot-btts-no"]
+    assert repository.state is not None
+    assert repository.state.freshness_state == "USABLE_STALE"
+    assert repository.state.stale_attempt_count == 0
+    assert repository.state.next_retry_at is None
 
 
 def test_repeated_current_provider_observation_is_not_rejected_by_old_capture_time() -> None:
