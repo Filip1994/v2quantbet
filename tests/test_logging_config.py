@@ -39,6 +39,9 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     record.risk_reserved_monitoring_count = 6
     record.risk_reserved_closed_for_odds_count = 3
     record.risk_reserved_without_monitoring_count = 1
+    record.risk_reserved_past_kickoff_count = 4
+    record.risk_reserved_past_10m_count = 3
+    record.risk_reserved_future_kickoff_count = 6
     record.selection_seconds = 0.12
     record.model_gate_seconds = 0.34
     record.preliminary_fetch_seconds = 4.56
@@ -76,6 +79,9 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["risk_reserved_monitoring_count"] == 6
     assert payload["risk_reserved_closed_for_odds_count"] == 3
     assert payload["risk_reserved_without_monitoring_count"] == 1
+    assert payload["risk_reserved_past_kickoff_count"] == 4
+    assert payload["risk_reserved_past_10m_count"] == 3
+    assert payload["risk_reserved_future_kickoff_count"] == 6
     assert payload["selection_seconds"] == 0.12
     assert payload["model_gate_seconds"] == 0.34
     assert payload["preliminary_fetch_seconds"] == 4.56
