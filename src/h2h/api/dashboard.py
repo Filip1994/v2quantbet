@@ -373,6 +373,22 @@ class DashboardService:
         return value.astimezone(UTC).strftime("%d %b %H:%M")
 
     @staticmethod
+    def _relative_age(value: datetime | None, reference: datetime) -> str:
+        if value is None:
+            return "—"
+        seconds = max(0, int((reference.astimezone(UTC) - value.astimezone(UTC)).total_seconds()))
+        if seconds < 60:
+            return "just now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}min ago"
+        hours, minutes = divmod(minutes, 60)
+        if hours < 24:
+            return f"{hours}h {minutes}mins ago" if minutes else f"{hours}h ago"
+        days, hours = divmod(hours, 24)
+        return f"{days}d {hours}h ago" if hours else f"{days}d ago"
+
+    @staticmethod
     def _short_id(value: Any) -> str:
         text = str(value or "")
         return text[-10:] if len(text) > 10 else text or "—"
@@ -537,7 +553,9 @@ class DashboardService:
             "</tr>"
         )
 
-    def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
+    def _render_pick_row(
+        self, pick: dict[str, Any], currency: str, *, generated_at: datetime
+    ) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
         quality_live, quality_history, quality_history_title = self._quality_summary(pick)
@@ -612,7 +630,8 @@ class DashboardService:
             f'<span title="{escape(self._dt(pick.get("last_observed_at")))}">'
             f"<b>Last observed</b>{self._odd(pick.get('last_observed_odd'))}"
             f"{last_meta}"
-            f"<small>Observed {escape(self._dt(pick.get('last_observed_at')))}</small></span>"
+            f'<small class="quote-age">'
+            f"{escape(self._relative_age(pick.get('last_observed_at'), generated_at))}</small></span>"
             f'<span title="{escape(self._dt(pick.get("display_closing_observed_at")))}">'
             f"<b>Closing</b>{self._odd(pick.get('display_closing_odd'))}"
             f"{closing_meta}</span>"
@@ -666,7 +685,8 @@ class DashboardService:
             pick for pick in data["picks"] if not self._is_history_pick(pick)
         ]
         active_rows = "".join(
-            self._render_pick_row(pick, currency) for pick in active_picks
+            self._render_pick_row(pick, currency, generated_at=data["generated_at"])
+            for pick in active_picks
         )
         if not active_rows:
             active_rows = (
@@ -759,6 +779,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(82px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
+.quote-age{{font-size:7px;line-height:1.1;margin-top:3px}}
 .pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
 .bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:-.02em;line-height:1;white-space:nowrap;overflow:hidden}}
 .brand-bet365{{display:inline-flex;align-items:baseline;gap:1px;background:#087a4b;padding:6px 8px;border-radius:6px}}
