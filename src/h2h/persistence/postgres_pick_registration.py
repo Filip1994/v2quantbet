@@ -40,6 +40,35 @@ LOGGER = logging.getLogger("quantbet.registration")
 
 ConnectionFactory = Callable[[], Any]
 
+_EXPOSURE_BREAKDOWN_SQL = (
+    "WITH unresolved_reserved AS ("
+    "SELECT l.pick_id, -l.amount_minor AS exposure_minor "
+    "FROM bankroll_ledger_entries l "
+    "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
+    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
+    "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
+    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+    "WHERE successor.prior_event_id = e.settlement_event_id))"
+    "), latest_operator AS ("
+    "SELECT DISTINCT ON (e.pick_id) e.pick_id, e.state "
+    "FROM pick_operator_state_events e "
+    "JOIN unresolved_reserved r ON r.pick_id = e.pick_id "
+    "ORDER BY e.pick_id, e.occurred_at DESC, e.persisted_at DESC, e.event_id DESC"
+    ") "
+    "SELECT COALESCE(SUM(r.exposure_minor), 0), COUNT(*), "
+    "COUNT(*) FILTER (WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), "
+    "COUNT(*) FILTER (WHERE o.state = 'SKIPPED'), "
+    "COALESCE(SUM(r.exposure_minor) FILTER (WHERE COALESCE(o.state, 'PLAYED') = 'PLAYED'), 0), "
+    "COALESCE(SUM(r.exposure_minor) FILTER (WHERE o.state = 'SKIPPED'), 0), "
+    "COUNT(*) FILTER (WHERE m.state = 'MONITORING'), "
+    "COUNT(*) FILTER (WHERE m.state = 'CLOSED_FOR_ODDS'), "
+    "COUNT(*) FILTER (WHERE m.pick_id IS NULL) "
+    "FROM unresolved_reserved r "
+    "LEFT JOIN latest_operator o ON o.pick_id = r.pick_id "
+    "LEFT JOIN pick_monitoring_states m ON m.pick_id = r.pick_id"
+)
+
+
 _EVALUATION_COLUMNS = (
     "evaluation_id, fixture_id, prediction_id, model_version_id, selected_series_id, "
     "companion_series_id, selected_snapshot_id, companion_snapshot_id, bookmaker_id, "
@@ -425,16 +454,11 @@ class PostgreSQLPickRegistrationRepository:
             ledger = cursor.fetchone()
             if ledger is None or int(ledger[0]) < policy.fixed_stake_minor:
                 failures.append("INSUFFICIENT_AVAILABLE_BANKROLL")
-            cursor.execute(
-                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
-                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
-                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
-                "WHERE successor.prior_event_id = e.settlement_event_id))",
-                (policy.bankroll_account_id,),
-            )
-            exposure = int(cursor.fetchone()[0])
+            cursor.execute(_EXPOSURE_BREAKDOWN_SQL, (policy.bankroll_account_id,))
+            exposure_row = cursor.fetchone()
+            if exposure_row is None:
+                raise RegistrationProvenanceError("risk exposure diagnostic query returned no row")
+            exposure = int(exposure_row[0])
             if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
                 failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
                 LOGGER.info(
@@ -447,6 +471,14 @@ class PostgreSQLPickRegistrationRepository:
                         "available_bankroll_minor": (
                             None if ledger is None else int(ledger[0])
                         ),
+                        "risk_reserved_pick_count": int(exposure_row[1]),
+                        "risk_reserved_played_count": int(exposure_row[2]),
+                        "risk_reserved_skipped_count": int(exposure_row[3]),
+                        "risk_reserved_played_minor": int(exposure_row[4]),
+                        "risk_reserved_skipped_minor": int(exposure_row[5]),
+                        "risk_reserved_monitoring_count": int(exposure_row[6]),
+                        "risk_reserved_closed_for_odds_count": int(exposure_row[7]),
+                        "risk_reserved_without_monitoring_count": int(exposure_row[8]),
                     },
                 )
             return tuple(failures)
