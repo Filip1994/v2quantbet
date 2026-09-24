@@ -701,6 +701,31 @@ class OpportunityWorker:
                             rejected_picks += 1
                             fallback_attempts += 1
                             continue
+                        if quote_age > self._provider_snapshot_max_age_seconds:
+                            self._repository.record_quote_refresh_state(
+                                fixture.fixture_id,
+                                preliminary.bookmaker_id,
+                                freshness_state="STALE",
+                                attempted_at=captured_at,
+                                latest_observed_at=final_market.observed_at,
+                                latest_captured_at=captured_at,
+                                stale_retry_policy=self._stale_retry_policy,
+                            )
+                            self._register.reject_final_quote_verification(
+                                claim.verification_id,
+                                reason_codes=(
+                                    FinalQuoteRejectionCode.FINAL_QUOTE_STALE.value,
+                                ),
+                                returned_source=selected_quote.source,
+                                returned_observed_at=final_market.observed_at,
+                                returned_captured_at=captured_at,
+                                quote_age_seconds=quote_age,
+                            )
+                            decisions += 1
+                            rejected_picks += 1
+                            fallback_attempts += 1
+                            continue
+
                         stale_quote = quote_age > self._maximum_quote_age_seconds
                         if stale_quote:
                             self._repository.record_quote_refresh_state(
@@ -713,7 +738,7 @@ class OpportunityWorker:
                                 stale_retry_policy=self._stale_retry_policy,
                             )
                             LOGGER.warning(
-                                "final quote verification returned stale provider observation",
+                                "final quote verification used latest published provider snapshot",
                                 extra={
                                     "worker": WORKER_NAME,
                                     "fixture_id": fixture.fixture_id,
@@ -722,23 +747,13 @@ class OpportunityWorker:
                                     "returned_observed_at": final_market.observed_at,
                                     "captured_at": captured_at,
                                     "quote_age_seconds": quote_age,
+                                    "provider_snapshot_max_age_seconds": (
+                                        self._provider_snapshot_max_age_seconds
+                                    ),
                                     "stale_quote": True,
                                     "warning_codes": ("STALE_QUOTE_WARNING",),
                                 },
                             )
-                            if len(self._bookmaker_ids) > 1:
-                                self._register.reject_final_quote_verification(
-                                    claim.verification_id,
-                                    reason_codes=(FinalQuoteRejectionCode.FINAL_QUOTE_STALE.value,),
-                                    returned_source=selected_quote.source,
-                                    returned_observed_at=final_market.observed_at,
-                                    returned_captured_at=captured_at,
-                                    quote_age_seconds=quote_age,
-                                )
-                                decisions += 1
-                                rejected_picks += 1
-                                fallback_attempts += 1
-                                continue
 
                         exact_snapshots = self._repository.snapshot_ids_for_market_observation(
                             fixture.fixture_id,
