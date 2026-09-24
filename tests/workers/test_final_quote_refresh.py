@@ -260,7 +260,7 @@ def test_provider_snapshot_beyond_bounded_age_rejects() -> None:
     assert registration.rejections[0][1]["reason_codes"] == ("FINAL_QUOTE_STALE",)
 
 
-def test_live_proxy_rejects_stale_bookmaker_price_that_no_longer_meets_value() -> None:
+def test_usable_stale_candidate_is_not_vetoed_or_polled_via_live_proxy() -> None:
     stale = NOW - timedelta(hours=3)
     live = (
         SimpleNamespace(
@@ -275,33 +275,9 @@ def test_live_proxy_rejects_stale_bookmaker_price_that_no_longer_meets_value() -
         kickoff_at=NOW + timedelta(minutes=10),
     )
 
-    assert source.live_calls == 1
-    assert cycle.registered_pick_ids == ()
-    assert cycle.live_corroborations == 1
-    assert cycle.live_proxy_rejections == 1
-    assert registration.rejections[-1][1]["reason_codes"] == (
-        "FINAL_QUOTE_LIVE_PROXY_BELOW_MINIMUM",
-    )
-
-
-def test_live_proxy_can_corroborate_bounded_stale_bookmaker_price() -> None:
-    stale = NOW - timedelta(hours=3)
-    live = (
-        SimpleNamespace(
-            market=Market.BTTS,
-            selection=Selection.YES,
-            odd=2.00,
-        ),
-    )
-    cycle, source, registration, _ = run(
-        market(2.0, observed_at=stale),
-        live=live,
-        kickoff_at=NOW + timedelta(minutes=10),
-    )
-
-    assert source.live_calls == 1
+    assert source.live_calls == 0
     assert cycle.registered_pick_ids == ("pick-1",)
-    assert cycle.live_corroborations == 1
+    assert cycle.live_corroborations == 0
     assert cycle.live_proxy_rejections == 0
     assert registration.completed[0][2]["stale_quote"] is True
 
