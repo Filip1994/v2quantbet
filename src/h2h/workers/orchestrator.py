@@ -46,10 +46,13 @@ class ScheduledJob:
     interval_seconds: float
     run: Callable[[], object]
     has_pending_work: Callable[[], bool] = lambda: False
+    pending_delay_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.name.strip() or self.interval_seconds <= 0:
             raise ValueError("scheduled job requires a name and positive interval")
+        if self.pending_delay_seconds < 0:
+            raise ValueError("scheduled job pending delay must be non-negative")
 
 
 class ProductionOrchestrator:
@@ -94,13 +97,14 @@ class ProductionOrchestrator:
                     finished = self._clock().astimezone(UTC)
                     pending = job.has_pending_work()
                     # Ordinary cadence is completion-based: an overrun cannot make the
-                    # same worker instantly due again. Pending bounded work is eligible
-                    # in the next outer scheduler round, after every other due job has
-                    # received one execution opportunity.
-                    next_due = (
-                        finished
-                        if pending
-                        else finished + timedelta(seconds=job.interval_seconds)
+                    # same worker instantly due again. Pending bounded work can opt into
+                    # a small cooldown; zero preserves eager next-round scheduling.
+                    next_due = finished + timedelta(
+                        seconds=(
+                            job.pending_delay_seconds
+                            if pending
+                            else job.interval_seconds
+                        )
                     )
                     self._runtime.worker_succeeded(
                         job.name, self._instance_id, at=finished, next_due_at=next_due
