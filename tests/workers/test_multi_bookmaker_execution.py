@@ -46,6 +46,36 @@ def quotes(
     return result if complete else result[:1]
 
 
+def ou_quotes(
+    bookmaker_id: int,
+    *,
+    observed_at: datetime = NOW - timedelta(seconds=5),
+):
+    name = {8: "Bet365", 11: "1xBet", 34: "Superbet"}[bookmaker_id]
+    return (
+        CanonicalQuote(
+            "api-football:1",
+            bookmaker_id,
+            name,
+            Market.OU_25,
+            Selection.OVER,
+            2.0,
+            observed_at,
+            "api-football",
+        ),
+        CanonicalQuote(
+            "api-football:1",
+            bookmaker_id,
+            name,
+            Market.OU_25,
+            Selection.UNDER,
+            1.9,
+            observed_at,
+            "api-football",
+        ),
+    )
+
+
 class Repository:
     fixture = OpportunityFixture(
         "api-football:1",
@@ -60,7 +90,14 @@ class Repository:
         return OpportunitySelection(1, 0, 0, 0, (self.fixture,))
 
     def latest_complete_market_states(self, *_args):
-        return (SimpleNamespace(market="BTTS", observed_at=NOW, captured_at=NOW),)
+        return (
+            SimpleNamespace(
+                market="BTTS",
+                observed_at=NOW - timedelta(seconds=5),
+                captured_at=NOW,
+                source="api-football",
+            ),
+        )
 
     def record_quote_refresh_state(self, *_args, **_kwargs):
         return SimpleNamespace(next_retry_at=None)
@@ -138,6 +175,7 @@ class StalePublishedRepository(Repository):
                 market="BTTS",
                 observed_at=NOW - timedelta(hours=3),
                 captured_at=NOW,
+                source="api-football",
             ),
         )
 
@@ -200,11 +238,13 @@ class MixedFreshnessRepository(Repository):
                 market="BTTS",
                 observed_at=NOW - timedelta(hours=5),
                 captured_at=NOW,
+                source="api-football",
             ),
             SimpleNamespace(
                 market="OU_25",
                 observed_at=NOW - timedelta(seconds=5),
                 captured_at=NOW,
+                source="api-football",
             ),
         )
 
@@ -242,7 +282,16 @@ class RejectBeforeFinal(Registration):
 def test_hard_stale_market_does_not_block_fresh_market_at_same_bookmaker() -> None:
     worker = OpportunityWorker(
         MixedFreshnessRepository(),
-        SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),)),
+        SimpleNamespace(
+            fetch_quotes=lambda **_kwargs: tuple(
+                quote
+                for bookmaker_id in (8, 11, 34)
+                for quote in (
+                    quotes(bookmaker_id, 2.0, observed_at=NOW - timedelta(hours=5))
+                    + ou_quotes(bookmaker_id, observed_at=NOW - timedelta(seconds=5))
+                )
+            )
+        ),
         SimpleNamespace(ingest=lambda *_args, **_kwargs: 0),
         SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
         MixedEvaluator(),
