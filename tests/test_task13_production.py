@@ -57,6 +57,7 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert settings.model_training_policy.min_matches == 80
     assert settings.model_training_policy.xi == 0.0018
     assert settings.model_training_policy.previous_seasons == 1
+    assert settings.api_football_published_max_age_seconds == 14400
     assert settings.live_close_poll_seconds == 60
     assert settings.live_close_window_seconds == 900
     assert settings.live_close_max_age_seconds == 120
@@ -80,12 +81,21 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
         ("QUANTBET_LIVE_CLOSE_POLL_SECONDS", "0"),
         ("QUANTBET_LIVE_CLOSE_WINDOW_SECONDS", "0"),
         ("QUANTBET_LIVE_CLOSE_MAX_AGE_SECONDS", "0"),
+        ("QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "0"),
     ],
 )
 def test_production_config_rejects_partial_or_invalid_values(name: str, value: str) -> None:
     environment = production_environment()
     environment[name] = value
     with pytest.raises(ConfigError):
+        load_production_settings(environment)
+
+
+def test_production_config_rejects_provider_age_below_strict_quote_age() -> None:
+    environment = production_environment()
+    environment["QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS"] = "299"
+
+    with pytest.raises(ConfigError, match="must be at least"):
         load_production_settings(environment)
 
 
@@ -151,8 +161,8 @@ class OpportunityRepositoryFake:
         return ("snapshot-a", "snapshot-b")
 
     def latest_complete_market_states(self, _fixture_id, _bookmaker_id):
-        now = datetime.now(UTC)
-        return (SimpleNamespace(observed_at=now, captured_at=now),)
+        now = datetime.now(UTC) - timedelta(seconds=1)
+        return (SimpleNamespace(market="BTTS", observed_at=now, captured_at=now),)
 
     def record_quote_refresh_state(self, *_args, freshness_state, attempted_at, **_kwargs):
         return SimpleNamespace(
@@ -187,6 +197,7 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     evaluator = SimpleNamespace(
         execute=lambda _prediction, snapshot: SimpleNamespace(
             evaluation_id=f"eval-{snapshot}",
+            bookmaker_id=8,
             market=SimpleNamespace(value="BTTS"),
             selected_selection=SimpleNamespace(value="YES"),
             selected_odd=1.5,

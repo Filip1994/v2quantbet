@@ -267,6 +267,9 @@ def build_production_application(
         maximum_quote_age_seconds=(
             application_settings.registration_policy.maximum_quote_age_seconds
         ),
+        provider_snapshot_max_age_seconds=(
+            settings.api_football_published_max_age_seconds
+        ),
         minimum_time_to_kickoff_seconds=(
             application_settings.registration_policy.minimum_time_to_kickoff_seconds
         ),

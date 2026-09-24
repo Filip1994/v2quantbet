@@ -282,6 +282,7 @@ def build_worker(repository, source, *, clock=lambda: NOW):
         evaluations.append(snapshot_id)
         return SimpleNamespace(
             evaluation_id=f"evaluation:{snapshot_id}",
+            bookmaker_id=8,
             market=SimpleNamespace(value="BTTS"),
             selected_selection=SimpleNamespace(value="YES"),
             selected_odd=1.5,
@@ -372,6 +373,32 @@ def test_budget_exhaustion_suppresses_stale_retry_before_persistence() -> None:
     assert result.stale_retries_requested == 1
     assert result.stale_retries_suppressed_by_budget == 1
     assert repository.state is None
+
+
+def test_latest_snapshot_query_selects_only_latest_capture_for_chosen_observation() -> None:
+    connection = SelectionConnection([])
+    repository = PostgreSQLRuntimeRepository(connect=lambda: connection)
+
+    assert repository.latest_complete_snapshot_ids("api-football:1549793", 8) == ()
+    assert "q.captured_at = c.captured_at" in connection._cursor.query
+
+
+def test_exact_market_snapshot_query_deduplicates_repeated_provider_observation() -> None:
+    connection = SelectionConnection([])
+    repository = PostgreSQLRuntimeRepository(connect=lambda: connection)
+
+    assert (
+        repository.snapshot_ids_for_market_observation(
+            "api-football:1549793",
+            8,
+            "BTTS",
+            NOW,
+            "api-football",
+        )
+        == ()
+    )
+    assert "DISTINCT ON (s.selection)" in connection._cursor.query
+    assert "q.captured_at DESC" in connection._cursor.query
 
 
 def test_complete_market_query_never_combines_different_observation_times() -> None:

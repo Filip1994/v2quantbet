@@ -13,6 +13,7 @@ from h2h.domain.odds import CanonicalQuote, Market
 
 from .api_football_client import ApiFootballClient
 from .api_football_adapter import api_football_bet_id_for_market
+from .api_football_live import LiveMarketQuote, parse_api_football_live_quotes
 from .api_football_ingestion import (
     build_api_football_market_snapshots,
     ingest_api_football_odds,
@@ -44,6 +45,16 @@ class ApiFootballOddsService:
             fixture_identity=fixture_identity,
             bookmaker_id=bookmaker_id,
         )
+
+    def fetch_live_quotes(
+        self,
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+    ) -> tuple[LiveMarketQuote, ...]:
+        """Fetch API-Football live-market quotes for freshness corroboration."""
+        provider_fixture_id = api_football_provider_fixture_id(fixture_identity)
+        response = self.client.fetch_live_odds(fixture_id=provider_fixture_id)
+        return parse_api_football_live_quotes(response, fixture_id=provider_fixture_id)
 
     def fetch_market_snapshots(
         self,

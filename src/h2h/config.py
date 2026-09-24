@@ -80,6 +80,7 @@ class ProductionSettings:
     opportunity_interval_seconds: float
     opportunity_max_items: int
     opportunity_max_wall_seconds: float
+    api_football_published_max_age_seconds: int
     live_close_poll_seconds: float
     live_close_window_seconds: int
     live_close_max_age_seconds: int
@@ -270,6 +271,17 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
     port = _positive_integer(values, "PORT", "8080")
     if port > 65535:
         raise ConfigError("PORT must be at most 65535")
+    provider_published_max_age = _positive_integer(
+        values, "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "14400"
+    )
+    if (
+        provider_published_max_age
+        < application.registration_policy.maximum_quote_age_seconds
+    ):
+        raise ConfigError(
+            "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS must be at least "
+            "QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS"
+        )
     return ProductionSettings(
         app_env=app_env,
         log_level=log_level,
@@ -291,6 +303,7 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
         opportunity_max_wall_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
         ),
+        api_football_published_max_age_seconds=provider_published_max_age,
         live_close_poll_seconds=_positive_number(
             values, "QUANTBET_LIVE_CLOSE_POLL_SECONDS", "60"
         ),

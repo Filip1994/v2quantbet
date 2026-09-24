@@ -17,6 +17,19 @@ def test_fetch_quotes_delegates_to_client_and_ingestion() -> None:
     client.fetch_odds.assert_called_once_with(fixture_id=42, bookmaker_id=None, bet_id=None)
 
 
+def test_fetch_live_quotes_delegates_to_live_client_and_parser() -> None:
+    client = Mock()
+    client.fetch_live_odds.return_value = {"response": []}
+    service = ApiFootballOddsService(client)
+
+    result = service.fetch_live_quotes(
+        fixture_identity=api_football_fixture_identity(42)
+    )
+
+    assert result == ()
+    client.fetch_live_odds.assert_called_once_with(fixture_id=42)
+
+
 def test_fetch_market_snapshots_delegates_to_client_and_ingestion() -> None:
     client = Mock()
     client.fetch_odds.return_value = {"response": []}

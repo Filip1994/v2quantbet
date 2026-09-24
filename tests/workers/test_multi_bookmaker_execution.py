@@ -13,7 +13,13 @@ NOW = datetime(2026, 9, 24, 12, tzinfo=UTC)
 POLICY = StaleQuoteRetryPolicy(timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1))
 
 
-def quotes(bookmaker_id: int, odd: float, *, complete: bool = True):
+def quotes(
+    bookmaker_id: int,
+    odd: float,
+    *,
+    complete: bool = True,
+    observed_at: datetime = NOW - timedelta(seconds=5),
+):
     name = {8: "Bet365", 11: "1xBet", 34: "Superbet"}[bookmaker_id]
     result = (
         CanonicalQuote(
@@ -23,7 +29,7 @@ def quotes(bookmaker_id: int, odd: float, *, complete: bool = True):
             Market.BTTS,
             Selection.YES,
             odd,
-            NOW - timedelta(seconds=5),
+            observed_at,
             "api-football",
         ),
         CanonicalQuote(
@@ -33,7 +39,7 @@ def quotes(bookmaker_id: int, odd: float, *, complete: bool = True):
             Market.BTTS,
             Selection.NO,
             1.9,
-            NOW - timedelta(seconds=5),
+            observed_at,
             "api-football",
         ),
     )
@@ -54,7 +60,7 @@ class Repository:
         return OpportunitySelection(1, 0, 0, 0, (self.fixture,))
 
     def latest_complete_market_states(self, *_args):
-        return (SimpleNamespace(observed_at=NOW, captured_at=NOW),)
+        return (SimpleNamespace(market="BTTS", observed_at=NOW, captured_at=NOW),)
 
     def record_quote_refresh_state(self, *_args, **_kwargs):
         return SimpleNamespace(next_retry_at=None)
@@ -123,6 +129,144 @@ class Registration:
     @staticmethod
     def minimum_playable_odds(model_probability):
         return 1.05 / model_probability
+
+
+class StalePublishedRepository(Repository):
+    def latest_complete_market_states(self, *_args):
+        return (
+            SimpleNamespace(
+                market="BTTS",
+                observed_at=NOW - timedelta(hours=3),
+                captured_at=NOW,
+            ),
+        )
+
+
+def test_multi_bookmaker_accepts_bounded_latest_published_snapshot() -> None:
+    calls = []
+    stale = NOW - timedelta(hours=3)
+
+    def fetch_quotes(**kwargs):
+        calls.append(kwargs["bookmaker_id"])
+        if kwargs["bookmaker_id"] is None:
+            return (
+                quotes(8, 2.0, observed_at=stale)
+                + quotes(11, 2.2, observed_at=stale)
+                + quotes(34, 2.1, observed_at=stale)
+            )
+        if kwargs["bookmaker_id"] == 11:
+            return quotes(11, 2.2, complete=False, observed_at=stale)
+        return quotes(
+            kwargs["bookmaker_id"],
+            Evaluator.odds[kwargs["bookmaker_id"]],
+            observed_at=stale,
+        )
+
+    registration = Registration()
+    worker = OpportunityWorker(
+        StalePublishedRepository(),
+        SimpleNamespace(fetch_quotes=fetch_quotes),
+        SimpleNamespace(ingest=lambda *_args, **_kwargs: 0),
+        SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
+        Evaluator(),
+        registration,
+        bookmaker_id=8,
+        bookmaker_ids=(8, 11, 34),
+        allowed_statuses=("NS",),
+        ensure_model_available=lambda _fixture: None,
+        should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=POLICY,
+        provider_snapshot_max_age_seconds=14400,
+        clock=lambda: NOW,
+    )
+
+    cycle = worker.run_once()
+
+    assert calls == [None, 11, 34]
+    assert cycle.registered_pick_ids == ("pick-superbet",)
+    assert cycle.stale_market_count == 3
+    assert all(
+        "FINAL_QUOTE_STALE" not in reason_codes
+        for _, reason_codes in registration.rejected
+    )
+
+
+class MixedFreshnessRepository(Repository):
+    def latest_complete_market_states(self, *_args):
+        return (
+            SimpleNamespace(
+                market="BTTS",
+                observed_at=NOW - timedelta(hours=5),
+                captured_at=NOW,
+            ),
+            SimpleNamespace(
+                market="OU_25",
+                observed_at=NOW - timedelta(seconds=5),
+                captured_at=NOW,
+            ),
+        )
+
+    def latest_complete_snapshot_ids(self, _fixture_id, bookmaker_id):
+        return (
+            f"pre-btts-{bookmaker_id}",
+            f"pre-ou-{bookmaker_id}",
+        )
+
+
+class MixedEvaluator:
+    def execute(self, _prediction_id, snapshot_id):
+        bookmaker_id = int(snapshot_id.rsplit("-", 1)[1])
+        is_btts = "btts" in snapshot_id
+        return SimpleNamespace(
+            evaluation_id=f"evaluation:{snapshot_id}",
+            fixture_id="api-football:1",
+            bookmaker_id=bookmaker_id,
+            bookmaker_key={8: "bet365", 11: "1xbet", 34: "superbet"}[bookmaker_id],
+            market=Market.BTTS if is_btts else Market.OU_25,
+            selected_selection=Selection.YES if is_btts else Selection.OVER,
+            selected_odd=2.0,
+            edge=-0.1,
+            expected_value=-0.1,
+            model_probability=0.50,
+            source="api-football",
+        )
+
+
+class RejectBeforeFinal(Registration):
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return ("EDGE_BELOW_MINIMUM",)
+
+
+def test_hard_stale_market_does_not_block_fresh_market_at_same_bookmaker() -> None:
+    worker = OpportunityWorker(
+        MixedFreshnessRepository(),
+        SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),)),
+        SimpleNamespace(ingest=lambda *_args, **_kwargs: 0),
+        SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
+        MixedEvaluator(),
+        RejectBeforeFinal(),
+        bookmaker_id=8,
+        bookmaker_ids=(8, 11, 34),
+        allowed_statuses=("NS",),
+        ensure_model_available=lambda _fixture: None,
+        should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=POLICY,
+        provider_snapshot_max_age_seconds=14400,
+        clock=lambda: NOW,
+    )
+
+    cycle = worker.run_once()
+
+    assert cycle.prediction_ids == ("prediction",)
+    assert cycle.fresh_market_count == 3
+    assert cycle.hard_stale_market_count == 3
+    assert cycle.stale_market_count == 3
+    assert len(cycle.evaluation_ids) == 3
+    assert all("pre-ou-" in item for item in cycle.evaluation_ids)
 
 
 def test_best_price_is_final_verified_and_incomplete_winner_falls_back() -> None:
