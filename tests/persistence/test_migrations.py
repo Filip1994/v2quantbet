@@ -231,6 +231,20 @@ def test_full_opportunity_backoff_flush_touches_only_transient_worker_state() ->
     assert "bankroll" not in statements
 
 
+def test_usable_stale_quote_migration_extends_only_refresh_state_enum() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "020_usable_stale_quote_state.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "USABLE_STALE" in migration
+    assert "production_quote_refresh_states" in migration
+    assert "registered_picks" not in migration
+    assert "quote_snapshots" not in migration
+    assert "pick_decisions" not in migration
+
+
 def test_operator_state_migration_is_minimal_and_append_only() -> None:
     migration = (
         Path(__file__).parents[2] / "migrations" / "014_pick_operator_state.sql"
