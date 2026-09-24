@@ -810,6 +810,106 @@ class OpportunityWorker:
                             rejected_picks += 1
                             fallback_attempts += 1
                             continue
+                        if (
+                            stale_quote
+                            and fixture.kickoff_at - captured_at <= timedelta(minutes=15)
+                        ):
+                            fetch_live = getattr(self._source, "fetch_live_quotes", None)
+                            if fetch_live is not None:
+                                try:
+                                    live_quotes = tuple(
+                                        fetch_live(fixture_identity=fixture.identity)
+                                    )
+                                    odds_fetches += 1
+                                except ApiBudgetExceededError:
+                                    LOGGER.info(
+                                        "live proxy corroboration skipped by provider budget",
+                                        extra={
+                                            "worker": WORKER_NAME,
+                                            "fixture_id": fixture.fixture_id,
+                                            "market": final_evaluation.market.value,
+                                            "selection": (
+                                                final_evaluation.selected_selection.value
+                                            ),
+                                        },
+                                    )
+                                except (
+                                    TransportError,
+                                    QuoteNormalizationError,
+                                    TypeError,
+                                    RuntimeError,
+                                ) as exc:
+                                    LOGGER.info(
+                                        "live proxy corroboration unavailable",
+                                        extra={
+                                            "worker": WORKER_NAME,
+                                            "fixture_id": fixture.fixture_id,
+                                            "market": final_evaluation.market.value,
+                                            "selection": (
+                                                final_evaluation.selected_selection.value
+                                            ),
+                                            "error_class": type(exc).__name__,
+                                        },
+                                    )
+                                else:
+                                    live_match = tuple(
+                                        quote
+                                        for quote in live_quotes
+                                        if quote.market == final_evaluation.market
+                                        and quote.selection
+                                        == final_evaluation.selected_selection
+                                    )
+                                    if len(live_match) == 1:
+                                        live_corroborations += 1
+                                        minimum_playable = float(
+                                            self._register.minimum_playable_odds(
+                                                final_evaluation.model_probability
+                                            )
+                                        )
+                                        if live_match[0].odd < minimum_playable:
+                                            self._register.reject_final_quote_verification(
+                                                claim.verification_id,
+                                                reason_codes=(
+                                                    FinalQuoteRejectionCode
+                                                    .FINAL_QUOTE_LIVE_PROXY_BELOW_MINIMUM
+                                                    .value,
+                                                ),
+                                                returned_source=selected_quote.source,
+                                                returned_observed_at=(
+                                                    final_market.observed_at
+                                                ),
+                                                returned_captured_at=captured_at,
+                                                quote_age_seconds=quote_age,
+                                            )
+                                            decisions += 1
+                                            rejected_picks += 1
+                                            fallback_attempts += 1
+                                            live_proxy_rejections += 1
+                                            LOGGER.info(
+                                                "stale bookmaker quote rejected by live proxy",
+                                                extra={
+                                                    "worker": WORKER_NAME,
+                                                    "fixture_id": fixture.fixture_id,
+                                                    "market": (
+                                                        final_evaluation.market.value
+                                                    ),
+                                                    "selection": (
+                                                        final_evaluation
+                                                        .selected_selection.value
+                                                    ),
+                                                    "bookmaker_odd": (
+                                                        final_evaluation.selected_odd
+                                                    ),
+                                                    "live_proxy_odd": (
+                                                        live_match[0].odd
+                                                    ),
+                                                    "minimum_playable_odds": (
+                                                        minimum_playable
+                                                    ),
+                                                },
+                                            )
+                                            continue
+
                         ready = self._register.complete_final_quote_verification(
                             claim.verification_id,
                             final_evaluation.evaluation_id,
@@ -926,6 +1026,9 @@ class OpportunityWorker:
             fallback_attempts=fallback_attempts,
             no_valid_quote_count=no_valid_quote_count,
             bookmaker_wins=tuple(sorted(bookmaker_wins.items())),
+            hard_stale_market_count=hard_stale_market_count,
+            live_corroborations=live_corroborations,
+            live_proxy_rejections=live_proxy_rejections,
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -957,6 +1060,9 @@ class OpportunityWorker:
                 "budget_exhausted": cycle.budget_exhausted,
                 "fresh_market_count": cycle.fresh_market_count,
                 "stale_market_count": cycle.stale_market_count,
+                "hard_stale_market_count": cycle.hard_stale_market_count,
+                "live_corroborations": cycle.live_corroborations,
+                "live_proxy_rejections": cycle.live_proxy_rejections,
                 "stale_retries_requested": cycle.stale_retries_requested,
                 "stale_retries_scheduled": cycle.stale_retries_scheduled,
                 "stale_retries_cleared": cycle.stale_retries_cleared,
