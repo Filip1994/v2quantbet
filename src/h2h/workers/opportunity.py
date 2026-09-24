@@ -76,6 +76,9 @@ class OpportunityCycle:
     fallback_attempts: int = 0
     no_valid_quote_count: int = 0
     bookmaker_wins: tuple[tuple[int, int], ...] = ()
+    hard_stale_market_count: int = 0
+    live_corroborations: int = 0
+    live_proxy_rejections: int = 0
 
 
 class OpportunityOddsUnavailableError(RuntimeError):
@@ -132,6 +135,7 @@ class OpportunityWorker:
         maximum_quote_age_seconds: int,
         minimum_time_to_kickoff_seconds: int,
         stale_retry_policy: StaleQuoteRetryPolicy,
+        provider_snapshot_max_age_seconds: int = 14400,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
@@ -139,6 +143,10 @@ class OpportunityWorker:
             raise ValueError("opportunity budgets must be positive")
         if maximum_quote_age_seconds <= 0 or minimum_time_to_kickoff_seconds <= 0:
             raise ValueError("quote age and kickoff bounds must be positive")
+        if provider_snapshot_max_age_seconds < maximum_quote_age_seconds:
+            raise ValueError(
+                "provider snapshot max age must be at least the strict quote age"
+            )
         self._repository = repository
         self._source = source
         self._ingestion = ingestion
@@ -160,6 +168,7 @@ class OpportunityWorker:
         self._maximum_quote_age_seconds = maximum_quote_age_seconds
         self._minimum_time_to_kickoff_seconds = minimum_time_to_kickoff_seconds
         self._stale_retry_policy = stale_retry_policy
+        self._provider_snapshot_max_age_seconds = provider_snapshot_max_age_seconds
         self._clock = clock
         self._monotonic = monotonic_clock
         self._cursor: OpportunityCursor | None = None
@@ -252,6 +261,9 @@ class OpportunityWorker:
         fallback_attempts = 0
         no_valid_quote_count = 0
         bookmaker_wins: dict[int, int] = {}
+        hard_stale_market_count = 0
+        live_corroborations = 0
+        live_proxy_rejections = 0
         try:
             for fixture in due:
                 if self._should_stop():
