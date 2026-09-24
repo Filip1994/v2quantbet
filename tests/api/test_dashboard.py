@@ -29,6 +29,7 @@ def _pick(**changes: object) -> dict[str, object]:
         "pick_odd": 1.95,
         "last_observed_odd": 2.01,
         "last_observed_at": NOW,
+        "last_checked_at": NOW,
         "last_observed_source": "SAME_BOOK",
         "last_observed_freshness": "FRESH",
         "display_closing_odd": 2.05,
@@ -172,6 +173,7 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
     for label in ("First seen", "Pick", "Last observed", "Closing"):
         assert f"<b>{label}</b>" in html
     assert '<small class="quote-age">2h 36mins ago</small>' in html
+    assert '<small class="check-age">checked just now</small>' in html
     assert 'title="23 Sep 2026 · 09:24 UTC"' in html
     assert "Observed 23 Sep" not in html
     assert "Best current" not in html
