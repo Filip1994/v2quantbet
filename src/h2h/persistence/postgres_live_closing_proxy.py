@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from h2h.domain.odds import Market, Selection
 from h2h.domain.settlement import realized_clv_ppm
