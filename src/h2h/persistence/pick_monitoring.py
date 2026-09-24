@@ -13,12 +13,14 @@ from h2h.domain.pick_monitoring import (
     PickOddsLifecycle,
 )
 from h2h.domain.fixture_identity import ResolvedFixtureIdentity
+from h2h.domain.odds import Market
 
 
 @dataclass(frozen=True, slots=True)
 class PickQuoteRefreshTarget:
     fixture_identity: ResolvedFixtureIdentity
     bookmaker_id: int
+    market: Market | None = None
 
 
 class PickMonitoringConflictError(ValueError):

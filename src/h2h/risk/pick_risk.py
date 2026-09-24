@@ -18,11 +18,11 @@ def evaluate_risk(
     stake: FixedStakeDecision,
     snapshot: BankrollRiskSnapshot,
     *,
-    duplicate_fixture_market: bool,
+    duplicate_fixture: bool,
 ) -> tuple[RiskRejectionCode, ...]:
     failures: set[RiskRejectionCode] = set()
-    if duplicate_fixture_market:
-        failures.add(RiskRejectionCode.DUPLICATE_FIXTURE_MARKET)
+    if duplicate_fixture:
+        failures.add(RiskRejectionCode.DUPLICATE_FIXTURE)
     if stake.amount_minor > snapshot.max_stake_per_pick_minor:
         failures.add(RiskRejectionCode.STAKE_EXCEEDS_PER_PICK_LIMIT)
     if stake.amount_minor > snapshot.balance_before_minor:

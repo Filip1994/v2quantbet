@@ -19,6 +19,7 @@ from h2h.domain.pick_monitoring import (
     QuoteFreshness,
 )
 from h2h.domain.fixture_identity import ProviderFixtureReference, ResolvedFixtureIdentity
+from h2h.domain.odds import Market
 from h2h.persistence.pick_monitoring import (
     PickClosingNotDueError,
     PickMonitoringConflictError,
@@ -389,12 +390,12 @@ class PostgreSQLPickMonitoringRepository:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT DISTINCT f.fixture_id, f.provider, f.provider_fixture_id, "
-                "e.bookmaker_id FROM registered_picks r "
+                "e.bookmaker_id, r.market FROM registered_picks r "
                 "JOIN fixtures f ON f.fixture_id = r.fixture_id "
                 "JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id "
                 "JOIN pick_monitoring_states m ON m.pick_id = r.pick_id "
                 "WHERE r.pick_id = ANY(%s) AND m.state = 'MONITORING' "
-                "ORDER BY f.fixture_id, e.bookmaker_id",
+                "ORDER BY f.fixture_id, e.bookmaker_id, r.market",
                 (list(pick_ids),),
             )
             return tuple(
@@ -404,6 +405,7 @@ class PostgreSQLPickMonitoringRepository:
                         provider_reference=ProviderFixtureReference(row[1], row[2]),
                     ),
                     int(row[3]),
+                    Market(row[4]),
                 )
                 for row in cursor.fetchall()
             )
@@ -415,6 +417,9 @@ class PostgreSQLPickMonitoringRepository:
             "c.configuration->'allowed_fixture_statuses', r.entry_snapshot_id, "
             "(c.configuration->>'maximum_quote_age_seconds')::integer "
             "FROM registered_picks r JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id "
+            "JOIN quote_series s ON s.series_id = e.selected_series_id "
+            "AND s.fixture_id = r.fixture_id AND s.bookmaker_id = e.bookmaker_id "
+            "AND s.market = r.market AND s.selection = r.selection "
             "JOIN pick_policy_configurations c ON c.config_fingerprint = r.config_fingerprint "
             "WHERE r.pick_id = %s AND r.entry_snapshot_id = e.selected_snapshot_id",
             (pick_id,),

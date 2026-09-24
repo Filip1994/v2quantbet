@@ -456,7 +456,17 @@ class OpportunityWorker:
                         preliminary.evaluation_id for preliminary in preliminary_evaluations
                     )
                     if len(self._bookmaker_ids) == 1:
-                        ordered_preliminaries = preliminary_evaluations
+                        ordered_preliminaries = tuple(
+                            sorted(
+                                preliminary_evaluations,
+                                key=lambda candidate: (
+                                    -float(candidate.expected_value),
+                                    -float(candidate.edge),
+                                    -float(candidate.selected_odd),
+                                    candidate.evaluation_id,
+                                ),
+                            )
+                        )
                     else:
                         ranked_sets = rank_best_prices(preliminary_evaluations)
                         ordered_preliminaries = tuple(
@@ -516,6 +526,7 @@ class OpportunityWorker:
                                 bookmaker_wins[preliminary.bookmaker_id] = (
                                     bookmaker_wins.get(preliminary.bookmaker_id, 0) + 1
                                 )
+                                break
                             else:
                                 rejected_picks += 1
                                 fallback_attempts += 1
@@ -554,6 +565,7 @@ class OpportunityWorker:
                             final_quotes = self._source.fetch_quotes(
                                 fixture_identity=fixture.identity,
                                 bookmaker_id=preliminary.bookmaker_id,
+                                market=preliminary.market,
                             )
                             odds_fetches += 1
                             final_refreshes += 1
@@ -764,6 +776,7 @@ class OpportunityWorker:
                             bookmaker_wins[final_evaluation.bookmaker_id] = (
                                 bookmaker_wins.get(final_evaluation.bookmaker_id, 0) + 1
                             )
+                            break
                         else:
                             rejected_picks += 1
                             fallback_attempts += 1

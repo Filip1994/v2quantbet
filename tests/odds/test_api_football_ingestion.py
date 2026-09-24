@@ -67,6 +67,7 @@ def test_unfiltered_response_skips_books_outside_the_hard_allowlist() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "9.00"},
                                     {"value": "No", "odd": "1.01"},
@@ -80,6 +81,7 @@ def test_unfiltered_response_skips_books_outside_the_hard_allowlist() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.10"},
                                     {"value": "No", "odd": "1.80"},
@@ -115,6 +117,7 @@ def test_ingests_api_football_quotes() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
@@ -152,6 +155,7 @@ def test_builds_api_football_market_snapshot() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
@@ -242,6 +246,7 @@ def test_rejects_mixed_matching_and_mismatched_fixture_records_before_adapting()
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [{"value": "Yes", "odd": "2.20"}],
                             }
                         ],
@@ -286,12 +291,17 @@ def test_unsupported_bet_branches_are_skipped_before_adapting() -> None:
                         "name": "Bet365",
                         "update": "2026-09-15T12:00:00+00:00",
                         "bets": [
-                            {"id": 1, "values": [{"value": "Home", "odd": "2.1"}]},
+                            {"id": 1, "name": "Match Winner", "values": [{"value": "Home", "odd": "2.1"}]},
                             {
                                 "id": 5,
+                                "name": "Goals Over/Under",
                                 "values": [{"value": "Over 1.5", "odd": "1.4"}],
                             },
-                            {"id": 8, "values": [{"value": "Yes", "odd": "2.2"}]},
+                            {
+                                "id": 8,
+                                "name": "Both Teams Score",
+                                "values": [{"value": "Yes", "odd": "2.2"}],
+                            },
                         ],
                     }
                 ],
@@ -306,3 +316,36 @@ def test_unsupported_bet_branches_are_skipped_before_adapting() -> None:
 
     assert len(quotes) == 1
     assert quotes[0].market.value == "BTTS"
+
+
+def test_rejects_cross_market_provider_identity_before_persistence() -> None:
+    response = {
+        "response": [
+            {
+                "fixture": {"id": 123},
+                "bookmakers": [
+                    {
+                        "id": 8,
+                        "name": "Bet365",
+                        "update": "2026-09-15T12:00:00+00:00",
+                        "bets": [
+                            {
+                                "id": 8,
+                                "name": "Goals Over/Under",
+                                "values": [
+                                    {"value": "Yes", "odd": "1.50"},
+                                    {"value": "No", "odd": "2.50"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(QuoteNormalizationError, match="bet id/name mismatch"):
+        ingest_api_football_odds(
+            response,
+            fixture_identity=api_football_fixture_identity(123),
+        )

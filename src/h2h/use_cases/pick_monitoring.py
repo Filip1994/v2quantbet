@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from h2h.domain.fixture_identity import ResolvedFixtureIdentity
-from h2h.domain.odds import CanonicalQuote
+from h2h.domain.odds import CanonicalQuote, Market
 from h2h.domain.pick_monitoring import (
     ClosingFinalization,
     MonitoringRecord,
@@ -35,7 +35,11 @@ def _now(clock: Callable[[], datetime]) -> datetime:
 
 class RegisteredPickQuoteSource(Protocol):
     def fetch_quotes(
-        self, *, fixture_identity: ResolvedFixtureIdentity, bookmaker_id: int | None = None
+        self,
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+        bookmaker_id: int | None = None,
+        market: Market | None = None,
     ) -> tuple[CanonicalQuote, ...]: ...
 
 
@@ -90,7 +94,7 @@ class RefreshRegisteredPickOdds:
         target_loader = getattr(self._repository, "quote_refresh_targets_for_picks", None)
         if target_loader is None:
             targets = tuple(
-                PickQuoteRefreshTarget(identity, 0)
+                PickQuoteRefreshTarget(identity, 0, None)
                 for identity in self._repository.fixture_identities_for_picks(claimed)
             )
         else:
@@ -104,10 +108,12 @@ class RefreshRegisteredPickOdds:
             try:
                 if target.bookmaker_id:
                     quotes = self._source.fetch_quotes(
-                        fixture_identity=identity, bookmaker_id=target.bookmaker_id
+                        fixture_identity=identity,
+                        bookmaker_id=target.bookmaker_id,
+                        market=target.market,
                     )
                 else:
-                    quotes = self._source.fetch_quotes(fixture_identity=identity)
+                    quotes = self._source.fetch_quotes(fixture_identity=identity, market=target.market)
             except ApiBudgetExceededError:
                 raise
             except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:

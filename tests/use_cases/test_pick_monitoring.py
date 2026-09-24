@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from h2h.domain.fixture_identity import ProviderFixtureReference, ResolvedFixtureIdentity
+from h2h.domain.odds import Market
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.use_cases.pick_monitoring import (
     ReconcileRegisteredPickMonitoring,
@@ -50,7 +51,7 @@ class Source:
     def __init__(self):
         self.calls = 0
 
-    def fetch_quotes(self, *, fixture_identity):
+    def fetch_quotes(self, *, fixture_identity, market=None):
         self.calls += 1
         return ("quote",)
 
@@ -99,20 +100,20 @@ def test_refresh_targets_the_bookmaker_registered_on_each_pick() -> None:
 
     class TargetRepository(Repository):
         def quote_refresh_targets_for_picks(self, _pick_ids):
-            return (PickQuoteRefreshTarget(identity, 34),)
+            return (PickQuoteRefreshTarget(identity, 34, Market.BTTS),)
 
     class TargetSource:
         def __init__(self):
             self.calls = []
 
-        def fetch_quotes(self, *, fixture_identity, bookmaker_id=None):
-            self.calls.append((fixture_identity.fixture_id, bookmaker_id))
+        def fetch_quotes(self, *, fixture_identity, bookmaker_id=None, market=None):
+            self.calls.append((fixture_identity.fixture_id, bookmaker_id, market))
             return ("quote",)
 
     source = TargetSource()
     RefreshRegisteredPickOdds(TargetRepository(), source, Ingestion(), clock=lambda: NOW).execute()
 
-    assert source.calls == [("api-football:42", 34)]
+    assert source.calls == [("api-football:42", 34, Market.BTTS)]
 
 
 def test_reconciliation_starts_every_unstarted_registered_pick() -> None:

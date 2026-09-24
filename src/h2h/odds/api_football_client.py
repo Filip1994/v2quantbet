@@ -30,7 +30,7 @@ class ApiFootballClient:
     cache_ttl_seconds: float = 0.0
     odds_request_category: str = "opportunity_odds"
     clock: Callable[[], float] = field(default=monotonic, repr=False)
-    _cache: dict[tuple[int, int | None], tuple[float, Mapping[str, Any]]] = field(
+    _cache: dict[tuple[int, int | None, int | None], tuple[float, Mapping[str, Any]]] = field(
         default_factory=dict, init=False, repr=False
     )
 
@@ -65,15 +65,21 @@ class ApiFootballClient:
             raise ValueError(f"{field} must be timezone-aware")
 
     def fetch_odds(
-        self, *, fixture_id: int, bookmaker_id: int | None = None
+        self,
+        *,
+        fixture_id: int,
+        bookmaker_id: int | None = None,
+        bet_id: int | None = None,
     ) -> Mapping[str, Any]:
-        """Fetch odds for one fixture, serving a fresh cached response when enabled."""
+        """Fetch odds for one fixture, optionally pinned to bookmaker and bet type."""
         self._validate_fixture_id(fixture_id)
         if bookmaker_id is not None:
             self._validate_positive_int(bookmaker_id, "bookmaker_id")
+        if bet_id is not None:
+            self._validate_positive_int(bet_id, "bet_id")
         self._validate()
         now = self.clock()
-        cache_key = (fixture_id, bookmaker_id)
+        cache_key = (fixture_id, bookmaker_id, bet_id)
         cached = self._cache.get(cache_key)
         if cached is not None:
             expires_at, payload = cached
@@ -84,6 +90,8 @@ class ApiFootballClient:
         query_values = {"fixture": fixture_id}
         if bookmaker_id is not None:
             query_values["bookmaker"] = bookmaker_id
+        if bet_id is not None:
+            query_values["bet"] = bet_id
         query = urlencode(query_values)
         url = f"{self.base_url.rstrip('/')}/odds?{query}"
         with provider_request_category(self.odds_request_category):

@@ -14,7 +14,7 @@ def test_fetch_quotes_delegates_to_client_and_ingestion() -> None:
     )
 
     assert result == ()
-    client.fetch_odds.assert_called_once_with(fixture_id=42, bookmaker_id=None)
+    client.fetch_odds.assert_called_once_with(fixture_id=42, bookmaker_id=None, bet_id=None)
 
 
 def test_fetch_market_snapshots_delegates_to_client_and_ingestion() -> None:
@@ -27,7 +27,7 @@ def test_fetch_market_snapshots_delegates_to_client_and_ingestion() -> None:
     )
 
     assert result == ()
-    client.fetch_odds.assert_called_once_with(fixture_id=42)
+    client.fetch_odds.assert_called_once_with(fixture_id=42, bet_id=None)
 
 
 def test_fetch_quotes_uses_numeric_transport_and_canonical_quote_identity() -> None:
@@ -44,6 +44,7 @@ def test_fetch_quotes_uses_numeric_transport_and_canonical_quote_identity() -> N
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
@@ -61,7 +62,7 @@ def test_fetch_quotes_uses_numeric_transport_and_canonical_quote_identity() -> N
         fixture_identity=api_football_fixture_identity(123)
     )
 
-    client.fetch_odds.assert_called_once_with(fixture_id=123, bookmaker_id=None)
+    client.fetch_odds.assert_called_once_with(fixture_id=123, bookmaker_id=None, bet_id=None)
     assert {quote.fixture_id for quote in quotes} == {"api-football:123"}
 
 
@@ -80,6 +81,7 @@ def test_fetch_quotes_pins_and_filters_one_provider_bookmaker() -> None:
                         "bets": [
                             {
                                 "id": 8,
+                                "name": "Both Teams Score",
                                 "values": [
                                     {"value": "Yes", "odd": "2.20"},
                                     {"value": "No", "odd": "1.62"},
@@ -96,6 +98,21 @@ def test_fetch_quotes_pins_and_filters_one_provider_bookmaker() -> None:
         fixture_identity=api_football_fixture_identity(123), bookmaker_id=8
     )
 
-    client.fetch_odds.assert_called_once_with(fixture_id=123, bookmaker_id=8)
+    client.fetch_odds.assert_called_once_with(fixture_id=123, bookmaker_id=8, bet_id=None)
     assert len(quotes) == 2
     assert {quote.bookmaker_id for quote in quotes} == {8}
+
+
+def test_fetch_quotes_can_pin_exact_canonical_market() -> None:
+    from h2h.domain.odds import Market
+
+    client = Mock()
+    client.fetch_odds.return_value = {"response": []}
+
+    ApiFootballOddsService(client).fetch_quotes(
+        fixture_identity=api_football_fixture_identity(123),
+        bookmaker_id=8,
+        market=Market.BTTS,
+    )
+
+    client.fetch_odds.assert_called_once_with(fixture_id=123, bookmaker_id=8, bet_id=8)

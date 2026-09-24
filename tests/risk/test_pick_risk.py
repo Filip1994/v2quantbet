@@ -33,7 +33,7 @@ def test_risk_boundaries_are_inclusive() -> None:
         evaluate_risk(
             stake,
             snapshot(balance_before_minor=30_000, open_exposure_before_minor=270_000),
-            duplicate_fixture_market=False,
+            duplicate_fixture=False,
         )
         == ()
     )
@@ -44,6 +44,6 @@ def test_risk_collects_deterministic_reasons() -> None:
     result = evaluate_risk(
         stake,
         snapshot(balance_before_minor=30_000, open_exposure_before_minor=300_000),
-        duplicate_fixture_market=True,
+        duplicate_fixture=True,
     )
     assert result == tuple(RiskRejectionCode)
