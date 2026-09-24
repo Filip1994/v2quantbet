@@ -32,6 +32,7 @@ from h2h.persistence.pick_registration import (
     RegistrationPersistenceConflictError,
     RegistrationProvenanceError,
 )
+from h2h.persistence.postgres_operator_risk import effective_played_open_exposure
 from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from h2h.risk.pick_risk import evaluate_risk, fixed_stake
 
@@ -275,16 +276,9 @@ class PostgreSQLPickRegistrationRepository:
                 raise RegistrationProvenanceError(
                     "initial bankroll funding contradicts registration policy"
                 )
-            cursor.execute(
-                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
-                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
-                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
-                "WHERE successor.prior_event_id = e.settlement_event_id))",
-                (policy.bankroll_account_id,),
+            open_exposure = effective_played_open_exposure(
+                cursor, policy.bankroll_account_id
             )
-            open_exposure = int(cursor.fetchone()[0])
             cursor.execute(
                 "SELECT EXISTS (SELECT 1 FROM registered_picks WHERE fixture_id = %s)",
                 (evaluation.fixture_id,),
@@ -442,7 +436,7 @@ class PostgreSQLPickRegistrationRepository:
         if row is None:
             raise RegistrationProvenanceError("risk exposure diagnostic query returned no row")
         return {
-            "open_exposure_minor": int(row[0]),
+            "open_exposure_minor": int(row[4]),
             "risk_reserved_pick_count": int(row[1]),
             "risk_reserved_played_count": int(row[2]),
             "risk_reserved_skipped_count": int(row[3]),
@@ -505,7 +499,7 @@ class PostgreSQLPickRegistrationRepository:
             exposure_row = cursor.fetchone()
             if exposure_row is None:
                 raise RegistrationProvenanceError("risk exposure diagnostic query returned no row")
-            exposure = int(exposure_row[0])
+            exposure = int(exposure_row[4])
             if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
                 failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
                 LOGGER.info(
