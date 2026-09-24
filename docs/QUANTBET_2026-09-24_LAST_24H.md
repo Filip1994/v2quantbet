@@ -884,6 +884,57 @@ Therefore the direct config read remains authoritative and the deployment-gate i
 
 Critical engine fixes can still be deployed by exact-commit Railway deployment; automatic source-trigger reliability is not yet considered fixed.
 
+
+
+### API request breakdown after opportunity fixes
+
+A later production sample covering approximately 12:30–13:36 UTC separated odds calls by request shape:
+
+- total `/odds` calls observed: **113**;
+- broad fixture-level opportunity calls: **81**;
+- exact-market calls carrying `provider_bet_id` (predominantly registered-pick monitoring): **32**.
+
+Approximate share in that window:
+- opportunity broad scanning: about **72%**;
+- exact-market monitoring: about **28%**.
+
+This confirms that monitoring contributes to API usage, but opportunity discovery/evaluation remains the larger odds consumer.
+
+The monitoring cadence is currently substantially more frequent than the user's minimum desire to see a useful Last observed update on a multi-hour horizon. No monitoring interval was changed at this checkpoint because monitoring is functioning and the immediate waste was more clearly attributable to repeated no-odds opportunity retries.
+
+### Initial PR #47 post-deploy recurrence evidence
+
+After the dedicated 10-minute first backoff became live, the next observed zero-odds fixtures were all distinct in the immediate sample.
+
+Examples after the new engine became active:
+- `1640264`;
+- `1640770`;
+- `1641722`;
+- `1640267`;
+- `1640268`;
+- `1640771`;
+- later `1500133`, `1557209`, `1636699`, `1508558`, `1517353`.
+
+Through the observed post-deploy window ending around 13:36 UTC, none of those zero-odds IDs had repeated inside the old ~2-minute hammer pattern.
+
+The full first-retry contract is 10 minutes, so this is strong early evidence rather than the final long-window proof.
+
+### PR #50 — make the exposure KPI match the actual registration gate
+
+**Merge commit:** `abbbba8ca768e83164f36be48664ffe8ea42da5c`
+
+PR #49 initially displayed operator/PLAYED exposure against the configured cap. A follow-up audit found that registration currently gates on unresolved system `STAKE_RESERVED` exposure, which can differ from PLAYED-only operator exposure when a pick is marked `SKIPPED`.
+
+To avoid a misleading dashboard explanation, the KPI was corrected to:
+
+`Risk exposure / cap`
+
+using the same system exposure source that registration uses.
+
+Operator/PLAYED-only bankroll and Pending figures remain unchanged.
+
+No risk rule, stake amount, exposure limit or operator state was modified.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
