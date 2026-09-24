@@ -142,6 +142,45 @@ def test_model_unavailability_is_cached_per_scope_but_only_for_one_cycle() -> No
     assert second.model_unavailable_fixture_ids == ()
 
 
+def test_future_item_retry_is_observable_and_skips_provider_call() -> None:
+    now = datetime(2026, 9, 22, 12, tzinfo=UTC)
+    deferred = OpportunityFixture(
+        "api-football:retry",
+        SimpleNamespace(fixture_id="api-football:retry"),
+        140,
+        2026,
+        now + timedelta(hours=2),
+        None,
+        next_retry_at=now + timedelta(minutes=30),
+    )
+    repository = RepositoryFake((deferred,))
+    source_calls = []
+    subject = OpportunityWorker(
+        repository,
+        SimpleNamespace(fetch_quotes=lambda **kwargs: source_calls.append(kwargs)),
+        SimpleNamespace(ingest=lambda _quotes: 0),
+        SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        bookmaker_id=8,
+        allowed_statuses=("NS",),
+        ensure_model_available=lambda _fixture: None,
+        should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=StaleQuoteRetryPolicy(
+            timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
+        ),
+        clock=lambda: now,
+    )
+
+    cycle = subject.run_once()
+
+    assert cycle.item_retry_deferred == 1
+    assert cycle.processed_fixture_ids == ()
+    assert source_calls == []
+
+
 def test_graceful_shutdown_yields_remaining_bounded_work() -> None:
     repository = RepositoryFake(fixtures(10))
     stopping = [False]
