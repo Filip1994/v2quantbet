@@ -127,6 +127,31 @@ class DashboardService:
                 current_quote.odd AS current_odd,
                 current_quote.observed_at AS current_observed_at,
                 current_quote.captured_at AS current_captured_at,
+                CASE
+                    WHEN current_quote.observed_at IS NULL THEN 'UNAVAILABLE'
+                    WHEN current_quote.observed_at >=
+                        LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
+                        - make_interval(secs => COALESCE(
+                            monitoring.current_max_age_seconds,
+                            (config.configuration->>'maximum_quote_age_seconds')::integer
+                        ))
+                    THEN 'FRESH'
+                    ELSE 'STALE'
+                END AS current_freshness,
+                CASE
+                    WHEN current_quote.observed_at IS NULL THEN NULL
+                    ELSE GREATEST(
+                        0,
+                        FLOOR(EXTRACT(EPOCH FROM (
+                            LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
+                            - current_quote.observed_at
+                        )))
+                    )::bigint
+                END AS current_quote_age_seconds,
+                COALESCE(
+                    monitoring.current_max_age_seconds,
+                    (config.configuration->>'maximum_quote_age_seconds')::integer
+                ) AS current_max_age_seconds,
                 best_current.odd AS best_current_odd,
                 best_current.observed_at AS best_current_observed_at,
                 best_current.captured_at AS best_current_captured_at,
@@ -157,6 +182,7 @@ class DashboardService:
             JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id
             JOIN pick_policy_configurations config
                 ON config.config_fingerprint = r.config_fingerprint
+            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
             JOIN quote_snapshots entry ON entry.snapshot_id = r.entry_snapshot_id
             LEFT JOIN final_quote_verifications fq
                 ON fq.verification_id = decision.final_quote_verification_id
@@ -200,10 +226,15 @@ class DashboardService:
                 WHERE series.fixture_id = r.fixture_id
                   AND series.market = r.market AND series.selection = r.selection
                   AND series.bookmaker_id = ANY(ARRAY[8, 11, 34]::bigint[])
+                  AND latest_price.observed_at >=
+                      LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
+                      - make_interval(secs => COALESCE(
+                          monitoring.current_max_age_seconds,
+                          (config.configuration->>'maximum_quote_age_seconds')::integer
+                      ))
                 ORDER BY latest_price.odd DESC, series.bookmaker_id
                 LIMIT 1
             ) best_current ON TRUE
-            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
@@ -311,13 +342,73 @@ class DashboardService:
         return str(state).replace("_", " "), "active"
 
     @staticmethod
-    def _warnings(pick: dict[str, Any]) -> list[str]:
-        warnings = [str(value) for value in (pick.get("warning_codes") or ())]
-        if pick.get("stale_quote"):
-            warnings.append("STALE QUOTE")
-        if pick.get("closing_status") in {"NO_VALID_QUOTE", "STALE_QUOTE"}:
-            warnings.append(str(pick["closing_status"]).replace("_", " "))
-        return list(dict.fromkeys(warnings))
+    def _quality_badges(pick: dict[str, Any]) -> list[tuple[str, str, str]]:
+        """Separate live quote freshness from immutable registration-time warnings."""
+        badges: list[tuple[str, str, str]] = []
+        freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
+        if freshness == "FRESH":
+            badges.append(
+                ("CURRENT FRESH", "fresh", "Latest registered-book quote is within its freshness limit")
+            )
+        elif freshness == "STALE":
+            badges.append(
+                ("CURRENT STALE", "stale", "Latest registered-book provider observation is too old")
+            )
+        else:
+            badges.append(
+                ("CURRENT UNAVAILABLE", "unavailable", "No current registered-book quote is available")
+            )
+
+        warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
+        if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
+            badges.append(
+                (
+                    "ENTRY STALE",
+                    "historical",
+                    "Historical warning: final quote verification was stale when this pick was registered",
+                )
+            )
+        for warning in warning_codes:
+            if warning == "STALE_QUOTE_WARNING":
+                continue
+            badges.append(
+                (
+                    f"ENTRY {warning}",
+                    "historical",
+                    "Historical warning recorded during final quote verification",
+                )
+            )
+
+        closing_status = str(pick.get("closing_status") or "")
+        if closing_status == "STALE_QUOTE":
+            badges.append(
+                ("CLOSING STALE", "closing", "No fresh quote was available at the closing cutoff")
+            )
+        elif closing_status == "NO_VALID_QUOTE":
+            badges.append(
+                ("CLOSING UNAVAILABLE", "closing", "No valid quote was available at the closing cutoff")
+            )
+
+        deduped: list[tuple[str, str, str]] = []
+        seen: set[str] = set()
+        for badge in badges:
+            if badge[0] not in seen:
+                seen.add(badge[0])
+                deduped.append(badge)
+        return deduped
+
+    @staticmethod
+    def _quote_age(value: Any) -> str:
+        if value is None:
+            return ""
+        seconds = max(0, int(value))
+        if seconds < 60:
+            return f"{seconds}s old"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}m old"
+        hours, remainder = divmod(minutes, 60)
+        return f"{hours}h {remainder:02d}m old" if remainder else f"{hours}h old"
 
     @staticmethod
     def _bookmaker_badge(bookmaker: Any) -> str:
@@ -343,6 +434,8 @@ class DashboardService:
 
     @staticmethod
     def _movement(pick: dict[str, Any]) -> str:
+        if str(pick.get("current_freshness") or "").upper() != "FRESH":
+            return ""
         entry = pick.get("pick_odd")
         current = pick.get("current_odd")
         if entry is None or current is None or Decimal(str(current)) == Decimal(str(entry)):
@@ -359,11 +452,11 @@ class DashboardService:
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
-        warnings = self._warnings(pick)
-        warning_html = (
-            "".join(f'<span class="warning">{escape(item)}</span>' for item in warnings)
-            if warnings
-            else '<span class="muted">None</span>'
+        quality_badges = self._quality_badges(pick)
+        quality_html = "".join(
+            f'<span class="quality-badge {escape(css)}" title="{escape(title)}">'
+            f"{escape(label)}</span>"
+            for label, css, title in quality_badges
         )
         clv = (
             "—"
@@ -392,6 +485,18 @@ class DashboardService:
             if best_key and best_key != registered_key and pick.get("best_current_odd") is not None
             else ""
         )
+        current_freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
+        current_label = "Last observed" if current_freshness == "STALE" else "Same-book current"
+        if current_freshness == "STALE":
+            age = self._quote_age(pick.get("current_quote_age_seconds"))
+            current_meta = (
+                f'<small class="quote-age stale">STALE'
+                f"{' · ' + escape(age) if age else ''}</small>"
+            )
+        elif current_freshness == "UNAVAILABLE":
+            current_meta = '<small class="quote-age unavailable">UNAVAILABLE</small>'
+        else:
+            current_meta = ""
         movement = self._movement(pick)
         operator_state = str(pick.get("operator_state") or "PLAYED")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
@@ -411,7 +516,8 @@ class DashboardService:
             f'<span title="{escape(self._dt(pick.get("pick_observed_at")))}">'
             f"<b>Pick</b>{self._odd(pick.get('pick_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("current_observed_at")))}">'
-            f"<b>Same-book current</b>{self._odd(pick.get('current_odd'))}{movement}</span>"
+            f"<b>{escape(current_label)}</b>{self._odd(pick.get('current_odd'))}{movement}"
+            f"{current_meta}</span>"
             f'<span title="{escape(self._dt(pick.get("best_current_observed_at")))}">'
             f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
             f"{best_bookmaker_footer}</span>"
@@ -451,7 +557,7 @@ class DashboardService:
             f'<td><span class="status operator-{operator_state.casefold()}">'
             f'{escape(operator_state)}</span><div class="operator-controls">'
             f"{operator_controls}</div></td>"
-            f"<td>{warning_html}</td>"
+            f"<td>{quality_html}</td>"
             "</tr>"
         )
 
@@ -555,9 +661,15 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .best-book-switch{{display:flex!important;align-items:center;justify-content:center;gap:5px;width:100%;margin-top:auto!important;padding-top:5px;border-top:1px solid var(--line);font-size:8px!important;color:var(--muted)}}
 .best-book-switch .bookmaker-mark{{transform:scale(.82);transform-origin:center;min-height:20px}}
 .sr-only{{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
-.status,.warning{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
+.status,.quality-badge{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
-.status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}.warning{{color:var(--amber);border-color:#6c5425;margin:2px}}
+.status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}
+.quality-badge{{margin:2px}}.quality-badge.fresh{{color:var(--green);border-color:#1f6a51}}
+.quality-badge.stale,.quality-badge.closing{{color:var(--amber);border-color:#6c5425}}
+.quality-badge.historical{{color:#a9c5ff;border-color:#35578c}}
+.quality-badge.unavailable{{color:var(--muted)}}
+.quote-age{{margin-top:auto!important;padding-top:4px;font-size:8px!important;letter-spacing:.04em}}
+.quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}
 .operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
 .operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
@@ -592,8 +704,10 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
 <section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
 <dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
-<dt>Same-book current</dt><dd>Latest valid price at the registered bookmaker. The arrow compares it with Pick odds.</dd>
-<dt>Best current</dt><dd>Highest latest price for the same fixture, market and selection across Bet365, 1xBet and Superbet.</dd>
+<dt>Same-book current</dt><dd>Latest provider observation at the registered bookmaker. If it exceeds the pinned freshness limit, the tile becomes Last observed and the movement arrow is suppressed.</dd>
+<dt>Best current</dt><dd>Highest fresh price for the same fixture, market and selection across Bet365, 1xBet and Superbet. Stale prices are excluded.</dd>
+<dt>Current freshness</dt><dd>Live freshness is calculated from the provider observed-at timestamp, not merely from whether the monitoring worker ran successfully.</dd>
+<dt>Entry warning</dt><dd>Historical warning captured when the pick was registered. It does not describe the current quote.</dd>
 <dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
 <dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>

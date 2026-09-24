@@ -28,6 +28,9 @@ def _pick(**changes: object) -> dict[str, object]:
         "first_seen_odd": 1.91,
         "pick_odd": 1.95,
         "current_odd": 2.01,
+        "current_freshness": "FRESH",
+        "current_quote_age_seconds": 30,
+        "current_max_age_seconds": 300,
         "best_current_odd": 2.10,
         "best_current_bookmaker_key": "superbet",
         "best_current_observed_at": NOW,
@@ -125,6 +128,8 @@ def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html
     assert "950.00 RSD" in html
     assert "+5.00%" in html
     assert "SOURCE_&lt;STALE&gt;" in html
+    assert "CURRENT FRESH" in html
+    assert "ENTRY STALE" in html
     assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "FIXED_STAKE_V1" in html
@@ -163,6 +168,52 @@ def test_same_bookmaker_movement_is_accessible_for_down_and_neutral() -> None:
     assert 'aria-label="Same-bookmaker price unchanged"' in neutral
 
 
+def test_stale_current_is_labeled_as_last_observed_and_not_as_live_movement() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    current_freshness="STALE",
+                    current_quote_age_seconds=3900,
+                    best_current_odd=None,
+                    best_current_bookmaker_key=None,
+                    best_current_observed_at=None,
+                    warning_codes=["STALE_QUOTE_WARNING"],
+                    stale_quote=True,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "<b>Last observed</b>" in html
+    assert "STALE · 1h 05m old" in html
+    assert "CURRENT STALE" in html
+    assert html.count("ENTRY STALE") == 1
+    assert 'aria-label="Same-bookmaker price moved up"' not in html
+    assert "STALE_QUOTE_WARNING" not in html
+
+
+def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    current_odd=None,
+                    current_observed_at=None,
+                    current_freshness="UNAVAILABLE",
+                    current_quote_age_seconds=None,
+                    warning_codes=[],
+                    stale_quote=False,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "CURRENT UNAVAILABLE" in html
+    assert '<small class="quote-age unavailable">UNAVAILABLE</small>' in html
+    assert "ENTRY STALE" not in html
+
+
 def test_dashboard_renders_skipped_operator_state_without_hiding_system_pick() -> None:
     html = RenderingDashboard(
         _snapshot([_pick(operator_state="SKIPPED", settlement_outcome="LOSS")])
@@ -181,6 +232,9 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
                 _pick(
                     first_seen_odd=None,
                     current_odd=None,
+                    current_observed_at=None,
+                    current_freshness="UNAVAILABLE",
+                    current_quote_age_seconds=None,
                     closing_odd=None,
                     realized_pnl_minor=None,
                     settlement_outcome=None,
