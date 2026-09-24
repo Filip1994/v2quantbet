@@ -496,6 +496,9 @@ class DashboardService:
         if pick.get("clv_ppm") is not None:
             clv_label = "CLV"
             clv = f"{Decimal(pick['clv_ppm']) / Decimal(10000):+.2f}%"
+        elif pick.get("manual_clv_ppm") is not None:
+            clv_label = "Manual CLV"
+            clv = f"{Decimal(pick['manual_clv_ppm']) / Decimal(10000):+.2f}%"
         elif pick.get("proxy_clv_ppm") is not None:
             clv_label = "Proxy CLV"
             clv = f"{Decimal(pick['proxy_clv_ppm']) / Decimal(10000):+.2f}%"
@@ -516,27 +519,18 @@ class DashboardService:
             )
         )
         registered_key = str(pick.get("bookmaker_key") or "").casefold()
-        best_key = str(pick.get("best_current_bookmaker_key") or "").casefold()
         registered_bookmaker = self._bookmaker_badge(registered_key)
-        best_bookmaker_footer = (
-            f'<small class="best-book-switch"><span>best at</span>'
-            f'{self._bookmaker_badge(best_key)}</small>'
-            if best_key and best_key != registered_key and pick.get("best_current_odd") is not None
+        last_source = str(pick.get("last_observed_source") or "UNAVAILABLE").upper()
+        closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+        last_meta = (
+            '<small class="source-label">LIVE PROXY</small>'
+            if last_source == "LIVE_PROXY"
             else ""
         )
-        current_freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
-        current_label = "Last observed" if current_freshness == "STALE" else "Same-book current"
-        if current_freshness == "STALE":
-            age = self._quote_age(pick.get("current_quote_age_seconds"))
-            current_meta = (
-                f'<small class="quote-age stale">STALE'
-                f"{' · ' + escape(age) if age else ''}</small>"
-            )
-        elif current_freshness == "UNAVAILABLE":
-            current_meta = '<small class="quote-age unavailable">UNAVAILABLE</small>'
-        else:
-            current_meta = ""
-        movement = self._movement(pick)
+        closing_meta = {
+            "MANUAL": '<small class="source-label manual">MANUAL</small>',
+            "LIVE_PROXY": '<small class="source-label">LIVE PROXY</small>',
+        }.get(closing_source, "")
         operator_state = str(pick.get("operator_state") or "PLAYED")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
         operator_controls = "".join(
@@ -551,29 +545,23 @@ class DashboardService:
         odds = (
             '<div class="odds-grid">'
             f'<span title="{escape(self._dt(pick.get("first_seen_observed_at")))}">'
-            f"<b>First</b>{self._odd(pick.get('first_seen_odd'))}</span>"
+            f"<b>First seen</b>{self._odd(pick.get('first_seen_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("pick_observed_at")))}">'
             f"<b>Pick</b>{self._odd(pick.get('pick_odd'))}</span>"
-            f'<span title="{escape(self._dt(pick.get("current_observed_at")))}">'
-            f"<b>{escape(current_label)}</b>{self._odd(pick.get('current_odd'))}{movement}"
-            f"{current_meta}</span>"
-            f'<span title="{escape(self._dt(pick.get("best_current_observed_at")))}">'
-            f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
-            f"{best_bookmaker_footer}</span>"
-            f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
-            f"<b>Same-book close</b>{self._odd(pick.get('closing_odd'))}</span>"
-            f'<span title="{escape(self._dt(pick.get("proxy_closing_observed_at")))}">'
-            f"<b>Market close</b>{self._odd(pick.get('proxy_closing_odd'))}"
-            f'<small class="proxy-label">LIVE PROXY</small></span>'
+            f'<span title="{escape(self._dt(pick.get("last_observed_at")))}">'
+            f"<b>Last observed</b>{self._odd(pick.get('last_observed_odd'))}"
+            f"{last_meta}</span>"
+            f'<span title="{escape(self._dt(pick.get("display_closing_observed_at")))}">'
+            f"<b>Closing</b>{self._odd(pick.get('display_closing_odd'))}"
+            f"{closing_meta}</span>"
             "</div>"
         )
         checkpoint_times = " · ".join(
             [
                 f"F {self._checkpoint_time(pick.get('first_seen_observed_at'))}",
                 f"P {self._checkpoint_time(pick.get('pick_observed_at'))}",
-                f"C {self._checkpoint_time(pick.get('current_observed_at'))}",
-                f"X {self._checkpoint_time(pick.get('closing_observed_at'))}",
-                f"M {self._checkpoint_time(pick.get('proxy_closing_observed_at'))}",
+                f"L {self._checkpoint_time(pick.get('last_observed_at'))}",
+                f"X {self._checkpoint_time(pick.get('display_closing_observed_at'))}",
             ]
         )
         return (
