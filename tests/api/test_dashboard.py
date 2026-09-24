@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -145,6 +145,7 @@ def test_registered_bookmaker_identity_is_kept_on_active_pick() -> None:
                     dashboard_phase="PREMATCH",
                     settlement_outcome=None,
                     settled_at=None,
+                    last_observed_at=NOW - timedelta(hours=2, minutes=36),
                 )
             ]
         )
@@ -170,7 +171,9 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
 
     for label in ("First seen", "Pick", "Last observed", "Closing"):
         assert f"<b>{label}</b>" in html
-    assert "Observed 23 Sep 2026 · 12:00 UTC" in html
+    assert '<small class="quote-age">2h 36mins ago</small>' in html
+    assert 'title="23 Sep 2026 · 09:24 UTC"' in html
+    assert "Observed 23 Sep" not in html
     assert "Best current" not in html
     assert "Same-book current" not in html
     assert "Market close" not in html
