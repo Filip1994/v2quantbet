@@ -170,6 +170,7 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
 
     for label in ("First seen", "Pick", "Last observed", "Closing"):
         assert f"<b>{label}</b>" in html
+    assert "Observed 23 Sep 2026 · 12:00 UTC" in html
     assert "Best current" not in html
     assert "Same-book current" not in html
     assert "Market close" not in html
@@ -316,6 +317,7 @@ def test_manual_close_in_history_shows_bad_clv_and_true_clv_still_wins() -> None
 
     assert "1.95 → 2.01" in manual
     assert "Pick → Closing · manual" in manual
+    assert "Last observed · 23 Sep 2026 · 12:00 UTC" in manual
     assert 'class="num history-clv bad"' in manual
     assert "<strong>-2.99%</strong>" in manual
     assert "BAD · MANUAL" in manual
