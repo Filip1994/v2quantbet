@@ -259,6 +259,7 @@ class OpportunityWorker:
                 for fixture in (priority_selection.due_fixtures + selection.due_fixtures)
             }.values()
         )[: self._max_items]
+        selection_seconds = self._monotonic() - started
         priority_fixture_ids = {
             fixture.fixture_id for fixture in priority_selection.due_fixtures
         }
@@ -302,6 +303,14 @@ class OpportunityWorker:
         live_corroborations = 0
         live_proxy_rejections = 0
         item_retry_deferred = 0
+        model_gate_seconds = 0.0
+        preliminary_fetch_seconds = 0.0
+        quote_processing_seconds = 0.0
+        prediction_seconds = 0.0
+        evaluation_seconds = 0.0
+        registration_seconds = 0.0
+        final_fetch_seconds = 0.0
+        failure_flush_seconds = 0.0
         try:
             for fixture in due:
                 if self._should_stop():
@@ -320,16 +329,21 @@ class OpportunityWorker:
                     continue
                 scope = (fixture.league_id, fixture.season)
                 if scope not in coverage_status_cache:
+                    phase_started = self._monotonic()
                     coverage_status_cache[scope] = self._model_scope_status(fixture)
+                    model_gate_seconds += self._monotonic() - phase_started
                 if coverage_status_cache[scope] != "ACTIVE":
                     model_deferred.append(fixture.fixture_id)
                     continue
                 unavailable = model_scope_cache.get(scope)
                 if scope not in model_scope_cache:
+                    phase_started = self._monotonic()
                     try:
                         self._ensure_model_available(fixture)
                     except ActiveModelUnavailableError as exc:
                         unavailable = exc
+                    finally:
+                        model_gate_seconds += self._monotonic() - phase_started
                     model_scope_cache[scope] = unavailable
                 if unavailable is not None:
                     failure_at = self._now()
@@ -339,6 +353,7 @@ class OpportunityWorker:
                     failed.append(fixture.fixture_id)
                     model_unavailable.append(fixture.fixture_id)
                     continue
+                fetch_started = self._monotonic()
                 try:
                     if fixture.stale_retry:
                         stale_retries_requested += 1
@@ -349,7 +364,9 @@ class OpportunityWorker:
                         ),
                     )
                     preliminary_refreshes += 1
+                    preliminary_fetch_seconds += self._monotonic() - fetch_started
                 except ApiBudgetExceededError:
+                    preliminary_fetch_seconds += self._monotonic() - fetch_started
                     if fixture.stale_retry:
                         stale_retries_suppressed_by_budget += 1
                         budget_exhausted = True
@@ -364,6 +381,7 @@ class OpportunityWorker:
                         break
                     raise
                 except (TransportError, QuoteNormalizationError, TypeError, RuntimeError) as exc:
+                    preliminary_fetch_seconds += self._monotonic() - fetch_started
                     failures_to_persist.append((WORKER_NAME, fixture.fixture_id, exc, self._now()))
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
@@ -390,6 +408,7 @@ class OpportunityWorker:
                     continue
                 # Persistence conflicts and database integrity failures are deliberately
                 # outside the provider-error boundary and must reach the orchestrator.
+                quote_processing_started = self._monotonic()
                 quotes_fetched += len(quotes)
                 odds_fetches += 1
                 fresh_quotes += self._ingestion.ingest(quotes)
@@ -442,6 +461,7 @@ class OpportunityWorker:
                     )
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
+                    quote_processing_seconds += self._monotonic() - quote_processing_started
                     continue
 
                 strict_age = timedelta(seconds=self._maximum_quote_age_seconds)
@@ -534,10 +554,14 @@ class OpportunityWorker:
                     )
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
+                    quote_processing_seconds += self._monotonic() - quote_processing_started
                     continue
 
+                quote_processing_seconds += self._monotonic() - quote_processing_started
                 try:
+                    prediction_started = self._monotonic()
                     prediction = self._predictor.execute(fixture.fixture_id)
+                    prediction_seconds += self._monotonic() - prediction_started
                     predictions.append(prediction.prediction_id)
                     snapshot_ids = tuple(
                         snapshot_id
@@ -546,10 +570,12 @@ class OpportunityWorker:
                             fixture.fixture_id, approved_id
                         )
                     )
+                    evaluation_started = self._monotonic()
                     evaluated_snapshots = tuple(
                         self._evaluator.execute(prediction.prediction_id, snapshot_id)
                         for snapshot_id in snapshot_ids
                     )
+                    evaluation_seconds += self._monotonic() - evaluation_started
                     preliminary_evaluations = tuple(
                         evaluation
                         for evaluation in evaluated_snapshots
@@ -592,9 +618,11 @@ class OpportunityWorker:
                         )
                         if selection_key in registered_selection_keys:
                             continue
+                        registration_started = self._monotonic()
                         preliminary_rejections = self._register.preliminary_rejection_codes(
                             preliminary.evaluation_id
                         )
+                        registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
                             LOGGER.info(
                                 "opportunity did not qualify for final quote refresh",
@@ -612,20 +640,24 @@ class OpportunityWorker:
                             )
                             continue
 
+                        registration_started = self._monotonic()
                         claim = self._register.begin_final_quote_verification(
                             preliminary.evaluation_id
                         )
+                        registration_seconds += self._monotonic() - registration_started
                         if claim.status is FinalQuoteStatus.REJECTED:
                             rejected_picks += 1
                             decisions += 1
                             fallback_attempts += 1
                             continue
                         if claim.status is FinalQuoteStatus.READY:
+                            registration_started = self._monotonic()
                             registration = self._register.execute(
                                 claim.final_evaluation_id,
                                 registration_request_id(preliminary.evaluation_id),
                                 final_quote_verification_id=claim.verification_id,
                             )
+                            registration_seconds += self._monotonic() - registration_started
                             decisions += 1
                             if registration.pick is not None:
                                 picks.append(registration.pick.pick_id)
@@ -668,6 +700,7 @@ class OpportunityWorker:
                                 "api_budget_outcome": "PENDING",
                             },
                         )
+                        final_fetch_started = self._monotonic()
                         try:
                             final_quotes = self._source.fetch_quotes(
                                 fixture_identity=fixture.identity,
@@ -676,7 +709,9 @@ class OpportunityWorker:
                             )
                             odds_fetches += 1
                             final_refreshes += 1
+                            final_fetch_seconds += self._monotonic() - final_fetch_started
                         except ApiBudgetExceededError:
+                            final_fetch_seconds += self._monotonic() - final_fetch_started
                             self._register.reject_final_quote_verification(
                                 claim.verification_id,
                                 reason_codes=(
@@ -708,6 +743,7 @@ class OpportunityWorker:
                             TypeError,
                             RuntimeError,
                         ) as exc:
+                            final_fetch_seconds += self._monotonic() - final_fetch_started
                             self._register.reject_final_quote_verification(
                                 claim.verification_id,
                                 reason_codes=(
@@ -849,15 +885,21 @@ class OpportunityWorker:
                             fallback_attempts += 1
                             continue
 
+                        evaluation_started = self._monotonic()
                         final_evaluation = self._evaluator.execute(
                             prediction.prediction_id, selected_snapshot_id
                         )
+                        evaluation_seconds += self._monotonic() - evaluation_started
                         evaluations.append(final_evaluation.evaluation_id)
                         # Model lifecycle may change during the network request.
+                        phase_started = self._monotonic()
                         self._ensure_model_available(fixture)
+                        model_gate_seconds += self._monotonic() - phase_started
+                        registration_started = self._monotonic()
                         final_preview = self._register.preliminary_rejection_codes(
                             final_evaluation.evaluation_id
                         )
+                        registration_seconds += self._monotonic() - registration_started
                         if (
                             self._model_scope_status(fixture) != "ACTIVE"
                             or FinalQuoteRejectionCode.MODEL_INACTIVE_OR_STALE.value
@@ -880,6 +922,7 @@ class OpportunityWorker:
                         # Stale-but-usable provider quotes are intentionally not
                         # vetoed by the live proxy during qualification. Operators can
                         # manually skip a pick if the displayed bookmaker price has moved.
+                        registration_started = self._monotonic()
                         ready = self._register.complete_final_quote_verification(
                             claim.verification_id,
                             final_evaluation.evaluation_id,
@@ -894,6 +937,7 @@ class OpportunityWorker:
                             registration_request_id(preliminary.evaluation_id),
                             final_quote_verification_id=ready.verification_id,
                         )
+                        registration_seconds += self._monotonic() - registration_started
                         decisions += 1
                         if registration.pick is not None:
                             picks.append(registration.pick.pick_id)
@@ -943,7 +987,9 @@ class OpportunityWorker:
                     if isinstance(exc, ActiveModelUnavailableError):
                         model_unavailable.append(fixture.fixture_id)
         finally:
+            flush_started = self._monotonic()
             self._flush_failures(failures_to_persist)
+            failure_flush_seconds += self._monotonic() - flush_started
         self._has_pending = bool(
             priority_selection.has_more or selection.has_more or interrupted or budget_exhausted
         )
@@ -1052,6 +1098,15 @@ class OpportunityWorker:
                 "no_valid_quote_count": cycle.no_valid_quote_count,
                 "bookmaker_wins": dict(cycle.bookmaker_wins),
                 "max_items": self._max_items,
+                "selection_seconds": selection_seconds,
+                "model_gate_seconds": model_gate_seconds,
+                "preliminary_fetch_seconds": preliminary_fetch_seconds,
+                "quote_processing_seconds": quote_processing_seconds,
+                "prediction_seconds": prediction_seconds,
+                "evaluation_seconds": evaluation_seconds,
+                "registration_seconds": registration_seconds,
+                "final_fetch_seconds": final_fetch_seconds,
+                "failure_flush_seconds": failure_flush_seconds,
                 "duration_seconds": self._monotonic() - started,
             },
         )
