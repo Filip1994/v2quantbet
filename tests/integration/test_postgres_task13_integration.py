@@ -45,6 +45,16 @@ def isolated_database():
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
+def _activate_model_scope(cursor, *, league_id: int, season: int, now: datetime) -> None:
+    cursor.execute(
+        "INSERT INTO model_coverage_scopes (provider, team_id_namespace, league_id, season, "
+        "status, first_required_at, updated_at, policy_fingerprint, active_model_version_id, "
+        "active_generation) VALUES ('api-football', 'api-football', %s, %s, 'ACTIVE', "
+        "%s, %s, %s, %s, 1)",
+        (league_id, season, now, now, "0" * 64, f"test-model:{league_id}:{season}"),
+    )
+
+
 def test_fresh_schema_runtime_leadership_and_bankroll(isolated_database) -> None:
     _schema, connect = isolated_database
     with connect() as connection:
@@ -112,6 +122,7 @@ def test_durable_opportunity_query_uses_phase_i_policy_not_manual_scope(isolated
             "'La Liga', 'Spain', 'League', %s, 'NS', 'api-football', %s)",
             ("fixture-observation-v1:" + "a" * 64, fixture_id, now + timedelta(hours=2), now),
         )
+        _activate_model_scope(cursor, league_id=140, season=2026, now=now)
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     due = runtime.due_opportunity_fixtures(
@@ -153,6 +164,7 @@ def test_stale_complete_market_retry_is_exact_and_restart_safe(isolated_database
             "'api-football', %s)",
             ("fixture-observation-v1:" + "b" * 64, fixture_id, now + timedelta(hours=4), now),
         )
+        _activate_model_scope(cursor, league_id=239, season=2026, now=now)
         for selection in ("YES", "NO"):
             cursor.execute(
                 "INSERT INTO quote_series (series_id, fixture_id, bookmaker_id, market, "
