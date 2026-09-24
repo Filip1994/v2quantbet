@@ -1030,6 +1030,84 @@ for commit `aec6aaf...`.
 
 At this checkpoint the deployment is still building. The phase-timing production result is pending.
 
+
+
+### Infrastructure root cause: engine and Postgres were cross-region
+
+PR #52 phase timings exposed that the remaining opportunity wall-time was dominated by database-heavy phases rather than provider HTTP.
+
+Representative EU-engine cycle before relocation:
+
+- total duration: **71.75 s**;
+- selection: **2.73 s**;
+- model gate: **4.04 s**;
+- preliminary provider fetch: **1.71 s**;
+- quote processing / DB: **28.39 s**;
+- prediction: **5.83 s**;
+- evaluation: **17.96 s**;
+- registration/risk checks: **8.40 s**;
+- final provider fetch: **0 s**.
+
+Direct Railway configuration confirmed:
+- Postgres compute + volume: **sfo**;
+- quantbet-engine compute: **europe-west4-drams3a**.
+
+Therefore every database-heavy opportunity, monitoring, model and discovery operation crossed regions.
+
+### Engine region co-location with Postgres
+
+Only `quantbet-engine` was moved to:
+
+`sfo: 1 replica`
+
+Postgres and dashboard were not modified.
+
+Preserved unchanged:
+- source repo and main branch;
+- environment variables;
+- database reference;
+- start/predeploy commands;
+- healthcheck;
+- runtime;
+- watch patterns;
+- betting/model/risk configuration.
+
+Railway deployment:
+
+`23bcb5b2-5d87-4213-b559-0bde837a9cac`
+
+reached **SUCCESS** and the previous Europe deployment was removed.
+
+Direct service config after rollout confirms:
+
+`multiRegionConfig = {"sfo": {"numReplicas": 1}}`
+
+### Immediate post-co-location timing evidence
+
+The effect is substantial:
+
+- model lifecycle:
+  - before: about **30.38 s**;
+  - after: about **0.81 s**.
+- monitoring:
+  - before: about **55.6 s**;
+  - after: about **0.84–1.05 s** for observed bounded slices.
+- discovery:
+  - earlier cycles commonly took multiple seconds to tens of seconds;
+  - first co-located slices completed around **0.45–1.16 s**.
+- opportunity no-odds slice:
+  - total: **0.31 s**;
+  - selection: **0.065 s**;
+  - model gate: **0.044 s**;
+  - provider fetch: **0.189 s**;
+  - failure flush: **0.016 s**.
+
+The provider request itself was never the dominant source of the prior 70–120 second opportunity cycles.
+
+This materially changes the wall-budget diagnosis: cross-region database round-trips were the primary latency amplifier.
+
+A quote-present opportunity cycle is still required for the final one-to-one comparison of quote processing, prediction, evaluation and registration after co-location.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
