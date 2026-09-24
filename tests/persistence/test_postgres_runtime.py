@@ -157,3 +157,41 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
     )
     assert "LIMIT %s" in cursor.query
     assert "ORDER BY latest.kickoff_at, f.fixture_id" in cursor.query
+
+
+class OpportunityOddsUnavailableError(RuntimeError):
+    pass
+
+
+def test_opportunity_no_odds_failure_starts_with_ten_minute_retry() -> None:
+    failed_at = datetime(2026, 9, 24, 13, tzinfo=UTC)
+    cursor = FakeCursor([])
+    repository = PostgreSQLRuntimeRepository(connect=lambda: FakeConnection(cursor))
+
+    repository.record_item_failure(
+        "opportunity",
+        "api-football:123",
+        OpportunityOddsUnavailableError("no odds"),
+        failed_at=failed_at,
+    )
+
+    assert cursor.parameters[3] == failed_at + timedelta(minutes=10)
+    assert cursor.parameters[4] == "OpportunityOddsUnavailableError"
+    assert "interval '10 minutes'" in cursor.query
+    assert "interval '1 hour'" in cursor.query
+
+
+def test_non_odds_item_failure_keeps_fast_generic_retry() -> None:
+    failed_at = datetime(2026, 9, 24, 13, tzinfo=UTC)
+    cursor = FakeCursor([])
+    repository = PostgreSQLRuntimeRepository(connect=lambda: FakeConnection(cursor))
+
+    repository.record_item_failure(
+        "opportunity",
+        "api-football:123",
+        RuntimeError("transient"),
+        failed_at=failed_at,
+    )
+
+    assert cursor.parameters[3] == failed_at + timedelta(seconds=5)
+    assert cursor.parameters[4] == "RuntimeError"
