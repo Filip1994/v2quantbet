@@ -298,7 +298,7 @@ def load_production_settings(environ: Mapping[str, str] | None = None) -> Produc
             values, "QUANTBET_OPPORTUNITY_INTERVAL_SECONDS", "60"
         ),
         opportunity_max_items=_positive_integer(
-            values, "QUANTBET_OPPORTUNITY_MAX_ITEMS", "10"
+            values, "QUANTBET_OPPORTUNITY_MAX_ITEMS", "2"
         ),
         opportunity_max_wall_seconds=_positive_number(
             values, "QUANTBET_OPPORTUNITY_MAX_WALL_SECONDS", "30"
