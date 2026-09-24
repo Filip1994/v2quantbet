@@ -446,7 +446,7 @@ def test_snapshot_risk_cap_uses_operator_played_exposure() -> None:
                 operator_summary=lambda _account: operator,
             )
         ),
-        budget=SimpleNamespace(usage_by_category=lambda: {}, effective_limit=7500),
+        budget=SimpleNamespace(usage_by_category=dict, effective_limit=7500),
     )
 
     class Projection(DashboardService):
