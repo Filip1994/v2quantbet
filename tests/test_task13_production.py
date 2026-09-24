@@ -57,6 +57,9 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert settings.model_training_policy.min_matches == 80
     assert settings.model_training_policy.xi == 0.0018
     assert settings.model_training_policy.previous_seasons == 1
+    assert settings.live_close_poll_seconds == 60
+    assert settings.live_close_window_seconds == 900
+    assert settings.live_close_max_age_seconds == 120
     assert settings.stale_quote_retry_policy.initial_interval == timedelta(seconds=120)
     assert settings.stale_quote_retry_policy.max_interval == timedelta(seconds=900)
     assert settings.stale_quote_retry_policy.max_attempts == 5
@@ -74,6 +77,9 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
         ("QUANTBET_MODEL_XI", "nan"),
         ("QUANTBET_STALE_QUOTE_INITIAL_RETRY_SECONDS", "0"),
         ("QUANTBET_STALE_QUOTE_MAX_ATTEMPTS", "0"),
+        ("QUANTBET_LIVE_CLOSE_POLL_SECONDS", "0"),
+        ("QUANTBET_LIVE_CLOSE_WINDOW_SECONDS", "0"),
+        ("QUANTBET_LIVE_CLOSE_MAX_AGE_SECONDS", "0"),
     ],
 )
 def test_production_config_rejects_partial_or_invalid_values(name: str, value: str) -> None:
@@ -110,6 +116,7 @@ def test_production_composition_uses_categorized_clients_with_one_durable_budget
     assert monitoring_client.odds_request_category == "results_monitoring"
     assert monitoring_client.transport.transport.budget is application.budget
     assert application.results.reconcile._source._client is monitoring_client
+    assert application.live_closing_proxy._client is monitoring_client
     training_client = application.model_lifecycle._trainer._historical_results
     assert training_client._fetch_completed_fixtures.__self__.transport.transport.budget is (
         application.budget
