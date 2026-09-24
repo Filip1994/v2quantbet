@@ -52,7 +52,9 @@ WITH latest_fixture AS (
     FROM registered_picks r
     JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
     JOIN latest_fixture latest ON latest.fixture_id = r.fixture_id
-    WHERE (
+    WHERE r.registered_at >= TIMESTAMPTZ '2026-09-23 00:00:00+00'
+      AND r.registered_at < TIMESTAMPTZ '2026-09-25 00:00:00+00'
+      AND (
         (
             latest.home_team ILIKE '%Seattle%'
             AND latest.away_team ILIKE '%Real Salt Lake%'
