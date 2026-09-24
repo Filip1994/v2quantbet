@@ -11,6 +11,7 @@ import pytest
 
 from h2h.api.health import HealthService, RuntimeHealthState, WORKER_FRESHNESS_SECONDS
 from h2h.config import ConfigError, load_production_settings
+from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.postgres_runtime import OpportunityFixture, OpportunitySelection, WorkerStatus
 from h2h.quant import DixonColesFitError
@@ -137,6 +138,34 @@ def test_production_composition_uses_categorized_clients_with_one_durable_budget
     assert provider_discovery._client is application.client
 
 
+
+
+
+def _btts_quotes(fixture_id: str, observed_at: datetime) -> tuple[CanonicalQuote, ...]:
+    return (
+        CanonicalQuote(
+            fixture_id,
+            8,
+            "Bet365",
+            Market.BTTS,
+            Selection.YES,
+            1.90,
+            observed_at,
+            "api-football",
+        ),
+        CanonicalQuote(
+            fixture_id,
+            8,
+            "Bet365",
+            Market.BTTS,
+            Selection.NO,
+            1.90,
+            observed_at,
+            "api-football",
+        ),
+    )
+
+
 class OpportunityRepositoryFake:
     def __init__(self) -> None:
         now = datetime.now(UTC)
@@ -149,6 +178,7 @@ class OpportunityRepositoryFake:
             None,
         )
         self.bookmakers: list[int] = []
+        self.observed_at = now - timedelta(seconds=1)
 
     def select_opportunity_fixtures(self, **_kwargs):
         return OpportunitySelection(1, 0, 0, 0, (self.fixture,))
@@ -161,8 +191,14 @@ class OpportunityRepositoryFake:
         return ("snapshot-a", "snapshot-b")
 
     def latest_complete_market_states(self, _fixture_id, _bookmaker_id):
-        now = datetime.now(UTC) - timedelta(seconds=1)
-        return (SimpleNamespace(market="BTTS", observed_at=now, captured_at=now),)
+        return (
+            SimpleNamespace(
+                market="BTTS",
+                observed_at=self.observed_at,
+                captured_at=self.observed_at,
+                source="api-football",
+            ),
+        )
 
     def record_quote_refresh_state(self, *_args, freshness_state, attempted_at, **_kwargs):
         return SimpleNamespace(
@@ -187,7 +223,7 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
 
     def fetch_quotes(**kwargs):
         quote_requests.append(kwargs)
-        return (SimpleNamespace(),)
+        return _btts_quotes(repository.fixture.fixture_id, repository.observed_at)
 
     source = SimpleNamespace(fetch_quotes=fetch_quotes)
     ingestion = SimpleNamespace(ingest=lambda _quotes: 0)
@@ -289,7 +325,11 @@ def test_opportunity_prediction_scope_failure_is_isolated_to_fixture() -> None:
     )
     worker = OpportunityWorker(
         repository,
-        SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),)),
+        SimpleNamespace(
+            fetch_quotes=lambda **_kwargs: _btts_quotes(
+                repository.fixture.fixture_id, repository.observed_at
+            )
+        ),
         SimpleNamespace(ingest=lambda _quotes: 0),
         SimpleNamespace(
             execute=lambda _fixture_id: (_ for _ in ()).throw(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.odds import ApiBudgetExceededError
 from h2h.persistence.postgres_runtime import (
     CompleteMarketQuoteState,
@@ -282,6 +283,31 @@ class WorkerRepository:
         return None
 
 
+def returned_btts_quotes(observed_at: datetime) -> tuple[CanonicalQuote, ...]:
+    return (
+        CanonicalQuote(
+            "api-football:1549793",
+            8,
+            "Bet365",
+            Market.BTTS,
+            Selection.YES,
+            1.90,
+            observed_at,
+            "api-football",
+        ),
+        CanonicalQuote(
+            "api-football:1549793",
+            8,
+            "Bet365",
+            Market.BTTS,
+            Selection.NO,
+            1.90,
+            observed_at,
+            "api-football",
+        ),
+    )
+
+
 def fixture(*, stale_retry=False, prior_state=None):
     return OpportunityFixture(
         "api-football:1549793",
@@ -342,7 +368,9 @@ def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
         "BTTS", NOW - timedelta(minutes=30), NOW, "api-football"
     )
     repository = WorkerRepository(fixture(), (stale_market,))
-    source = SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),))
+    source = SimpleNamespace(
+        fetch_quotes=lambda **_kwargs: returned_btts_quotes(stale_market.observed_at)
+    )
     worker, evaluations, decisions = build_worker(repository, source)
 
     first = worker.run_once()
@@ -357,6 +385,34 @@ def test_repeated_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     assert decisions == []
 
 
+def test_repeated_current_provider_observation_is_not_rejected_by_old_capture_time() -> None:
+    observed_at = NOW - timedelta(minutes=1)
+    repository = WorkerRepository(
+        fixture(),
+        (
+            CompleteMarketQuoteState(
+                "BTTS",
+                observed_at,
+                NOW - timedelta(hours=6),
+                "api-football",
+            ),
+        ),
+    )
+    worker, evaluations, _decisions = build_worker(
+        repository,
+        SimpleNamespace(
+            fetch_quotes=lambda **_kwargs: returned_btts_quotes(observed_at)
+        ),
+    )
+
+    result = worker.run_once()
+
+    assert result.odds_unavailable_fixture_ids == ()
+    assert result.prediction_ids == ("prediction",)
+    assert result.evaluation_ids == ("evaluation:snapshot-btts-no",)
+    assert evaluations == ["snapshot-btts-no"]
+
+
 def test_later_fresh_payload_clears_stale_state_automatically() -> None:
     repository = WorkerRepository(
         fixture(stale_retry=True, prior_state="STALE"),
@@ -366,7 +422,12 @@ def test_later_fresh_payload_clears_stale_state_automatically() -> None:
         "STALE", 2, NOW - timedelta(minutes=10), NOW - timedelta(minutes=4), NOW, NOW, NOW
     )
     worker, _evaluations, _decisions = build_worker(
-        repository, SimpleNamespace(fetch_quotes=lambda **_kwargs: (SimpleNamespace(),))
+        repository,
+        SimpleNamespace(
+            fetch_quotes=lambda **_kwargs: returned_btts_quotes(
+                repository.market_states[0].observed_at
+            )
+        ),
     )
 
     result = worker.run_once()
