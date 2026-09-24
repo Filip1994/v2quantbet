@@ -108,6 +108,21 @@ class ApiFootballClient:
             )
         return payload
 
+    def fetch_live_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
+        """Fetch the current API-Football in-play/live odds feed for one fixture."""
+        self._validate_fixture_id(fixture_id)
+        self._validate()
+        query = urlencode({"fixture": fixture_id})
+        url = f"{self.base_url.rstrip('/')}/odds/live?{query}"
+        with provider_request_category(self.odds_request_category):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
+        self._log_request("odds-live", payload)
+        return payload
+
     def fetch_fixtures_for_date(self, *, fixture_date: date) -> Mapping[str, Any]:
         """Fetch every provider fixture on one UTC calendar date."""
         self._validate()
