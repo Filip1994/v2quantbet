@@ -295,7 +295,7 @@ class DashboardService:
         ingestion_candidates = [
             item.get("last_success_at")
             for name, item in by_name.items()
-            if name in {"opportunity", "monitoring"}
+            if name in {"opportunity", "monitoring", "closing_proxy"}
         ]
         last_ingestion = max((value for value in ingestion_candidates if value), default=None)
         return {
