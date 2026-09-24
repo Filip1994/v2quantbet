@@ -526,7 +526,8 @@ class DashboardService:
             f"{escape(operator_state)}</span>{operator_control}</div></td>"
             f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
-            f"<small>Pick → Closing · {escape(close_source)}</small></td>"
+            f"<small>Pick → Closing · {escape(close_source)}</small>"
+            f"<small>Last observed · {escape(self._dt(pick.get('last_observed_at')))}</small></td>"
             f'<td class="num history-clv {escape(clv_css)}"><strong>{escape(clv)}</strong>'
             f"<small>{escape(clv_verdict)} · {escape(clv_source)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
@@ -610,7 +611,8 @@ class DashboardService:
             f"<b>Pick</b>{self._odd(pick.get('pick_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("last_observed_at")))}">'
             f"<b>Last observed</b>{self._odd(pick.get('last_observed_odd'))}"
-            f"{last_meta}</span>"
+            f"{last_meta}"
+            f"<small>Observed {escape(self._dt(pick.get('last_observed_at')))}</small></span>"
             f'<span title="{escape(self._dt(pick.get("display_closing_observed_at")))}">'
             f"<b>Closing</b>{self._odd(pick.get('display_closing_odd'))}"
             f"{closing_meta}</span>"
