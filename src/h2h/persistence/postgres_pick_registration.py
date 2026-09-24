@@ -10,8 +10,6 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
-LOGGER = logging.getLogger("quantbet.registration")
-
 from h2h.decisions.pick_eligibility import evaluate_persisted_eligibility
 from h2h.domain.final_quote import FinalQuoteClaim, FinalQuoteStatus
 from h2h.domain.fixture_record import FixtureObservation
@@ -36,6 +34,8 @@ from h2h.persistence.pick_registration import (
 )
 from h2h.persistence.postgres_value_evaluations import PostgreSQLValueEvaluationRepository
 from h2h.risk.pick_risk import evaluate_risk, fixed_stake
+
+LOGGER = logging.getLogger("quantbet.registration")
 
 
 ConnectionFactory = Callable[[], Any]
