@@ -282,6 +282,7 @@ def build_worker(repository, source, *, clock=lambda: NOW):
         evaluations.append(snapshot_id)
         return SimpleNamespace(
             evaluation_id=f"evaluation:{snapshot_id}",
+            bookmaker_id=8,
             market=SimpleNamespace(value="BTTS"),
             selected_selection=SimpleNamespace(value="YES"),
             selected_odd=1.5,
