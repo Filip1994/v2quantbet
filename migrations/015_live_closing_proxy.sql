@@ -3,8 +3,8 @@
 CREATE TABLE pick_live_close_observations (
     observation_id TEXT PRIMARY KEY
         CHECK (observation_id ~ '^pick-live-close-observation-v1:[0-9a-f]{64}$'),
-    pick_id TEXT NOT NULL REFERENCES registered_picks(pick_id) ON DELETE RESTRICT,
-    fixture_id TEXT NOT NULL REFERENCES fixtures(fixture_id) ON DELETE RESTRICT,
+    pick_id TEXT NOT NULL,
+    fixture_id TEXT NOT NULL,
     market TEXT NOT NULL CHECK (market IN ('OU_25', 'BTTS')),
     selection TEXT NOT NULL CHECK (selection IN ('OVER', 'UNDER', 'YES', 'NO')),
     source TEXT NOT NULL CHECK (source = 'api-football-live'),
@@ -17,6 +17,9 @@ CREATE TABLE pick_live_close_observations (
         (market = 'OU_25' AND selection IN ('OVER', 'UNDER'))
         OR (market = 'BTTS' AND selection IN ('YES', 'NO'))
     ),
+    FOREIGN KEY (pick_id, fixture_id)
+        REFERENCES registered_picks(pick_id, fixture_id) ON DELETE RESTRICT,
+    UNIQUE (observation_id, pick_id),
     UNIQUE (pick_id, provider_observed_at, live_bet_id, odd)
 );
 
@@ -31,8 +34,7 @@ CREATE TABLE pick_live_close_finalizations (
     cutoff_at TIMESTAMPTZ NOT NULL,
     finalized_at TIMESTAMPTZ NOT NULL,
     outcome TEXT NOT NULL CHECK (outcome IN ('CAPTURED', 'NO_VALID_QUOTE')),
-    observation_id TEXT UNIQUE REFERENCES pick_live_close_observations(observation_id)
-        ON DELETE RESTRICT,
+    observation_id TEXT UNIQUE,
     entry_snapshot_id TEXT NOT NULL REFERENCES quote_snapshots(snapshot_id) ON DELETE RESTRICT,
     proxy_closing_odd_decimal NUMERIC CHECK (proxy_closing_odd_decimal > 1),
     proxy_clv_ppm BIGINT,
@@ -41,6 +43,8 @@ CREATE TABLE pick_live_close_finalizations (
         CHECK (method_version = 'CLV_MARKET_PROXY_ODDS_RATIO_PPM_V1'),
     max_age_seconds INTEGER NOT NULL CHECK (max_age_seconds > 0),
     CHECK (finalized_at >= cutoff_at),
+    FOREIGN KEY (observation_id, pick_id)
+        REFERENCES pick_live_close_observations(observation_id, pick_id) ON DELETE RESTRICT,
     CHECK (
         (outcome = 'CAPTURED' AND observation_id IS NOT NULL
             AND proxy_closing_odd_decimal IS NOT NULL AND proxy_clv_ppm IS NOT NULL)
