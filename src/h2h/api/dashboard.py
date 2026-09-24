@@ -342,60 +342,55 @@ class DashboardService:
         return str(state).replace("_", " "), "active"
 
     @staticmethod
-    def _quality_badges(pick: dict[str, Any]) -> list[tuple[str, str, str]]:
-        """Separate live quote freshness from immutable registration-time warnings."""
-        badges: list[tuple[str, str, str]] = []
+    def _quality_summary(
+        pick: dict[str, Any],
+    ) -> tuple[tuple[str, str, str], tuple[str, ...], str]:
+        """Return one live freshness badge plus compact historical context."""
         freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
         if freshness == "FRESH":
-            badges.append(
-                ("CURRENT FRESH", "fresh", "Latest registered-book quote is within its freshness limit")
+            live = (
+                "FRESH",
+                "fresh",
+                "Latest registered-book quote is within its freshness limit",
             )
         elif freshness == "STALE":
-            badges.append(
-                ("CURRENT STALE", "stale", "Latest registered-book provider observation is too old")
+            live = (
+                "STALE NOW",
+                "stale",
+                "Latest registered-book provider observation is too old",
             )
         else:
-            badges.append(
-                ("CURRENT UNAVAILABLE", "unavailable", "No current registered-book quote is available")
+            live = (
+                "UNAVAILABLE",
+                "unavailable",
+                "No current registered-book quote is available",
             )
 
         warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
+        history: list[str] = []
+        history_titles: list[str] = []
         if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
-            badges.append(
-                (
-                    "ENTRY STALE",
-                    "historical",
-                    "Historical warning: final quote verification was stale when this pick was registered",
-                )
+            history.append("Entry stale")
+            history_titles.append(
+                "Final quote verification was stale when this pick was registered"
             )
-        for warning in warning_codes:
-            if warning == "STALE_QUOTE_WARNING":
-                continue
-            badges.append(
-                (
-                    f"ENTRY {warning}",
-                    "historical",
-                    "Historical warning recorded during final quote verification",
-                )
-            )
+
+        other_entry_warnings = [
+            warning for warning in warning_codes if warning != "STALE_QUOTE_WARNING"
+        ]
+        if other_entry_warnings:
+            history.append("Entry warning")
+            history_titles.append("Registration warnings: " + ", ".join(other_entry_warnings))
 
         closing_status = str(pick.get("closing_status") or "")
         if closing_status == "STALE_QUOTE":
-            badges.append(
-                ("CLOSING STALE", "closing", "No fresh quote was available at the closing cutoff")
-            )
+            history.append("Closing stale")
+            history_titles.append("No fresh quote was available at the closing cutoff")
         elif closing_status == "NO_VALID_QUOTE":
-            badges.append(
-                ("CLOSING UNAVAILABLE", "closing", "No valid quote was available at the closing cutoff")
-            )
+            history.append("Closing unavailable")
+            history_titles.append("No valid quote was available at the closing cutoff")
 
-        deduped: list[tuple[str, str, str]] = []
-        seen: set[str] = set()
-        for badge in badges:
-            if badge[0] not in seen:
-                seen.add(badge[0])
-                deduped.append(badge)
-        return deduped
+        return live, tuple(dict.fromkeys(history)), " · ".join(history_titles)
 
     @staticmethod
     def _quote_age(value: Any) -> str:
@@ -452,11 +447,19 @@ class DashboardService:
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
-        quality_badges = self._quality_badges(pick)
-        quality_html = "".join(
-            f'<span class="quality-badge {escape(css)}" title="{escape(title)}">'
-            f"{escape(label)}</span>"
-            for label, css, title in quality_badges
+        quality_live, quality_history, quality_history_title = self._quality_summary(pick)
+        quality_label, quality_css, quality_title = quality_live
+        history_html = (
+            f'<small class="quality-history" title="{escape(quality_history_title)}">'
+            f"{escape(' · '.join(quality_history))}</small>"
+            if quality_history
+            else ""
+        )
+        quality_html = (
+            '<div class="quality-summary">'
+            f'<span class="quality-badge {escape(quality_css)}" title="{escape(quality_title)}">'
+            f"{escape(quality_label)}</span>"
+            f"{history_html}</div>"
         )
         clv = (
             "—"
@@ -664,10 +667,11 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .status,.quality-badge{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
 .status.void{{color:var(--muted)}}.status.active{{color:#8ab4ff;border-color:#35578c}}
-.quality-badge{{margin:2px}}.quality-badge.fresh{{color:var(--green);border-color:#1f6a51}}
-.quality-badge.stale,.quality-badge.closing{{color:var(--amber);border-color:#6c5425}}
-.quality-badge.historical{{color:#a9c5ff;border-color:#35578c}}
+.quality-summary{{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:104px}}
+.quality-badge.fresh{{color:var(--green);border-color:#1f6a51}}
+.quality-badge.stale{{color:var(--amber);border-color:#6c5425}}
 .quality-badge.unavailable{{color:var(--muted)}}
+.quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
 .quote-age{{margin-top:auto!important;padding-top:4px;font-size:8px!important;letter-spacing:.04em}}
 .quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}
 .operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
@@ -706,8 +710,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
 <dt>Same-book current</dt><dd>Latest provider observation at the registered bookmaker. If it exceeds the pinned freshness limit, the tile becomes Last observed and the movement arrow is suppressed.</dd>
 <dt>Best current</dt><dd>Highest fresh price for the same fixture, market and selection across Bet365, 1xBet and Superbet. Stale prices are excluded.</dd>
+<dt>Quality</dt><dd>One live status: FRESH, STALE NOW or UNAVAILABLE. Historical context such as Entry stale or Closing stale is shown as secondary text underneath.</dd>
 <dt>Current freshness</dt><dd>Live freshness is calculated from the provider observed-at timestamp, not merely from whether the monitoring worker ran successfully.</dd>
-<dt>Entry warning</dt><dd>Historical warning captured when the pick was registered. It does not describe the current quote.</dd>
 <dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
 <dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>

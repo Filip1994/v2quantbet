@@ -128,8 +128,9 @@ def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html
     assert "950.00 RSD" in html
     assert "+5.00%" in html
     assert "SOURCE_&lt;STALE&gt;" in html
-    assert "CURRENT FRESH" in html
-    assert "ENTRY STALE" in html
+    assert ">FRESH</span>" in html
+    assert "Entry stale" in html
+    assert "Entry warning" in html
     assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "FIXED_STAKE_V1" in html
@@ -187,10 +188,32 @@ def test_stale_current_is_labeled_as_last_observed_and_not_as_live_movement() ->
 
     assert "<b>Last observed</b>" in html
     assert "STALE · 1h 05m old" in html
-    assert "CURRENT STALE" in html
-    assert html.count("ENTRY STALE") == 1
+    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
+    assert '<small class="quality-history"' in html
+    assert ">Entry stale</small>" in html
     assert 'aria-label="Same-bookmaker price moved up"' not in html
     assert "STALE_QUOTE_WARNING" not in html
+
+
+def test_quality_consolidates_live_and_historical_stale_states() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    current_freshness="STALE",
+                    warning_codes=["STALE_QUOTE_WARNING"],
+                    stale_quote=True,
+                    closing_status="STALE_QUOTE",
+                )
+            ]
+        )
+    ).render_html()
+
+    assert '<span class="quality-badge stale" title="Latest registered-book provider observation is too old">STALE NOW</span>' in html
+    assert ">Entry stale · Closing stale</small>" in html
+    assert "CURRENT STALE" not in html
+    assert "ENTRY STALE" not in html
+    assert "CLOSING STALE" not in html
 
 
 def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None:
@@ -209,7 +232,7 @@ def test_current_unavailable_is_distinct_from_historical_entry_warning() -> None
         )
     ).render_html()
 
-    assert "CURRENT UNAVAILABLE" in html
+    assert ">UNAVAILABLE</span>" in html
     assert '<small class="quote-age unavailable">UNAVAILABLE</small>' in html
     assert "ENTRY STALE" not in html
 
