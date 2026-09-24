@@ -322,11 +322,23 @@ class DashboardService:
     @staticmethod
     def _bookmaker_badge(bookmaker: Any) -> str:
         key = str(bookmaker or "").casefold()
-        label = {"bet365": "B365", "1xbet": "1X", "superbet": "SB"}.get(key, "BK")
-        name = str(bookmaker or "Unavailable")
+        name = {
+            "bet365": "Bet365",
+            "1xbet": "1xBet",
+            "superbet": "Superbet",
+        }.get(key, str(bookmaker or "Unavailable"))
+        if key == "bet365":
+            mark = '<span class="brand-bet365"><b>bet</b><strong>365</strong></span>'
+        elif key == "1xbet":
+            mark = '<span class="brand-1xbet"><b>1X</b><strong>BET</strong></span>'
+        elif key == "superbet":
+            mark = '<span class="brand-superbet"><b>SUPER</b><strong>BET</strong></span>'
+        else:
+            mark = f'<span class="brand-generic">{escape(name)}</span>'
         return (
-            f'<span class="bookmaker-icon bookmaker-{escape(key)}" aria-hidden="true">'
-            f"{escape(label)}</span><span>{escape(name)}</span>"
+            f'<span class="bookmaker-mark bookmaker-{escape(key)}" '
+            f'aria-label="{escape(name)}" title="{escape(name)}" '
+            f'data-bookmaker="{escape(key)}">{mark}</span>'
         )
 
     @staticmethod
@@ -371,8 +383,15 @@ class DashboardService:
                 ],
             )
         )
-        registered_bookmaker = self._bookmaker_badge(pick.get("bookmaker_key"))
-        best_bookmaker = self._bookmaker_badge(pick.get("best_current_bookmaker_key"))
+        registered_key = str(pick.get("bookmaker_key") or "").casefold()
+        best_key = str(pick.get("best_current_bookmaker_key") or "").casefold()
+        registered_bookmaker = self._bookmaker_badge(registered_key)
+        best_bookmaker_footer = (
+            f'<small class="best-book-switch"><span>best at</span>'
+            f'{self._bookmaker_badge(best_key)}</small>'
+            if best_key and best_key != registered_key and pick.get("best_current_odd") is not None
+            else ""
+        )
         movement = self._movement(pick)
         operator_state = str(pick.get("operator_state") or "PLAYED")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
@@ -395,7 +414,7 @@ class DashboardService:
             f"<b>Same-book current</b>{self._odd(pick.get('current_odd'))}{movement}</span>"
             f'<span title="{escape(self._dt(pick.get("best_current_observed_at")))}">'
             f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
-            f'<small class="inline-book">{best_bookmaker}</small></span>'
+            f"{best_bookmaker_footer}</span>"
             f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
             f"<b>Close</b>{self._odd(pick.get('closing_odd'))}</span>"
             "</div>"
@@ -414,11 +433,11 @@ class DashboardService:
             f"{escape(self._short_id(pick.get('pick_id')))}</code></td>"
             f'<td class="fixture"><strong>{escape(fixture)}</strong><small>'
             f"{escape(str(pick.get('competition_name') or '—'))} · "
-            f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
+            f"{escape(self._dt(pick.get('kickoff_at')))}</small>"
+            f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
-            f'<td>{odds}<small class="registered-book">Registered: {registered_bookmaker}</small>'
-            f'<small class="timestamps">{escape(checkpoint_times)}</small></td>'
+            f'<td>{odds}<small class="timestamps">{escape(checkpoint_times)}</small></td>'
             f'<td class="num"><strong>{self._pct(pick.get("model_probability"))}</strong>'
             f"<small>implied {self._pct(pick.get('implied_probability'))} · "
             f"de-vig {self._pct(pick.get('devig_probability'))}</small></td>"
@@ -520,10 +539,21 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(5,minmax(58px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
-.odds-grid span{{background:var(--panel2);padding:5px;text-align:center}}.odds-grid b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase}}
+.odds-grid{{display:grid;grid-template-columns:repeat(5,minmax(72px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
+.odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
 .movement{{display:inline!important;background:transparent!important;padding:0 0 0 4px!important;font-weight:900}}.movement.up{{color:var(--green)}}.movement.down{{color:var(--red)}}.movement.neutral{{color:var(--muted)}}
-.bookmaker-icon{{display:inline-flex;width:26px;height:18px;align-items:center;justify-content:center;margin-right:5px;border:1px solid var(--line);font-size:8px;font-weight:900}}.registered-book,.inline-book{{display:flex!important;align-items:center;justify-content:center;gap:2px}}.registered-book{{justify-content:flex-start;margin-top:7px!important}}
+.pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
+.bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:-.02em;line-height:1;white-space:nowrap;overflow:hidden}}
+.brand-bet365{{display:inline-flex;align-items:baseline;gap:1px;background:#087a4b;padding:6px 8px;border-radius:6px}}
+.brand-bet365 b{{color:#fff;font-size:11px}}.brand-bet365 strong{{color:#f4ea24;font-size:11px}}
+.brand-1xbet{{display:inline-flex;align-items:baseline;gap:1px;background:#fff;padding:6px 8px;border-radius:6px}}
+.brand-1xbet b{{color:#1689d4;font-size:11px}}.brand-1xbet strong{{color:#184b91;font-size:11px}}
+.brand-superbet{{display:inline-flex;align-items:baseline;gap:1px;background:#e52333;padding:6px 8px;border-radius:6px}}
+.brand-superbet b,.brand-superbet strong{{color:#fff;font-size:9px}}
+.brand-generic{{display:inline-flex;background:#1b2637;color:var(--text);border:1px solid var(--line);padding:6px 8px;border-radius:6px}}
+.best-book-switch{{display:flex!important;align-items:center;justify-content:center;gap:5px;width:100%;margin-top:auto!important;padding-top:5px;border-top:1px solid var(--line);font-size:8px!important;color:var(--muted)}}
+.best-book-switch .bookmaker-mark{{transform:scale(.82);transform-origin:center;min-height:20px}}
 .sr-only{{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .status,.warning{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
@@ -536,7 +566,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
-.scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}}}
+.scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
+.odds-grid{{grid-template-columns:repeat(5,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>

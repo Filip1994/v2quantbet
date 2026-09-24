@@ -137,6 +137,22 @@ def test_render_populated_history_preserves_odds_settlement_clv_and_escapes_html
     assert 'value="SKIPPED"' in html
 
 
+def test_bookmaker_identity_is_shown_once_per_pick_and_best_book_only_when_different() -> None:
+    same_book = RenderingDashboard(
+        _snapshot([_pick(best_current_bookmaker_key="bet365")])
+    ).render_html()
+    different_book = RenderingDashboard(_snapshot([_pick()])).render_html()
+
+    assert same_book.count('data-bookmaker="bet365"') == 1
+    assert 'class="best-book-switch"' not in same_book
+    assert 'class="pick-book"' in same_book
+
+    assert different_book.count('data-bookmaker="bet365"') == 1
+    assert different_book.count('data-bookmaker="superbet"') == 1
+    assert 'class="best-book-switch"' in different_book
+    assert "best at" in different_book
+
+
 def test_same_bookmaker_movement_is_accessible_for_down_and_neutral() -> None:
     down = RenderingDashboard(_snapshot([_pick(current_odd=1.80)])).render_html()
     neutral = RenderingDashboard(_snapshot([_pick(current_odd=1.95)])).render_html()
