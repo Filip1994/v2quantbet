@@ -81,6 +81,66 @@ class PostgreSQLQuoteHistoryRepository:
             )
             return tuple(self._row_to_series(row) for row in cursor.fetchall())
 
+    def fixture_ingestion_state(
+        self, fixture_id: str
+    ) -> tuple[tuple[QuoteSeries, ...], frozenset[tuple[str, Any, str]]]:
+        """Load series definitions and semantic observation keys in one round-trip."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.series_id, s.fixture_id, s.bookmaker_id, s.market, s.selection, "
+                "s.created_at, q.observed_at, q.source "
+                "FROM quote_series s LEFT JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = %s ORDER BY s.created_at, s.series_id, q.observed_at",
+                (fixture_id,),
+            )
+            rows = cursor.fetchall()
+
+        series_by_id: dict[str, QuoteSeries] = {}
+        observations: set[tuple[str, Any, str]] = set()
+        for row in rows:
+            series_id = str(row[0])
+            series_by_id.setdefault(series_id, self._row_to_series(row[:6]))
+            if row[6] is not None and row[7] is not None:
+                observations.add((series_id, row[6], str(row[7])))
+        return tuple(series_by_id.values()), frozenset(observations)
+
+    def ensure_series_batch(self, series: Iterable[QuoteSeries]) -> None:
+        """Ensure multiple series definitions using one transaction/connection."""
+        incoming = tuple(series)
+        if not incoming:
+            return
+        if len({item.series_id for item in incoming}) != len(incoming):
+            raise QuoteHistoryConflictError("duplicate series ID in ingestion batch")
+
+        with self.connect() as connection, connection.cursor() as cursor:
+            for item in incoming:
+                cursor.execute(
+                    "INSERT INTO quote_series "
+                    "(series_id, fixture_id, bookmaker_id, market, selection, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                    (
+                        item.series_id,
+                        item.fixture_id,
+                        item.bookmaker_id,
+                        item.market.value,
+                        item.selection.value,
+                        item.created_at,
+                    ),
+                )
+            cursor.execute(
+                "SELECT series_id, fixture_id, bookmaker_id, market, selection, created_at "
+                "FROM quote_series WHERE series_id = ANY(%s)",
+                ([item.series_id for item in incoming],),
+            )
+            persisted = {str(row[0]): row[1:] for row in cursor.fetchall()}
+            for item in incoming:
+                row = persisted.get(item.series_id)
+                if row is None:
+                    raise QuoteHistoryConflictError(
+                        f"conflicting definition for series ID {item.series_id!r}"
+                    )
+                self._require_same_series(row, item)
+
     def append_snapshots(self, snapshots: Iterable[QuoteSnapshot]) -> None:
         """Append by (series_id, observed_at, source), preserving first provenance."""
         incoming = tuple(snapshots)

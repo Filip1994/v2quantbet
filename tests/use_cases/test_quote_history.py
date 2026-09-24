@@ -93,3 +93,53 @@ def test_canonical_fixture_id_flows_through_unchanged_history_hashing() -> None:
     assert snapshots[0].snapshot_id == (
         "snapshot-6502dee18fa5965714ef2559c6811adc8ca83f0c4310f3da99ecb9cebcb9ccfc"
     )
+
+
+class BatchAwareRepository(InMemoryQuoteHistoryRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fixture_state_calls = 0
+        self.batch_ensure_calls = 0
+
+    def fixture_ingestion_state(self, fixture_id: str):
+        self.fixture_state_calls += 1
+        series = self.series_for_fixture(fixture_id)
+        observations = frozenset(
+            (item.series_id, snapshot.observed_at, snapshot.source)
+            for item in series
+            for snapshot in self.snapshots_for_series(item.series_id)
+        )
+        return series, observations
+
+    def ensure_series_batch(self, series) -> None:
+        self.batch_ensure_calls += 1
+        for item in tuple(series):
+            self.ensure_series(item)
+
+
+def test_batch_capable_repository_uses_one_fixture_preload_per_cycle() -> None:
+    repository = BatchAwareRepository()
+    service = QuoteHistoryIngestionService(
+        repository,
+        capture_clock=lambda: datetime(2026, 9, 15, 12, 1, tzinfo=UTC),
+    )
+    over = make_quote()
+    under = CanonicalQuote(
+        fixture_id=over.fixture_id,
+        bookmaker_id=over.bookmaker_id,
+        bookmaker_name=over.bookmaker_name,
+        market=over.market,
+        selection=Selection.UNDER,
+        odd=1.8,
+        observed_at=over.observed_at,
+        source=over.source,
+    )
+
+    assert service.ingest((over, under)) == 2
+    assert repository.fixture_state_calls == 1
+    assert repository.batch_ensure_calls == 1
+    assert len(repository.series_for_fixture("fixture-1")) == 2
+
+    assert service.ingest((over, under)) == 0
+    assert repository.fixture_state_calls == 2
+    assert repository.batch_ensure_calls == 2
