@@ -455,10 +455,23 @@ class OpportunityWorker:
                     evaluations.extend(
                         preliminary.evaluation_id for preliminary in preliminary_evaluations
                     )
-                    ranked_sets = rank_best_prices(preliminary_evaluations)
-                    ordered_preliminaries = tuple(
-                        candidate for group in ranked_sets for candidate in group.candidates
-                    )
+                    if len(self._bookmaker_ids) == 1:
+                        ordered_preliminaries = tuple(
+                            sorted(
+                                preliminary_evaluations,
+                                key=lambda candidate: (
+                                    -float(candidate.expected_value),
+                                    -float(candidate.edge),
+                                    -float(candidate.selected_odd),
+                                    candidate.evaluation_id,
+                                ),
+                            )
+                        )
+                    else:
+                        ranked_sets = rank_best_prices(preliminary_evaluations)
+                        ordered_preliminaries = tuple(
+                            candidate for group in ranked_sets for candidate in group.candidates
+                        )
                     compared_quotes += len(ordered_preliminaries)
                     registered_selection_keys: set[tuple[object, object]] = set()
                     for preliminary in ordered_preliminaries:
