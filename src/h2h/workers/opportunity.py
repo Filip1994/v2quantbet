@@ -400,6 +400,8 @@ class OpportunityWorker:
                     )
                     for approved_id in self._bookmaker_ids
                 }
+                # Current-response membership must follow provider observation identity.
+                # Local captured_at may be old when an identical provider snapshot is deduplicated.
                 returned_observations = _returned_complete_market_observations(quotes)
                 returned_states_by_bookmaker = {
                     approved_id: tuple(
