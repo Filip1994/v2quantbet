@@ -16,6 +16,31 @@ from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy, quote_refr
 ConnectionFactory = Callable[[], Any]
 LEADER_LOCK_NAME = "quantbet-production-v1"
 
+_OPPORTUNITY_NO_ODDS_ERROR = "OpportunityOddsUnavailableError"
+
+
+def _initial_item_retry_at(worker: str, error_class: str, failed_at: datetime) -> datetime:
+    if worker == "opportunity" and error_class == _OPPORTUNITY_NO_ODDS_ERROR:
+        return failed_at + timedelta(minutes=10)
+    return failed_at + timedelta(seconds=5)
+
+
+_ITEM_FAILURE_UPSERT_SQL = (
+    "INSERT INTO production_item_failures (worker_name, item_id, failure_count, "
+    "last_failure_at, next_retry_at, last_error_class, last_error_message) "
+    "VALUES (%s, %s, 1, %s, %s, %s, %s) ON CONFLICT (worker_name, item_id) "
+    "DO UPDATE SET failure_count = production_item_failures.failure_count + 1, "
+    "last_failure_at = EXCLUDED.last_failure_at, next_retry_at = CASE "
+    "WHEN EXCLUDED.worker_name = 'opportunity' "
+    "AND EXCLUDED.last_error_class = 'OpportunityOddsUnavailableError' THEN LEAST("
+    "EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
+    "(power(2, LEAST(production_item_failures.failure_count, 3)) * interval '10 minutes')) "
+    "ELSE LEAST(EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
+    "(power(2, LEAST(production_item_failures.failure_count, 8)) * interval '5 seconds')) END, "
+    "last_error_class = EXCLUDED.last_error_class, "
+    "last_error_message = EXCLUDED.last_error_message"
+)
+
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -585,16 +610,15 @@ class PostgreSQLRuntimeRepository:
         failed = _utc(failed_at)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO production_item_failures (worker_name, item_id, failure_count, "
-                "last_failure_at, next_retry_at, last_error_class, last_error_message) "
-                "VALUES (%s, %s, 1, %s, %s, %s, %s) ON CONFLICT (worker_name, item_id) "
-                "DO UPDATE SET failure_count = production_item_failures.failure_count + 1, "
-                "last_failure_at = EXCLUDED.last_failure_at, next_retry_at = LEAST("
-                "EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
-                "(power(2, LEAST(production_item_failures.failure_count, 8)) * interval '5 seconds')), "
-                "last_error_class = EXCLUDED.last_error_class, "
-                "last_error_message = EXCLUDED.last_error_message",
-                (worker, item_id, failed, failed + timedelta(seconds=5), error_class, message),
+                _ITEM_FAILURE_UPSERT_SQL,
+                (
+                    worker,
+                    item_id,
+                    failed,
+                    _initial_item_retry_at(worker, error_class, failed),
+                    error_class,
+                    message,
+                ),
             )
 
     def record_item_failures(
@@ -610,16 +634,15 @@ class PostgreSQLRuntimeRepository:
                 error_class, message = _bounded_error(error)
                 failed = _utc(failed_at)
                 cursor.execute(
-                    "INSERT INTO production_item_failures (worker_name, item_id, failure_count, "
-                    "last_failure_at, next_retry_at, last_error_class, last_error_message) "
-                    "VALUES (%s, %s, 1, %s, %s, %s, %s) ON CONFLICT (worker_name, item_id) "
-                    "DO UPDATE SET failure_count = production_item_failures.failure_count + 1, "
-                    "last_failure_at = EXCLUDED.last_failure_at, next_retry_at = LEAST("
-                    "EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
-                    "(power(2, LEAST(production_item_failures.failure_count, 8)) * interval '5 seconds')), "
-                    "last_error_class = EXCLUDED.last_error_class, "
-                    "last_error_message = EXCLUDED.last_error_message",
-                    (worker, item_id, failed, failed + timedelta(seconds=5), error_class, message),
+                    _ITEM_FAILURE_UPSERT_SQL,
+                    (
+                        worker,
+                        item_id,
+                        failed,
+                        _initial_item_retry_at(worker, error_class, failed),
+                        error_class,
+                        message,
+                    ),
                 )
 
     def clear_item_failure(self, worker: str, item_id: str) -> None:
