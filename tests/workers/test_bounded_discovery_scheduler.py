@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import Mock
 
+from h2h.persistence.fixtures import FixturePersistenceConflictError
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
 from h2h.use_cases.durable_fixture_discovery import DurableFixtureDiscovery
 from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
@@ -127,3 +129,58 @@ def test_cold_start_is_persisted_in_bounded_units_without_starving_scheduler() -
     assert results_runs == [start + timedelta(seconds=value) for value in (0, 5, 10)]
     assert len(repository.fixture_ids) == len(set(repository.fixture_ids)) == 22
     assert client.fetch_fixtures_for_date.call_count == 22
+
+
+
+def test_conflicting_fixture_is_quarantined_without_stopping_discovery_batch() -> None:
+    now = datetime(2026, 9, 24, 14, tzinfo=UTC)
+
+    def item(fixture_id: str, provider_fixture_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            fixture_id=fixture_id,
+            provider="api-football",
+            provider_fixture_id=provider_fixture_id,
+            competition_id=253,
+            season=2026,
+            provider_home_team_id=10,
+            provider_away_team_id=20,
+        )
+
+    good_before = item("api-football:1", "1")
+    poisoned = item("api-football:2", "2")
+    good_after = item("api-football:3", "3")
+    attempted: list[str] = []
+    persisted_ids: list[str] = []
+
+    class ConflictRepository:
+        def record_discovery(self, fixture, *, observed_at):
+            attempted.append(fixture.fixture_id)
+            if fixture.fixture_id == poisoned.fixture_id:
+                raise FixturePersistenceConflictError("immutable fixture identity conflicts")
+            persisted_ids.append(fixture.fixture_id)
+            return fixture
+
+    source = SimpleNamespace(
+        discover=lambda _start, _end: (good_before, poisoned, good_after),
+        has_pending=False,
+    )
+    durable = DurableFixtureDiscovery(
+        source,
+        ConflictRepository(),
+        clock=lambda: now,
+        max_per_call=3,
+    )
+
+    result = durable.discover(now, now + timedelta(days=1))
+
+    assert [fixture.fixture_id for fixture in result] == [
+        good_before.fixture_id,
+        good_after.fixture_id,
+    ]
+    assert attempted == [
+        good_before.fixture_id,
+        poisoned.fixture_id,
+        good_after.fixture_id,
+    ]
+    assert persisted_ids == [good_before.fixture_id, good_after.fixture_id]
+    assert durable.has_pending is False
