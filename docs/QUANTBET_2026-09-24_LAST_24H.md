@@ -245,3 +245,95 @@ Priority order:
 - **Head timestamp:** 24/09/2026 05:59:19 CEST
 
 This file should be treated as the handoff checkpoint for the next QuantBet work session.
+
+
+---
+
+## 8. Production verification performed after the 24h audit
+
+### Railway runtime located
+
+The active V2 runtime is in Railway project `sincere-balance`, with:
+- `quantbet-engine`
+- `quantbet-dashboard`
+- `Postgres`
+
+The separate Railway project `v2quantbet-deploy-picks` is not the active runtime; its only observed deployment was removed.
+
+### Functional head deployment
+
+Commit `86652cd` — **Preserve opportunity cursor progress on wall-budget exhaustion** — deployed successfully to both engine and dashboard before this documentation-only commit.
+
+The engine acquired production leadership and continued cycling successfully.
+
+### Live opportunity-worker evidence
+
+Observed opportunity cycles after the freshness/cursor fixes show the worker is no longer stuck, but still has a material availability bottleneck.
+
+Representative cycles:
+
+- Cycle A:
+  - due fixtures: 10
+  - eligible fixtures: 13
+  - odds unavailable: 8
+  - processed fixtures: 0
+  - budget exhausted: true
+  - pending work: true
+
+- Cycle B:
+  - due fixtures: 10
+  - eligible fixtures: 17
+  - odds unavailable: 7
+  - processed fixtures: 1
+  - predictions: 1
+  - decisions: 1
+  - registered picks: 1
+  - fresh quotes: 4
+  - final refreshes: 1
+  - budget exhausted: true
+  - pending work: true
+
+- Later cycle:
+  - due fixtures: 10
+  - eligible fixtures: 14
+  - odds unavailable: 0
+  - processed fixtures: 1
+  - fresh quotes: 4
+  - predictions: 1
+  - stale retries scheduled: 1
+  - budget exhausted: true
+  - pending work: true
+
+This confirms that the opportunity cursor/fairness path is progressing across cycles instead of repeatedly pinning the same first work slice.
+
+### Provider freshness / final verification evidence
+
+A live final-quote verification path was exercised. The worker emitted:
+
+- mandatory final quote verification requested
+- final quote verification used latest published provider snapshot
+
+The cycle still produced a decision and registered one pick. The fallback is therefore operational in production rather than only unit-tested.
+
+### Model lifecycle evidence
+
+The model lifecycle is active and alternates between:
+- model scope activated;
+- model scope has insufficient data;
+- one observed `DixonColesFitError` training failure.
+
+The worker recovered and subsequent cycles continued successfully. This is not a scheduler crash, but the failure needs diagnostic attribution to the exact scope and fit condition before it can be classified as benign or defective.
+
+### Immediate engineering focus from live evidence
+
+1. **Investigate the repeated `opportunity odds unavailable` population** by fixture/provider/market rather than weakening freshness rules.
+2. **Attribute the observed `DixonColesFitError`** to the exact model scope and error detail.
+3. **Confirm API wall-budget economics.** Several opportunity cycles are reaching `budget_exhausted=true`; this is a per-cycle wall/work budget condition and must not be confused with the 7,500-call daily provider allowance.
+4. **Observe the cursor for several more slices** to verify there is no starvation pattern in deferred fixtures.
+5. **Reconcile status docs** only after production evidence is incorporated, so documentation does not overstate completeness.
+
+### Current verified conclusion
+
+The system is **running**, not merely built. The newest functional code is live and the worker survives sparse/no-odds cases, model-fit failures, stale-market refresh paths, and final-quote fallback without stopping the scheduler.
+
+The current limiting problem is no longer basic orchestration. It is **quality and availability of actionable market evidence under bounded runtime**, plus better diagnostics for the remaining model-fit failure.
