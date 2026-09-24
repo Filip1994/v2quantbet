@@ -501,6 +501,14 @@ class DashboardService:
 
         clv, clv_css, clv_verdict, clv_source = self._clv_summary(pick)
         operator_state = str(pick.get("operator_state") or "PLAYED")
+        action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
+        alternate_state = "SKIPPED" if operator_state == "PLAYED" else "PLAYED"
+        operator_control = (
+            f'<form class="history-operator-form" method="post" action="{action}">'
+            f'<input type="hidden" name="request_id" value="dashboard:{uuid4().hex}">'
+            f'<button name="state" value="{alternate_state}" class="history-operator-button">'
+            f"{'Skip' if alternate_state == 'SKIPPED' else 'Play'}</button></form>"
+        )
         closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
         close_source = {
             "SAME_BOOK": "same-book",
@@ -514,7 +522,8 @@ class DashboardService:
             f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong>"
-            f'<small class="history-operator">{escape(operator_state)}</small></td>'
+            f'<div class="history-operator"><span class="status operator-{operator_state.casefold()}">'
+            f"{escape(operator_state)}</span>{operator_control}</div></td>"
             f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
             f"<small>Pick → Closing · {escape(close_source)}</small></td>"
@@ -776,7 +785,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
 .history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
-.history-fixture{{min-width:260px}}.history-operator{{font-size:8px!important;letter-spacing:.05em}}
+.history-fixture{{min-width:260px}}.history-operator{{display:flex;align-items:center;gap:5px;margin-top:5px}}
+.history-operator-form{{margin:0}}.history-operator-button{{background:transparent;color:var(--muted);border:0;padding:2px 3px;cursor:pointer;font:inherit;font-size:8px;text-decoration:underline}}
 .history-odds strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
 .history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
