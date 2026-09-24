@@ -644,3 +644,176 @@ That bug is fixed and live.
 
 The opportunity funnel now reaches the model/value layer. Zero picks in an individual post-fix cycle can therefore be a legitimate result of the existing EV/edge rules, while provider no-odds responses and hard-stale data remain separate upstream constraints.
 
+
+
+---
+
+## 11. Value-layer, risk-cap and API retry audit — afternoon continuation
+
+### PR #46 — structured opportunity rejection diagnostics
+
+**Merge commit:** `a7ce4a3392e818a4716dc8a3f5b4d8c6b521c0ce`
+
+Structured production logs were extended so a candidate that does not reach final quote verification now records:
+
+- market and selection;
+- preliminary odds;
+- model-vs-market edge;
+- expected value;
+- rejection reason codes;
+- final-quote decision context where applicable.
+
+This was an observability-only change. No model, edge, EV, bankroll, staking or registration rule was altered.
+
+### Production proof: qualified value candidates do exist
+
+After PR #46 telemetry became active, fixture `api-football:1528647` produced multiple real value evaluations.
+
+Two examples passed the model/value thresholds but were blocked by the risk layer:
+
+1. **OU_25 OVER @ 1.85**
+   - edge: **+8.14 percentage points**;
+   - expected value: **+10.00%**;
+   - rejection: `MAX_OPEN_EXPOSURE_EXCEEDED`.
+
+2. **BTTS YES @ 1.67**
+   - edge: **+7.01 percentage points**;
+   - expected value: **+4.73%**;
+   - rejection: `MAX_OPEN_EXPOSURE_EXCEEDED`.
+
+Other evaluations from the same fixture included candidates that also failed minimum EV and/or minimum edge, but the two cases above demonstrate that the earlier impression of “no qualified picks” was incomplete.
+
+**Current interpretation:** the opportunity freshness bug is no longer the primary blocker for these candidates. At least some valid model/value candidates are reaching registration eligibility and are then being stopped by the open-exposure risk cap.
+
+The risk limit has **not** been relaxed. Changing max open exposure is a bankroll/risk policy decision and requires explicit operator approval.
+
+### Representative production cycle with value evaluations
+
+A production opportunity cycle around 13:19 UTC reported:
+
+- due fixtures: 10;
+- eligible fixtures: 13;
+- preliminary refreshes: 5;
+- odds unavailable: 4;
+- predictions: 1;
+- evaluations: 8;
+- compared quotes: 8;
+- hard-stale markets: 0;
+- accelerated stale retries scheduled: 0;
+- decisions: 0;
+- registered picks: 0;
+- duration: approximately 121 seconds.
+
+The eight evaluations were real model/value work. Registration did not proceed because preliminary policy/risk rejection codes were present.
+
+This is strong evidence that the stale-quote policy is no longer suppressing the funnel before the model/value layer.
+
+### PR #47 — slower retry for fixtures with no provider odds
+
+**Merge commit:** `225359ee2f5cde9e23fe54e72548fbaf7fb1dbde`
+
+A separate API-economics problem was found in generic item-failure scheduling.
+
+Before this change, `OpportunityOddsUnavailableError` inherited the generic transient-error retry sequence beginning at approximately:
+
+`5s → 10s → 20s → 40s → ...`
+
+That is too aggressive for a provider whose pre-match odds publication cadence is much slower.
+
+Production evidence before the fix:
+
+- 36 zero-odds calls in the sampled window;
+- 29 unique zero-odds fixture IDs;
+- repeated zero-odds fixture IDs included:
+  - `1632432` ×3;
+  - `1632433` ×3;
+  - `1636700` ×3;
+  - `1634027` ×2;
+- some zero-odds fixtures were rechecked only about two minutes after the previous zero response.
+
+The dedicated opportunity no-odds retry sequence is now:
+
+`10m → 20m → 40m → 60m cap`
+
+Generic transport/runtime failures retain the faster retry path.
+
+The change does **not** affect:
+- registered-pick monitoring;
+- fixtures that already have usable odds;
+- model probability;
+- edge or EV thresholds;
+- bankroll/risk rules;
+- the 8-hour `USABLE_STALE` policy.
+
+### PR #47 production rollout
+
+The automatic Railway deployment for the merge was initially marked `SKIPPED` because of the engine source/check-suite deployment issue.
+
+An exact-current-main engine deployment was then started manually through Railway. Deployment:
+
+`cb14ffac-1390-4cb3-accc-b51e4003b449`
+
+reached **SUCCESS** for commit `225359ee...`.
+
+Initial post-deploy opportunity evidence showed:
+- 28 eligible fixtures in one slice;
+- 18 waiting for refresh rather than immediately re-polled;
+- only a small due subset hitting the provider;
+- cycle duration approximately 24 seconds in that sample.
+
+A full recurrence proof requires observing the same zero-odds fixture IDs for at least the new 10-minute first-retry window. That longer verification is still pending at this checkpoint.
+
+### PR #48 — expose the actual risk exposure snapshot
+
+**Merge commit:** `fa955f18a7aca5a98815a2ff64cded33caffb26c`
+
+To diagnose `MAX_OPEN_EXPOSURE_EXCEEDED` without changing the limit, registration logging now exposes:
+
+- `open_exposure_minor`;
+- `fixed_stake_minor`;
+- `max_open_exposure_minor`;
+- `available_bankroll_minor`.
+
+This is diagnostics only.
+
+Railway engine deployment `a72f9c17-b822-47a8-9a7b-fc4f53468941` reached **SUCCESS**. The next value candidate that hits the exposure gate will therefore reveal the exact live risk-cap numbers.
+
+### Railway deployment automation status
+
+The engine now has path-scoped watch patterns:
+
+- `src/h2h/**`
+- `migrations/**`
+- `pyproject.toml`
+
+This prevents documentation-only changes from being intended engine triggers.
+
+However, a direct service-config read still reports:
+
+`source.checkSuites = true`
+
+even after Railway-agent attempts to set it false. This remains inconsistent with the intended deployment configuration and explains why some automatic engine deployments are still created and then marked `SKIPPED`.
+
+Therefore:
+- exact-commit manual engine deployment remains the verified fallback for critical fixes;
+- the check-suite source setting must be considered unresolved until a direct service-config read reports the intended value.
+
+### Risk-policy boundary
+
+The repository development defaults are:
+
+- fixed stake: 30,000 minor units;
+- max open exposure: 300,000 minor units.
+
+Those defaults would imply ten simultaneous full fixed-stake reservations, but **production variable values are hidden by Railway OAuth** and must not be assumed to equal repository defaults.
+
+PR #48 was added specifically so the next live exposure rejection will provide authoritative production values.
+
+### Current priorities after this checkpoint
+
+1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
+2. Verify PR #47 by confirming zero-odds fixture IDs do not reappear inside the new 10-minute first-retry window.
+3. Do not loosen `MAX_OPEN_EXPOSURE` without explicit operator approval.
+4. Continue reducing fixture-by-fixture API cost; provider-level odds batching remains a promising next optimization.
+5. Hard-enforce or better bound the opportunity 30-second wall budget; 120-second cycles still occur.
+6. Resolve the Railway `checkSuites` deployment-gate inconsistency.
