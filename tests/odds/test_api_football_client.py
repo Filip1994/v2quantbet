@@ -10,7 +10,21 @@ from h2h.odds.api_football_client import ApiFootballClient
 def test_fetch_odds_uses_injected_transport(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger="quantbet.provider")
     transport = Mock()
-    transport.get_json.return_value = {"response": [{"fixture": {"id": 42}}]}
+    transport.get_json.return_value = {
+        "response": [
+            {
+                "fixture": {"id": 42},
+                "update": "2026-09-24T06:00:00+00:00",
+                "bookmakers": [
+                    {
+                        "id": 8,
+                        "update": "2026-09-24T08:55:00+00:00",
+                        "bets": [],
+                    }
+                ],
+            }
+        ]
+    }
 
     result = ApiFootballClient(transport, "secret").fetch_odds(fixture_id=42)
 
@@ -24,6 +38,9 @@ def test_fetch_odds_uses_injected_transport(caplog: pytest.LogCaptureFixture) ->
     assert record.provider_endpoint == "odds"
     assert record.provider_requests == 1
     assert record.provider_response_items == 1
+    assert record.provider_fixture_id == 42
+    assert record.provider_update_oldest == "2026-09-24T06:00:00+00:00"
+    assert record.provider_update_latest == "2026-09-24T08:55:00+00:00"
 
 
 def test_fetch_odds_uses_fresh_fixture_cache() -> None:
