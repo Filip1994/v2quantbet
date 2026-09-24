@@ -182,6 +182,7 @@ class DashboardService:
             JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id
             JOIN pick_policy_configurations config
                 ON config.config_fingerprint = r.config_fingerprint
+            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
             JOIN quote_snapshots entry ON entry.snapshot_id = r.entry_snapshot_id
             LEFT JOIN final_quote_verifications fq
                 ON fq.verification_id = decision.final_quote_verification_id
@@ -234,7 +235,6 @@ class DashboardService:
                 ORDER BY latest_price.odd DESC, series.bookmaker_id
                 LIMIT 1
             ) best_current ON TRUE
-            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
