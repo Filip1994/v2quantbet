@@ -108,6 +108,39 @@ class ApiFootballClient:
             )
         return payload
 
+    def fetch_odds_for_scope(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        fixture_date: date,
+        page: int = 1,
+    ) -> Mapping[str, Any]:
+        """Fetch one paginated league/date slice of pre-match odds."""
+        self._validate_positive_int(league_id, "league_id")
+        self._validate_positive_int(season, "season")
+        self._validate_positive_int(page, "page")
+        if isinstance(fixture_date, datetime) or not isinstance(fixture_date, date):
+            raise TypeError("fixture_date must be a date")
+        self._validate()
+        query = urlencode(
+            {
+                "league": league_id,
+                "season": season,
+                "date": fixture_date.isoformat(),
+                "page": page,
+            }
+        )
+        url = f"{self.base_url.rstrip('/')}/odds?{query}"
+        with provider_request_category(self.odds_request_category):
+            payload = self.transport.get_json(
+                url,
+                headers={"x-apisports-key": self.api_key},
+                timeout=self.timeout,
+            )
+        self._log_request("odds-scope", payload, fixture_date=fixture_date)
+        return payload
+
     def fetch_live_odds(self, *, fixture_id: int) -> Mapping[str, Any]:
         """Fetch the current API-Football in-play/live odds feed for one fixture."""
         self._validate_fixture_id(fixture_id)
