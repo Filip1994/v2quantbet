@@ -676,10 +676,9 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(6,minmax(72px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(82px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
-.movement{{display:inline!important;background:transparent!important;padding:0 0 0 4px!important;font-weight:900}}.movement.up{{color:var(--green)}}.movement.down{{color:var(--red)}}.movement.neutral{{color:var(--muted)}}
 .pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
 .bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:-.02em;line-height:1;white-space:nowrap;overflow:hidden}}
 .brand-bet365{{display:inline-flex;align-items:baseline;gap:1px;background:#087a4b;padding:6px 8px;border-radius:6px}}
@@ -689,8 +688,6 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .brand-superbet{{display:inline-flex;align-items:baseline;gap:1px;background:#e52333;padding:6px 8px;border-radius:6px}}
 .brand-superbet b,.brand-superbet strong{{color:#fff;font-size:9px}}
 .brand-generic{{display:inline-flex;background:#1b2637;color:var(--text);border:1px solid var(--line);padding:6px 8px;border-radius:6px}}
-.best-book-switch{{display:flex!important;align-items:center;justify-content:center;gap:5px;width:100%;margin-top:auto!important;padding-top:5px;border-top:1px solid var(--line);font-size:8px!important;color:var(--muted)}}
-.best-book-switch .bookmaker-mark{{transform:scale(.82);transform-origin:center;min-height:20px}}
 .sr-only{{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .status,.quality-badge{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
@@ -698,10 +695,11 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .quality-summary{{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:104px}}
 .quality-badge.fresh{{color:var(--green);border-color:#1f6a51}}
 .quality-badge.stale{{color:var(--amber);border-color:#6c5425}}
+.quality-badge.active{{color:#8ab4ff;border-color:#35578c}}
 .quality-badge.unavailable{{color:var(--muted)}}
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
-.quote-age{{margin-top:auto!important;padding-top:4px;font-size:8px!important;letter-spacing:.04em}}
-.quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}.proxy-label{{color:#a9c5ff!important;font-size:7px!important;letter-spacing:.05em}}
+.source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
+.source-label.manual{{color:var(--amber)!important}}
 .operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
 .operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
@@ -711,7 +709,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
-.odds-grid{{grid-template-columns:repeat(6,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
+.odds-grid{{grid-template-columns:repeat(4,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
@@ -735,14 +733,13 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
 <section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
+<dt>First seen</dt><dd>First stored pre-match price for the registered market and bookmaker series.</dd>
 <dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
-<dt>Same-book current</dt><dd>Latest provider observation at the registered bookmaker. If it exceeds the pinned freshness limit, the tile becomes Last observed and the movement arrow is suppressed.</dd>
-<dt>Best current</dt><dd>Highest fresh price for the same fixture, market and selection across Bet365, 1xBet and Superbet. Stale prices are excluded.</dd>
-<dt>Quality</dt><dd>One live status: FRESH, STALE NOW or UNAVAILABLE. Historical context such as Entry stale or Closing stale is shown as secondary text underneath.</dd>
-<dt>Current freshness</dt><dd>Live freshness is calculated from the provider observed-at timestamp, not merely from whether the monitoring worker ran successfully.</dd>
-<dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
-<dt>Market close</dt><dd>API-Football live-market proxy captured in the final 15 minutes before kickoff. It is not bookmaker-specific and never replaces the same-book closing fact.</dd>
-<dt>Proxy CLV</dt><dd>Entry odds compared with Market close when a valid same-book close is unavailable. It is labeled separately from true same-book CLV.</dd>
+<dt>Last observed</dt><dd>Newest stored pre-kickoff price. In the final live window this may come from the API-Football live-market proxy and is labeled LIVE PROXY.</dd>
+<dt>Closing</dt><dd>True same-book closing when available; otherwise an explicit manual historical override or the live-market proxy, each labeled at the value.</dd>
+<dt>Quality</dt><dd>Before kickoff it shows quote freshness. After kickoff it switches to LIVE, FINISHED, CLOSED or SETTLED so stale pre-match quotes do not masquerade as current match state.</dd>
+<dt>Proxy CLV</dt><dd>Entry odds compared with a live-market proxy close when no valid same-book close exists.</dd>
+<dt>Manual CLV</dt><dd>Entry odds compared with an operator-confirmed manual closing override. It is kept separate from persisted same-book CLV.</dd>
 <dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>
 <dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>
