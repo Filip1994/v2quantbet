@@ -179,6 +179,7 @@ def test_manual_closing_override_migration_is_auditable_and_targeted() -> None:
     assert "ORDER BY q.observed_at DESC" in migration
     assert "ON CONFLICT DO NOTHING" in migration
 
+
 def test_seattle_btts_no_manual_close_migration_is_exact_and_append_only() -> None:
     migration = (
         Path(__file__).parents[2]
@@ -194,7 +195,6 @@ def test_seattle_btts_no_manual_close_migration_is_exact_and_append_only() -> No
     assert "ORDER BY q.observed_at DESC" in migration
     assert "pick_manual_closing_overrides" in migration
     assert "ON CONFLICT DO NOTHING" in migration
-
 
 
 def test_opportunity_retry_reset_migration_is_narrow_and_transient_only() -> None:
