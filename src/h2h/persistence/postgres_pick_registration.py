@@ -40,6 +40,19 @@ LOGGER = logging.getLogger("quantbet.registration")
 
 ConnectionFactory = Callable[[], Any]
 
+_OPEN_EXPOSURE_SQL = (
+    "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
+    "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
+    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
+    "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
+    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+    "WHERE successor.prior_event_id = e.settlement_event_id)) "
+    "AND COALESCE((SELECT operator_event.state FROM pick_operator_state_events operator_event "
+    "WHERE operator_event.pick_id = l.pick_id "
+    "ORDER BY operator_event.occurred_at DESC, operator_event.persisted_at DESC, "
+    "operator_event.event_id DESC LIMIT 1), 'PLAYED') = 'PLAYED'"
+)
+
 _EVALUATION_COLUMNS = (
     "evaluation_id, fixture_id, prediction_id, model_version_id, selected_series_id, "
     "companion_series_id, selected_snapshot_id, companion_snapshot_id, bookmaker_id, "
@@ -236,12 +249,7 @@ class PostgreSQLPickRegistrationRepository:
                     "initial bankroll funding contradicts registration policy"
                 )
             cursor.execute(
-                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
-                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
-                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
-                "WHERE successor.prior_event_id = e.settlement_event_id))",
+                _OPEN_EXPOSURE_SQL,
                 (policy.bankroll_account_id,),
             )
             open_exposure = int(cursor.fetchone()[0])
@@ -426,12 +434,7 @@ class PostgreSQLPickRegistrationRepository:
             if ledger is None or int(ledger[0]) < policy.fixed_stake_minor:
                 failures.append("INSUFFICIENT_AVAILABLE_BANKROLL")
             cursor.execute(
-                "SELECT COALESCE(SUM(-l.amount_minor), 0) FROM bankroll_ledger_entries l "
-                "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
-                "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
-                "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
-                "WHERE successor.prior_event_id = e.settlement_event_id))",
+                _OPEN_EXPOSURE_SQL,
                 (policy.bankroll_account_id,),
             )
             exposure = int(cursor.fetchone()[0])
