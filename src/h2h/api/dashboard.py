@@ -124,47 +124,99 @@ class DashboardService:
                 opening.odd AS first_seen_odd,
                 opening.observed_at AS first_seen_observed_at,
                 opening.captured_at AS first_seen_captured_at,
-                current_quote.odd AS current_odd,
-                current_quote.observed_at AS current_observed_at,
-                current_quote.captured_at AS current_captured_at,
                 CASE
-                    WHEN current_quote.observed_at IS NULL THEN 'UNAVAILABLE'
-                    WHEN current_quote.observed_at >=
-                        LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN live_latest.odd
+                    ELSE current_quote.odd
+                END AS last_observed_odd,
+                CASE
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN live_latest.provider_observed_at
+                    ELSE current_quote.observed_at
+                END AS last_observed_at,
+                CASE
+                    WHEN live_latest.provider_observed_at IS NOT NULL
+                         AND (
+                             current_quote.observed_at IS NULL
+                             OR live_latest.provider_observed_at > current_quote.observed_at
+                         )
+                    THEN 'LIVE_PROXY'
+                    WHEN current_quote.observed_at IS NOT NULL THEN 'SAME_BOOK'
+                    ELSE 'UNAVAILABLE'
+                END AS last_observed_source,
+                CASE
+                    WHEN COALESCE(
+                        live_latest.provider_observed_at,
+                        current_quote.observed_at
+                    ) IS NULL
+                    THEN 'UNAVAILABLE'
+                    WHEN (
+                        CASE
+                            WHEN live_latest.provider_observed_at IS NOT NULL
+                                 AND (
+                                     current_quote.observed_at IS NULL
+                                     OR live_latest.provider_observed_at
+                                        > current_quote.observed_at
+                                 )
+                            THEN live_latest.provider_observed_at
+                            ELSE current_quote.observed_at
+                        END
+                    ) >= LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
                         - make_interval(secs => COALESCE(
                             monitoring.current_max_age_seconds,
                             (config.configuration->>'maximum_quote_age_seconds')::integer
                         ))
                     THEN 'FRESH'
                     ELSE 'STALE'
-                END AS current_freshness,
+                END AS last_observed_freshness,
                 CASE
-                    WHEN current_quote.observed_at IS NULL THEN NULL
-                    ELSE GREATEST(
-                        0,
-                        FLOOR(EXTRACT(EPOCH FROM (
-                            LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
-                            - current_quote.observed_at
-                        )))
-                    )::bigint
-                END AS current_quote_age_seconds,
-                COALESCE(
-                    monitoring.current_max_age_seconds,
-                    (config.configuration->>'maximum_quote_age_seconds')::integer
-                ) AS current_max_age_seconds,
-                best_current.odd AS best_current_odd,
-                best_current.observed_at AS best_current_observed_at,
-                best_current.captured_at AS best_current_captured_at,
-                best_current.bookmaker_key AS best_current_bookmaker_key,
+                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.odd
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.odd
+                    WHEN proxy_close.outcome = 'CAPTURED'
+                    THEN proxy_close.proxy_closing_odd_decimal
+                    ELSE NULL
+                END AS display_closing_odd,
+                CASE
+                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.observed_at
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.observed_at
+                    WHEN proxy_close.outcome = 'CAPTURED'
+                    THEN proxy_observation.provider_observed_at
+                    ELSE NULL
+                END AS display_closing_observed_at,
+                CASE
+                    WHEN closing.outcome = 'CAPTURED' THEN 'SAME_BOOK'
+                    WHEN manual_close.snapshot_id IS NOT NULL THEN 'MANUAL'
+                    WHEN proxy_close.outcome = 'CAPTURED' THEN 'LIVE_PROXY'
+                    ELSE 'UNAVAILABLE'
+                END AS display_closing_source,
                 closing.outcome AS closing_status,
-                closing.finalized_at AS closing_finalized_at,
-                closing_quote.odd AS closing_odd,
-                closing_quote.observed_at AS closing_observed_at,
-                closing_quote.captured_at AS closing_captured_at,
                 proxy_close.outcome AS proxy_closing_status,
-                proxy_close.proxy_closing_odd_decimal AS proxy_closing_odd,
                 proxy_close.proxy_clv_ppm,
-                proxy_observation.provider_observed_at AS proxy_closing_observed_at,
+                CASE
+                    WHEN manual_quote.odd IS NULL THEN NULL
+                    ELSE ROUND(
+                        ((entry.odd / manual_quote.odd) - 1) * 1000000
+                    )::bigint
+                END AS manual_clv_ppm,
+                CASE
+                    WHEN settlement.outcome IS NOT NULL THEN 'SETTLED'
+                    WHEN latest.provider_status IN ('FT', 'AET', 'PEN') THEN 'FINISHED'
+                    WHEN latest.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'CLOSED'
+                    WHEN latest.kickoff_at <= CURRENT_TIMESTAMP
+                         OR latest.provider_status IN (
+                             '1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT', 'LIVE'
+                         )
+                    THEN 'LIVE'
+                    ELSE 'PREMATCH'
+                END AS dashboard_phase,
                 e.bookmaker_key, e.source, e.model_probability,
                 e.selected_raw_implied_probability AS implied_probability,
                 e.selected_devig_probability AS devig_probability,
@@ -178,8 +230,8 @@ class DashboardService:
                 settlement.outcome AS settlement_outcome,
                 settlement.gross_return_minor, settlement.realized_pnl_minor,
                 settlement.occurred_at AS settled_at,
-                clv.clv_ppm, clv.method_version AS clv_method_version
-                , COALESCE(operator_state.state, 'PLAYED') AS operator_state
+                clv.clv_ppm, clv.method_version AS clv_method_version,
+                COALESCE(operator_state.state, 'PLAYED') AS operator_state
             FROM registered_picks r
             JOIN pick_decisions decision ON decision.decision_id = r.decision_id
             JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
@@ -210,38 +262,22 @@ class DashboardService:
                 LIMIT 1
             ) current_quote ON TRUE
             LEFT JOIN LATERAL (
-                SELECT latest_price.odd, latest_price.observed_at,
-                    latest_price.captured_at,
-                    CASE series.bookmaker_id
-                        WHEN 8 THEN 'bet365'
-                        WHEN 11 THEN '1xbet'
-                        WHEN 34 THEN 'superbet'
-                    END AS bookmaker_key
-                FROM quote_series series
-                JOIN LATERAL (
-                    SELECT q.odd, q.observed_at, q.captured_at
-                    FROM quote_snapshots q
-                    WHERE q.series_id = series.series_id AND q.source = e.source
-                      AND q.observed_at < latest.kickoff_at
-                      AND q.captured_at < latest.kickoff_at
-                    ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
-                    LIMIT 1
-                ) latest_price ON TRUE
-                WHERE series.fixture_id = r.fixture_id
-                  AND series.market = r.market AND series.selection = r.selection
-                  AND series.bookmaker_id = ANY(ARRAY[8, 11, 34]::bigint[])
-                  AND latest_price.observed_at >=
-                      LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
-                      - make_interval(secs => COALESCE(
-                          monitoring.current_max_age_seconds,
-                          (config.configuration->>'maximum_quote_age_seconds')::integer
-                      ))
-                ORDER BY latest_price.odd DESC, series.bookmaker_id
+                SELECT observation.odd, observation.provider_observed_at
+                FROM pick_live_close_observations observation
+                WHERE observation.pick_id = r.pick_id
+                  AND observation.provider_observed_at < latest.kickoff_at
+                  AND observation.captured_at < latest.kickoff_at
+                ORDER BY observation.provider_observed_at DESC,
+                    observation.captured_at DESC, observation.observation_id DESC
                 LIMIT 1
-            ) best_current ON TRUE
+            ) live_latest ON TRUE
             LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
             LEFT JOIN quote_snapshots closing_quote
                 ON closing_quote.snapshot_id = closing.closing_snapshot_id
+            LEFT JOIN pick_manual_closing_overrides manual_close
+                ON manual_close.pick_id = r.pick_id
+            LEFT JOIN quote_snapshots manual_quote
+                ON manual_quote.snapshot_id = manual_close.snapshot_id
             LEFT JOIN pick_live_close_finalizations proxy_close
                 ON proxy_close.pick_id = r.pick_id
             LEFT JOIN pick_live_close_observations proxy_observation
@@ -353,65 +389,53 @@ class DashboardService:
     def _quality_summary(
         pick: dict[str, Any],
     ) -> tuple[tuple[str, str, str], tuple[str, ...], str]:
-        """Return one live freshness badge plus compact historical context."""
-        freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
-        if freshness == "FRESH":
-            live = (
-                "FRESH",
-                "fresh",
-                "Latest registered-book quote is within its freshness limit",
-            )
-        elif freshness == "STALE":
-            live = (
-                "STALE NOW",
-                "stale",
-                "Latest registered-book provider observation is too old",
-            )
+        """Prefer fixture lifecycle after kickoff and quote freshness before kickoff."""
+        phase = str(pick.get("dashboard_phase") or "PREMATCH").upper()
+        if phase == "SETTLED":
+            primary = ("SETTLED", "fresh", "Result and settlement are durable")
+        elif phase == "FINISHED":
+            primary = ("FINISHED", "fresh", "Fixture is finished; settlement may still be pending")
+        elif phase == "CLOSED":
+            primary = ("CLOSED", "unavailable", "Fixture ended without a normal final result")
+        elif phase == "LIVE":
+            primary = ("LIVE", "active", "Fixture has started")
         else:
-            live = (
-                "UNAVAILABLE",
-                "unavailable",
-                "No current registered-book quote is available",
-            )
+            freshness = str(pick.get("last_observed_freshness") or "UNAVAILABLE").upper()
+            if freshness == "FRESH":
+                primary = ("FRESH", "fresh", "Latest pre-match observation is fresh")
+            elif freshness == "STALE":
+                primary = ("STALE", "stale", "Latest pre-match observation is stale")
+            else:
+                primary = ("UNAVAILABLE", "unavailable", "No pre-match observation is available")
 
-        warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
         history: list[str] = []
         history_titles: list[str] = []
-        if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
-            history.append("Entry stale")
-            history_titles.append(
-                "Final quote verification was stale when this pick was registered"
-            )
+        if phase == "PREMATCH":
+            warning_codes = [str(value) for value in (pick.get("warning_codes") or ())]
+            if pick.get("stale_quote") or "STALE_QUOTE_WARNING" in warning_codes:
+                history.append("Entry stale")
+                history_titles.append("Registration-time final quote verification was stale")
+            other_entry_warnings = [
+                warning for warning in warning_codes if warning != "STALE_QUOTE_WARNING"
+            ]
+            if other_entry_warnings:
+                history.append("Entry warning")
+                history_titles.append(
+                    "Registration warnings: " + ", ".join(other_entry_warnings)
+                )
+        else:
+            closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+            if closing_source == "MANUAL":
+                history.append("Manual close")
+                history_titles.append("Operator-confirmed closing equals the last observed quote")
+            elif closing_source == "LIVE_PROXY":
+                history.append("Proxy close")
+                history_titles.append("Closing uses the API-Football live-market proxy")
+            elif closing_source == "UNAVAILABLE":
+                history.append("No close")
+                history_titles.append("No closing quote is available")
 
-        other_entry_warnings = [
-            warning for warning in warning_codes if warning != "STALE_QUOTE_WARNING"
-        ]
-        if other_entry_warnings:
-            history.append("Entry warning")
-            history_titles.append("Registration warnings: " + ", ".join(other_entry_warnings))
-
-        closing_status = str(pick.get("closing_status") or "")
-        if closing_status == "STALE_QUOTE":
-            history.append("Same-book close stale")
-            history_titles.append("No fresh quote was available at the closing cutoff")
-        elif closing_status == "NO_VALID_QUOTE":
-            history.append("Same-book close unavailable")
-            history_titles.append("No valid quote was available at the closing cutoff")
-
-        return live, tuple(dict.fromkeys(history)), " · ".join(history_titles)
-
-    @staticmethod
-    def _quote_age(value: Any) -> str:
-        if value is None:
-            return ""
-        seconds = max(0, int(value))
-        if seconds < 60:
-            return f"{seconds}s old"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m old"
-        hours, remainder = divmod(minutes, 60)
-        return f"{hours}h {remainder:02d}m old" if remainder else f"{hours}h old"
+        return primary, tuple(dict.fromkeys(history)), " · ".join(history_titles)
 
     @staticmethod
     def _bookmaker_badge(bookmaker: Any) -> str:
@@ -435,23 +459,6 @@ class DashboardService:
             f'data-bookmaker="{escape(key)}">{mark}</span>'
         )
 
-    @staticmethod
-    def _movement(pick: dict[str, Any]) -> str:
-        if str(pick.get("current_freshness") or "").upper() != "FRESH":
-            return ""
-        entry = pick.get("pick_odd")
-        current = pick.get("current_odd")
-        if entry is None or current is None or Decimal(str(current)) == Decimal(str(entry)):
-            css, symbol, label = "neutral", "→", "Same-bookmaker price unchanged"
-        elif Decimal(str(current)) > Decimal(str(entry)):
-            css, symbol, label = "up", "↑", "Same-bookmaker price moved up"
-        else:
-            css, symbol, label = "down", "↓", "Same-bookmaker price moved down"
-        return (
-            f'<span class="movement {css}" role="img" aria-label="{label}" title="{label}">'
-            f'{symbol}<span class="sr-only">{label}</span></span>'
-        )
-
     def _render_pick_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         status, status_class = self._status(pick)
@@ -472,6 +479,9 @@ class DashboardService:
         if pick.get("clv_ppm") is not None:
             clv_label = "CLV"
             clv = f"{Decimal(pick['clv_ppm']) / Decimal(10000):+.2f}%"
+        elif pick.get("manual_clv_ppm") is not None:
+            clv_label = "Manual CLV"
+            clv = f"{Decimal(pick['manual_clv_ppm']) / Decimal(10000):+.2f}%"
         elif pick.get("proxy_clv_ppm") is not None:
             clv_label = "Proxy CLV"
             clv = f"{Decimal(pick['proxy_clv_ppm']) / Decimal(10000):+.2f}%"
@@ -492,27 +502,18 @@ class DashboardService:
             )
         )
         registered_key = str(pick.get("bookmaker_key") or "").casefold()
-        best_key = str(pick.get("best_current_bookmaker_key") or "").casefold()
         registered_bookmaker = self._bookmaker_badge(registered_key)
-        best_bookmaker_footer = (
-            f'<small class="best-book-switch"><span>best at</span>'
-            f'{self._bookmaker_badge(best_key)}</small>'
-            if best_key and best_key != registered_key and pick.get("best_current_odd") is not None
+        last_source = str(pick.get("last_observed_source") or "UNAVAILABLE").upper()
+        closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
+        last_meta = (
+            '<small class="source-label">LIVE PROXY</small>'
+            if last_source == "LIVE_PROXY"
             else ""
         )
-        current_freshness = str(pick.get("current_freshness") or "UNAVAILABLE").upper()
-        current_label = "Last observed" if current_freshness == "STALE" else "Same-book current"
-        if current_freshness == "STALE":
-            age = self._quote_age(pick.get("current_quote_age_seconds"))
-            current_meta = (
-                f'<small class="quote-age stale">STALE'
-                f"{' · ' + escape(age) if age else ''}</small>"
-            )
-        elif current_freshness == "UNAVAILABLE":
-            current_meta = '<small class="quote-age unavailable">UNAVAILABLE</small>'
-        else:
-            current_meta = ""
-        movement = self._movement(pick)
+        closing_meta = {
+            "MANUAL": '<small class="source-label manual">MANUAL</small>',
+            "LIVE_PROXY": '<small class="source-label">LIVE PROXY</small>',
+        }.get(closing_source, "")
         operator_state = str(pick.get("operator_state") or "PLAYED")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
         operator_controls = "".join(
@@ -527,29 +528,23 @@ class DashboardService:
         odds = (
             '<div class="odds-grid">'
             f'<span title="{escape(self._dt(pick.get("first_seen_observed_at")))}">'
-            f"<b>First</b>{self._odd(pick.get('first_seen_odd'))}</span>"
+            f"<b>First seen</b>{self._odd(pick.get('first_seen_odd'))}</span>"
             f'<span title="{escape(self._dt(pick.get("pick_observed_at")))}">'
             f"<b>Pick</b>{self._odd(pick.get('pick_odd'))}</span>"
-            f'<span title="{escape(self._dt(pick.get("current_observed_at")))}">'
-            f"<b>{escape(current_label)}</b>{self._odd(pick.get('current_odd'))}{movement}"
-            f"{current_meta}</span>"
-            f'<span title="{escape(self._dt(pick.get("best_current_observed_at")))}">'
-            f"<b>Best current</b>{self._odd(pick.get('best_current_odd'))}"
-            f"{best_bookmaker_footer}</span>"
-            f'<span title="{escape(self._dt(pick.get("closing_observed_at")))}">'
-            f"<b>Same-book close</b>{self._odd(pick.get('closing_odd'))}</span>"
-            f'<span title="{escape(self._dt(pick.get("proxy_closing_observed_at")))}">'
-            f"<b>Market close</b>{self._odd(pick.get('proxy_closing_odd'))}"
-            f'<small class="proxy-label">LIVE PROXY</small></span>'
+            f'<span title="{escape(self._dt(pick.get("last_observed_at")))}">'
+            f"<b>Last observed</b>{self._odd(pick.get('last_observed_odd'))}"
+            f"{last_meta}</span>"
+            f'<span title="{escape(self._dt(pick.get("display_closing_observed_at")))}">'
+            f"<b>Closing</b>{self._odd(pick.get('display_closing_odd'))}"
+            f"{closing_meta}</span>"
             "</div>"
         )
         checkpoint_times = " · ".join(
             [
                 f"F {self._checkpoint_time(pick.get('first_seen_observed_at'))}",
                 f"P {self._checkpoint_time(pick.get('pick_observed_at'))}",
-                f"C {self._checkpoint_time(pick.get('current_observed_at'))}",
-                f"X {self._checkpoint_time(pick.get('closing_observed_at'))}",
-                f"M {self._checkpoint_time(pick.get('proxy_closing_observed_at'))}",
+                f"L {self._checkpoint_time(pick.get('last_observed_at'))}",
+                f"X {self._checkpoint_time(pick.get('display_closing_observed_at'))}",
             ]
         )
         return (
@@ -664,10 +659,9 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(6,minmax(72px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
+.odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(82px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
-.movement{{display:inline!important;background:transparent!important;padding:0 0 0 4px!important;font-weight:900}}.movement.up{{color:var(--green)}}.movement.down{{color:var(--red)}}.movement.neutral{{color:var(--muted)}}
 .pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
 .bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:-.02em;line-height:1;white-space:nowrap;overflow:hidden}}
 .brand-bet365{{display:inline-flex;align-items:baseline;gap:1px;background:#087a4b;padding:6px 8px;border-radius:6px}}
@@ -677,8 +671,6 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .brand-superbet{{display:inline-flex;align-items:baseline;gap:1px;background:#e52333;padding:6px 8px;border-radius:6px}}
 .brand-superbet b,.brand-superbet strong{{color:#fff;font-size:9px}}
 .brand-generic{{display:inline-flex;background:#1b2637;color:var(--text);border:1px solid var(--line);padding:6px 8px;border-radius:6px}}
-.best-book-switch{{display:flex!important;align-items:center;justify-content:center;gap:5px;width:100%;margin-top:auto!important;padding-top:5px;border-top:1px solid var(--line);font-size:8px!important;color:var(--muted)}}
-.best-book-switch .bookmaker-mark{{transform:scale(.82);transform-origin:center;min-height:20px}}
 .sr-only{{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .status,.quality-badge{{display:inline-block;border:1px solid var(--line);padding:3px 6px;font-size:9px;font-weight:800;letter-spacing:.05em}}
 .status.win{{color:var(--green);border-color:#1f6a51}}.status.loss,.status.lost{{color:var(--red);border-color:#6f2c3a}}
@@ -686,10 +678,11 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .quality-summary{{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:104px}}
 .quality-badge.fresh{{color:var(--green);border-color:#1f6a51}}
 .quality-badge.stale{{color:var(--amber);border-color:#6c5425}}
+.quality-badge.active{{color:#8ab4ff;border-color:#35578c}}
 .quality-badge.unavailable{{color:var(--muted)}}
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
-.quote-age{{margin-top:auto!important;padding-top:4px;font-size:8px!important;letter-spacing:.04em}}
-.quote-age.stale{{color:var(--amber)}}.quote-age.unavailable{{color:var(--muted)}}.proxy-label{{color:#a9c5ff!important;font-size:7px!important;letter-spacing:.05em}}
+.source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
+.source-label.manual{{color:var(--amber)!important}}
 .operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
 .operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
@@ -699,7 +692,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
-.odds-grid{{grid-template-columns:repeat(6,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
+.odds-grid{{grid-template-columns:repeat(4,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
@@ -723,14 +716,13 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
 <section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
+<dt>First seen</dt><dd>First stored pre-match price for the registered market and bookmaker series.</dd>
 <dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
-<dt>Same-book current</dt><dd>Latest provider observation at the registered bookmaker. If it exceeds the pinned freshness limit, the tile becomes Last observed and the movement arrow is suppressed.</dd>
-<dt>Best current</dt><dd>Highest fresh price for the same fixture, market and selection across Bet365, 1xBet and Superbet. Stale prices are excluded.</dd>
-<dt>Quality</dt><dd>One live status: FRESH, STALE NOW or UNAVAILABLE. Historical context such as Entry stale or Closing stale is shown as secondary text underneath.</dd>
-<dt>Current freshness</dt><dd>Live freshness is calculated from the provider observed-at timestamp, not merely from whether the monitoring worker ran successfully.</dd>
-<dt>Closing same-book</dt><dd>Last valid pre-kickoff price at the registered bookmaker.</dd>
-<dt>Market close</dt><dd>API-Football live-market proxy captured in the final 15 minutes before kickoff. It is not bookmaker-specific and never replaces the same-book closing fact.</dd>
-<dt>Proxy CLV</dt><dd>Entry odds compared with Market close when a valid same-book close is unavailable. It is labeled separately from true same-book CLV.</dd>
+<dt>Last observed</dt><dd>Newest stored pre-kickoff price. In the final live window this may come from the API-Football live-market proxy and is labeled LIVE PROXY.</dd>
+<dt>Closing</dt><dd>True same-book closing when available; otherwise an explicit manual historical override or the live-market proxy, each labeled at the value.</dd>
+<dt>Quality</dt><dd>Before kickoff it shows quote freshness. After kickoff it switches to LIVE, FINISHED, CLOSED or SETTLED so stale pre-match quotes do not masquerade as current match state.</dd>
+<dt>Proxy CLV</dt><dd>Entry odds compared with a live-market proxy close when no valid same-book close exists.</dd>
+<dt>Manual CLV</dt><dd>Entry odds compared with an operator-confirmed manual closing override. It is kept separate from persisted same-book CLV.</dd>
 <dt>Implied probability</dt><dd>1 ÷ decimal odds.</dd>
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>
 <dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>
