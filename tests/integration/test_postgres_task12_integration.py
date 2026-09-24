@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +23,7 @@ from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistratio
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
 from h2h.persistence.operator_pick_state import (
     OperatorPickStateConflictError,
+    OperatorPickStateRiskError,
     PostgreSQLOperatorPickStateRepository,
 )
 from tests.integration.test_postgres_task10_integration import (
@@ -283,6 +285,146 @@ def test_skipped_pending_pick_releases_only_operator_exposure() -> None:
     assert skipped.open_exposure_minor == 0
     assert skipped.available_bankroll_minor == _policy(account).initial_bankroll_minor
     assert system.open_exposure_minor == pick.stake_minor
+
+
+
+def test_skipped_pending_pick_releases_registration_risk_capacity() -> None:
+    _migrate()
+    first_candidate = _candidate()
+    second_candidate = _candidate()
+    account = f"operator-risk-{uuid4()}"
+    configured = _policy(
+        account,
+        maximum_quote_age_seconds=7200,
+        max_open_exposure_minor=30_000,
+    )
+    registration = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+    now = datetime.now(UTC)
+    try:
+        registration.bootstrap_bankroll(configured, occurred_at=now)
+        first = registration.register(
+            first_candidate.evaluation_id,
+            f"first-{account}",
+            configured,
+            decided_at=now,
+        ).pick
+        assert first is not None
+
+        operator.set_state(
+            first.pick_id,
+            OperatorPickState.SKIPPED,
+            f"skip-{first.pick_id}",
+            occurred_at=now + timedelta(seconds=1),
+        )
+        released = registration.risk_exposure_breakdown(
+            account, checked_at=now + timedelta(seconds=1)
+        )
+        assert released["open_exposure_minor"] == 0
+        assert released["risk_reserved_played_minor"] == 0
+        assert released["risk_reserved_skipped_minor"] == first.stake_minor
+
+        second = registration.register(
+            second_candidate.evaluation_id,
+            f"second-{account}",
+            configured,
+            decided_at=now + timedelta(seconds=2),
+        ).pick
+        assert second is not None
+        after_second = registration.risk_exposure_breakdown(
+            account, checked_at=now + timedelta(seconds=2)
+        )
+        assert after_second["open_exposure_minor"] == second.stake_minor
+
+        with pytest.raises(OperatorPickStateRiskError, match="maximum open exposure"):
+            operator.set_state(
+                first.pick_id,
+                OperatorPickState.PLAYED,
+                f"restore-{first.pick_id}",
+                occurred_at=now + timedelta(seconds=3),
+                max_open_exposure_minor=configured.max_open_exposure_minor,
+            )
+        assert operator.current_state(first.pick_id) is OperatorPickState.SKIPPED
+    finally:
+        _cleanup(account, (first_candidate, second_candidate))
+
+
+def test_registration_and_played_reactivation_share_one_hard_exposure_lock() -> None:
+    _migrate()
+    first_candidate = _candidate()
+    second_candidate = _candidate()
+    account = f"operator-risk-race-{uuid4()}"
+    configured = _policy(
+        account,
+        maximum_quote_age_seconds=7200,
+        max_open_exposure_minor=30_000,
+    )
+    registration = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+    now = datetime.now(UTC)
+    try:
+        registration.bootstrap_bankroll(configured, occurred_at=now)
+        first = registration.register(
+            first_candidate.evaluation_id,
+            f"first-race-{account}",
+            configured,
+            decided_at=now,
+        ).pick
+        assert first is not None
+        operator.set_state(
+            first.pick_id,
+            OperatorPickState.SKIPPED,
+            f"skip-race-{first.pick_id}",
+            occurred_at=now + timedelta(seconds=1),
+        )
+
+        barrier = Barrier(2)
+
+        def reactivate() -> str:
+            barrier.wait()
+            try:
+                PostgreSQLOperatorPickStateRepository(
+                    database_url=DATABASE_URL
+                ).set_state(
+                    first.pick_id,
+                    OperatorPickState.PLAYED,
+                    f"restore-race-{first.pick_id}",
+                    occurred_at=now + timedelta(seconds=2),
+                    max_open_exposure_minor=configured.max_open_exposure_minor,
+                )
+            except OperatorPickStateRiskError:
+                return "reactivation_blocked"
+            return "reactivated"
+
+        def register_second() -> str:
+            barrier.wait()
+            result = PostgreSQLPickRegistrationRepository(
+                database_url=DATABASE_URL
+            ).register(
+                second_candidate.evaluation_id,
+                f"second-race-{account}",
+                configured,
+                decided_at=now + timedelta(seconds=2),
+            )
+            return "registered" if result.pick is not None else "registration_blocked"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            restore_future = executor.submit(reactivate)
+            register_future = executor.submit(register_second)
+            outcomes = {restore_future.result(), register_future.result()}
+
+        assert outcomes in (
+            {"reactivated", "registration_blocked"},
+            {"reactivation_blocked", "registered"},
+        )
+        snapshot = registration.risk_exposure_breakdown(
+            account, checked_at=now + timedelta(seconds=3)
+        )
+        assert snapshot["open_exposure_minor"] == 30_000
+        assert snapshot["risk_reserved_played_count"] == 1
+
+    finally:
+        _cleanup(account, (first_candidate, second_candidate))
 
 
 @pytest.mark.parametrize(
