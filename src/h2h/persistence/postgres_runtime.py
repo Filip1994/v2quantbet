@@ -332,7 +332,8 @@ class PostgreSQLRuntimeRepository:
                 waiting_for_window += 1
                 continue
             derived_stale = bool(
-                latest_complete_observed_at is not None
+                freshness_state is None
+                and latest_complete_observed_at is not None
                 and current - latest_complete_observed_at
                 > timedelta(seconds=maximum_quote_age_seconds)
             )
@@ -458,7 +459,12 @@ class PostgreSQLRuntimeRepository:
         stale_retry_policy: StaleQuoteRetryPolicy,
     ) -> QuoteRefreshState:
         """Persist freshness separately from generic transport/item failures."""
-        if freshness_state not in {"FRESH", "STALE", "NO_USABLE_QUOTE"}:
+        if freshness_state not in {
+            "FRESH",
+            "USABLE_STALE",
+            "STALE",
+            "NO_USABLE_QUOTE",
+        }:
             raise ValueError("unsupported quote freshness state")
         attempted = _utc(attempted_at)
         with self.connect() as connection, connection.cursor() as cursor:
