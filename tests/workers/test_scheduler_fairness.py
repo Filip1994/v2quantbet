@@ -99,3 +99,47 @@ def test_overrun_uses_completion_based_next_due_and_does_not_instantly_rerun() -
 
     assert runs == [start, start + timedelta(seconds=130)]
     assert runtime.successes[0][2] == start + timedelta(seconds=130)
+
+
+def test_pending_worker_can_use_normal_interval_as_backlog_cooldown() -> None:
+    now = [datetime(2026, 9, 22, 12, tzinfo=UTC)]
+    start = now[0]
+    stop = Stop(now)
+    runtime = RuntimeFake()
+    runs: list[datetime] = []
+
+    def run():
+        runs.append(now[0])
+        now[0] += timedelta(seconds=10)
+        if len(runs) == 2:
+            stop.set()
+
+    ProductionOrchestrator(
+        (
+            ScheduledJob(
+                "opportunity",
+                60,
+                run,
+                has_pending_work=lambda: True,
+                pending_delay_seconds=60,
+            ),
+        ),
+        runtime,
+        instance_id="test",
+        stop=stop,  # type: ignore[arg-type]
+        tick_seconds=5,
+        leader_healthy=lambda: True,
+        clock=lambda: now[0],
+    ).run_forever()
+
+    assert runs == [start, start + timedelta(seconds=70)]
+    assert runtime.successes[0][2] == start + timedelta(seconds=70)
+
+
+def test_pending_delay_rejects_negative_values() -> None:
+    try:
+        ScheduledJob("opportunity", 60, lambda: None, pending_delay_seconds=-1)
+    except ValueError as exc:
+        assert "pending delay" in str(exc)
+    else:
+        raise AssertionError("negative pending delay must be rejected")
