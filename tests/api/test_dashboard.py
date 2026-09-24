@@ -556,8 +556,19 @@ def test_operator_write_response_serializes_timestamp() -> None:
         occurred_at=NOW,
         request_id="request-1",
     )
+    calls = []
+
+    def set_state(*args, **kwargs):
+        calls.append((args, kwargs))
+        return event
+
     application = SimpleNamespace(
-        operator_picks=SimpleNamespace(set_state=lambda *_args, **_kwargs: event)
+        settings=SimpleNamespace(
+            application=SimpleNamespace(
+                registration_policy=SimpleNamespace(max_open_exposure_minor=300_000)
+            )
+        ),
+        operator_picks=SimpleNamespace(set_state=set_state),
     )
 
     result = DashboardService(application).set_operator_state(
@@ -565,6 +576,7 @@ def test_operator_write_response_serializes_timestamp() -> None:
     )
 
     assert result["occurred_at"] == "2026-09-23T12:00:00+00:00"
+    assert calls[0][1]["max_open_exposure_minor"] == 300_000
 
 
 def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
