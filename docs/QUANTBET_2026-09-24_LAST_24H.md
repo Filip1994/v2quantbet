@@ -1275,6 +1275,40 @@ for commit `9c9b537e...`.
 
 Production lifecycle-count verification is pending at this checkpoint.
 
+
+
+### PR #55 / #57 — reserved-risk composition observability
+
+**PR #55** added a read-only breakdown for unresolved `STAKE_RESERVED` exposure using the same terminal-settlement semantics as the registration risk gate.
+
+When `MAX_OPEN_EXPOSURE_EXCEEDED` is encountered, the structured log now reports:
+- total unresolved reserved pick count;
+- latest operator PLAYED count/exposure;
+- latest operator SKIPPED count/exposure;
+- reserved picks still in `MONITORING`;
+- reserved picks already `CLOSED_FOR_ODDS`;
+- reserved picks without a monitoring state.
+
+This replaces the old exposure SUM query rather than adding a second round trip.
+
+**PR #57** extends the same query with kickoff-age diagnostics:
+- reserved picks whose latest authoritative kickoff has passed;
+- reserved picks more than ten minutes past kickoff;
+- reserved picks with future kickoff.
+
+No ledger, settlement, operator-state, monitoring, stake, exposure-cap or registration semantics changed.
+
+Production:
+- #55 deployment `cb45c0b6-8959-4f08-8245-d2c11949ce58` reached **SUCCESS** in `sfo`;
+- #57 deployment `56843226-2b5a-47bf-abc1-1954e73caa79` reached **SUCCESS** in `sfo`;
+- #57 acquired production leadership successfully.
+
+At the first #57 cycle:
+- opportunity: `eligible_fixtures=8`, `due_fixtures=0`, `waiting_for_refresh=8`, `max_items=2`, duration about **0.056 s**;
+- monitoring remained sub-second to about one second per bounded slice.
+
+The exact reserved-risk composition is still pending the next candidate that reaches the preliminary registration gate; no exposure facts were mutated merely to obtain diagnostics.
+
 ### Current priorities after this checkpoint
 
 1. Capture the first PR #48 exposure-cap log and record the exact production risk numbers.
