@@ -58,6 +58,7 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert settings.model_training_policy.min_matches == 80
     assert settings.model_training_policy.xi == 0.0018
     assert settings.model_training_policy.previous_seasons == 1
+    assert settings.opportunity_max_items == 2
     assert settings.api_football_published_max_age_seconds == 28800
     assert settings.live_close_poll_seconds == 60
     assert settings.live_close_window_seconds == 900
