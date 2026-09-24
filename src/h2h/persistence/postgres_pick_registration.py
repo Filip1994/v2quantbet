@@ -437,6 +437,41 @@ class PostgreSQLPickRegistrationRepository:
             exposure = int(cursor.fetchone()[0])
             if exposure + policy.fixed_stake_minor > policy.max_open_exposure_minor:
                 failures.append("MAX_OPEN_EXPOSURE_EXCEEDED")
+                cursor.execute(
+                    "WITH latest_operator AS ("
+                    "SELECT DISTINCT ON (pick_id) pick_id, state "
+                    "FROM pick_operator_state_events "
+                    "ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC"
+                    "), latest_fixture AS ("
+                    "SELECT DISTINCT ON (fixture_id) fixture_id, kickoff_at "
+                    "FROM fixture_observations "
+                    "ORDER BY fixture_id, observed_at DESC, fixture_observation_id DESC"
+                    "), unresolved AS ("
+                    "SELECT l.pick_id, COALESCE(o.state, 'PLAYED') AS operator_state, "
+                    "f.kickoff_at FROM bankroll_ledger_entries l "
+                    "JOIN registered_picks r ON r.pick_id = l.pick_id "
+                    "LEFT JOIN latest_operator o ON o.pick_id = l.pick_id "
+                    "LEFT JOIN latest_fixture f ON f.fixture_id = r.fixture_id "
+                    "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
+                    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
+                    "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
+                    "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
+                    "WHERE successor.prior_event_id = e.settlement_event_id))"
+                    ") SELECT COUNT(*), "
+                    "COUNT(*) FILTER (WHERE operator_state = 'PLAYED'), "
+                    "COUNT(*) FILTER (WHERE operator_state = 'SKIPPED'), "
+                    "COUNT(*) FILTER (WHERE kickoff_at < %s), "
+                    "COUNT(*) FILTER (WHERE kickoff_at <= %s - interval '10 minutes'), "
+                    "COUNT(*) FILTER (WHERE kickoff_at >= %s) "
+                    "FROM unresolved",
+                    (
+                        policy.bankroll_account_id,
+                        checked,
+                        checked,
+                        checked,
+                    ),
+                )
+                composition = cursor.fetchone()
                 LOGGER.info(
                     "preliminary risk exposure cap reached",
                     extra={
@@ -447,6 +482,12 @@ class PostgreSQLPickRegistrationRepository:
                         "available_bankroll_minor": (
                             None if ledger is None else int(ledger[0])
                         ),
+                        "exposure_pick_count": int(composition[0]),
+                        "exposure_played_count": int(composition[1]),
+                        "exposure_skipped_count": int(composition[2]),
+                        "exposure_past_kickoff_count": int(composition[3]),
+                        "exposure_past_10m_count": int(composition[4]),
+                        "exposure_future_kickoff_count": int(composition[5]),
                     },
                 )
             return tuple(failures)
