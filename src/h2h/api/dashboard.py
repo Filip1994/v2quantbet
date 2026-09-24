@@ -65,7 +65,7 @@ class DashboardService:
                 "initial_minor": performance.initial_bankroll_minor,
                 "available_minor": performance.available_bankroll_minor,
                 "open_exposure_minor": performance.open_exposure_minor,
-                "risk_exposure_minor": system_performance.open_exposure_minor,
+                "risk_exposure_minor": performance.open_exposure_minor,
                 "max_open_exposure_minor": policy.max_open_exposure_minor,
                 "fixed_stake_minor": policy.fixed_stake_minor,
                 "total_staked_minor": performance.total_staked_minor,
