@@ -163,7 +163,7 @@ class OpportunityWorker:
         maximum_quote_age_seconds: int,
         minimum_time_to_kickoff_seconds: int,
         stale_retry_policy: StaleQuoteRetryPolicy,
-        provider_snapshot_max_age_seconds: int = 14400,
+        provider_snapshot_max_age_seconds: int = 28800,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
