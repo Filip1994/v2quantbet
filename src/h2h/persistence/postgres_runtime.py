@@ -238,11 +238,7 @@ class PostgreSQLRuntimeRepository:
                 "refresh.freshness_state, refresh.stale_attempt_count, refresh.next_retry_at, "
                 "refresh.last_attempt_at, "
                 "complete.latest_observed_at, complete.latest_captured_at "
-                "FROM fixtures f JOIN model_coverage_scopes coverage ON "
-                "coverage.provider = f.provider AND coverage.team_id_namespace = f.provider "
-                "AND coverage.league_id = f.league_id AND coverage.season = f.season "
-                "AND coverage.active_model_version_id IS NOT NULL "
-                "JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
+                "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
                 "competition_name, competition_type "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
@@ -261,9 +257,14 @@ class PostgreSQLRuntimeRepository:
                 "f.fixture_id AND refresh.bookmaker_id = %s "
                 "LEFT JOIN production_item_failures failures ON failures.worker_name = "
                 "'opportunity' AND failures.item_id = f.fixture_id "
+                "JOIN model_coverage_scopes coverage ON coverage.provider = f.provider "
+                "AND coverage.team_id_namespace = f.provider "
+                "AND coverage.league_id = f.league_id AND coverage.season = f.season "
+                "AND coverage.active_model_version_id IS NOT NULL "
                 "WHERE latest.kickoff_at > %s "
                 "AND latest.kickoff_at <= %s "
                 "AND latest.provider_status = ANY(%s) "
+                "AND (failures.next_retry_at IS NULL OR failures.next_retry_at <= %s) "
                 "AND (%s = FALSE OR (refresh.freshness_state = 'STALE' "
                 "AND refresh.next_retry_at IS NOT NULL AND refresh.next_retry_at <= %s)) "
                 "AND (%s::timestamptz IS NULL OR (latest.kickoff_at, f.fixture_id) > (%s, %s)) "
@@ -275,6 +276,7 @@ class PostgreSQLRuntimeRepository:
                     current,
                     current + timedelta(hours=72),
                     list(allowed_statuses),
+                    current,
                     stale_only,
                     current,
                     after_kickoff,
