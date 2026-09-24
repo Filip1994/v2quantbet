@@ -51,5 +51,12 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$status"
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-diagnostics
+          path: /tmp/ruff.txt
+          if-no-files-found: error
       - name: Tests
         run: uv run python -m pytest
