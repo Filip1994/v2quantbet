@@ -337,3 +337,12 @@ The worker recovered and subsequent cycles continued successfully. This is not a
 The system is **running**, not merely built. The newest functional code is live and the worker survives sparse/no-odds cases, model-fit failures, stale-market refresh paths, and final-quote fallback without stopping the scheduler.
 
 The current limiting problem is no longer basic orchestration. It is **quality and availability of actionable market evidence under bounded runtime**, plus better diagnostics for the remaining model-fit failure.
+
+
+### Deploy-trigger efficiency finding
+
+Both Railway services are sourced from `Filip1994/v2quantbet:main` and currently expose no path-scoped `watchPatterns` in service configuration.
+
+Result: this documentation-only update triggered a fresh Railway deployment for both `quantbet-engine` and `quantbet-dashboard`.
+
+This is not a correctness failure, but it is unnecessary build/deploy churn. The next infrastructure cleanup should define safe service-specific watch paths so changes under `docs/**` do not redeploy production code while code, migrations, dependency files, and service configuration still do.
