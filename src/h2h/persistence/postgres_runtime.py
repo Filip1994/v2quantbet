@@ -527,6 +527,7 @@ class PostgreSQLRuntimeRepository:
                 "ON s.fixture_id = %s AND s.bookmaker_id = %s AND s.market = c.market "
                 "JOIN quote_snapshots q ON q.series_id = s.series_id "
                 "AND q.observed_at = c.observed_at AND q.source = c.source "
+                "AND q.captured_at = c.captured_at "
                 "ORDER BY s.market, s.selection, q.snapshot_id",
                 (fixture_id, bookmaker_id, fixture_id, bookmaker_id),
             )
@@ -543,11 +544,11 @@ class PostgreSQLRuntimeRepository:
         """Resolve an exact returned market without mixing observation contexts."""
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT s.selection, q.snapshot_id FROM quote_series s "
-                "JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "SELECT DISTINCT ON (s.selection) s.selection, q.snapshot_id "
+                "FROM quote_series s JOIN quote_snapshots q ON q.series_id = s.series_id "
                 "WHERE s.fixture_id = %s AND s.bookmaker_id = %s AND s.market = %s "
                 "AND q.observed_at = %s AND q.source = %s "
-                "ORDER BY s.selection, q.snapshot_id",
+                "ORDER BY s.selection, q.captured_at DESC, q.snapshot_id DESC",
                 (fixture_id, bookmaker_id, market, _utc(observed_at), source),
             )
             rows = tuple((str(row[0]), str(row[1])) for row in cursor.fetchall())
