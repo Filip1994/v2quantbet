@@ -528,6 +528,65 @@ class PostgreSQLPickRegistrationRepository:
                 )
             return tuple(failures)
 
+    def record_exposure_blocked_signal(
+        self,
+        evaluation_id: str,
+        policy: RegistrationPolicyConfig,
+        *,
+        blocked_at: datetime,
+        capture_origin: str = "LIVE",
+    ) -> None:
+        """Persist a bankroll-neutral research fact for an exposure-only rejection."""
+        blocked = _utc(blocked_at, "blocked_at")
+        if capture_origin not in {"LIVE", "LOG_BACKFILL"}:
+            raise ValueError("unsupported research signal capture_origin")
+        with self.connect() as connection, connection.cursor() as cursor:
+            evaluation = self._load_evaluation(cursor, evaluation_id)
+            self._verify_prediction_provenance(cursor, evaluation)
+            cursor.execute(
+                _EXPOSURE_BREAKDOWN_SQL,
+                (
+                    policy.bankroll_account_id,
+                    blocked,
+                    blocked,
+                    blocked,
+                ),
+            )
+            exposure_row = cursor.fetchone()
+            if exposure_row is None:
+                raise RegistrationProvenanceError(
+                    "risk exposure diagnostic query returned no row"
+                )
+            exposure = int(exposure_row[0])
+            cursor.execute(
+                "INSERT INTO research_exposure_signals "
+                "(evaluation_id, first_blocked_at, last_blocked_at, block_count, "
+                "first_open_exposure_minor, last_open_exposure_minor, "
+                "max_open_exposure_minor, fixed_stake_minor, capture_origin, created_at) "
+                "VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (evaluation_id) DO UPDATE SET "
+                "last_blocked_at = GREATEST(research_exposure_signals.last_blocked_at, "
+                "EXCLUDED.last_blocked_at), "
+                "block_count = research_exposure_signals.block_count + 1, "
+                "last_open_exposure_minor = EXCLUDED.last_open_exposure_minor, "
+                "max_open_exposure_minor = EXCLUDED.max_open_exposure_minor, "
+                "fixed_stake_minor = EXCLUDED.fixed_stake_minor, "
+                "capture_origin = CASE "
+                "WHEN research_exposure_signals.capture_origin = 'LIVE' THEN 'LIVE' "
+                "ELSE EXCLUDED.capture_origin END",
+                (
+                    evaluation.evaluation_id,
+                    blocked,
+                    blocked,
+                    exposure,
+                    exposure,
+                    policy.max_open_exposure_minor,
+                    policy.fixed_stake_minor,
+                    capture_origin,
+                    blocked,
+                ),
+            )
+
     def begin_final_quote_verification(
         self, preliminary_evaluation_id: str, *, requested_at: datetime
     ) -> FinalQuoteClaim:
