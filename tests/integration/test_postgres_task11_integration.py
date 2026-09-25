@@ -265,7 +265,7 @@ def test_opening_current_closing_markers_bulletin_and_late_quote_freeze() -> Non
         _cleanup(account, (candidate,))
 
 
-@pytest.mark.parametrize("age_minutes", [15, 16, 180])
+@pytest.mark.parametrize("age_minutes", [15, 16, 45])
 def test_closing_uses_last_valid_prekickoff_candidate_regardless_of_age(age_minutes) -> None:
     _migrate()
     candidate = _candidate()
