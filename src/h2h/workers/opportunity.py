@@ -634,7 +634,7 @@ class OpportunityWorker:
                                     self._record_research_signal(
                                         preliminary.evaluation_id, self._now()
                                     )
-                                except Exception:  # noqa: BLE001 - research cannot affect betting
+                                except Exception:
                                     LOGGER.exception(
                                         "failed to persist exposure-blocked research signal",
                                         extra={
