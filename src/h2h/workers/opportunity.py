@@ -216,7 +216,7 @@ class OpportunityWorker:
     ) -> None:
         try:
             self._on_exposure_blocked(evaluation_id, blocked_at, blocked_stage)
-        except Exception as exc:  # noqa: BLE001 - research capture must not alter betting flow
+        except Exception as exc:
             LOGGER.exception(
                 "research exposure-blocked signal persistence failed",
                 extra={
