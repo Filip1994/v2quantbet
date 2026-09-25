@@ -161,12 +161,12 @@ def _one_signal_per_fixture(
     chosen: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
         fixture_id = str(row["fixture_id"])
-        first_blocked_at = row["first_blocked_at"]
-        if not isinstance(first_blocked_at, datetime):
-            raise TypeError("first_blocked_at must be a datetime")
+        qualified_at = row.get("qualified_at") or row.get("first_blocked_at")
+        if not isinstance(qualified_at, datetime):
+            raise TypeError("qualified_at must be a datetime")
 
         rank = (
-            first_blocked_at,
+            qualified_at,
             -strength(row, "expected_value"),
             -strength(row, "edge"),
             -strength(row, "odds"),
@@ -179,7 +179,10 @@ def _one_signal_per_fixture(
     return tuple(
         sorted(
             (item[1] for item in chosen.values()),
-            key=lambda row: (row["last_blocked_at"], str(row["evaluation_id"])),
+            key=lambda row: (
+                row.get("qualified_at") or row.get("last_blocked_at"),
+                str(row["evaluation_id"]),
+            ),
             reverse=True,
         )
     )
@@ -201,9 +204,12 @@ class ResearchDashboardService:
 
     def _derived(self, row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
+        qualified_at = item.get("qualified_at") or item.get("first_blocked_at")
+        if not isinstance(qualified_at, datetime):
+            raise TypeError("qualified_at must be a datetime")
         quote_age = max(
             0,
-            int((item["first_blocked_at"] - item["quote_observed_at"]).total_seconds()),
+            int((qualified_at - item["quote_observed_at"]).total_seconds()),
         )
         item["quote_age_seconds"] = quote_age
         item["freshness"] = (
@@ -227,6 +233,10 @@ class ResearchDashboardService:
         market = params.get("market", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         result = params.get("result", [""])[0].strip().upper()
+        disposition = params.get("disposition", [""])[0].strip().upper()
+        p_bucket = params.get("p_bucket", [""])[0].strip()
+        ev_bucket = params.get("ev_bucket", [""])[0].strip()
+        odds_bucket = params.get("odds_bucket", [""])[0].strip()
         p_min = _parse_fraction(params.get("p_min", [""])[0])
         p_max = _parse_fraction(params.get("p_max", [""])[0])
         ev_min = _parse_fraction(params.get("ev_min", [""])[0])
@@ -245,6 +255,14 @@ class ResearchDashboardService:
             if league and league not in (row.get("competition_name") or "").casefold():
                 return False
             if result and row["outcome"] != result:
+                return False
+            if disposition and row.get("disposition") != disposition:
+                return False
+            if p_bucket and row["probability_bucket"] != p_bucket:
+                return False
+            if ev_bucket and row["ev_bucket"] != ev_bucket:
+                return False
+            if odds_bucket and row["odds_bucket"] != odds_bucket:
                 return False
             if p_min is not None and p < p_min:
                 return False
