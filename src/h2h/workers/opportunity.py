@@ -166,6 +166,7 @@ class OpportunityWorker:
         provider_snapshot_max_age_seconds: int = 28800,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
+        record_research_signal: Callable[[str, datetime], None] | None = None,
     ) -> None:
         if max_items <= 0 or max_wall_seconds <= 0:
             raise ValueError("opportunity budgets must be positive")
@@ -199,6 +200,7 @@ class OpportunityWorker:
         self._provider_snapshot_max_age_seconds = provider_snapshot_max_age_seconds
         self._clock = clock
         self._monotonic = monotonic_clock
+        self._record_research_signal = record_research_signal
         self._cursor: OpportunityCursor | None = None
         self._has_pending = False
 
@@ -624,6 +626,23 @@ class OpportunityWorker:
                         )
                         registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
+                            if (
+                                preliminary_rejections == ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+                                and self._record_research_signal is not None
+                            ):
+                                try:
+                                    self._record_research_signal(
+                                        preliminary.evaluation_id, self._now()
+                                    )
+                                except Exception:
+                                    LOGGER.exception(
+                                        "failed to persist exposure-blocked research signal",
+                                        extra={
+                                            "worker": WORKER_NAME,
+                                            "fixture_id": fixture.fixture_id,
+                                            "evaluation_id": preliminary.evaluation_id,
+                                        },
+                                    )
                             LOGGER.info(
                                 "opportunity did not qualify for final quote refresh",
                                 extra={

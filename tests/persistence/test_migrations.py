@@ -257,3 +257,20 @@ def test_operator_state_migration_is_minimal_and_append_only() -> None:
     assert "UNREPORTED" not in migration
     assert "reason" not in migration.casefold()
     assert "bookmaker" not in migration.casefold()
+
+
+def test_shadow_research_migration_is_normalized_and_bankroll_isolated() -> None:
+    migration = (
+        Path(__file__).parents[2] / "migrations" / "021_shadow_research_signals.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE research_signals" in migration
+    assert "evaluation_id TEXT NOT NULL UNIQUE" in migration
+    assert "MAX_OPEN_EXPOSURE_EXCEEDED" in migration
+    assert "first_blocked_at" in migration
+    assert "last_blocked_at" in migration
+    assert "blocked_count" in migration
+    assert "exposure_cap_minor" in migration
+    assert "JOIN value_evaluations" in migration
+    assert "INSERT INTO registered_picks" not in migration
+    assert "INSERT INTO bankroll_ledger_entries" not in migration

@@ -144,10 +144,18 @@ class ReconcileFixtureResults:
             stable = self._repository.stable_result(fixture_id, as_of=now)
             if stable is None:
                 continue
+            pick_ids = self._repository.pick_ids_for_fixture(fixture_id)
+            if not pick_ids:
+                complete_research = getattr(
+                    self._repository, "complete_research_only_fixture", None
+                )
+                if complete_research is not None:
+                    complete_research(fixture_id, stable, completed_at=now)
+                continue
             for pick_id in self._repository.unsettled_pick_ids(fixture_id):
                 self._repository.settle_pick(pick_id, stable, settled_at=now)
                 settled.append(pick_id)
-            for pick_id in self._repository.pick_ids_for_fixture(fixture_id):
+            for pick_id in pick_ids:
                 outcome = self._repository.finalize_clv(pick_id, realized_at=now)
                 if outcome.clv_fact_id is not None:
                     clv.append(pick_id)

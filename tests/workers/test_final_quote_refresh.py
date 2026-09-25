@@ -186,6 +186,7 @@ def run(
     live=(),
     kickoff_at=None,
     provider_snapshot_max_age_seconds=28800,
+    record_research_signal=None,
 ):
     repository = Repository()
     if kickoff_at is not None:
@@ -215,6 +216,7 @@ def run(
         stale_retry_policy=POLICY,
         provider_snapshot_max_age_seconds=provider_snapshot_max_age_seconds,
         clock=lambda: NOW,
+        record_research_signal=record_research_signal,
     )
     return worker.run_once(), source, registration, repository
 
@@ -343,3 +345,45 @@ def test_non_candidate_spends_no_final_refresh_and_concurrent_claim_is_suppresse
     second, source, _, _ = run(market(2.0), registration=in_flight)
     assert source.calls == 1
     assert second.registered_pick_ids == ()
+
+
+class ExposureOnlyRegistration(Registration):
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+
+
+class MixedExposureRegistration(Registration):
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return ("EDGE_BELOW_MINIMUM", "MAX_OPEN_EXPOSURE_EXCEEDED")
+
+
+def test_exposure_only_rejection_is_recorded_without_final_refresh() -> None:
+    recorded = []
+    cycle, source, registration, _ = run(
+        market(2.0),
+        registration=ExposureOnlyRegistration(),
+        record_research_signal=lambda evaluation_id, blocked_at: recorded.append(
+            (evaluation_id, blocked_at)
+        ),
+    )
+
+    assert source.calls == 1
+    assert cycle.registered_pick_ids == ()
+    assert registration.executed == []
+    assert recorded == [("evaluation-preliminary", NOW)]
+
+
+def test_multi_reason_rejection_is_not_recorded_as_exposure_only() -> None:
+    recorded = []
+    cycle, source, registration, _ = run(
+        market(2.0),
+        registration=MixedExposureRegistration(),
+        record_research_signal=lambda evaluation_id, blocked_at: recorded.append(
+            (evaluation_id, blocked_at)
+        ),
+    )
+
+    assert source.calls == 1
+    assert cycle.registered_pick_ids == ()
+    assert registration.executed == []
+    assert recorded == []

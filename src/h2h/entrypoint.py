@@ -187,10 +187,20 @@ def _run_active_leader(
 
 
 def main() -> None:
-    if os.getenv("QUANTBET_PROCESS", "worker").strip().lower() == "dashboard":
+    process = os.getenv("QUANTBET_PROCESS", "worker").strip().lower()
+    service_name = os.getenv("RAILWAY_SERVICE_NAME", "").strip().lower()
+    if process == "dashboard":
         from h2h.dashboard_entrypoint import main as dashboard_main
 
         dashboard_main()
+        return
+    if process in {"research", "shadow"} or service_name in {
+        "quantbet-research",
+        "quantbet-shadow",
+    }:
+        from h2h.research_dashboard_entrypoint import main as research_main
+
+        research_main()
         return
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     settings = load_production_settings()
