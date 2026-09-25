@@ -82,8 +82,20 @@ def _probability_bucket(value: float) -> str:
 
 
 class ResearchDashboardService:
-    def __init__(self, repository: PostgreSQLResearchSignalRepository) -> None:
+    def __init__(
+        self,
+        repository: PostgreSQLResearchSignalRepository,
+        *,
+        closing_max_age_seconds: int,
+    ) -> None:
+        if (
+            isinstance(closing_max_age_seconds, bool)
+            or not isinstance(closing_max_age_seconds, int)
+            or closing_max_age_seconds <= 0
+        ):
+            raise ValueError("closing_max_age_seconds must be a positive integer")
         self._repository = repository
+        self._closing_max_age_seconds = closing_max_age_seconds
 
     def snapshot(self, *, provider_fixture_id: str | None = None) -> dict[str, Any]:
         rows = [dict(row) for row in self._repository.rows()]
@@ -94,18 +106,29 @@ class ResearchDashboardService:
             ]
         for row in rows:
             closing = row.get("closing_odd")
-            row["clv_ppm"] = (
-                None
-                if closing is None
-                else realized_clv_ppm(Decimal(row["entry_odd"]), Decimal(closing))
-            )
             kickoff = row.get("kickoff_at")
             closing_observed = row.get("closing_observed_at")
-            row["closing_age_seconds"] = (
+            closing_age = (
                 None
                 if kickoff is None or closing_observed is None
                 else int((kickoff - closing_observed).total_seconds())
             )
+            row["closing_age_seconds"] = closing_age
+            if closing is None:
+                row["clv_status"] = "NO_VALID_CLOSING"
+                row["clv_ppm"] = None
+            elif (
+                closing_age is None
+                or closing_age < 0
+                or closing_age > self._closing_max_age_seconds
+            ):
+                row["clv_status"] = "STALE_CLOSING"
+                row["clv_ppm"] = None
+            else:
+                row["clv_status"] = "AVAILABLE"
+                row["clv_ppm"] = realized_clv_ppm(
+                    Decimal(row["entry_odd"]), Decimal(closing)
+                )
             row["outcome"] = _outcome(row)
             row["unit_pnl"] = _unit_pnl(row, row["outcome"])
 
@@ -147,7 +170,13 @@ class ResearchDashboardService:
                 bucket["clv"].append(int(row["clv_ppm"]))
 
         bucket_rows = []
-        for key, value in sorted(buckets.items(), key=lambda item: item[0]):
+        def bucket_sort_key(item: tuple[str, dict[str, Any]]) -> int:
+            label = item[0]
+            if label == "75%+":
+                return 75
+            return int(label.split("-", 1)[0])
+
+        for key, value in sorted(buckets.items(), key=bucket_sort_key):
             settled_count = int(value["settled"])
             clvs = value["clv"]
             bucket_rows.append(
@@ -237,7 +266,8 @@ class ResearchDashboardService:
                 f"<td><strong>{escape(self._dt(row['blocked_at']))}</strong>"
                 f"<small>{escape(str(row['blocked_stage']))} · {escape(str(row['capture_method']))}</small></td>"
                 f"<td class='num'><strong>{self._odd(row['closing_odd'])}</strong>"
-                f"<small>CLV {self._clv(row['clv_ppm'])}"
+                f"<small>Research CLV {self._clv(row['clv_ppm'])} · "
+                f"{escape(str(row['clv_status']))}"
                 f"{'' if close_age is None else ' · age ' + str(close_age) + 's'}</small></td>"
                 f"<td><span class='status {outcome.lower()}'>{escape(outcome)}</span>"
                 f"<small>{escape(str(row.get('regulation_home_goals') if row.get('regulation_home_goals') is not None else '—'))}"
@@ -250,12 +280,17 @@ class ResearchDashboardService:
 
         bucket_html = []
         for row in data["bucket_rows"]:
+            hit_rate = (
+                "—"
+                if row["hit_rate"] is None
+                else f"{float(row['hit_rate']) * 100:.1f}%"
+            )
             bucket_html.append(
                 "<tr>"
                 f"<td><strong>{escape(row['bucket'])}</strong></td>"
                 f"<td class='num'>{row['signals']}</td>"
                 f"<td class='num'>{row['settled']}</td>"
-                f"<td class='num'>{'—' if row['hit_rate'] is None else f'{row['hit_rate']*100:.1f}%'}</td>"
+                f"<td class='num'>{hit_rate}</td>"
                 f"<td class='num'>{self._roi(row['unit_roi'])}</td>"
                 f"<td class='num'>{self._clv(row['avg_clv_ppm'])}</td>"
                 "</tr>"
@@ -284,17 +319,17 @@ td small{{display:block;margin-top:3px}}.num{{text-align:right;font-variant-nume
 .bucket table{{min-width:700px}}@media(max-width:1000px){{.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
 <div class="eyebrow">QuantBet / Shadow Research</div><h1>Exposure-blocked signal lab</h1>
-<div class="muted">No bankroll reservations. No operator actions. Durable research over signals blocked only by open exposure.</div>
+<div class="muted">No bankroll reservations. No operator actions. Durable research over signals blocked only by open exposure. Entry is the observed preliminary quote; research CLV is valid only when the same-series pre-kickoff close passes the configured closing-age rule.</div>
 <section class="cards">
 <div class="card"><span>Raw signals</span><strong>{summary['raw_signals']}</strong></div>
 <div class="card"><span>Unique fixtures</span><strong>{summary['unique_fixtures']}</strong></div>
 <div class="card"><span>Settled first-per-fixture</span><strong>{summary['settled_primary']}</strong></div>
 <div class="card"><span>1-unit ROI</span><strong>{self._roi(summary['unit_roi'])}</strong></div>
-<div class="card"><span>Average CLV</span><strong>{avg_clv}</strong></div>
+<div class="card"><span>Average research CLV</span><strong>{avg_clv}</strong></div>
 <div class="card"><span>Positive CLV rate</span><strong>{positive}</strong></div>
 </section>
 <section class="panel bucket"><div class="head"><strong>Model-probability buckets</strong><span class="muted">first blocked signal per fixture</span></div>
-<div class="table"><table><thead><tr><th>Model p</th><th class="num">Signals</th><th class="num">Settled</th><th class="num">Hit rate</th><th class="num">1u ROI</th><th class="num">Avg CLV</th></tr></thead>
+<div class="table"><table><thead><tr><th>Model p</th><th class="num">Signals</th><th class="num">Settled</th><th class="num">Hit rate</th><th class="num">1u ROI</th><th class="num">Avg research CLV</th></tr></thead>
 <tbody>{''.join(bucket_html)}</tbody></table></div></section>
 <section class="panel"><div class="head"><strong>All exposure-blocked signals</strong><span class="muted">raw immutable evaluations</span></div>
 <div class="table"><table><thead><tr><th>ID</th><th>Fixture</th><th>Signal</th><th class="num">Entry</th><th class="num">Probability</th><th class="num">Value</th><th>Blocked</th><th class="num">Closing</th><th>Result</th><th class="num">1u P/L</th></tr></thead>
