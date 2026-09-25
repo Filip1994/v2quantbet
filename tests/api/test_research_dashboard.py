@@ -1,0 +1,103 @@
+from datetime import UTC, datetime, timedelta
+
+from h2h.api.research_dashboard import (
+    ResearchDashboardService,
+    counterfactual_outcome,
+    counterfactual_pnl_minor,
+    research_clv_ppm,
+)
+
+
+NOW = datetime(2026, 9, 25, 12, tzinfo=UTC)
+
+
+def signal_row():
+    return {
+        "research_signal_id": "research-signal-v1:" + "a" * 64,
+        "evaluation_id": "value-evaluation-v1:" + "a" * 64,
+        "fixture_id": "api-football:123",
+        "provider_fixture_id": "123",
+        "league_id": 39,
+        "season": 2026,
+        "stage": "PRELIMINARY",
+        "block_reason": "MAX_OPEN_EXPOSURE_EXCEEDED",
+        "first_blocked_at": NOW,
+        "last_blocked_at": NOW,
+        "blocked_count": 2,
+        "first_open_exposure_minor": 300_000,
+        "last_open_exposure_minor": 300_000,
+        "exposure_cap_minor": 300_000,
+        "home_team": "Home",
+        "away_team": "Away",
+        "competition_name": "Research League",
+        "country": "Test",
+        "kickoff_at": NOW + timedelta(hours=2),
+        "fixture_status": "NS",
+        "market": "BTTS",
+        "selection": "YES",
+        "bookmaker": "Bet365",
+        "model_probability": 0.62,
+        "market_fair_probability": 0.48,
+        "odds": 2.20,
+        "edge": 0.14,
+        "expected_value": 0.364,
+        "quote_observed_at": NOW - timedelta(seconds=120),
+        "quote_captured_at": NOW - timedelta(seconds=115),
+        "source": "api-football",
+        "closing_odds": 2.00,
+        "closing_observed_at": NOW + timedelta(hours=1),
+        "closing_captured_at": NOW + timedelta(hours=1, seconds=5),
+        "result_phase": "COMPLETE",
+        "result_classification": "PLAYED_SETTLEABLE",
+        "result_provider_status": "FT",
+        "regulation_home_goals": 1,
+        "regulation_away_goals": 1,
+    }
+
+
+class Repository:
+    def list_signals(self, *, limit):
+        assert limit == 5000
+        return (signal_row(),)
+
+
+def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
+    row = signal_row()
+
+    assert counterfactual_outcome(row) == "WIN"
+    assert counterfactual_pnl_minor(row, 30_000) == 36_000
+    assert research_clv_ppm(row) == 100_000
+
+
+def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
+    dashboard = ResearchDashboardService(Repository())
+
+    signals = dashboard.signals(
+        {
+            "p_min": ["60"],
+            "p_max": ["65"],
+            "ev_min": ["30"],
+            "odds_min": ["2.0"],
+            "market": ["BTTS"],
+            "league": ["research"],
+            "result": ["WIN"],
+        }
+    )
+    assert len(signals) == 1
+    assert signals[0]["probability_bucket"] == "60–65%"
+    assert signals[0]["ev_bucket"] == "30%+"
+    assert signals[0]["freshness"] == "FRESH"
+
+    html = dashboard.render_html("p_min=60&p_max=65")
+    assert "Home – Away" in html
+    assert "Research League" in html
+    assert "fixture 123" in html
+    assert "+36.40%" in html
+    assert "+10.00%" in html
+
+
+def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
+    row = signal_row()
+    row["closing_observed_at"] = row["quote_observed_at"]
+
+    assert research_clv_ppm(row) is None
