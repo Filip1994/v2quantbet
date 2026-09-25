@@ -72,6 +72,10 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
             CompetitionMetadata("Germany", "Regionalliga West", "league", 4),
             RejectionReason.GERMAN_TIER,
         ),
+        (
+            CompetitionMetadata("Czech-Republic", "3. liga - MSFL", "league", 3),
+            RejectionReason.EXPLICIT_COMPETITION,
+        ),
     ],
 )
 def test_rejects_real_provider_exclusions(
