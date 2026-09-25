@@ -26,7 +26,8 @@ SET qualified_at = first_blocked_at
 WHERE qualified_at IS NULL;
 
 ALTER TABLE research_signals
-    ALTER COLUMN qualified_at SET NOT NULL;
+    ALTER COLUMN qualified_at SET NOT NULL,
+    ALTER COLUMN qualified_at SET DEFAULT CURRENT_TIMESTAMP;
 
 ALTER TABLE research_signals
     ADD CONSTRAINT research_signals_production_pick_key UNIQUE (production_pick_id);
