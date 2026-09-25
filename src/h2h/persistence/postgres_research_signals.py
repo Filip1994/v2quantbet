@@ -6,7 +6,6 @@ import json
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Any
 
 from h2h.domain.registration_policy import RegistrationPolicyConfig
