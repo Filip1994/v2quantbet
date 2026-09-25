@@ -103,7 +103,7 @@ def test_opportunity_batch_is_bounded_and_continues_with_keyset_cursor() -> None
 
 def test_wall_budget_advances_cursor_past_examined_normal_fixtures() -> None:
     repository = RepositoryFake(fixtures(6))
-    ticks = iter(float(value) for value in range(20))
+    ticks = iter(float(value) for value in range(100))
     subject = worker(
         repository,
         lambda _fixture: None,
