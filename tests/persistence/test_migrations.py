@@ -273,6 +273,6 @@ def test_research_shadow_signal_migration_is_append_only_and_bankroll_free() -> 
     assert "LIVE_V1" in migration
     assert "research_signals_append_only" in migration
     assert "research_fixture_results_append_only" in migration
-    assert migration.count("value-evaluation-v1:") >= 223
+    assert migration.count("value-evaluation-v1:") >= 237
     assert "INSERT INTO bankroll_ledger_entries" not in migration
     assert "INSERT INTO registered_picks" not in migration
