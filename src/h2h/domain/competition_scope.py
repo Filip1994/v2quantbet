@@ -11,6 +11,7 @@ class RejectionReason:
     ENGLISH_TIER = "EXCLUDED_ENGLISH_TIER_4_OR_LOWER"
     GERMAN_TIER = "EXCLUDED_GERMAN_TIER_4_OR_LOWER"
     CUP = "EXCLUDED_CUP_COMPETITION"
+    EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     AMBIGUOUS = "AMBIGUOUS_COMPETITION_METADATA"
 
 
@@ -50,6 +51,13 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
 
     if not country or not name or not competition_type:
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)
+
+    explicitly_excluded_competitions = {
+        ("czech republic", "3 liga msfl"),
+        ("czechia", "3 liga msfl"),
+    }
+    if (country, name) in explicitly_excluded_competitions:
+        return ScopeDecision(False, RejectionReason.EXPLICIT_COMPETITION)
 
     african_markers = {
         "algeria", "angola", "benin", "botswana", "burkina faso", "cameroon",
