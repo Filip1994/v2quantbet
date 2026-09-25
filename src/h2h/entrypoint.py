@@ -79,6 +79,7 @@ def _run_active_leader(
     _prepare_bankroll(application)
     state.update(leadership="active")
     application.monitoring.reconcile.execute()
+    application.research.reconcile.execute()
     application.results.repository.reconcile(reconciled_at=datetime.now(UTC))
     policy = application.settings.application.registration_policy
     lifecycle = application.settings.application.odds_lifecycle_policy
@@ -153,6 +154,12 @@ def _run_active_leader(
             float(lifecycle.monitoring_interval_seconds),
             application.monitoring.worker.run_once,
             has_pending_work=lambda: application.monitoring.worker.has_pending,
+        ),
+        ScheduledJob(
+            "research_monitoring",
+            float(lifecycle.monitoring_interval_seconds),
+            application.research.worker.run_once,
+            has_pending_work=lambda: application.research.worker.has_pending,
         ),
         ScheduledJob(
             "results",
