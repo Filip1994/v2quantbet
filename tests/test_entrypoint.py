@@ -91,6 +91,10 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
             worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
             bulletin=SimpleNamespace(generate=lambda *_args, **_kwargs: None),
         ),
+        research=SimpleNamespace(
+            reconcile=SimpleNamespace(execute=lambda: None),
+            worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
+        ),
         results=SimpleNamespace(
             repository=SimpleNamespace(reconcile=lambda **_kwargs: None),
             worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
