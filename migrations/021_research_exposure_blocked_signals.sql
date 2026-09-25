@@ -3,7 +3,11 @@
 
 CREATE TABLE research_exposure_blocked_signals (
     evaluation_id TEXT PRIMARY KEY
-        CHECK (evaluation_id ~ '^value-evaluation-v1:[0-9a-f]{64}
+        CHECK (evaluation_id ~ '^value-evaluation-v1:[0-9a-f]{64}$'),
+    fixture_id TEXT NOT NULL CHECK (length(trim(fixture_id)) > 0),
+    fixture_observation_id TEXT NOT NULL
+        CHECK (fixture_observation_id ~ '^fixture-observation-v1:[0-9a-f]{64}$'),
+    config_fingerprint TEXT,
     reason_code TEXT NOT NULL CHECK (reason_code = 'MAX_OPEN_EXPOSURE_EXCEEDED'),
     blocked_at TIMESTAMPTZ NOT NULL,
     open_exposure_minor BIGINT NOT NULL CHECK (open_exposure_minor >= 0),
