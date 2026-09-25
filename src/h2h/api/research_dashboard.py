@@ -97,6 +97,9 @@ class ResearchDashboardService:
         self._repository = repository
         self._closing_max_age_seconds = closing_max_age_seconds
 
+    def fixture_mapping(self, provider_fixture_id: str) -> dict[str, Any] | None:
+        return self._repository.fixture_mapping(provider_fixture_id)
+
     def snapshot(self, *, provider_fixture_id: str | None = None) -> dict[str, Any]:
         rows = [dict(row) for row in self._repository.rows()]
         if provider_fixture_id:
@@ -350,6 +353,21 @@ class ResearchDashboardHTTPService:
                 path = parsed.path
                 if path == "/livez":
                     service._json(self, 200, {"live": True})
+                    return
+                if path == "/api/fixture-map":
+                    try:
+                        values = parse_qs(parsed.query)
+                        provider_fixture_id = values["provider_fixture_id"][0]
+                        mapping = dashboard.fixture_mapping(provider_fixture_id)
+                    except (KeyError, ValueError):
+                        service._json(self, 400, {"error": "invalid_provider_fixture_id"})
+                        return
+                    if mapping is None:
+                        service._json(self, 404, {"error": "fixture_not_found"})
+                    else:
+                        # Deliberately public: only non-proprietary football fixture
+                        # metadata is exposed here. Model/value/research data stays protected.
+                        service._json(self, 200, {"fixture": _json_safe(mapping)})
                     return
                 if path in {"/", "/research"}:
                     if service._authorize(self):
