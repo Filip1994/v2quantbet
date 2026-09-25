@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 from threading import Event
 
-from h2h.api.dashboard import DashboardHTTPService
-from h2h.api.research_dashboard import ResearchDashboardService
+from h2h.api.research_dashboard import (
+    ResearchDashboardHTTPService,
+    ResearchDashboardService,
+)
 from h2h.logging_config import configure_logging
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.workers.runtime import install_shutdown_handlers
@@ -38,8 +40,8 @@ def main() -> None:
         database_url,
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
     )
-    server = DashboardHTTPService(
-        service,  # type: ignore[arg-type] - same render_html HTTP contract, no mutation route used
+    server = ResearchDashboardHTTPService(
+        service
         host="0.0.0.0",
         port=_integer("PORT", "8080"),
     )
