@@ -74,11 +74,14 @@ class PostgreSQLResultSettlementRepository:
         now = _utc(reconciled_at, "reconciled_at")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO fixture_result_acquisition_states "
+                "WITH tracked AS ("
+                "SELECT fixture_id FROM registered_picks "
+                "UNION SELECT fixture_id FROM research_signals"
+                ") INSERT INTO fixture_result_acquisition_states "
                 "(fixture_id, phase, next_check_at, updated_at, version) "
                 "SELECT DISTINCT r.fixture_id, 'WAITING', "
                 "latest.kickoff_at + (%s * interval '1 second'), %s, 1 "
-                "FROM registered_picks r JOIN LATERAL ("
+                "FROM tracked r JOIN LATERAL ("
                 "SELECT kickoff_at FROM fixture_observations f WHERE f.fixture_id = r.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE LEFT JOIN fixture_result_acquisition_states s "
@@ -237,12 +240,21 @@ class PostgreSQLResultSettlementRepository:
                 interval = self.policy.postponed_poll_interval_seconds
             next_check = checked + timedelta(seconds=interval)
         cursor.execute(
+            "SELECT anchor.result_observation_id, anchor.settlement_fingerprint, "
+            "anchor.occurred_at FROM ("
             "SELECT e.result_observation_id, settled.settlement_fingerprint, e.occurred_at "
             "FROM pick_settlement_events e "
             "JOIN fixture_result_observations settled "
             "ON settled.result_observation_id = e.result_observation_id "
-            "WHERE e.fixture_id = %s AND e.event_kind = 'NORMAL' LIMIT 1",
-            (result.fixture_id,),
+            "WHERE e.fixture_id = %s AND e.event_kind = 'NORMAL' "
+            "UNION ALL "
+            "SELECT r.result_observation_id, settled.settlement_fingerprint, r.finalized_at "
+            "FROM research_fixture_result_finalizations r "
+            "JOIN fixture_result_observations settled "
+            "ON settled.result_observation_id = r.result_observation_id "
+            "WHERE r.fixture_id = %s"
+            ") anchor ORDER BY anchor.occurred_at LIMIT 1",
+            (result.fixture_id, result.fixture_id),
         )
         settled = cursor.fetchone()
         newly_confirmed_correction = bool(
