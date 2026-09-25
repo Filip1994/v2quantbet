@@ -265,11 +265,8 @@ def test_opening_current_closing_markers_bulletin_and_late_quote_freeze() -> Non
         _cleanup(account, (candidate,))
 
 
-@pytest.mark.parametrize(
-    ("age_minutes", "expected"),
-    [(15, ClosingOutcome.CAPTURED), (16, ClosingOutcome.STALE_QUOTE)],
-)
-def test_closing_freshness_boundary_and_stale_candidate(age_minutes, expected) -> None:
+@pytest.mark.parametrize("age_minutes", [15, 16, 180])
+def test_closing_uses_last_valid_prekickoff_candidate_regardless_of_age(age_minutes) -> None:
     _migrate()
     candidate = _candidate()
     account = f"task11-{uuid4()}"
@@ -290,9 +287,9 @@ def test_closing_freshness_boundary_and_stale_candidate(age_minutes, expected) -
         assert current is not None
         assert current.freshness.value == "STALE"
         result = repository.finalize(pick.pick_id, finalized_at=cutoff)
-        assert result.outcome is expected
+        assert result.outcome is ClosingOutcome.CAPTURED
         assert result.candidate_snapshot_id == candidate_id
-        assert (result.closing_snapshot_id is not None) is (expected is ClosingOutcome.CAPTURED)
+        assert result.closing_snapshot_id == candidate_id
     finally:
         _cleanup(account, (candidate,))
 
