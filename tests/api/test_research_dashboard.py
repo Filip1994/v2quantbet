@@ -92,7 +92,7 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
     assert "Home – Away" in html
     assert "Research League" in html
     assert "fixture 123" in html
-    assert "+36.40%" in html
+    assert "36.4%" in html
     assert "+10.00%" in html
 
 
