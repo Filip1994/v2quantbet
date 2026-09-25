@@ -87,8 +87,8 @@ class PostgreSQLResearchSignalRepository:
                 "INSERT INTO research_signals "
                 "(signal_id, evaluation_id, fixture_id, blocked_reason, "
                 "registration_policy_fingerprint, allowed_fixture_statuses, "
-                "maximum_quote_age_seconds, detected_at) "
-                "VALUES (%s, %s, %s, 'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, %s, %s) "
+                "maximum_quote_age_seconds, capture_source, detected_at) "
+                "VALUES (%s, %s, %s, 'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, %s, 'LIVE', %s) "
                 "ON CONFLICT (evaluation_id) DO NOTHING",
                 (
                     signal_id,
@@ -102,7 +102,7 @@ class PostgreSQLResearchSignalRepository:
             )
             cursor.execute(
                 "SELECT signal_id, fixture_id, registration_policy_fingerprint, "
-                "allowed_fixture_statuses, maximum_quote_age_seconds "
+                "allowed_fixture_statuses, maximum_quote_age_seconds, capture_source "
                 "FROM research_signals WHERE evaluation_id = %s",
                 (evaluation_id,),
             )
@@ -113,10 +113,18 @@ class PostgreSQLResearchSignalRepository:
                 policy.fingerprint,
                 list(policy.allowed_fixture_statuses),
                 policy.maximum_quote_age_seconds,
+                "LIVE",
             )
             if stored is None:
                 raise RuntimeError("research signal insert disappeared")
-            actual = (stored[0], stored[1], stored[2], list(stored[3]), int(stored[4]))
+            actual = (
+                stored[0],
+                stored[1],
+                stored[2],
+                list(stored[3]),
+                int(stored[4]),
+                stored[5],
+            )
             if actual != expected:
                 raise PickMonitoringConflictError("research signal replay changed provenance")
             return signal_id
