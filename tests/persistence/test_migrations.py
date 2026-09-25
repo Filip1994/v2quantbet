@@ -274,3 +274,19 @@ def test_shadow_research_migration_is_normalized_and_bankroll_isolated() -> None
     assert "JOIN value_evaluations" in migration
     assert "INSERT INTO registered_picks" not in migration
     assert "INSERT INTO bankroll_ledger_entries" not in migration
+def test_last_seen_closing_migration_is_audited_and_backfills_clv() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "022_last_seen_prekickoff_closing.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE pick_closing_contract_corrections" in migration
+    assert "prior_outcome = 'STALE_QUOTE'" in migration
+    assert "corrected_closing_snapshot_id" in migration
+    assert "DROP TRIGGER pick_closing_finalizations_immutable" in migration
+    assert "SET outcome = 'CAPTURED'" in migration
+    assert "closing_snapshot_id = f.candidate_snapshot_id" in migration
+    assert "CREATE TRIGGER pick_closing_finalizations_immutable" in migration
+    assert "INSERT INTO pick_realized_clv" in migration
+    assert "CLV_ODDS_RATIO_PPM_V1" in migration
