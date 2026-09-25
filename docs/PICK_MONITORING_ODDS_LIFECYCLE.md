@@ -17,13 +17,18 @@ Task #11 extends durable `registered_picks`; it does not reinterpret Task #10 En
 - **Entry** is exactly `registered_picks.entry_snapshot_id`.
 - **Current** is the latest valid pre-match observation, ordered by `observed_at`,
   `captured_at`, then `snapshot_id`. Freshness is a separate `FRESH`/`STALE` quality.
-- **Closing** exists only after explicit finalization. It is either an immutable snapshot
-  reference or an explicit `NO_VALID_QUOTE`/`STALE_QUOTE` outcome with no invented price.
+- **Closing** exists only after explicit finalization. When at least one valid quote exists
+  for Entry's exact series and source before kickoff, Closing is the latest such observation,
+  regardless of its age. Freshness is diagnostic quality metadata and never vetoes a real
+  pre-kickoff price. `NO_VALID_QUOTE` is reserved for the case where no valid pre-kickoff
+  candidate exists.
 
 The cutoff is the persisted fixture observation's `kickoff_at` selected by finalization and
 is exclusive. Both quote timestamps must precede the cutoff and the contemporaneous fixture
 observation known at capture must describe an approved pre-match state. Source is pinned to
 Entry. A finalized Current is pinned to the finalization candidate and Closing never moves.
+`STALE_QUOTE` remains a legacy schema value only; migration 022 explicitly audits and
+reclassifies existing stale finalizations to the last valid pre-kickoff snapshot.
 
 ## Monitoring lifecycle
 
