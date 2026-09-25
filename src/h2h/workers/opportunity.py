@@ -163,6 +163,7 @@ class OpportunityWorker:
         maximum_quote_age_seconds: int,
         minimum_time_to_kickoff_seconds: int,
         stale_retry_policy: StaleQuoteRetryPolicy,
+        record_exposure_blocked: Callable[[str], object] | None = None,
         provider_snapshot_max_age_seconds: int = 28800,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
@@ -196,6 +197,7 @@ class OpportunityWorker:
         self._maximum_quote_age_seconds = maximum_quote_age_seconds
         self._minimum_time_to_kickoff_seconds = minimum_time_to_kickoff_seconds
         self._stale_retry_policy = stale_retry_policy
+        self._record_exposure_blocked = record_exposure_blocked
         self._provider_snapshot_max_age_seconds = provider_snapshot_max_age_seconds
         self._clock = clock
         self._monotonic = monotonic_clock
@@ -624,17 +626,37 @@ class OpportunityWorker:
                         )
                         registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
+                            research_signal_id = None
+                            if (
+                                preliminary_rejections == ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+                                and self._record_exposure_blocked is not None
+                            ):
+                                try:
+                                    research_signal_id = self._record_exposure_blocked(
+                                        preliminary.evaluation_id
+                                    )
+                                except Exception:  # noqa: BLE001 - research sidecar must not block execution
+                                    LOGGER.exception(
+                                        "exposure research signal persistence failed",
+                                        extra={
+                                            "worker": WORKER_NAME,
+                                            "fixture_id": fixture.fixture_id,
+                                            "evaluation_id": preliminary.evaluation_id,
+                                        },
+                                    )
                             LOGGER.info(
                                 "opportunity did not qualify for final quote refresh",
                                 extra={
                                     "worker": WORKER_NAME,
                                     "fixture_id": fixture.fixture_id,
+                                    "evaluation_id": preliminary.evaluation_id,
                                     "market": preliminary.market.value,
                                     "selection": preliminary.selected_selection.value,
                                     "preliminary_odds": preliminary.selected_odd,
                                     "preliminary_edge": preliminary.edge,
                                     "preliminary_ev": preliminary.expected_value,
                                     "rejection_reasons": preliminary_rejections,
+                                    "research_signal_id": research_signal_id,
                                     "final_quote_refresh_requested": False,
                                 },
                             )
