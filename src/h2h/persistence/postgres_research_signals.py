@@ -136,8 +136,13 @@ class PostgreSQLResearchSignalRepository:
                 "NULL, NULL, NULL, NULL, %s, %s FROM value_evaluations e "
                 "WHERE e.evaluation_id = %s "
                 "ON CONFLICT (fixture_id) DO UPDATE SET "
+                "research_signal_id = EXCLUDED.research_signal_id, "
+                "evaluation_id = EXCLUDED.evaluation_id, "
                 "production_pick_id = EXCLUDED.production_pick_id, "
-                "qualified_at = LEAST(research_signals.qualified_at, EXCLUDED.qualified_at) "
+                "qualified_at = EXCLUDED.qualified_at, "
+                "block_reason = NULL, first_blocked_at = NULL, last_blocked_at = NULL, "
+                "blocked_count = NULL, first_open_exposure_minor = NULL, "
+                "last_open_exposure_minor = NULL, exposure_cap_minor = NULL "
                 "RETURNING research_signal_id",
                 (signal_id, qualified, production_pick_id.strip(), evaluation_id),
             )
