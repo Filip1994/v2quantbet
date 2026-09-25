@@ -39,7 +39,7 @@ CREATE INDEX idx_research_signals_qualified
 -- preliminary evaluation so production and exposure-blocked cohorts are measured
 -- at the same research decision stage.
 WITH production_candidates AS (
-    SELECT
+    SELECT DISTINCT ON (rp.fixture_id)
         rp.fixture_id,
         rp.pick_id,
         rp.registered_at,
@@ -48,6 +48,7 @@ WITH production_candidates AS (
     JOIN pick_decisions pd ON pd.decision_id = rp.decision_id
     LEFT JOIN final_quote_verifications fqv
         ON fqv.verification_id = pd.final_quote_verification_id
+    ORDER BY rp.fixture_id, rp.registered_at ASC, rp.pick_id ASC
 )
 INSERT INTO research_signals (
     research_signal_id,
