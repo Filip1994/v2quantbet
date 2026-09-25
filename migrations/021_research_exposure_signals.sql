@@ -12,7 +12,9 @@ CREATE TABLE research_signals (
         CHECK (length(trim(registration_policy_fingerprint)) > 0),
     allowed_fixture_statuses TEXT[] NOT NULL
         CHECK (cardinality(allowed_fixture_statuses) > 0),
-    maximum_quote_age_seconds INTEGER NOT NULL CHECK (maximum_quote_age_seconds > 0),
+    maximum_quote_age_seconds INTEGER NOT NULL CHECK (maximum_quote_age_seconds >= 0),
+    capture_source TEXT NOT NULL DEFAULT 'LIVE'
+        CHECK (capture_source IN ('LIVE', 'LOG_BACKFILL')),
     detected_at TIMESTAMPTZ NOT NULL,
     persisted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (signal_id, fixture_id)
