@@ -30,6 +30,7 @@ from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRunti
 from h2h.persistence.postgres_live_closing_proxy import PostgreSQLLiveClosingProxyRepository
 from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
+from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
 from h2h.use_cases.model_lifecycle import (
@@ -82,6 +83,7 @@ class ProductionApplication:
     opportunity: OpportunityWorker
     live_closing_proxy: LiveClosingProxyWorker
     operator_picks: PostgreSQLOperatorPickStateRepository
+    research: PostgreSQLResearchSignalRepository
 
     def close(self) -> None:
         self.prediction.close()
@@ -131,6 +133,7 @@ def build_production_application(
         database_url=application_settings.database_url,
         require_final_quote_verification=True,
     )
+    research = PostgreSQLResearchSignalRepository(application_settings.database_url)
 
     def item_failure(worker: str):
         def record(item_id: str, error: BaseException, at: datetime) -> None:
@@ -233,6 +236,18 @@ def build_production_application(
             )
         )
 
+    def record_research_signal(evaluation_id: str, blocked_at: datetime) -> None:
+        exposure = registration.repository.risk_exposure_breakdown(
+            application_settings.registration_policy.bankroll_account_id,
+            checked_at=blocked_at,
+        )
+        research.record_exposure_blocked(
+            evaluation_id,
+            blocked_at=blocked_at,
+            open_exposure_minor=int(exposure["open_exposure_minor"]),
+            exposure_cap_minor=application_settings.registration_policy.max_open_exposure_minor,
+        )
+
     opportunity = OpportunityWorker(
         runtime,
         source,
@@ -274,6 +289,7 @@ def build_production_application(
             application_settings.registration_policy.minimum_time_to_kickoff_seconds
         ),
         stale_retry_policy=settings.stale_quote_retry_policy,
+        record_research_signal=record_research_signal,
     )
     return ProductionApplication(
         settings,
@@ -291,4 +307,5 @@ def build_production_application(
         opportunity,
         live_closing_proxy,
         operator_picks,
+        research,
     )
