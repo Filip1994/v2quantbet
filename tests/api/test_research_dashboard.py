@@ -76,6 +76,43 @@ class DuplicateFixtureRepository:
         return (weaker, stronger)
 
 
+class SegmentedRepository:
+    def list_signals(self, *, limit):
+        assert limit == 5000
+
+        win = signal_row()
+
+        pending = signal_row()
+        pending["research_signal_id"] = "research-signal-v1:" + "c" * 64
+        pending["evaluation_id"] = "value-evaluation-v1:" + "c" * 64
+        pending["fixture_id"] = "api-football:124"
+        pending["provider_fixture_id"] = "124"
+        pending["home_team"] = "Pending Home"
+        pending["away_team"] = "Pending Away"
+        pending["kickoff_at"] = NOW + timedelta(hours=5)
+        pending["result_phase"] = "WAITING"
+        pending["result_classification"] = None
+        pending["result_provider_status"] = "NS"
+        pending["regulation_home_goals"] = None
+        pending["regulation_away_goals"] = None
+        pending["closing_odds"] = None
+        pending["closing_observed_at"] = None
+        pending["closing_captured_at"] = None
+
+        loss = signal_row()
+        loss["research_signal_id"] = "research-signal-v1:" + "d" * 64
+        loss["evaluation_id"] = "value-evaluation-v1:" + "d" * 64
+        loss["fixture_id"] = "api-football:125"
+        loss["provider_fixture_id"] = "125"
+        loss["home_team"] = "Loss Home"
+        loss["away_team"] = "Loss Away"
+        loss["kickoff_at"] = NOW - timedelta(hours=3)
+        loss["regulation_home_goals"] = 1
+        loss["regulation_away_goals"] = 0
+
+        return (pending, win, loss)
+
+
 def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
     row = signal_row()
 
@@ -103,7 +140,7 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
     assert signals[0]["ev_bucket"] == "30%+"
     assert signals[0]["freshness"] == "FRESH"
 
-    html = dashboard.render_html("p_min=60&p_max=65")
+    html = dashboard.render_html("tab=history&p_min=60&p_max=65")
     assert "Home – Away" in html
     assert "Research League" in html
     assert "fixture 123" in html
@@ -117,6 +154,42 @@ def test_research_dashboard_projects_one_canonical_pick_per_fixture() -> None:
     assert len(rows) == 1
     assert rows[0]["market"] == "BTTS"
     assert rows[0]["evaluation_id"] == "value-evaluation-v1:" + "a" * 64
+
+
+def test_research_dashboard_separates_active_and_history_tabs() -> None:
+    dashboard = ResearchDashboardService(SegmentedRepository())
+
+    active_html = dashboard.render_html("tab=active")
+    assert "Active research board" in active_html
+    assert "Pending Home – Pending Away" in active_html
+    assert "Home – Away" not in active_html
+    assert "Loss Home – Loss Away" not in active_html
+    assert 'class="active" href=' in active_html
+    assert 'name="result"' not in active_html
+
+    history_html = dashboard.render_html("tab=history")
+    assert "Settled research history" in history_html
+    assert "Pending Home – Pending Away" not in history_html
+    assert "Home – Away" in history_html
+    assert "Loss Home – Loss Away" in history_html
+    assert 'class="badge result-win"' in history_html
+    assert 'class="badge result-loss"' in history_html
+    assert 'class="row-win"' in history_html
+    assert 'class="row-loss"' in history_html
+    assert 'name="result"' in history_html
+
+
+def test_research_history_result_filter_and_sportsbook_palette() -> None:
+    dashboard = ResearchDashboardService(SegmentedRepository())
+
+    html = dashboard.render_html("tab=history&result=LOSS")
+
+    assert "Loss Home – Loss Away" in html
+    assert "Home – Away" not in html
+    assert "--win:#3cdb86" in html
+    assert "--loss:#ff6574" in html
+    assert "QuantBet Research" in html
+    assert "Shadow intelligence" in html
 
 
 def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
