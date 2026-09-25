@@ -129,7 +129,11 @@ def research_clv_ppm(row: dict[str, Any]) -> int | None:
     closing = row.get("closing_odds")
     closing_at = row.get("closing_observed_at")
     entry_at = row.get("quote_observed_at")
-    if closing is None or not isinstance(closing_at, datetime) or not isinstance(entry_at, datetime):
+    if (
+        closing is None
+        or not isinstance(closing_at, datetime)
+        or not isinstance(entry_at, datetime)
+    ):
         return None
     if closing_at <= entry_at:
         return None
@@ -239,45 +243,75 @@ class ResearchDashboardService:
         for row in rows:
             clv = "—" if row["clv_ppm"] is None else f'{row["clv_ppm"] / 10_000:+.2f}%'
             pnl_rsd = "—" if row["pnl_minor"] is None else f'{row["pnl_minor"] / 100:+.0f}'
-            exposure = f'{row["last_open_exposure_minor"] / 100:.0f}/{row["exposure_cap_minor"] / 100:.0f}'
+            exposure = (
+                f'{row["last_open_exposure_minor"] / 100:.0f}/'
+                f'{row["exposure_cap_minor"] / 100:.0f}'
+            )
             match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
             competition = escape(row.get("competition_name") or "—")
             body_rows.append(
                 "<tr>"
-                f'<td><b>{match}</b><small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
+                (
+                    f'<td><b>{match}</b><small>{competition} · fixture '
+                    f'{escape(str(row["provider_fixture_id"]))}</small></td>'
+                )
                 f'<td>{_time(row["kickoff_at"])}</td>'
                 f'<td>{escape(row["market"])} {escape(row["selection"])}</td>'
-                f'<td>{_pct(row["model_probability"])}<small>{escape(row["probability_bucket"])}</small></td>'
+                (
+                    f'<td>{_pct(row["model_probability"])}'
+                    f'<small>{escape(row["probability_bucket"])}</small></td>'
+                )
                 f'<td>{_pct(row["market_fair_probability"])}</td>'
                 f'<td>{_odd(row["odds"])}<small>{escape(row["odds_bucket"])}</small></td>'
                 f'<td>{_pct(row["edge"])}</td>'
                 f'<td>{_pct(row["expected_value"])}<small>{escape(row["ev_bucket"])}</small></td>'
-                f'<td>{_time(row["first_blocked_at"])}<small>{row["quote_age_seconds"]}s · {escape(row["freshness"])}</small></td>'
+                (
+                    f'<td>{_time(row["first_blocked_at"])}'
+                    f'<small>{row["quote_age_seconds"]}s · '
+                    f'{escape(row["freshness"])}</small></td>'
+                )
                 f'<td>{escape(row["bookmaker"])}<small>{escape(row["source"])}</small></td>'
                 f'<td>{exposure} RSD<small>x{row["blocked_count"]}</small></td>'
-                f'<td>{_odd(row["closing_odds"])}<small>{_time(row["closing_observed_at"])}</small></td>'
+                (
+                    f'<td>{_odd(row["closing_odds"])}'
+                    f'<small>{_time(row["closing_observed_at"])}</small></td>'
+                )
                 f'<td>{clv}</td>'
-                f'<td><b>{escape(row["outcome"])}</b><small>{pnl_rsd} RSD · {escape(row.get("result_phase") or "waiting")}</small></td>'
+                (
+                    f'<td><b>{escape(row["outcome"])}</b>'
+                    f'<small>{pnl_rsd} RSD · '
+                    f'{escape(row.get("result_phase") or "waiting")}</small></td>'
+                )
                 "</tr>"
             )
-        rows_html = "".join(body_rows) or '<tr><td colspan="14">No signals match these filters.</td></tr>'
+        rows_html = "".join(body_rows) or (
+            '<tr><td colspan="14">No signals match these filters.</td></tr>'
+        )
         avg_clv_text = "—" if avg_clv is None else f"{avg_clv:+.2f}%"
         return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantBet Research</title><style>
 :root{{color-scheme:dark;background:#0b0d10;color:#eef1f4;font-family:Inter,system-ui,sans-serif}}
 *{{box-sizing:border-box}}body{{margin:0;padding:24px}}main{{max-width:1900px;margin:auto}}
 h1{{margin:0 0 6px}}p{{color:#9ca6b2}}.cards{{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}}
-.card{{background:#15191f;border:1px solid #29313a;border-radius:10px;padding:12px 16px;min-width:150px}}
-.card b{{display:block;font-size:22px}}form{{display:flex;gap:8px;flex-wrap:wrap;background:#11151a;padding:12px;border-radius:10px;margin-bottom:14px}}
-input,select,button{{background:#0b0d10;color:#eef1f4;border:1px solid #394451;border-radius:6px;padding:8px}}
+.card{{background:#15191f;border:1px solid #29313a;border-radius:10px;
+padding:12px 16px;min-width:150px}}
+.card b{{display:block;font-size:22px}}
+form{{display:flex;gap:8px;flex-wrap:wrap;background:#11151a;
+padding:12px;border-radius:10px;margin-bottom:14px}}
+input,select,button{{background:#0b0d10;color:#eef1f4;border:1px solid #394451;
+border-radius:6px;padding:8px}}
 button{{cursor:pointer}}.table{{overflow:auto;border:1px solid #29313a;border-radius:10px}}
-table{{border-collapse:collapse;width:100%;font-size:13px}}th,td{{padding:10px;border-bottom:1px solid #232a32;text-align:left;white-space:nowrap;vertical-align:top}}
+table{{border-collapse:collapse;width:100%;font-size:13px}}
+th,td{{padding:10px;border-bottom:1px solid #232a32;text-align:left;
+white-space:nowrap;vertical-align:top}}
 th{{position:sticky;top:0;background:#15191f}}small{{display:block;color:#87919d;margin-top:3px}}
 footer{{color:#76808b;margin-top:14px;font-size:12px}}a{{color:#d5dce4}}
 </style></head><body><main>
 <h1>QuantBet Shadow / Research</h1>
-<p>Exposure-only preliminary signals. Read-only; no bankroll reservation, pick registration, settlement control or worker scheduler.</p>
+<p>Exposure-only preliminary signals. Read-only; no bankroll reservation,
+pick registration, settlement control or worker scheduler.</p>
 <div class="cards">
 <div class="card"><small>Signals</small><b>{len(rows)}</b></div>
 <div class="card"><small>Unique fixtures</small><b>{unique_fixtures}</b></div>
@@ -286,7 +320,9 @@ footer{{color:#76808b;margin-top:14px;font-size:12px}}a{{color:#d5dce4}}
 <div class="card"><small>Avg research CLV</small><b>{avg_clv_text}</b></div>
 </div>
 <form method="get">
-<select name="market"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
+<select name="market"><option value="">All markets</option>
+<option {"selected" if field("market")=="BTTS" else ""}>BTTS</option>
+<option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
 <input name="league" placeholder="League contains" value="{field("league")}">
 <input name="p_min" placeholder="Model p min %" value="{field("p_min")}">
 <input name="p_max" placeholder="Model p max %" value="{field("p_max")}">
@@ -294,13 +330,22 @@ footer{{color:#76808b;margin-top:14px;font-size:12px}}a{{color:#d5dce4}}
 <input name="ev_max" placeholder="EV max %" value="{field("ev_max")}">
 <input name="odds_min" placeholder="Odds min" value="{field("odds_min")}">
 <input name="odds_max" placeholder="Odds max" value="{field("odds_max")}">
-<select name="result"><option value="">All results</option>{''.join(f'<option {"selected" if field("result")==v else ""}>{v}</option>' for v in ("WIN","LOSS","VOID","PENDING"))}</select>
+<select name="result"><option value="">All results</option>
+{''.join(
+    f'<option {"selected" if field("result")==v else ""}>{v}</option>'
+    for v in ("WIN", "LOSS", "VOID", "PENDING")
+)}</select>
 <button type="submit">Filter</button><a href="/research">Clear</a>
 </form>
 <div class="table"><table><thead><tr>
-<th>Match</th><th>Kickoff</th><th>Market</th><th>Model p</th><th>Market fair p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Detected</th><th>Bookmaker</th><th>Exposure</th><th>Research close</th><th>CLV</th><th>Counterfactual</th>
+<th>Match</th><th>Kickoff</th><th>Market</th><th>Model p</th>
+<th>Market fair p</th><th>Odds</th><th>Edge</th><th>EV</th>
+<th>Detected</th><th>Bookmaker</th><th>Exposure</th>
+<th>Research close</th><th>CLV</th><th>Counterfactual</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div>
-<footer>Research close = last stored same-series/source pre-kickoff quote. CLV is shown only when that quote is later than the entry quote. Times are Europe/Belgrade.</footer>
+<footer>Research close = last stored same-series/source pre-kickoff quote.
+CLV is shown only when that quote is later than the entry quote.
+Times are Europe/Belgrade.</footer>
 </main></body></html>"""
 
 
@@ -350,7 +395,9 @@ class ResearchDashboardHTTPService:
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        handler.send_header(
+            "Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'"
+        )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")
         handler.send_header("Content-Length", str(len(encoded)))
