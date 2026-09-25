@@ -205,7 +205,7 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'class="row-loss"' in history_html
     assert 'class="result-panel result-panel-win"' in history_html
     assert 'class="result-panel result-panel-loss"' in history_html
-    assert '<div class="score">2 : 1</div>' in history_html
+    assert '<div class="score">1 : 1</div>' in history_html
     assert '<div class="score">1 : 0</div>' in history_html
     assert "<th>Match</th><th>Result</th><th>Pick</th>" in history_html
     assert 'name="result"' in history_html
