@@ -419,3 +419,20 @@ ON CONFLICT (evaluation_id) DO UPDATE SET
     max_open_exposure_minor=EXCLUDED.max_open_exposure_minor,
     fixed_stake_minor=EXCLUDED.fixed_stake_minor,
     capture_origin=CASE WHEN research_exposure_signals.capture_origin='LIVE' THEN 'LIVE' ELSE 'LOG_BACKFILL' END;
+
+
+-- Additional high-confidence backfill from historical engine deployments:
+-- cb45c0b6-8959-4f08-8245-d2c11949ce58, a3072959-d54c-4f04-90f6-324ae7365259, 6f60647f-00f2-4bb5-9dd6-e02c0847776d, 23bcb5b2-5d87-4213-b559-0bde837a9cac, 581e24e5-2e82-44db-a1d7-ae4bca421271, ba7c3cc1-9ddb-46ad-95ac-c36d0b310169
+WITH backfill(evaluation_id,first_blocked_at,last_blocked_at,block_count,first_open_exposure_minor,last_open_exposure_minor,max_open_exposure_minor,fixed_stake_minor) AS (
+    VALUES
+        ('value-evaluation-v1:aa6b3fb26ae3c38146b9f6e82f6e8137adc978b3d70d6af873b2e1f5817186cd','2026-09-24T14:09:05.877641+00:00'::timestamptz,'2026-09-24T14:09:05.877641+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:01d6468203f4389d194948fee4705868eedd88eb82eee5cbce9f3160a34dc184','2026-09-24T14:09:05.897413+00:00'::timestamptz,'2026-09-24T14:09:05.897413+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:d77d650de3f9f4c7423a6cc593dd66e6a0b33bf375770ee9aa45c2fa437ea288','2026-09-24T14:01:36.413411+00:00'::timestamptz,'2026-09-24T14:01:36.413411+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:d13ada3a87ddd70002740ee6470ff78a4287b4d16ff8f89e2f4ba2ffb81190a5','2026-09-24T14:01:38.517932+00:00'::timestamptz,'2026-09-24T14:01:38.517932+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:a2e7cb7c1b7262ea394f17ab3ecd104d7bf46106a904ed1ff3ccd8cd76153f23','2026-09-24T13:57:24.959976+00:00'::timestamptz,'2026-09-24T13:57:24.959976+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:c7345f6023f4f5ba705fe060b7119d520615e7f4b72d714357637e1d5f9b3152','2026-09-24T13:57:29.187609+00:00'::timestamptz,'2026-09-24T13:57:29.187609+00:00'::timestamptz,1,300000,300000,300000,30000)
+)
+INSERT INTO research_exposure_signals (evaluation_id,first_blocked_at,last_blocked_at,block_count,first_open_exposure_minor,last_open_exposure_minor,max_open_exposure_minor,fixed_stake_minor,capture_origin,created_at)
+SELECT b.evaluation_id,b.first_blocked_at,b.last_blocked_at,b.block_count,b.first_open_exposure_minor,b.last_open_exposure_minor,b.max_open_exposure_minor,b.fixed_stake_minor,'LOG_BACKFILL',b.first_blocked_at
+FROM backfill b JOIN value_evaluations e ON e.evaluation_id=b.evaluation_id
+ON CONFLICT (evaluation_id) DO UPDATE SET first_blocked_at=LEAST(research_exposure_signals.first_blocked_at,EXCLUDED.first_blocked_at),last_blocked_at=GREATEST(research_exposure_signals.last_blocked_at,EXCLUDED.last_blocked_at),block_count=research_exposure_signals.block_count+EXCLUDED.block_count,first_open_exposure_minor=CASE WHEN EXCLUDED.first_blocked_at<research_exposure_signals.first_blocked_at THEN EXCLUDED.first_open_exposure_minor ELSE research_exposure_signals.first_open_exposure_minor END,last_open_exposure_minor=CASE WHEN EXCLUDED.last_blocked_at>research_exposure_signals.last_blocked_at THEN EXCLUDED.last_open_exposure_minor ELSE research_exposure_signals.last_open_exposure_minor END,max_open_exposure_minor=EXCLUDED.max_open_exposure_minor,fixed_stake_minor=EXCLUDED.fixed_stake_minor,capture_origin=CASE WHEN research_exposure_signals.capture_origin='LIVE' THEN 'LIVE' ELSE 'LOG_BACKFILL' END;
