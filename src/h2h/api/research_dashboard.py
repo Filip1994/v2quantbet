@@ -761,7 +761,7 @@ class ResearchDashboardService:
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
                     f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
-                    f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
+                    f'<td class="bookmaker-cell">{_bookmaker_badge(row["bookmaker"])}<small>{escape(row["source"])}</small></td>'
                     f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
