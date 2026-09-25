@@ -219,9 +219,7 @@ class ResearchDashboardService:
                 return False
             if odds_min is not None and odds < odds_min:
                 return False
-            if odds_max is not None and odds > odds_max:
-                return False
-            return True
+            return not (odds_max is not None and odds > odds_max)
 
         return tuple(row for row in rows if keep(row))
 
