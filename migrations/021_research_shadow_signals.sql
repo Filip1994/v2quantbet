@@ -293,7 +293,21 @@ WITH seed(evaluation_id, blocked_at) AS (
     ('value-evaluation-v1:9ed2a45d71094d35d54c6316f8ea844e3bce8c65ca67f161818b33e0f91583c2', '2026-09-25T09:59:29.964134+00:00'::timestamptz),
     ('value-evaluation-v1:b3b7a2bc532431f50a2b7ed23e4aea3881d14a5c6383d6cc7c85a24814c9d375', '2026-09-25T10:24:28.343938+00:00'::timestamptz),
     ('value-evaluation-v1:7e8ca0eaf60b43c0cf5d5231592780e0e33486872157bfb6a9fa3f0b07790a99', '2026-09-25T10:24:28.364417+00:00'::timestamptz),
-    ('value-evaluation-v1:ac266174a59d126ad8419fbc2e4fb5196620c6d4072cb2b04cdad4adfb85920e', '2026-09-25T10:43:30.450355+00:00'::timestamptz)
+    ('value-evaluation-v1:ac266174a59d126ad8419fbc2e4fb5196620c6d4072cb2b04cdad4adfb85920e', '2026-09-25T10:43:30.450355+00:00'::timestamptz),
+    ('value-evaluation-v1:17ed2b1871471c6e894402a48cce255d3743fe1269becea1a41969553e38439a', '2026-09-25T10:48:39.793659+00:00'::timestamptz),
+    ('value-evaluation-v1:bb9f4d293461f906b0daca5402892c921d486a19c5cc1f4674c5ed75abf2c7ec', '2026-09-25T10:48:39.813889+00:00'::timestamptz),
+    ('value-evaluation-v1:1358e48433ac4242bc60c341500be46ff6ca607ab4c14e71f0d5dc073ff8387f', '2026-09-25T11:24:02.759588+00:00'::timestamptz),
+    ('value-evaluation-v1:998ea634fc2b1f6bf9d0905493aff9fd9637aa577ca946afaf5d082b96777f6b', '2026-09-25T11:24:02.780854+00:00'::timestamptz),
+    ('value-evaluation-v1:e548c24f4348e5656ac793608f036bcab6b4baa000101c0435b8586a8119972a', '2026-09-25T11:24:02.801471+00:00'::timestamptz),
+    ('value-evaluation-v1:427b8ac13bfb86b7e58a5dc0d821522f68cdf0179f4a40719b7f551bedba99d1', '2026-09-25T11:24:02.824219+00:00'::timestamptz),
+    ('value-evaluation-v1:ecfdd77d84564ce766f44586f404658464016ddddad1fdf7ca967a25b2d9bfba', '2026-09-25T11:26:10.153117+00:00'::timestamptz),
+    ('value-evaluation-v1:f1e17a55a4d970ec87d3a84207677e4e2381fd99dcfba5dd96ed4976d412f23f', '2026-09-25T11:26:10.180207+00:00'::timestamptz),
+    ('value-evaluation-v1:0961734f67f038f089c10dd7ccec7071953b5105602e0fa0fcce9465145cd220', '2026-09-25T11:26:10.205279+00:00'::timestamptz),
+    ('value-evaluation-v1:b4c2b02a68534aaa03cbd38c5ec68715ae4020f49cd2a32651233f905d4ecae0', '2026-09-25T11:26:10.228261+00:00'::timestamptz),
+    ('value-evaluation-v1:13fc12c0a6150aa793dcf10ba0c45848883f556beb1f906ae3e434d7953751c8', '2026-09-25T11:37:54.297150+00:00'::timestamptz),
+    ('value-evaluation-v1:ef43063ba64e22ae0d7cff9f80cef22e131c90c0656279eb668369bb7e2f0737', '2026-09-25T11:37:54.348407+00:00'::timestamptz),
+    ('value-evaluation-v1:fd5c44025958fec7618cf91ef90a3f8c75b545d2f87e52facb3a8aed08ccbeb0', '2026-09-25T11:38:57.965537+00:00'::timestamptz),
+    ('value-evaluation-v1:0b333b092d50004de1291d996467ef2b1ad38cb231b9a334ff37f4254f4bdddf', '2026-09-25T11:38:57.986479+00:00'::timestamptz)
 )
 INSERT INTO research_signals (
     signal_id, evaluation_id, fixture_id, blocked_at, blocked_stage,
