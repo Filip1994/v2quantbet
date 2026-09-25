@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from h2h.api.research_dashboard import (
+    ResearchDashboardHTTPService,
     ResearchDashboardService,
     counterfactual_outcome,
     counterfactual_pnl_minor,
@@ -101,3 +102,10 @@ def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
     row["closing_observed_at"] = row["quote_observed_at"]
 
     assert research_clv_ppm(row) is None
+
+
+def test_research_dashboard_can_be_explicitly_public(monkeypatch) -> None:
+    monkeypatch.setenv("QUANTBET_RESEARCH_PUBLIC", "true")
+    monkeypatch.delenv("QUANTBET_RESEARCH_PASSWORD", raising=False)
+
+    assert ResearchDashboardHTTPService._authorize(object()) is True
