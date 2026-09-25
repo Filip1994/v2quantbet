@@ -186,13 +186,13 @@ class PostgreSQLPickMonitoringRepository:
                 outcome = ClosingOutcome.NO_VALID_QUOTE
                 candidate_id = closing_id = None
             else:
+                # Closing is the last valid same-series quote observed and captured
+                # before kickoff. Quote age is quality metadata, never a veto: a
+                # registered production pick necessarily had a valid Entry quote,
+                # and the latest valid pre-kickoff observation is the canonical close.
                 candidate_id = candidate.snapshot_id
-                if candidate.is_fresh_at(cutoff_at, state.policy.closing_max_age_seconds):
-                    outcome = ClosingOutcome.CAPTURED
-                    closing_id = candidate_id
-                else:
-                    outcome = ClosingOutcome.STALE_QUOTE
-                    closing_id = None
+                outcome = ClosingOutcome.CAPTURED
+                closing_id = candidate_id
             finalization_id = _fact_id("pick-closing-finalization-v1", pick_id)
             cursor.execute(
                 "INSERT INTO pick_closing_finalizations "
