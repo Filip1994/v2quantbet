@@ -62,6 +62,20 @@ class Repository:
         return (signal_row(),)
 
 
+class DuplicateFixtureRepository:
+    def list_signals(self, *, limit):
+        assert limit == 5000
+        weaker = signal_row()
+        weaker["evaluation_id"] = "value-evaluation-v1:" + "b" * 64
+        weaker["research_signal_id"] = "research-signal-v1:" + "b" * 64
+        weaker["market"] = "OU_25"
+        weaker["selection"] = "OVER"
+        weaker["expected_value"] = 0.20
+        stronger = signal_row()
+        stronger["expected_value"] = 0.40
+        return (weaker, stronger)
+
+
 def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
     row = signal_row()
 
@@ -95,6 +109,14 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
     assert "fixture 123" in html
     assert "36.4%" in html
     assert "+10.00%" in html
+
+
+def test_research_dashboard_projects_one_canonical_pick_per_fixture() -> None:
+    rows = ResearchDashboardService(DuplicateFixtureRepository()).signals({})
+
+    assert len(rows) == 1
+    assert rows[0]["market"] == "BTTS"
+    assert rows[0]["evaluation_id"] == "value-evaluation-v1:" + "a" * 64
 
 
 def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
