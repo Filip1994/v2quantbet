@@ -203,6 +203,11 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'class="badge result-loss"' in history_html
     assert 'class="row-win"' in history_html
     assert 'class="row-loss"' in history_html
+    assert 'class="result-panel result-panel-win"' in history_html
+    assert 'class="result-panel result-panel-loss"' in history_html
+    assert '<div class="score">2 : 1</div>' in history_html
+    assert '<div class="score">1 : 0</div>' in history_html
+    assert "<th>Match</th><th>Result</th><th>Pick</th>" in history_html
     assert 'name="result"' in history_html
     assert "BLOCKED EXPOSURE" in history_html
     assert "SKIPPED" in history_html
@@ -223,7 +228,10 @@ def test_research_history_result_filter_and_sportsbook_palette() -> None:
     assert "--panel:#181b1f" in html
     assert "--win:#69c98f" in html
     assert "--loss:#e06f78" in html
-    assert "QuantBet Research" in html
+    assert "QUANT" in html
+    assert "BET" in html
+    assert 'class="sportsbook-logo"' in html
+    assert "Research Board" in html
     assert "Research universe" in html
 
 
