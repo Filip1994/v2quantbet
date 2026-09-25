@@ -620,3 +620,23 @@ def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
     entrypoint.main()
 
     assert calls == ["dashboard"]
+
+
+def test_root_entrypoint_dispatches_research_dashboard_without_composing_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setenv("QUANTBET_PROCESS", "research_dashboard")
+    monkeypatch.setattr(
+        "h2h.research_dashboard_entrypoint.main",
+        lambda: calls.append("research_dashboard"),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "load_production_settings",
+        lambda: pytest.fail("worker settings must not load for research dashboard process"),
+    )
+
+    entrypoint.main()
+
+    assert calls == ["research_dashboard"]
