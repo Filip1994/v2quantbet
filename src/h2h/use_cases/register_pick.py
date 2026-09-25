@@ -88,6 +88,19 @@ class RegisterEligiblePick:
             evaluation_id, self._policy, checked_at=_now(self._clock)
         )
 
+    def record_exposure_blocked_signal(
+        self,
+        evaluation_id: str,
+        *,
+        capture_origin: str = "LIVE",
+    ) -> None:
+        self._repository.record_exposure_blocked_signal(
+            evaluation_id,
+            self._policy,
+            blocked_at=_now(self._clock),
+            capture_origin=capture_origin,
+        )
+
     def minimum_playable_odds(self, model_probability: float) -> float:
         probability = Decimal(str(model_probability))
         if not Decimal(0) < probability <= Decimal(1):
