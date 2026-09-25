@@ -74,13 +74,13 @@ class PostgreSQLResearchSignalRepository:
                 raise ValueError(f"{name} is out of range")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO research_signals (research_signal_id, evaluation_id, stage, "
-                "block_reason, first_blocked_at, last_blocked_at, blocked_count, "
+                "INSERT INTO research_signals (research_signal_id, evaluation_id, fixture_id, "
+                "stage, block_reason, first_blocked_at, last_blocked_at, blocked_count, "
                 "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor) "
-                "SELECT %s, e.evaluation_id, 'PRELIMINARY', 'MAX_OPEN_EXPOSURE_EXCEEDED', "
-                "%s, %s, 1, %s, %s, %s FROM value_evaluations e "
-                "WHERE e.evaluation_id = %s "
-                "ON CONFLICT (evaluation_id) DO UPDATE SET "
+                "SELECT %s, e.evaluation_id, e.fixture_id, 'PRELIMINARY', "
+                "'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, 1, %s, %s, %s "
+                "FROM value_evaluations e WHERE e.evaluation_id = %s "
+                "ON CONFLICT (fixture_id) DO UPDATE SET "
                 "first_open_exposure_minor = CASE WHEN EXCLUDED.first_blocked_at < "
                 "research_signals.first_blocked_at THEN EXCLUDED.first_open_exposure_minor "
                 "ELSE research_signals.first_open_exposure_minor END, "
@@ -114,7 +114,7 @@ class PostgreSQLResearchSignalRepository:
             raise ValueError("limit must be between 1 and 5000")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT rs.research_signal_id, rs.evaluation_id, e.fixture_id, "
+                "SELECT rs.research_signal_id, rs.evaluation_id, rs.fixture_id, "
                 "f.provider_fixture_id, f.league_id, f.season, rs.stage, rs.block_reason, "
                 "rs.first_blocked_at, rs.last_blocked_at, rs.blocked_count, "
                 "rs.first_open_exposure_minor, rs.last_open_exposure_minor, "
