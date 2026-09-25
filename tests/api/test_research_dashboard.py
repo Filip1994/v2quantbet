@@ -1,7 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+import json
+from urllib.request import urlopen
 
-from h2h.api.research_dashboard import ResearchDashboardService
+from h2h.api.research_dashboard import (
+    ResearchDashboardHTTPService,
+    ResearchDashboardService,
+)
 
 
 NOW = datetime(2026, 9, 25, 10, tzinfo=UTC)
@@ -63,6 +68,26 @@ class Repository:
     def rows(self):
         return self._rows
 
+    def fixture_mapping(self, provider_fixture_id):
+        for item in self._rows:
+            if str(item["provider_fixture_id"]) == str(provider_fixture_id):
+                return {
+                    key: item[key]
+                    for key in (
+                        "provider_fixture_id",
+                        "fixture_id",
+                        "league_id",
+                        "season",
+                        "home_team",
+                        "away_team",
+                        "competition_name",
+                        "country",
+                        "kickoff_at",
+                        "provider_status",
+                    )
+                }
+        return None
+
 
 def test_research_snapshot_maps_fixture_and_computes_shadow_result_and_clv() -> None:
     dashboard = ResearchDashboardService(
@@ -115,3 +140,30 @@ def test_research_html_exposes_exact_match_mapping_without_bankroll_controls() -
     assert "Research CLV +5.00%" in html
     assert "bankroll reservations" in html
     assert "operator-state" not in html
+
+
+def test_fixture_mapping_endpoint_is_public_and_contains_no_model_data(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("QUANTBET_DASHBOARD_PUBLIC", raising=False)
+    monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
+    dashboard = ResearchDashboardService(
+        Repository([row()]),  # type: ignore[arg-type]
+        closing_max_age_seconds=900,
+    )
+    service = ResearchDashboardHTTPService(dashboard, host="127.0.0.1", port=0)
+    service.start()
+    try:
+        with urlopen(
+            f"http://127.0.0.1:{service.port}/api/fixture-map?provider_fixture_id=123"
+        ) as response:
+            payload = json.loads(response.read())
+    finally:
+        service.close()
+
+    assert payload["fixture"]["home_team"] == "Home FC"
+    assert payload["fixture"]["away_team"] == "Away United"
+    assert payload["fixture"]["competition_name"] == "Research League"
+    assert "model_probability" not in payload["fixture"]
+    assert "expected_value" not in payload["fixture"]
+    assert "clv_ppm" not in payload["fixture"]
