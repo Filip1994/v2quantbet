@@ -61,6 +61,7 @@ def build_postgres_research_signal_application(
         source,
         ingestion,
         clock=research_clock,
+        claim_limit=10,
         on_item_failure=on_item_failure,
         on_item_success=on_item_success,
         should_stop=should_stop,
