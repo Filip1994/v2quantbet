@@ -86,6 +86,7 @@ class PostgreSQLResearchSignalRepository:
                 ON ras.fixture_id = s.fixture_id
             LEFT JOIN fixture_result_observations ro
                 ON ro.result_observation_id = ras.current_observation_id
+               AND ras.phase = 'COMPLETE'
             LEFT JOIN LATERAL (
                 SELECT rp.pick_id, rp.registered_at, rp.market, rp.selection
                 FROM registered_picks rp
