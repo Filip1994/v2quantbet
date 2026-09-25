@@ -626,10 +626,10 @@ class OpportunityWorker:
                         )
                         registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
-                            if (
-                                preliminary_rejections == ("MAX_OPEN_EXPOSURE_EXCEEDED",)
-                                and self._record_research_signal is not None
-                            ):
+                            exposure_only = preliminary_rejections == (
+                                "MAX_OPEN_EXPOSURE_EXCEEDED",
+                            )
+                            if exposure_only and self._record_research_signal is not None:
                                 try:
                                     self._record_research_signal(
                                         preliminary.evaluation_id, self._now()
@@ -657,6 +657,12 @@ class OpportunityWorker:
                                     "final_quote_refresh_requested": False,
                                 },
                             )
+                            if exposure_only:
+                                # Exposure is fixture-global at the fixed stake. The first
+                                # exposure-only rejection is therefore the canonical shadow
+                                # candidate for this fixture; later markets/bookmakers must
+                                # not create additional counterfactual picks.
+                                break
                             continue
 
                         registration_started = self._monotonic()
