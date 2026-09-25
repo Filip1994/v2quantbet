@@ -28,6 +28,9 @@ def signal_row():
         "first_open_exposure_minor": 300_000,
         "last_open_exposure_minor": 300_000,
         "exposure_cap_minor": 300_000,
+        "qualified_at": NOW,
+        "production_pick_id": None,
+        "disposition": "BLOCKED_EXPOSURE",
         "home_team": "Home",
         "away_team": "Away",
         "competition_name": "Research League",
@@ -98,6 +101,15 @@ class SegmentedRepository:
         pending["closing_odds"] = None
         pending["closing_observed_at"] = None
         pending["closing_captured_at"] = None
+        pending["block_reason"] = None
+        pending["first_blocked_at"] = None
+        pending["last_blocked_at"] = None
+        pending["blocked_count"] = None
+        pending["first_open_exposure_minor"] = None
+        pending["last_open_exposure_minor"] = None
+        pending["exposure_cap_minor"] = None
+        pending["production_pick_id"] = "registered-pick-v1:" + "c" * 64
+        pending["disposition"] = "PLAYED"
 
         loss = signal_row()
         loss["research_signal_id"] = "research-signal-v1:" + "d" * 64
@@ -109,6 +121,15 @@ class SegmentedRepository:
         loss["kickoff_at"] = NOW - timedelta(hours=3)
         loss["regulation_home_goals"] = 1
         loss["regulation_away_goals"] = 0
+        loss["block_reason"] = None
+        loss["first_blocked_at"] = None
+        loss["last_blocked_at"] = None
+        loss["blocked_count"] = None
+        loss["first_open_exposure_minor"] = None
+        loss["last_open_exposure_minor"] = None
+        loss["exposure_cap_minor"] = None
+        loss["production_pick_id"] = "registered-pick-v1:" + "d" * 64
+        loss["disposition"] = "SKIPPED"
 
         return (pending, win, loss)
 
@@ -133,6 +154,10 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
             "market": ["BTTS"],
             "league": ["research"],
             "result": ["WIN"],
+            "disposition": ["BLOCKED_EXPOSURE"],
+            "p_bucket": ["60–65%"],
+            "ev_bucket": ["30%+"],
+            "odds_bucket": ["2.01–2.50"],
         }
     )
     assert len(signals) == 1
@@ -166,6 +191,8 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert "Loss Home – Loss Away" not in active_html
     assert 'class="active" href=' in active_html
     assert 'name="result"' not in active_html
+    assert "PLAYED" in active_html
+    assert "production candidate" in active_html
 
     history_html = dashboard.render_html("tab=history")
     assert "Settled research history" in history_html
@@ -177,6 +204,12 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'class="row-win"' in history_html
     assert 'class="row-loss"' in history_html
     assert 'name="result"' in history_html
+    assert "BLOCKED EXPOSURE" in history_html
+    assert "SKIPPED" in history_html
+    assert 'name="disposition"' in history_html
+    assert 'name="p_bucket"' in history_html
+    assert 'name="ev_bucket"' in history_html
+    assert 'name="odds_bucket"' in history_html
 
 
 def test_research_history_result_filter_and_sportsbook_palette() -> None:
@@ -191,7 +224,19 @@ def test_research_history_result_filter_and_sportsbook_palette() -> None:
     assert "--win:#69c98f" in html
     assert "--loss:#e06f78" in html
     assert "QuantBet Research" in html
-    assert "Shadow intelligence" in html
+    assert "Research universe" in html
+
+
+def test_research_dashboard_can_filter_by_production_route() -> None:
+    dashboard = ResearchDashboardService(SegmentedRepository())
+
+    played = dashboard.signals({"disposition": ["PLAYED"]})
+    skipped = dashboard.signals({"disposition": ["SKIPPED"]})
+    blocked = dashboard.signals({"disposition": ["BLOCKED_EXPOSURE"]})
+
+    assert [row["fixture_id"] for row in played] == ["api-football:124"]
+    assert [row["fixture_id"] for row in skipped] == ["api-football:125"]
+    assert [row["fixture_id"] for row in blocked] == ["api-football:123"]
 
 
 def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
