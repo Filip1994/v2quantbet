@@ -199,6 +199,62 @@ class PostgreSQLResearchSignalRepository:
                 )
         return True
 
+    def fixture_mapping(self, provider_fixture_id: str) -> dict[str, Any] | None:
+        """Resolve a provider fixture ID to non-proprietary durable match metadata."""
+        if not isinstance(provider_fixture_id, str) or not provider_fixture_id.isdigit():
+            raise ValueError("provider_fixture_id must contain only digits")
+        if int(provider_fixture_id) <= 0:
+            raise ValueError("provider_fixture_id must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    f.provider_fixture_id,
+                    f.fixture_id,
+                    f.league_id,
+                    f.season,
+                    latest.home_team,
+                    latest.away_team,
+                    latest.competition_name,
+                    latest.country,
+                    latest.kickoff_at,
+                    latest.provider_status
+                FROM fixtures f
+                JOIN LATERAL (
+                    SELECT
+                        fo.home_team,
+                        fo.away_team,
+                        fo.competition_name,
+                        fo.country,
+                        fo.kickoff_at,
+                        fo.provider_status
+                    FROM fixture_observations fo
+                    WHERE fo.fixture_id = f.fixture_id
+                    ORDER BY fo.observed_at DESC, fo.fixture_observation_id DESC
+                    LIMIT 1
+                ) latest ON TRUE
+                WHERE f.provider = 'api-football'
+                  AND f.provider_fixture_id = %s
+                """,
+                (provider_fixture_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "provider_fixture_id",
+            "fixture_id",
+            "league_id",
+            "season",
+            "home_team",
+            "away_team",
+            "competition_name",
+            "country",
+            "kickoff_at",
+            "provider_status",
+        )
+        return dict(zip(keys, row, strict=True))
+
     def rows(self, *, limit: int = 5000) -> tuple[dict[str, Any], ...]:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("limit must be a positive integer")
