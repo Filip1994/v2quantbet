@@ -322,7 +322,7 @@ class ResearchDashboardService:
             query_params["tab"] = next_tab
             return "/research?" + urlencode(query_params)
 
-        def signed_class(value: int | float | None) -> str:
+        def signed_class(value: float | None) -> str:
             if value is None or value == 0:
                 return "neutral"
             return "positive" if value > 0 else "negative"
