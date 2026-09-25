@@ -21,6 +21,7 @@ from h2h.persistence.postgres_pick_monitoring import PostgreSQLPickMonitoringRep
 from h2h.persistence.postgres_daily_bulletin import PostgreSQLDailyBulletinRepository
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
 from h2h.persistence.postgres_performance import PostgreSQLPerformanceRepository
+from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 from h2h.domain.registration_policy import RegistrationPolicyConfig
 from h2h.domain.pick_monitoring import OddsLifecyclePolicy
 from h2h.domain.settlement import ResultSettlementPolicy
@@ -350,6 +351,7 @@ def build_postgres_result_settlement_application(
     on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
     on_item_success: Callable[[str], None] | None = None,
     should_stop: Callable[[], bool] = lambda: False,
+    research: PostgreSQLResearchSignalRepository | None = None,
 ) -> PostgreSQLResultSettlementApplication:
     if not isinstance(policy, ResultSettlementPolicy):
         raise TypeError("policy must be a ResultSettlementPolicy")
@@ -359,6 +361,7 @@ def build_postgres_result_settlement_application(
     reconcile = ReconcileFixtureResults(
         repository,
         source,
+        research=research,
         clock=result_clock,
         on_item_failure=on_item_failure,
         on_item_success=on_item_success,

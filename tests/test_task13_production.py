@@ -271,7 +271,7 @@ def test_opportunity_pipeline_is_deterministic_and_one_bookmaker_only() -> None:
     first = worker.run_once()
     second = worker.run_once()
     assert first.registered_pick_ids == ()
-    assert first.quotes_fetched == 1
+    assert first.quotes_fetched == 2
     assert first.fresh_quotes == 0
     assert first.decisions == 0
     assert second.evaluation_ids == first.evaluation_ids

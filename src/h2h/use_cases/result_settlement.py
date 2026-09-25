@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,6 +13,9 @@ from h2h.odds.api_football_client import ApiFootballClient
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
+from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
+
+LOGGER = logging.getLogger("quantbet.results")
 
 
 def _now(clock: Callable[[], datetime]) -> datetime:
@@ -88,6 +92,7 @@ class ReconcileFixtureResults:
         repository: PostgreSQLResultSettlementRepository,
         source: ApiFootballResultSource,
         *,
+        research: PostgreSQLResearchSignalRepository | None = None,
         clock: Callable[[], datetime],
         on_item_failure: Callable[[str, BaseException, datetime], None] | None = None,
         on_item_success: Callable[[str], None] | None = None,
@@ -96,6 +101,7 @@ class ReconcileFixtureResults:
     ) -> None:
         self._repository = repository
         self._source = source
+        self._research = research
         self._clock = clock
         self._normalizer = ApiFootballSettlementResultNormalizer()
         self._on_item_failure = on_item_failure or (lambda _item, _error, _at: None)
@@ -151,6 +157,19 @@ class ReconcileFixtureResults:
                 outcome = self._repository.finalize_clv(pick_id, realized_at=now)
                 if outcome.clv_fact_id is not None:
                     clv.append(pick_id)
+            if self._research is not None:
+                try:
+                    self._research.finalize_fixture_result(
+                        fixture_id, stable, finalized_at=now
+                    )
+                except Exception as exc:
+                    LOGGER.exception(
+                        "research result finalization failed",
+                        extra={
+                            "fixture_id": fixture_id,
+                            "error_class": type(exc).__name__,
+                        },
+                    )
         self._has_pending = self._repository.has_due_results(as_of=_now(self._clock))
         return ResultCycle(
             initialized,

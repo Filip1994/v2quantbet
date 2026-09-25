@@ -186,6 +186,7 @@ def run(
     live=(),
     kickoff_at=None,
     provider_snapshot_max_age_seconds=28800,
+    on_exposure_blocked=None,
 ):
     repository = Repository()
     if kickoff_at is not None:
@@ -213,6 +214,7 @@ def run(
         maximum_quote_age_seconds=300,
         minimum_time_to_kickoff_seconds=600,
         stale_retry_policy=POLICY,
+        on_exposure_blocked=on_exposure_blocked,
         provider_snapshot_max_age_seconds=provider_snapshot_max_age_seconds,
         clock=lambda: NOW,
     )
@@ -343,3 +345,74 @@ def test_non_candidate_spends_no_final_refresh_and_concurrent_claim_is_suppresse
     second, source, _, _ = run(market(2.0), registration=in_flight)
     assert source.calls == 1
     assert second.registered_pick_ids == ()
+
+
+class PreliminaryReasonsRegistration(Registration):
+    def __init__(self, reasons):
+        super().__init__()
+        self.reasons = tuple(reasons)
+
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return self.reasons
+
+
+class FinalExposureRegistration(Registration):
+    def execute(self, evaluation_id, request_id, **kwargs):
+        self.executed.append((evaluation_id, request_id, kwargs))
+        return SimpleNamespace(
+            pick=None,
+            decision=SimpleNamespace(
+                evaluation_id=evaluation_id,
+                decided_at=NOW,
+                outcome=SimpleNamespace(value="REJECTED"),
+                reason_codes=("MAX_OPEN_EXPOSURE_EXCEEDED",),
+            ),
+        )
+
+
+def test_research_capture_records_exact_preliminary_exposure_only_rejection() -> None:
+    captured = []
+    registration = PreliminaryReasonsRegistration(("MAX_OPEN_EXPOSURE_EXCEEDED",))
+
+    cycle, source, _, _ = run(
+        market(2.0),
+        registration=registration,
+        on_exposure_blocked=lambda evaluation_id, blocked_at, stage: captured.append(
+            (evaluation_id, blocked_at, stage)
+        ),
+    )
+
+    assert cycle.registered_pick_ids == ()
+    assert source.calls == 1
+    assert captured == [("evaluation-preliminary", NOW, "PRELIMINARY_RISK")]
+
+
+def test_research_capture_ignores_multi_reason_preliminary_rejection() -> None:
+    captured = []
+    registration = PreliminaryReasonsRegistration(
+        ("EDGE_BELOW_MINIMUM", "MAX_OPEN_EXPOSURE_EXCEEDED")
+    )
+
+    run(
+        market(2.0),
+        registration=registration,
+        on_exposure_blocked=lambda *args: captured.append(args),
+    )
+
+    assert captured == []
+
+
+def test_research_capture_records_final_risk_exposure_only_rejection() -> None:
+    captured = []
+
+    cycle, source, _, _ = run(
+        market(2.0),
+        registration=FinalExposureRegistration(),
+        on_exposure_blocked=lambda evaluation_id, blocked_at, stage: captured.append(
+            (evaluation_id, blocked_at, stage)
+        ),
+    )
+
+    assert source.calls == 2
+    assert cycle.registered_pick_ids == ()
+    assert captured == [("evaluation-final", NOW, "FINAL_RISK")]

@@ -129,7 +129,7 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "<h2>History</h2>" in html
     assert "1 finished" in html
     assert "Risk exposure / cap" in html
-    assert "3,000.00 RSD / 3,000.00 RSD" in html
+    assert "3 000.00 RSD / 3 000.00 RSD" in html
     assert "1.95 → 2.05" in html
     assert '<th class="num">Probability</th>' in html
     assert 'class="num history-probability"' in html
@@ -174,6 +174,7 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
                     dashboard_phase="PREMATCH",
                     settlement_outcome=None,
                     settled_at=None,
+                    last_observed_at=NOW - timedelta(hours=2, minutes=36),
                 )
             ]
         )
@@ -620,3 +621,23 @@ def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
     entrypoint.main()
 
     assert calls == ["dashboard"]
+
+
+def test_root_entrypoint_dispatches_research_dashboard_without_composing_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setenv("QUANTBET_PROCESS", "research_dashboard")
+    monkeypatch.setattr(
+        "h2h.research_dashboard_entrypoint.main",
+        lambda: calls.append("research_dashboard"),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "load_production_settings",
+        lambda: pytest.fail("worker settings must not load for research dashboard process"),
+    )
+
+    entrypoint.main()
+
+    assert calls == ["research_dashboard"]

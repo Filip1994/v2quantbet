@@ -257,3 +257,22 @@ def test_operator_state_migration_is_minimal_and_append_only() -> None:
     assert "UNREPORTED" not in migration
     assert "reason" not in migration.casefold()
     assert "bookmaker" not in migration.casefold()
+
+
+def test_research_shadow_signal_migration_is_append_only_and_bankroll_free() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "021_research_shadow_signals.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE research_signals" in migration
+    assert "CREATE TABLE research_fixture_result_finalizations" in migration
+    assert "MAX_OPEN_EXPOSURE_EXCEEDED" in migration
+    assert "LOG_BACKFILL_V1" in migration
+    assert "LIVE_V1" in migration
+    assert "research_signals_append_only" in migration
+    assert "research_fixture_results_append_only" in migration
+    assert migration.count("value-evaluation-v1:") >= 237
+    assert "INSERT INTO bankroll_ledger_entries" not in migration
+    assert "INSERT INTO registered_picks" not in migration

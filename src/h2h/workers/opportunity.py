@@ -163,6 +163,7 @@ class OpportunityWorker:
         maximum_quote_age_seconds: int,
         minimum_time_to_kickoff_seconds: int,
         stale_retry_policy: StaleQuoteRetryPolicy,
+        on_exposure_blocked: Callable[[str, datetime, str], None] | None = None,
         provider_snapshot_max_age_seconds: int = 28800,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
@@ -196,6 +197,7 @@ class OpportunityWorker:
         self._maximum_quote_age_seconds = maximum_quote_age_seconds
         self._minimum_time_to_kickoff_seconds = minimum_time_to_kickoff_seconds
         self._stale_retry_policy = stale_retry_policy
+        self._on_exposure_blocked = on_exposure_blocked or (lambda _evaluation, _at, _stage: None)
         self._provider_snapshot_max_age_seconds = provider_snapshot_max_age_seconds
         self._clock = clock
         self._monotonic = monotonic_clock
@@ -208,6 +210,21 @@ class OpportunityWorker:
 
     def _now(self) -> datetime:
         return self._clock().astimezone(UTC)
+
+    def _record_exposure_block(
+        self, evaluation_id: str, *, blocked_at: datetime, blocked_stage: str
+    ) -> None:
+        try:
+            self._on_exposure_blocked(evaluation_id, blocked_at, blocked_stage)
+        except Exception as exc:
+            LOGGER.exception(
+                "research exposure-blocked signal persistence failed",
+                extra={
+                    "worker": WORKER_NAME,
+                    "evaluation_id": evaluation_id,
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def _flush_failures(self, pending: list[tuple[str, str, BaseException, datetime]]) -> None:
         if not pending:
@@ -624,6 +641,12 @@ class OpportunityWorker:
                         )
                         registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
+                            if preliminary_rejections == ("MAX_OPEN_EXPOSURE_EXCEEDED",):
+                                self._record_exposure_block(
+                                    preliminary.evaluation_id,
+                                    blocked_at=self._now(),
+                                    blocked_stage="PRELIMINARY_RISK",
+                                )
                             LOGGER.info(
                                 "opportunity did not qualify for final quote refresh",
                                 extra={
@@ -669,6 +692,17 @@ class OpportunityWorker:
                             else:
                                 rejected_picks += 1
                                 fallback_attempts += 1
+                                decision = getattr(registration, "decision", None)
+                                if (
+                                    decision is not None
+                                    and tuple(getattr(decision, "reason_codes", ()))
+                                    == ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+                                ):
+                                    self._record_exposure_block(
+                                        decision.evaluation_id,
+                                        blocked_at=decision.decided_at,
+                                        blocked_stage="FINAL_RISK",
+                                    )
                             continue
                         if not claim.should_fetch:
                             LOGGER.info(
@@ -949,6 +983,14 @@ class OpportunityWorker:
                         else:
                             rejected_picks += 1
                             fallback_attempts += 1
+                            if tuple(registration.decision.reason_codes) == (
+                                "MAX_OPEN_EXPOSURE_EXCEEDED",
+                            ):
+                                self._record_exposure_block(
+                                    registration.decision.evaluation_id,
+                                    blocked_at=registration.decision.decided_at,
+                                    blocked_stage="FINAL_RISK",
+                                )
                         LOGGER.info(
                             "mandatory final quote verification decided",
                             extra={
