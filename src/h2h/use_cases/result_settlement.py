@@ -162,7 +162,7 @@ class ReconcileFixtureResults:
                     self._research.finalize_fixture_result(
                         fixture_id, stable, finalized_at=now
                     )
-                except Exception as exc:  # noqa: BLE001 - research must not block settlement
+                except Exception as exc:
                     LOGGER.exception(
                         "research result finalization failed",
                         extra={
