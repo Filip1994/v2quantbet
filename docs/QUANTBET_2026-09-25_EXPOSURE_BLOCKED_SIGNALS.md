@@ -471,7 +471,7 @@ For **registered picks**, durable PostgreSQL state already gives us:
 
 That is enough to measure betting-system performance by market, league, odds range, probability range, EV band, quote freshness, and model/policy version.
 
-## Critical research gap: blocked signals do not yet have counterfactual CLV/outcome tracking
+## Research gap identified at capture: blocked signals lacked counterfactual CLV/outcome tracking
 
 The rows in this document are **preliminary candidates that never reached registered-pick monitoring**.
 
@@ -482,7 +482,7 @@ Because exposure was already full:
 - they do not automatically enter the current pick closing-line workflow;
 - result acquisition is currently centered on registered-pick fixtures.
 
-Therefore a blocked signal can have a logged preliminary EV but, under the current production design, we cannot reliably compute its later **counterfactual CLV** and outcome from the normal pick pipeline.
+Therefore a blocked signal could have a logged preliminary EV but, under the pre-research production design, we could not reliably compute its later **counterfactual CLV** and outcome from the normal pick pipeline.
 
 This matters because exposure policy cannot be optimized from registered picks alone. We need to know what happened to the opportunities that the cap rejected.
 
@@ -572,3 +572,36 @@ That does **not** yet prove the cap should be raised. The correct decision depen
 5. Are signals correlated by league, team, market, kickoff window, or shared model error?
 
 Until those are measured, preserve the current model and exposure policy and build the evidence base.
+
+## Durable shadow research implementation — PR #67
+
+The long-term fix is implemented on `feature/research-shadow-signals` in PR #67 and is intended to supersede log/Markdown-only tracking after production rollout.
+
+Design boundaries:
+
+- an evaluation is admitted to `research_signals` only when its sole blocking reason is `MAX_OPEN_EXPOSURE_EXCEEDED`;
+- a research signal never becomes a registered pick and never reserves bankroll or open exposure;
+- live signals persist the exact policy fingerprint and canonical policy configuration;
+- **237** historical exposure-only evaluations from the available 24–25 September production window are backfilled by exact `evaluation_id`; each log pairing matched within 0–5 ms and there were no unmatched exposure-only opportunity events in the captured windows;
+- existing fixture observations provide exact home/away/competition/kickoff mapping, so provider fixture IDs no longer need manual SQL/provider lookup;
+- research fixtures enter the existing authoritative result-acquisition lifecycle, but financial settlement remains restricted to registered picks;
+- a separate read-only research dashboard exposes model probability, market fair probability, odds, edge, EV, research closing candidate, validated research CLV, final result and 1-unit counterfactual P/L;
+- research CLV is emitted only when the latest same-series/same-source pre-kickoff quote satisfies the configured closing-age bound;
+- preliminary signal odds are treated as observed shadow-entry prices, **not** as guaranteed executable prices after the mandatory final quote refresh;
+- a public metadata-only `/api/fixture-map?provider_fixture_id=...` endpoint maps API-Football IDs to match identity without exposing model probability, EV, CLV, bankroll or proprietary research data.
+
+The normal research dashboard and full JSON signal endpoint remain subject to the dashboard authentication/public-mode policy.
+
+### Measurement policy after rollout
+
+Keep the betting policy unchanged while the shadow cohort accumulates. Use both registered picks and exposure-blocked shadow signals to measure:
+
+- probability calibration and empirical hit rate;
+- EV band performance;
+- odds-band performance;
+- market/selection/league/bookmaker effects;
+- research CLV and positive-CLV rate;
+- flat 1-unit counterfactual ROI;
+- sample size and drawdown.
+
+Do not infer a staking sweet spot from hit rate alone. A probability bucket is useful only when probability calibration, price/EV and realized return agree on a sufficiently large sample. Any future Kelly policy should be capped fractional Kelly and should use calibrated probabilities rather than raw model confidence.
