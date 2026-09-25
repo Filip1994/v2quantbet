@@ -54,6 +54,15 @@ class PickRegistrationRepository(Protocol):
         self, evaluation_id: str, policy: RegistrationPolicyConfig, *, checked_at: datetime
     ) -> tuple[str, ...]: ...
 
+    def record_exposure_blocked_signal(
+        self,
+        evaluation_id: str,
+        policy: RegistrationPolicyConfig,
+        *,
+        blocked_at: datetime,
+        capture_origin: str = "LIVE",
+    ) -> None: ...
+
     def begin_final_quote_verification(
         self, preliminary_evaluation_id: str, *, requested_at: datetime
     ) -> FinalQuoteClaim: ...

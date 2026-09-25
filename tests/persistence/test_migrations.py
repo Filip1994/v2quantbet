@@ -257,3 +257,17 @@ def test_operator_state_migration_is_minimal_and_append_only() -> None:
     assert "UNREPORTED" not in migration
     assert "reason" not in migration.casefold()
     assert "bookmaker" not in migration.casefold()
+
+
+def test_research_exposure_signal_migration_is_bankroll_neutral() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "021_research_exposure_signals.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE research_exposure_signals" in migration
+    assert "REFERENCES value_evaluations(evaluation_id)" in migration
+    assert "capture_origin IN ('LIVE', 'LOG_BACKFILL')" in migration
+    assert "bankroll_ledger_entries" not in migration
+    assert "registered_picks" not in migration

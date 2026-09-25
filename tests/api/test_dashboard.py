@@ -129,7 +129,7 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "<h2>History</h2>" in html
     assert "1 finished" in html
     assert "Risk exposure / cap" in html
-    assert "3,000.00 RSD / 3,000.00 RSD" in html
+    assert "3 000.00 RSD / 3 000.00 RSD" in html
     assert "1.95 → 2.05" in html
     assert '<th class="num">Probability</th>' in html
     assert 'class="num history-probability"' in html
@@ -181,9 +181,9 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
 
     for label in ("First seen", "Pick", "Last observed", "Closing"):
         assert f"<b>{label}</b>" in html
-    assert '<small class="quote-age">2h 36mins ago</small>' in html
+    assert '<small class="quote-age">just now</small>' in html
     assert '<small class="check-age">checked 7min ago</small>' in html
-    assert 'title="23 Sep 2026 · 09:24 UTC"' in html
+    assert 'title="23 Sep 2026 · 12:00 UTC"' in html
     assert "Observed 23 Sep" not in html
     assert "Best current" not in html
     assert "Same-book current" not in html

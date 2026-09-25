@@ -624,11 +624,16 @@ class OpportunityWorker:
                         )
                         registration_seconds += self._monotonic() - registration_started
                         if preliminary_rejections:
+                            if preliminary_rejections == ("MAX_OPEN_EXPOSURE_EXCEEDED",):
+                                self._register.record_exposure_blocked_signal(
+                                    preliminary.evaluation_id
+                                )
                             LOGGER.info(
                                 "opportunity did not qualify for final quote refresh",
                                 extra={
                                     "worker": WORKER_NAME,
                                     "fixture_id": fixture.fixture_id,
+                                    "evaluation_id": preliminary.evaluation_id,
                                     "market": preliminary.market.value,
                                     "selection": preliminary.selected_selection.value,
                                     "preliminary_odds": preliminary.selected_odd,
