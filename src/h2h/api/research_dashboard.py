@@ -358,6 +358,15 @@ class ResearchDashboardService:
             }.get(outcome, "void")
             return f'<span class="badge result-{css}">{escape(outcome)}</span>'
 
+        def disposition_badge(disposition: str) -> str:
+            css = {
+                "PLAYED": "played",
+                "SKIPPED": "skipped",
+                "BLOCKED_EXPOSURE": "blocked",
+            }.get(disposition, "skipped")
+            label = disposition.replace("_", " ")
+            return f'<span class="badge route-{css}">{escape(label)}</span>'
+
         def freshness_badge(value: str) -> str:
             css = {
                 "FRESH": "fresh",
@@ -371,8 +380,13 @@ class ResearchDashboardService:
         if tab == "active":
             for row in rows:
                 exposure = (
-                    f'{row["last_open_exposure_minor"] / 100:.0f}/'
-                    f'{row["exposure_cap_minor"] / 100:.0f}'
+                    "—"
+                    if row["last_open_exposure_minor"] is None
+                    or row["exposure_cap_minor"] is None
+                    else (
+                        f'{row["last_open_exposure_minor"] / 100:.0f}/'
+                        f'{row["exposure_cap_minor"] / 100:.0f} RSD'
+                    )
                 )
                 match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
                 competition = escape(row.get("competition_name") or "—")
@@ -385,23 +399,26 @@ class ResearchDashboardService:
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])}</small></td>'
+                    f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td class="{signed_class(row["edge"])}"><b>{_pct(row["edge"])}</b></td>'
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
                     f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
-                    f'<td>{_time(row["first_blocked_at"])}'
+                    f'<td>{_time(row["qualified_at"])}'
                     f'<small>{row["quote_age_seconds"]}s · {freshness_badge(row["freshness"])}</small></td>'
-                    f'<td><b>{exposure} RSD</b><small>blocked ×{row["blocked_count"]}</small></td>'
+                    f'<td><b>{exposure}</b><small>'
+                    f'{"blocked ×" + str(row["blocked_count"]) if row["blocked_count"] is not None else "production candidate"}'
+                    f'</small></td>'
                     f'<td>{result_badge(row["outcome"])}</td>'
                     "</tr>"
                 )
             headers = (
                 "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
-                "<th>Odds</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
-                "<th>Detected</th><th>Exposure</th><th>Status</th>"
+                "<th>Odds</th><th>Route</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
+                "<th>Qualified</th><th>Exposure</th><th>Status</th>"
             )
             empty_text = "No active research picks match these filters."
-            colspan = 11
+            colspan = 12
         else:
             for row in rows:
                 clv_value = (
@@ -426,27 +443,28 @@ class ResearchDashboardService:
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
-                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["bookmaker"])}</small></td>'
+                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
                     f'<td><b>{_odd(row["closing_odds"])}</b><small>{_time(row["closing_observed_at"])}</small></td>'
                     f'<td class="{signed_class(clv_value)}"><b>{clv}</b></td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
-                    f'<small>fair {_pct(row["market_fair_probability"])}</small></td>'
+                    f'<small>{escape(row["probability_bucket"])} · fair {_pct(row["market_fair_probability"])}</small></td>'
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
+                    f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td>{result_badge(row["outcome"])}'
                     f'<small>{score} · {escape(row.get("result_provider_status") or row.get("result_phase") or "settled")}</small></td>'
                     f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
                     f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
-                    f'<td>{_time(row["first_blocked_at"])}</td>'
+                    f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
             headers = (
                 "<th>Match</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
                 "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
-                "<th>Result</th><th>P/L</th><th>Bookmaker</th><th>Detected</th>"
+                "<th>Route</th><th>Result</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
             )
             empty_text = "No historical research picks match these filters."
-            colspan = 12
+            colspan = 13
 
         rows_html = (
             "".join(body_rows)
