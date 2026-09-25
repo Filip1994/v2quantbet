@@ -635,7 +635,7 @@ class OpportunityWorker:
                                     research_signal_id = self._record_exposure_blocked(
                                         preliminary.evaluation_id
                                     )
-                                except Exception:  # noqa: BLE001 - research sidecar must not block execution
+                                except Exception:
                                     LOGGER.exception(
                                         "exposure research signal persistence failed",
                                         extra={
