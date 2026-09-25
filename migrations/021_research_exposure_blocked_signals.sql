@@ -18,6 +18,25 @@ CREATE INDEX idx_research_exposure_blocked_time
 CREATE INDEX idx_research_exposure_blocked_fixture
     ON research_exposure_blocked_signals (fixture_id, blocked_at, evaluation_id);
 
+-- Mutable operational claim state for bounded research close refreshes.
+-- This table controls provider pressure; it is not a betting or bankroll fact.
+CREATE TABLE research_close_refresh_states (
+    fixture_id TEXT NOT NULL CHECK (length(trim(fixture_id)) > 0),
+    bookmaker_id BIGINT NOT NULL CHECK (bookmaker_id > 0),
+    last_attempt_at TIMESTAMPTZ NOT NULL,
+    attempt_count INTEGER NOT NULL CHECK (attempt_count > 0),
+    last_outcome TEXT NOT NULL
+        CHECK (last_outcome IN ('CLAIMED', 'SUCCESS', 'NO_QUOTES', 'ERROR')),
+    last_persisted_snapshot_count INTEGER NOT NULL DEFAULT 0
+        CHECK (last_persisted_snapshot_count >= 0),
+    last_error_class TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (fixture_id, bookmaker_id)
+);
+
+CREATE INDEX idx_research_close_refresh_attempt
+    ON research_close_refresh_states (last_attempt_at, fixture_id, bookmaker_id);
+
 CREATE FUNCTION reject_research_signal_mutation() RETURNS trigger AS $$
 BEGIN
     RAISE EXCEPTION 'research exposure-blocked signals are append-only';
