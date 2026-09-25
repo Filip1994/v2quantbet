@@ -148,6 +148,17 @@ def _run_active_leader(
             application.settings.live_close_poll_seconds,
             application.live_closing_proxy.run_once,
         ),
+        *(
+            (
+                ScheduledJob(
+                    "research_closing",
+                    application.settings.live_close_poll_seconds,
+                    application.research_closing.run_once,
+                ),
+            )
+            if getattr(application, "research_closing", None) is not None
+            else ()
+        ),
         ScheduledJob(
             "monitoring",
             float(lifecycle.monitoring_interval_seconds),

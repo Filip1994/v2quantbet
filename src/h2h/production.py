@@ -28,6 +28,7 @@ from h2h.persistence import (
 )
 from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
 from h2h.persistence.postgres_live_closing_proxy import PostgreSQLLiveClosingProxyRepository
+from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
@@ -43,6 +44,7 @@ from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 from h2h.workers.opportunity import OpportunityWorker
 from h2h.workers.model_lifecycle import ModelLifecycleWorker
 from h2h.workers.live_closing_proxy import LiveClosingProxyWorker
+from h2h.workers.research_closing import ResearchClosingWorker
 
 
 @dataclass
@@ -81,6 +83,7 @@ class ProductionApplication:
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
     live_closing_proxy: LiveClosingProxyWorker
+    research_closing: ResearchClosingWorker
     operator_picks: PostgreSQLOperatorPickStateRepository
 
     def close(self) -> None:
@@ -153,9 +156,10 @@ def build_production_application(
         should_stop=should_stop,
         odds_request_category="results_monitoring",
     )
+    monitoring_source = ApiFootballOddsService(monitoring_client)
     monitoring = build_postgres_pick_monitoring_application(
         application_settings.odds_lifecycle_policy,
-        ApiFootballOddsService(monitoring_client),
+        monitoring_source,
         database_url=application_settings.database_url,
         bulletin_timezone=application_settings.bulletin_timezone,
         on_item_failure=item_failure("monitoring"),
@@ -178,6 +182,19 @@ def build_production_application(
         max_age_seconds=settings.live_close_max_age_seconds,
         on_item_failure=item_failure("closing_proxy"),
         on_item_success=item_success("closing_proxy"),
+        should_stop=should_stop,
+    )
+    research_closing = ResearchClosingWorker(
+        PostgreSQLResearchSignalRepository(database_url=application_settings.database_url),
+        monitoring_source,
+        QuoteHistoryIngestionService(
+            prediction.quote_history, capture_clock=lambda: datetime.now(UTC)
+        ),
+        clock=lambda: datetime.now(UTC),
+        window_seconds=application_settings.odds_lifecycle_policy.closing_max_age_seconds,
+        allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
+        on_item_failure=item_failure("research_closing"),
+        on_item_success=item_success("research_closing"),
         should_stop=should_stop,
     )
     versions = PostgreSQLDixonColesModelVersionRepository(
@@ -290,5 +307,6 @@ def build_production_application(
         model_lifecycle,
         opportunity,
         live_closing_proxy,
+        research_closing,
         operator_picks,
     )

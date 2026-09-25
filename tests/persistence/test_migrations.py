@@ -257,3 +257,19 @@ def test_operator_state_migration_is_minimal_and_append_only() -> None:
     assert "UNREPORTED" not in migration
     assert "reason" not in migration.casefold()
     assert "bookmaker" not in migration.casefold()
+
+
+def test_research_exposure_signal_migration_is_append_only_and_bankroll_free() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "021_research_exposure_blocked_signals.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE research_exposure_blocked_signals" in migration
+    assert "MAX_OPEN_EXPOSURE_EXCEEDED" in migration
+    assert "RAILWAY_LOG_BACKFILL" in migration
+    assert "LIVE_GATE" in migration
+    assert "research_exposure_blocked_signals_append_only" in migration
+    assert "STAKE_RESERVED" not in migration
+    assert "INSERT INTO registered_picks" not in migration
