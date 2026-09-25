@@ -18,6 +18,10 @@ from h2h.application_postgres import (
     build_postgres_result_settlement_application,
 )
 from h2h.config import ProductionSettings
+from h2h.application_research import (
+    PostgreSQLResearchSignalApplication,
+    build_postgres_research_signal_application,
+)
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
 from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
@@ -75,6 +79,7 @@ class ProductionApplication:
     prediction: PostgreSQLProductionPredictionApplication
     registration: PostgreSQLPickRegistrationApplication
     monitoring: PostgreSQLPickMonitoringApplication
+    research: PostgreSQLResearchSignalApplication
     results: PostgreSQLResultSettlementApplication
     active_model_loader: LoadActiveDixonColesModel
     model_coverage: PostgreSQLModelCoverageRepository
@@ -87,6 +92,7 @@ class ProductionApplication:
         self.prediction.close()
         self.registration.close()
         self.monitoring.close()
+        self.research.close()
         self.results.close()
 
 
@@ -153,13 +159,23 @@ def build_production_application(
         should_stop=should_stop,
         odds_request_category="results_monitoring",
     )
+    monitoring_source = ApiFootballOddsService(monitoring_client)
     monitoring = build_postgres_pick_monitoring_application(
         application_settings.odds_lifecycle_policy,
-        ApiFootballOddsService(monitoring_client),
+        monitoring_source,
         database_url=application_settings.database_url,
         bulletin_timezone=application_settings.bulletin_timezone,
         on_item_failure=item_failure("monitoring"),
         on_item_success=item_success("monitoring"),
+        should_stop=should_stop,
+    )
+    research = build_postgres_research_signal_application(
+        application_settings.registration_policy,
+        application_settings.odds_lifecycle_policy,
+        monitoring_source,
+        database_url=application_settings.database_url,
+        on_item_failure=item_failure("research_monitoring"),
+        on_item_success=item_success("research_monitoring"),
         should_stop=should_stop,
     )
     results = build_postgres_result_settlement_application(
@@ -274,6 +290,7 @@ def build_production_application(
             application_settings.registration_policy.minimum_time_to_kickoff_seconds
         ),
         stale_retry_policy=settings.stale_quote_retry_policy,
+        record_exposure_blocked=research.record_exposure_blocked.execute,
     )
     return ProductionApplication(
         settings,
@@ -284,6 +301,7 @@ def build_production_application(
         prediction,
         registration,
         monitoring,
+        research,
         results,
         loader,
         coverage,
