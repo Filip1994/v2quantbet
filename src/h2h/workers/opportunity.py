@@ -167,6 +167,7 @@ class OpportunityWorker:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
         record_research_signal: Callable[[str, datetime], None] | None = None,
+        record_research_production: Callable[[str, str, datetime], None] | None = None,
     ) -> None:
         if max_items <= 0 or max_wall_seconds <= 0:
             raise ValueError("opportunity budgets must be positive")
@@ -201,6 +202,7 @@ class OpportunityWorker:
         self._clock = clock
         self._monotonic = monotonic_clock
         self._record_research_signal = record_research_signal
+        self._record_research_production = record_research_production
         self._cursor: OpportunityCursor | None = None
         self._has_pending = False
 
@@ -690,6 +692,23 @@ class OpportunityWorker:
                                 bookmaker_wins[preliminary.bookmaker_id] = (
                                     bookmaker_wins.get(preliminary.bookmaker_id, 0) + 1
                                 )
+                                if self._record_research_production is not None:
+                                    try:
+                                        self._record_research_production(
+                                            preliminary.evaluation_id,
+                                            registration.pick.pick_id,
+                                            self._now(),
+                                        )
+                                    except Exception:
+                                        LOGGER.exception(
+                                            "failed to persist production research candidate",
+                                            extra={
+                                                "worker": WORKER_NAME,
+                                                "fixture_id": fixture.fixture_id,
+                                                "evaluation_id": preliminary.evaluation_id,
+                                                "pick_id": registration.pick.pick_id,
+                                            },
+                                        )
                                 break
                             else:
                                 rejected_picks += 1
@@ -970,6 +989,23 @@ class OpportunityWorker:
                             bookmaker_wins[final_evaluation.bookmaker_id] = (
                                 bookmaker_wins.get(final_evaluation.bookmaker_id, 0) + 1
                             )
+                            if self._record_research_production is not None:
+                                try:
+                                    self._record_research_production(
+                                        preliminary.evaluation_id,
+                                        registration.pick.pick_id,
+                                        self._now(),
+                                    )
+                                except Exception:
+                                    LOGGER.exception(
+                                        "failed to persist production research candidate",
+                                        extra={
+                                            "worker": WORKER_NAME,
+                                            "fixture_id": fixture.fixture_id,
+                                            "evaluation_id": preliminary.evaluation_id,
+                                            "pick_id": registration.pick.pick_id,
+                                        },
+                                    )
                             break
                         else:
                             rejected_picks += 1
