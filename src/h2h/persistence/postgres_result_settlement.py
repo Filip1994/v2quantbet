@@ -76,13 +76,16 @@ class PostgreSQLResultSettlementRepository:
             cursor.execute(
                 "INSERT INTO fixture_result_acquisition_states "
                 "(fixture_id, phase, next_check_at, updated_at, version) "
-                "SELECT DISTINCT r.fixture_id, 'WAITING', "
+                "SELECT DISTINCT target.fixture_id, 'WAITING', "
                 "latest.kickoff_at + (%s * interval '1 second'), %s, 1 "
-                "FROM registered_picks r JOIN LATERAL ("
-                "SELECT kickoff_at FROM fixture_observations f WHERE f.fixture_id = r.fixture_id "
+                "FROM (SELECT fixture_id FROM registered_picks "
+                "UNION SELECT fixture_id FROM research_exposure_blocked_signals) target "
+                "JOIN LATERAL ("
+                "SELECT kickoff_at FROM fixture_observations f "
+                "WHERE f.fixture_id = target.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE LEFT JOIN fixture_result_acquisition_states s "
-                "ON s.fixture_id = r.fixture_id WHERE s.fixture_id IS NULL "
+                "ON s.fixture_id = target.fixture_id WHERE s.fixture_id IS NULL "
                 "ON CONFLICT DO NOTHING RETURNING fixture_id",
                 (self.policy.initial_delay_seconds, now),
             )
