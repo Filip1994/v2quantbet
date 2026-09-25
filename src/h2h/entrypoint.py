@@ -79,6 +79,7 @@ def _run_active_leader(
     _prepare_bankroll(application)
     state.update(leadership="active")
     application.monitoring.reconcile.execute()
+    application.research.reconcile.execute()
     application.results.repository.reconcile(reconciled_at=datetime.now(UTC))
     policy = application.settings.application.registration_policy
     lifecycle = application.settings.application.odds_lifecycle_policy
@@ -155,6 +156,12 @@ def _run_active_leader(
             has_pending_work=lambda: application.monitoring.worker.has_pending,
         ),
         ScheduledJob(
+            "research_monitoring",
+            min(60.0, float(lifecycle.monitoring_interval_seconds)),
+            application.research.worker.run_once,
+            has_pending_work=lambda: application.research.worker.has_pending,
+        ),
+        ScheduledJob(
             "results",
             float(application.settings.application.result_settlement_policy.poll_interval_seconds),
             application.results.worker.run_once,
@@ -187,10 +194,16 @@ def _run_active_leader(
 
 
 def main() -> None:
-    if os.getenv("QUANTBET_PROCESS", "worker").strip().lower() == "dashboard":
+    process = os.getenv("QUANTBET_PROCESS", "worker").strip().lower()
+    if process == "dashboard":
         from h2h.dashboard_entrypoint import main as dashboard_main
 
         dashboard_main()
+        return
+    if process == "research-dashboard":
+        from h2h.research_dashboard_entrypoint import main as research_dashboard_main
+
+        research_dashboard_main()
         return
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     settings = load_production_settings()

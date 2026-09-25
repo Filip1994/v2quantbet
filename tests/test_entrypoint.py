@@ -85,11 +85,18 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
             verify_bankroll=lambda *_args: None,
             due_opportunity_fixtures=lambda **kwargs: calls.append(kwargs),
         ),
-        registration=SimpleNamespace(bootstrap_bankroll=SimpleNamespace(execute=lambda: None)),
+        registration=SimpleNamespace(
+            bootstrap_bankroll=SimpleNamespace(execute=lambda: None),
+            repository=SimpleNamespace(risk_exposure_breakdown=lambda *_args, **_kwargs: {}),
+        ),
         monitoring=SimpleNamespace(
             reconcile=SimpleNamespace(execute=lambda: None),
             worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
             bulletin=SimpleNamespace(generate=lambda *_args, **_kwargs: None),
+        ),
+        research=SimpleNamespace(
+            reconcile=SimpleNamespace(execute=lambda: None),
+            worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
         ),
         results=SimpleNamespace(
             repository=SimpleNamespace(reconcile=lambda **_kwargs: None),
