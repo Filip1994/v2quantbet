@@ -248,6 +248,17 @@ def build_production_application(
             exposure_cap_minor=application_settings.registration_policy.max_open_exposure_minor,
         )
 
+    def record_research_production(
+        evaluation_id: str,
+        production_pick_id: str,
+        qualified_at: datetime,
+    ) -> None:
+        research.record_production_candidate(
+            evaluation_id,
+            qualified_at=qualified_at,
+            production_pick_id=production_pick_id,
+        )
+
     opportunity = OpportunityWorker(
         runtime,
         source,
@@ -290,6 +301,7 @@ def build_production_application(
         ),
         stale_retry_policy=settings.stale_quote_retry_policy,
         record_research_signal=record_research_signal,
+        record_research_production=record_research_production,
     )
     return ProductionApplication(
         settings,
