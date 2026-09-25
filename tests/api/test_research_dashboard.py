@@ -193,6 +193,15 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'name="result"' not in active_html
     assert "PLAYED" in active_html
     assert "production candidate" in active_html
+    assert 'class="bookmaker-mark bookmaker-bet365"' in active_html
+    assert "System status" in active_html
+    assert "Database" in active_html
+    assert "Engine" in active_html
+    assert "Models" in active_html
+    assert "Odds" in active_html
+    assert "Results" in active_html
+    assert "Research" in active_html
+    assert "health-unknown" in active_html
 
     history_html = dashboard.render_html("tab=history")
     assert "Settled research history" in history_html
@@ -215,6 +224,7 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'name="p_bucket"' in history_html
     assert 'name="ev_bucket"' in history_html
     assert 'name="odds_bucket"' in history_html
+    assert 'class="bookmaker-mark bookmaker-bet365"' in history_html
 
 
 def test_research_history_result_filter_and_sportsbook_palette() -> None:

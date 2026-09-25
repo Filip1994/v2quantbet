@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hmac
 import os
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,6 +41,73 @@ def _time(value: Any) -> str:
     if not isinstance(value, datetime):
         return "—"
     return value.astimezone(BELGRADE).strftime("%Y-%m-%d %H:%M")
+
+
+def _bookmaker_key(value: Any) -> str:
+    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+
+
+def _bookmaker_badge(bookmaker: Any) -> str:
+    raw = str(bookmaker or "Unavailable").strip() or "Unavailable"
+    key = _bookmaker_key(raw)
+    canonical = {
+        "bet365": "Bet365",
+        "1xbet": "1xBet",
+        "superbet": "Superbet",
+        "pinnacle": "Pinnacle",
+        "betfair": "Betfair",
+        "bwin": "Bwin",
+        "unibet": "Unibet",
+        "betway": "Betway",
+        "williamhill": "William Hill",
+        "mozzart": "Mozzart",
+        "mozzartbet": "Mozzart",
+        "maxbet": "MaxBet",
+        "meridian": "MeridianBet",
+        "meridianbet": "MeridianBet",
+        "admiral": "AdmiralBet",
+        "admiralbet": "AdmiralBet",
+        "soccerbet": "SoccerBet",
+    }.get(key, raw)
+    if key == "bet365":
+        mark = '<span class="brand-bet365"><b>bet</b><strong>365</strong></span>'
+    elif key == "1xbet":
+        mark = '<span class="brand-1xbet"><b>1X</b><strong>BET</strong></span>'
+    elif key == "superbet":
+        mark = '<span class="brand-superbet"><b>SUPER</b><strong>BET</strong></span>'
+    elif key == "pinnacle":
+        mark = '<span class="brand-pinnacle"><b>PIN</b><strong>NACLE</strong></span>'
+    elif key == "betfair":
+        mark = '<span class="brand-betfair"><b>BET</b><strong>FAIR</strong></span>'
+    elif key == "bwin":
+        mark = '<span class="brand-bwin"><b>bwin</b></span>'
+    elif key == "unibet":
+        mark = '<span class="brand-unibet"><b>UNIBET</b><i>••••••</i></span>'
+    elif key == "betway":
+        mark = '<span class="brand-betway"><b>BETWAY</b></span>'
+    elif key == "williamhill":
+        mark = '<span class="brand-williamhill"><b>William</b><strong>HILL</strong></span>'
+    elif key in {"mozzart", "mozzartbet"}:
+        mark = '<span class="brand-mozzart"><b>MOZZART</b></span>'
+    elif key == "maxbet":
+        mark = '<span class="brand-maxbet"><b>MAX</b><strong>BET</strong></span>'
+    elif key in {"meridian", "meridianbet"}:
+        mark = '<span class="brand-meridian"><b>MERIDIAN</b><strong>BET</strong></span>'
+    elif key in {"admiral", "admiralbet"}:
+        mark = '<span class="brand-admiral"><b>ADMIRAL</b><strong>BET</strong></span>'
+    elif key == "soccerbet":
+        mark = '<span class="brand-soccerbet"><b>SOCCER</b><strong>BET</strong></span>'
+    else:
+        initials = "".join(part[:1] for part in raw.replace("-", " ").split())[:3].upper() or "?"
+        mark = (
+            f'<span class="brand-generic"><i>{escape(initials)}</i>'
+            f'<b>{escape(canonical)}</b></span>'
+        )
+    return (
+        f'<span class="bookmaker-mark bookmaker-{escape(key or "generic")}" '
+        f'aria-label="{escape(canonical, quote=True)}" '
+        f'title="{escape(canonical, quote=True)}">{mark}</span>'
+    )
 
 
 def _probability_bucket(value: Any) -> str:
@@ -227,6 +294,232 @@ class ResearchDashboardService:
         item["odds_bucket"] = _odds_bucket(item["odds"])
         return item
 
+    def _system_health(self) -> tuple[dict[str, str], ...]:
+        unavailable = (
+            {"label": "Database", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+            {"label": "Engine", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+            {"label": "Models", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+            {"label": "Odds", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+            {"label": "Results", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+            {"label": "Research", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
+        )
+        connect = getattr(self._repository, "connect", None)
+        if not callable(connect):
+            return unavailable
+
+        try:
+            with connect() as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT CURRENT_TIMESTAMP")
+                database_now = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT worker_name, last_success_at, last_failure_at, next_due_at, "
+                    "consecutive_failures, updated_at FROM production_worker_status "
+                    "ORDER BY worker_name"
+                )
+                workers = tuple(
+                    {
+                        "worker_name": row[0],
+                        "last_success_at": row[1],
+                        "last_failure_at": row[2],
+                        "next_due_at": row[3],
+                        "consecutive_failures": int(row[4]),
+                        "updated_at": row[5],
+                    }
+                    for row in cursor.fetchall()
+                )
+                cursor.execute(
+                    "SELECT COUNT(*), MAX(qualified_at) FROM research_signals"
+                )
+                research_count, latest_research = cursor.fetchone()
+                cursor.execute(
+                    "SELECT COUNT(*) FILTER (WHERE freshness_state = 'FRESH'), "
+                    "COUNT(*) FILTER (WHERE freshness_state = 'STALE'), "
+                    "COUNT(*) FILTER (WHERE freshness_state = 'NO_USABLE_QUOTE'), "
+                    "MAX(updated_at) FROM production_quote_refresh_states"
+                )
+                quote_fresh, quote_stale, quote_unusable, quote_updated = cursor.fetchone()
+                cursor.execute(
+                    "SELECT COUNT(*) FILTER (WHERE phase <> 'COMPLETE'), "
+                    "COUNT(*) FILTER (WHERE correction_required), MAX(updated_at) "
+                    "FROM fixture_result_acquisition_states"
+                )
+                pending_results, corrections, results_updated = cursor.fetchone()
+        except Exception:  # noqa: BLE001 - health UI must degrade without breaking Research
+            return (
+                {"label": "Database", "state": "bad", "summary": "Unreachable", "detail": "Research could not read operational PostgreSQL facts."},
+                *unavailable[1:],
+            )
+
+        if not isinstance(database_now, datetime):
+            database_now = datetime.now(UTC)
+        elif database_now.tzinfo is None or database_now.utcoffset() is None:
+            database_now = database_now.replace(tzinfo=UTC)
+
+        by_name = {str(item["worker_name"]): item for item in workers}
+
+        def worker_component(
+            label: str,
+            names: tuple[str, ...],
+            *,
+            tolerate_partial: bool = False,
+        ) -> dict[str, str]:
+            selected = [by_name[name] for name in names if name in by_name]
+            if not selected:
+                return {
+                    "label": label,
+                    "state": "bad",
+                    "summary": "No heartbeat",
+                    "detail": f"No status rows for {', '.join(names)}.",
+                }
+            missing = [name for name in names if name not in by_name]
+            stale: list[str] = []
+            failing: list[str] = []
+            never_succeeded: list[str] = []
+            for item in selected:
+                name = str(item["worker_name"])
+                success = item["last_success_at"]
+                failure = item["last_failure_at"]
+                next_due = item["next_due_at"]
+                if success is None:
+                    never_succeeded.append(name)
+                if (
+                    isinstance(next_due, datetime)
+                    and database_now > next_due + timedelta(seconds=120)
+                ):
+                    stale.append(name)
+                if int(item["consecutive_failures"]) > 0 and (
+                    success is None
+                    or not isinstance(failure, datetime)
+                    or failure >= success
+                ):
+                    failing.append(name)
+
+            problems = set(stale + failing + never_succeeded)
+            if never_succeeded or (problems and not tolerate_partial):
+                state = "bad"
+            elif problems or missing:
+                state = "warn"
+            else:
+                state = "ok"
+
+            if state == "ok":
+                summary = f"{len(selected)} worker{'s' if len(selected) != 1 else ''} healthy"
+            elif state == "warn":
+                summary = f"{len(problems) + len(missing)} warning{'s' if len(problems) + len(missing) != 1 else ''}"
+            else:
+                summary = f"{len(problems) or len(missing)} problem{'s' if (len(problems) or len(missing)) != 1 else ''}"
+            details: list[str] = []
+            if stale:
+                details.append("stale: " + ", ".join(stale))
+            if failing:
+                details.append("failing: " + ", ".join(failing))
+            if never_succeeded:
+                details.append("never succeeded: " + ", ".join(never_succeeded))
+            if missing:
+                details.append("missing: " + ", ".join(missing))
+            if not details:
+                latest = max(
+                    (
+                        item["last_success_at"]
+                        for item in selected
+                        if isinstance(item["last_success_at"], datetime)
+                    ),
+                    default=None,
+                )
+                details.append(
+                    "last success "
+                    + (_time(latest) if isinstance(latest, datetime) else "unavailable")
+                )
+            return {
+                "label": label,
+                "state": state,
+                "summary": summary,
+                "detail": "; ".join(details),
+            }
+
+        engine_names = tuple(sorted(by_name))
+        engine = worker_component("Engine", engine_names) if engine_names else {
+            "label": "Engine",
+            "state": "bad",
+            "summary": "No heartbeat",
+            "detail": "production_worker_status is empty.",
+        }
+        models = worker_component("Models", ("model_lifecycle",))
+        odds = worker_component(
+            "Odds",
+            ("opportunity", "monitoring", "closing_proxy"),
+            tolerate_partial=True,
+        )
+        results = worker_component("Results", ("results",))
+
+        if int(corrections or 0) > 0 and results["state"] == "ok":
+            results = {
+                **results,
+                "state": "warn",
+                "summary": f"{int(corrections)} correction pending",
+                "detail": (
+                    f"{int(pending_results or 0)} result states pending; "
+                    f"{int(corrections)} correction-required; last state update {_time(results_updated)}"
+                ),
+            }
+        elif results["state"] == "ok":
+            results = {
+                **results,
+                "summary": f"{int(pending_results or 0)} pending",
+                "detail": (
+                    f"No correction-required states; last state update {_time(results_updated)}"
+                ),
+            }
+
+        if odds["state"] == "ok":
+            odds = {
+                **odds,
+                "summary": f"{int(quote_fresh or 0)} fresh",
+                "detail": (
+                    f"{int(quote_fresh or 0)} fresh / {int(quote_stale or 0)} stale / "
+                    f"{int(quote_unusable or 0)} unusable refresh states; "
+                    f"last update {_time(quote_updated)}"
+                ),
+            }
+
+        research_state = "ok" if int(research_count or 0) > 0 else "warn"
+        research = {
+            "label": "Research",
+            "state": research_state,
+            "summary": f"{int(research_count or 0)} signals",
+            "detail": (
+                "latest qualified "
+                + (_time(latest_research) if isinstance(latest_research, datetime) else "none")
+            ),
+        }
+
+        return (
+            {
+                "label": "Database",
+                "state": "ok",
+                "summary": "Connected",
+                "detail": "PostgreSQL operational facts are readable.",
+            },
+            engine,
+            models,
+            odds,
+            results,
+            research,
+        )
+
+    @staticmethod
+    def _health_html(items: tuple[dict[str, str], ...]) -> str:
+        return "".join(
+            (
+                f'<div class="health-item health-{escape(item["state"])}" '
+                f'title="{escape(item["detail"], quote=True)}">'
+                f'<span class="health-lamp" aria-hidden="true"></span>'
+                f'<span><b>{escape(item["label"])}</b>'
+                f'<small>{escape(item["summary"])}</small></span></div>'
+            )
+            for item in items
+        )
+
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
         canonical = _one_signal_per_fixture(self._repository.list_signals(limit=5000))
         rows = tuple(self._derived(row) for row in canonical)
@@ -330,6 +623,7 @@ class ResearchDashboardService:
         blocked_count = sum(
             row.get("disposition") == "BLOCKED_EXPOSURE" for row in filtered
         )
+        health_html = self._health_html(self._system_health())
 
         def field(name: str) -> str:
             return escape(params.get(name, [""])[0], quote=True)
@@ -406,7 +700,7 @@ class ResearchDashboardService:
                     f'<td class="{signed_class(row["edge"])}"><b>{_pct(row["edge"])}</b></td>'
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
-                    f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
+                    f'<td class="bookmaker-cell">{_bookmaker_badge(row["bookmaker"])}<small>{escape(row["source"])}</small></td>'
                     f'<td>{_time(row["qualified_at"])}'
                     f'<small>{row["quote_age_seconds"]}s · {freshness_badge(row["freshness"])}</small></td>'
                     f'<td><b>{exposure}</b><small>'
@@ -467,7 +761,7 @@ class ResearchDashboardService:
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
                     f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
-                    f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
+                    f'<td class="bookmaker-cell">{_bookmaker_badge(row["bookmaker"])}<small>{escape(row["source"])}</small></td>'
                     f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
@@ -526,6 +820,7 @@ main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-ite
 .brand{{display:flex;align-items:center;gap:14px}}.sportsbook-logo{{height:46px;min-width:154px;display:flex;align-items:center;padding:0 13px;border-radius:10px;background:linear-gradient(180deg,#25292d,#1a1d20);border:1px solid #3d4349;box-shadow:inset 0 1px rgba(255,255,255,.04),0 10px 28px rgba(0,0,0,.22);font-weight:950;letter-spacing:-.03em}}.logo-q{{display:grid;place-items:center;width:31px;height:31px;margin-right:8px;border:2px solid #d4d8dc;border-radius:50%;color:#f0f2f3;font-size:18px;line-height:1}}.logo-word{{color:#d8dcdf;font-size:15px}}.logo-bet{{margin-left:2px;color:#d3aa5f;font-size:15px}}
 h1{{font-size:24px;line-height:1.1;margin:0}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#aab1b8;font-weight:800;margin-bottom:4px}}
 .subtitle{{margin:0;color:var(--muted);font-size:13px}}.readonly{{border:1px solid var(--line);background:#1a1e22;padding:8px 11px;border-radius:999px;color:#aeb5bc;font-size:12px;white-space:nowrap}}
+.health-strip{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-8px 0 16px;padding:9px 10px;background:#15181b;border:1px solid var(--line);border-radius:12px}}.health-label{{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#737b83;font-weight:900;margin:0 4px}}.health-item{{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #2a3035;border-radius:9px;background:#1a1e22;min-width:112px}}.health-item>span:last-child{{display:block}}.health-item b{{display:block;font-size:11px;line-height:1.05}}.health-item small{{display:block;margin:3px 0 0;font-size:9px;line-height:1;color:#858d94}}.health-lamp{{width:9px;height:9px;border-radius:50%;flex:0 0 9px;background:#677079;box-shadow:0 0 0 3px rgba(103,112,121,.10)}}.health-ok .health-lamp{{background:var(--win);box-shadow:0 0 0 3px rgba(105,201,143,.11),0 0 10px rgba(105,201,143,.28)}}.health-warn .health-lamp{{background:var(--warn);box-shadow:0 0 0 3px rgba(198,163,93,.11),0 0 10px rgba(198,163,93,.24)}}.health-bad .health-lamp{{background:var(--loss);box-shadow:0 0 0 3px rgba(224,111,120,.11),0 0 10px rgba(224,111,120,.26)}}.health-unknown .health-lamp{{background:#677079}}
 .tabs{{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#171a1d;border:1px solid var(--line);border-radius:12px;width:max-content}}
 .tabs a{{text-decoration:none;color:#9ca3aa;padding:9px 16px;border-radius:8px;font-weight:800;font-size:13px;transition:.15s ease}}
 .tabs a:hover{{color:var(--text);background:#24292e}}.tabs a.active{{background:#d4d8dc;color:#17191b;box-shadow:0 5px 16px rgba(0,0,0,.24)}}
@@ -547,6 +842,7 @@ th{{position:sticky;top:0;z-index:3;background:#1b1f23;color:#959da5;text-transf
 tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#20252a}}tbody tr:last-child td{{border-bottom:0}}
 td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
+.bookmaker-cell{{min-width:132px}}.bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:86px;padding:0 9px;border-radius:7px;border:1px solid #3a4046;background:#22272c;box-shadow:inset 0 1px rgba(255,255,255,.04);font-size:10px;font-weight:950;line-height:1;letter-spacing:-.02em}}.bookmaker-mark b,.bookmaker-mark strong{{font:inherit}}.brand-bet365 b{{color:#f5f5f5}}.brand-bet365 strong{{color:#f1d24b;margin-left:1px}}.bookmaker-bet365{{background:#146947;border-color:#2a8967}}.brand-1xbet b{{color:#61aef4}}.brand-1xbet strong{{color:#f5f6f7;margin-left:2px}}.bookmaker-1xbet{{background:#182f47;border-color:#305f8b}}.brand-superbet b{{color:#fff}}.brand-superbet strong{{color:#ffdc32;margin-left:1px}}.bookmaker-superbet{{background:#d8262e;border-color:#ef4c52}}.brand-pinnacle b{{color:#f6a428}}.brand-pinnacle strong{{color:#f1f1f1}}.bookmaker-pinnacle{{background:#20262b;border-color:#5f6870}}.brand-betfair b{{color:#14181b}}.brand-betfair strong{{color:#14181b;margin-left:1px}}.bookmaker-betfair{{background:#f2a51a;border-color:#ffc255}}.brand-bwin b{{color:#fff;text-transform:lowercase;font-size:13px}}.bookmaker-bwin{{background:#151515;border-color:#4a4a4a}}.brand-unibet b{{color:#fff}}.brand-unibet i{{display:block;color:#56c54f;font-style:normal;font-size:8px;letter-spacing:1px;margin-left:5px}}.bookmaker-unibet{{background:#222;border-color:#4b4b4b}}.brand-betway b{{color:#fff}}.bookmaker-betway{{background:#1f6c45;border-color:#3b9369}}.brand-williamhill b{{color:#f3cc43}}.brand-williamhill strong{{color:#fff;margin-left:2px}}.bookmaker-williamhill{{background:#17365c;border-color:#315f93}}.brand-mozzart b{{color:#fff}}.bookmaker-mozzart,.bookmaker-mozzartbet{{background:#1765b5;border-color:#3e8bd5}}.brand-maxbet b{{color:#fff}}.brand-maxbet strong{{color:#ffce2f;margin-left:2px}}.bookmaker-maxbet{{background:#d1242c;border-color:#ed5056}}.brand-meridian b{{color:#fff}}.brand-meridian strong{{color:#e8473f;margin-left:2px}}.bookmaker-meridian,.bookmaker-meridianbet{{background:#273748;border-color:#485b6d}}.brand-admiral b{{color:#fff}}.brand-admiral strong{{color:#e62e39;margin-left:2px}}.bookmaker-admiral,.bookmaker-admiralbet{{background:#232323;border-color:#555}}.brand-soccerbet b{{color:#fff}}.brand-soccerbet strong{{color:#f4bf32;margin-left:2px}}.bookmaker-soccerbet{{background:#145a92;border-color:#337caf}}.brand-generic{{display:flex;align-items:center;gap:6px}}.brand-generic i{{display:grid;place-items:center;width:18px;height:18px;border-radius:5px;background:#343a40;color:#dfe3e6;font-style:normal;font-size:8px}}.brand-generic b{{color:#dfe3e6;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis}}
 .badge{{display:inline-flex;align-items:center;justify-content:center;min-width:68px;padding:6px 9px;border-radius:999px;font-weight:950;font-size:10px;letter-spacing:.06em}}
 .route-played{{background:rgba(134,166,194,.12);border:1px solid rgba(134,166,194,.32);color:#a9c3d9}}.route-skipped{{background:rgba(154,161,168,.10);border:1px solid rgba(154,161,168,.25);color:#aab1b8}}.route-blocked{{background:rgba(198,163,93,.11);border:1px solid rgba(198,163,93,.30);color:var(--warn)}}
 .result-win{{background:rgba(105,201,143,.15);border:1px solid rgba(105,201,143,.42);color:#82dda6}}.result-loss{{background:rgba(224,111,120,.15);border:1px solid rgba(224,111,120,.42);color:#f08790}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
@@ -555,12 +851,13 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 4px 0 var(--win);background:linear-gradient(90deg,rgba(105,201,143,.045),transparent 25%)}}.row-loss{{box-shadow:inset 4px 0 var(--loss);background:linear-gradient(90deg,rgba(224,111,120,.05),transparent 25%)}}.row-void{{box-shadow:inset 4px 0 var(--void);background:linear-gradient(90deg,rgba(154,161,168,.035),transparent 25%)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
 .empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#7f878e;margin-top:12px;font-size:11px}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
-@media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
+@media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.health-strip{{align-items:stretch}}.health-label{{width:100%;margin-bottom:1px}}.health-item{{min-width:calc(50% - 4px);flex:1}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
 </style></head><body><main>
 <header class="topbar">
 <div class="brand"><div class="sportsbook-logo" aria-label="QuantBet"><span class="logo-q">Q</span><span class="logo-word">QUANT</span><span class="logo-bet">BET</span></div><div><div class="eyebrow">Research universe</div><h1>Research Board</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
+<section class="health-strip" aria-label="System status"><span class="health-label">System status</span>{health_html}</section>
 <nav class="tabs" aria-label="Research sections">
 <a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
