@@ -168,8 +168,8 @@ class ResearchDashboardService:
             return -self._fixed_stake_minor
         profit = (
             Decimal(self._fixed_stake_minor)
-            * (Decimal(str(row["selected_odd"])) - Decimal("1"))
-        ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            * (Decimal(str(row["selected_odd"])) - Decimal(1))
+        ).quantize(Decimal(1), rounding=ROUND_HALF_UP)
         return int(profit)
 
     @staticmethod
