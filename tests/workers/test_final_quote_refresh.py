@@ -187,8 +187,9 @@ def run(
     kickoff_at=None,
     provider_snapshot_max_age_seconds=28800,
     record_research_signal=None,
+    repository=None,
 ):
-    repository = Repository()
+    repository = repository or Repository()
     if kickoff_at is not None:
         repository.fixture = OpportunityFixture(
             repository.fixture.fixture_id,
@@ -357,6 +358,32 @@ class MixedExposureRegistration(Registration):
         return ("EDGE_BELOW_MINIMUM", "MAX_OPEN_EXPOSURE_EXCEEDED")
 
 
+class TwoCandidateEvaluator(Evaluator):
+    def execute(self, _prediction_id, snapshot_id):
+        evaluation = super().execute(_prediction_id, snapshot_id)
+        if snapshot_id == "weak":
+            return SimpleNamespace(
+                **{
+                    **evaluation.__dict__,
+                    "evaluation_id": "evaluation-weak",
+                    "expected_value": 0.10,
+                    "edge": 0.08,
+                    "selected_odd": 1.95,
+                }
+            )
+        if snapshot_id == "strong":
+            return SimpleNamespace(
+                **{
+                    **evaluation.__dict__,
+                    "evaluation_id": "evaluation-strong",
+                    "expected_value": 0.20,
+                    "edge": 0.12,
+                    "selected_odd": 2.10,
+                }
+            )
+        return evaluation
+
+
 def test_exposure_only_rejection_is_recorded_without_final_refresh() -> None:
     recorded = []
     cycle, source, registration, _ = run(
@@ -371,6 +398,27 @@ def test_exposure_only_rejection_is_recorded_without_final_refresh() -> None:
     assert cycle.registered_pick_ids == ()
     assert registration.executed == []
     assert recorded == [("evaluation-preliminary", NOW)]
+
+
+def test_exposure_shadow_stops_after_strongest_candidate_for_fixture() -> None:
+    repository = Repository()
+    repository.latest_complete_snapshot_ids = lambda *_args: ("weak", "strong")
+    recorded = []
+
+    cycle, source, registration, _ = run(
+        market(2.0),
+        registration=ExposureOnlyRegistration(),
+        evaluator=TwoCandidateEvaluator(),
+        record_research_signal=lambda evaluation_id, blocked_at: recorded.append(
+            (evaluation_id, blocked_at)
+        ),
+        repository=repository,
+    )
+
+    assert source.calls == 1
+    assert cycle.registered_pick_ids == ()
+    assert registration.executed == []
+    assert recorded == [("evaluation-strong", NOW)]
 
 
 def test_multi_reason_rejection_is_not_recorded_as_exposure_only() -> None:
