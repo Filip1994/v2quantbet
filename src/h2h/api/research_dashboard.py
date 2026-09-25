@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import hmac
+import json
 import os
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from typing import Any
 
 from h2h.domain.settlement import realized_clv_ppm
@@ -57,6 +62,7 @@ class ResearchDashboardService:
                 SELECT
                     signal.signal_id,
                     signal.detected_at,
+                    signal.capture_source,
                     signal.fixture_id,
                     fixture.provider_fixture_id,
                     fixture.league_id,
@@ -129,6 +135,8 @@ class ResearchDashboardService:
 
     @staticmethod
     def _outcome(row: dict[str, Any]) -> str | None:
+        if str(row.get("result_phase") or "") not in {"POST_SETTLEMENT_RECHECK", "COMPLETE"}:
+            return None
         classification = str(row.get("result_classification") or "")
         if classification == "NON_PLAYED_VOIDABLE":
             return "VOID"
@@ -238,9 +246,9 @@ th,td{{padding:10px 11px;border-bottom:1px solid var(--line);text-align:left;ver
 <article class="card"><span>EV ≥ 30%</span><strong>{extreme}</strong></article>
 </section>
 <section class="panel"><div class="wrap"><table><thead><tr>
-<th>Match</th><th>Signal</th><th>Book</th><th class="num">Entry</th><th class="num">Model p</th>
+<th>Match</th><th>Signal</th><th>Book</th><th class="num">Signal odds</th><th class="num">Model p</th>
 <th class="num">Market fair</th><th class="num">Edge</th><th class="num">EV</th>
-<th class="num">Latest same-book</th><th class="num">Close</th><th class="num">CLV</th>
+<th class="num">Latest same-book</th><th class="num">Close</th><th class="num">Signal→close CLV</th>
 <th>Result</th><th class="num">Flat 300 P/L</th>
 </tr></thead><tbody>{rows}</tbody></table></div></section>
 <footer>Generated {escape(self._dt(data["generated_at"]))} · research-only · no bankroll reservation</footer>
@@ -259,7 +267,7 @@ th,td{{padding:10px 11px;border-bottom:1px solid var(--line);text-align:left;ver
             f"<small>{escape(str(row.get('competition_name') or '—'))} · {escape(self._dt(row.get('kickoff_at')))}</small>"
             f"<small>fixture {escape(str(row.get('provider_fixture_id') or '—'))} · league {escape(str(row.get('league_id') or '—'))}</small></td>"
             f"<td><strong>{escape(str(row['market']))} {escape(str(row['selected_selection']))}</strong>"
-            f"<small>blocked {escape(self._dt(row.get('detected_at')))}</small></td>"
+            f"<small>blocked {escape(self._dt(row.get('detected_at')))} · {escape(str(row.get('capture_source') or 'LIVE'))}</small></td>"
             f"<td>{escape(str(row.get('bookmaker_key') or '—'))}</td>"
             f"<td class='num'>{self._odd(row.get('selected_odd'))}</td>"
             f"<td class='num'><strong>{self._pct(row.get('model_probability'))}</strong></td>"
@@ -274,3 +282,124 @@ th,td{{padding:10px 11px;border-bottom:1px solid var(--line);text-align:left;ver
             f"<td class='num {outcome_css}'><strong>{escape(self._money(row.get('counterfactual_pnl_minor')))}</strong></td>"
             "</tr>"
         )
+
+
+
+def research_dashboard_is_public() -> bool:
+    return os.environ.get("QUANTBET_RESEARCH_PUBLIC", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+class ResearchDashboardHTTPService:
+    """GET-only HTTP surface. No operator or bankroll mutation route exists."""
+
+    def __init__(self, dashboard: ResearchDashboardService, *, host: str, port: int) -> None:
+        service = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                path = self.path.split("?", 1)[0]
+                if path == "/livez":
+                    service._json(self, 200, {"live": True})
+                    return
+                if path in {"/", "/dashboard"}:
+                    if not service._authorize(self):
+                        return
+                    try:
+                        service._html(self, 200, dashboard.render_html())
+                    except Exception as exc:  # noqa: BLE001 - bounded read-only failure response
+                        service._json(self, 503, {"error": type(exc).__name__})
+                    return
+                service._json(self, 404, {"error": "not_found"})
+
+            def do_POST(self) -> None:
+                service._json(self, 404, {"error": "not_found"})
+
+            def do_PUT(self) -> None:
+                service._json(self, 404, {"error": "not_found"})
+
+            def do_DELETE(self) -> None:
+                service._json(self, 404, {"error": "not_found"})
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        self._server = ThreadingHTTPServer((host, port), Handler)
+        self._thread = Thread(target=self._server.serve_forever, daemon=True)
+
+    @staticmethod
+    def _json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, Any]) -> None:
+        encoded = json.dumps(body).encode()
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    @staticmethod
+    def _html(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
+        encoded = body.encode()
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header(
+            "Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'"
+        )
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.send_header("X-Frame-Options", "DENY")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    @staticmethod
+    def _authorize(handler: BaseHTTPRequestHandler) -> bool:
+        if research_dashboard_is_public():
+            return True
+        username = (
+            os.environ.get("QUANTBET_RESEARCH_USER", "").strip()
+            or os.environ.get("QUANTBET_DASHBOARD_USER", "quantbet")
+        )
+        password = (
+            os.environ.get("QUANTBET_RESEARCH_PASSWORD", "")
+            or os.environ.get("QUANTBET_DASHBOARD_PASSWORD", "")
+        )
+        if not password:
+            ResearchDashboardHTTPService._json(handler, 404, {"error": "not_found"})
+            return False
+        supplied_user = supplied_password = ""
+        authorization = handler.headers.get("Authorization", "")
+        if authorization.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(authorization[6:], validate=True).decode()
+                supplied_user, supplied_password = decoded.split(":", 1)
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if hmac.compare_digest(supplied_user, username) and hmac.compare_digest(
+            supplied_password, password
+        ):
+            return True
+        encoded = b'{"error":"authentication_required"}'
+        handler.send_response(401)
+        handler.send_header("WWW-Authenticate", 'Basic realm="QuantBet Research"')
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+        return False
+
+    def start(self) -> None:
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self._server.server_address[1])
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
