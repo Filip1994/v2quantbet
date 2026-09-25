@@ -109,6 +109,49 @@ def _confirm(repository, candidate, kickoff, *, score=(2, 1), start=None):
     return first, second_at
 
 
+def test_research_only_fixture_acquires_stable_result_without_bankroll_settlement() -> None:
+    _migrate()
+    candidate = _candidate()
+    account = f"task12-research-{uuid4()}"
+    repository = PostgreSQLResultSettlementRepository(RESULT_POLICY, database_url=DATABASE_URL)
+    cutoff = _fixture_cutoff(candidate)
+    blocked_at = cutoff - timedelta(hours=1)
+    try:
+        with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO research_exposure_signals "
+                "(evaluation_id, first_blocked_at, last_blocked_at, block_count, "
+                "first_open_exposure_minor, last_open_exposure_minor, "
+                "max_open_exposure_minor, fixed_stake_minor, capture_origin, created_at) "
+                "VALUES (%s, %s, %s, 1, 30000, 30000, 30000, 30000, 'LIVE', %s)",
+                (candidate.evaluation_id, blocked_at, blocked_at, blocked_at),
+            )
+
+        initialized = repository.reconcile(reconciled_at=blocked_at)
+        assert candidate.fixture_id in initialized
+        result, settled_at = _confirm(repository, candidate, cutoff, score=(1, 0))
+
+        with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT phase, candidate_observation_id FROM fixture_result_acquisition_states "
+                "WHERE fixture_id = %s",
+                (candidate.fixture_id,),
+            )
+            assert cursor.fetchone() == ("COMPLETE", result.result_observation_id)
+            cursor.execute(
+                "SELECT COUNT(*) FROM pick_settlement_events WHERE fixture_id = %s",
+                (candidate.fixture_id,),
+            )
+            assert cursor.fetchone()[0] == 0
+            cursor.execute(
+                "SELECT COUNT(*) FROM bankroll_ledger_entries WHERE pick_id IS NOT NULL"
+            )
+            assert cursor.fetchone()[0] == 0
+        assert repository.stable_result(candidate.fixture_id, as_of=settled_at) == result.result_observation_id
+    finally:
+        _cleanup(account, (candidate,))
+
+
 def test_result_settlement_ledger_clv_performance_and_replay() -> None:
     _migrate()
     candidate = _candidate()
