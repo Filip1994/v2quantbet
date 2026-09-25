@@ -247,6 +247,7 @@ class ResearchDashboardService:
         for row in data["rows"]:
             outcome = str(row["outcome"])
             pnl = row["unit_pnl"]
+            pnl_label = "—" if pnl is None else f"{Decimal(pnl):+.3f}u"
             close_age = row["closing_age_seconds"]
             rows_html.append(
                 "<tr>"
@@ -272,7 +273,7 @@ class ResearchDashboardService:
                 f"<td><span class='status {outcome.lower()}'>{escape(outcome)}</span>"
                 f"<small>{escape(str(row.get('regulation_home_goals') if row.get('regulation_home_goals') is not None else '—'))}"
                 f"–{escape(str(row.get('regulation_away_goals') if row.get('regulation_away_goals') is not None else '—'))}</small></td>"
-                f"<td class='num'><strong>{'—' if pnl is None else f'{Decimal(pnl):+.3f}u'}</strong></td>"
+                f"<td class='num'><strong>{pnl_label}</strong></td>"
                 "</tr>"
             )
         if not rows_html:
