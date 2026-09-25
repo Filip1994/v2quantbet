@@ -154,6 +154,10 @@ def _one_signal_per_fixture(
 ) -> tuple[dict[str, Any], ...]:
     """Project historical shadow rows onto the production one-pick-per-fixture rule."""
 
+    def strength(row: dict[str, Any], name: str) -> float:
+        value = _number(row.get(name))
+        return float("-inf") if value is None else value
+
     chosen: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
         fixture_id = str(row["fixture_id"])
@@ -161,15 +165,11 @@ def _one_signal_per_fixture(
         if not isinstance(first_blocked_at, datetime):
             raise TypeError("first_blocked_at must be a datetime")
 
-        def strength(name: str) -> float:
-            value = _number(row.get(name))
-            return float("-inf") if value is None else value
-
         rank = (
             first_blocked_at,
-            -strength("expected_value"),
-            -strength("edge"),
-            -strength("odds"),
+            -strength(row, "expected_value"),
+            -strength(row, "edge"),
+            -strength(row, "odds"),
             str(row["evaluation_id"]),
         )
         current = chosen.get(fixture_id)
