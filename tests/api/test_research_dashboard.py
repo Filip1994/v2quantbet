@@ -186,8 +186,10 @@ def test_research_history_result_filter_and_sportsbook_palette() -> None:
 
     assert "Loss Home – Loss Away" in html
     assert "Home – Away" not in html
-    assert "--win:#3cdb86" in html
-    assert "--loss:#ff6574" in html
+    assert "--bg:#111315" in html
+    assert "--panel:#181b1f" in html
+    assert "--win:#69c98f" in html
+    assert "--loss:#e06f78" in html
     assert "QuantBet Research" in html
     assert "Shadow intelligence" in html
 
