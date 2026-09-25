@@ -30,6 +30,7 @@ from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRunti
 from h2h.persistence.postgres_live_closing_proxy import PostgreSQLLiveClosingProxyRepository
 from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
+from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
 from h2h.use_cases.api_football_fixture_discovery import ApiFootballFixtureDiscovery
 from h2h.use_cases.model_lifecycle import (
@@ -81,6 +82,7 @@ class ProductionApplication:
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
     live_closing_proxy: LiveClosingProxyWorker
+    research: PostgreSQLResearchSignalRepository
     operator_picks: PostgreSQLOperatorPickStateRepository
 
     def close(self) -> None:
@@ -118,6 +120,9 @@ def build_production_application(
     source = ApiFootballOddsService(client)
     provider_state = ProviderOperationalState()
     operator_picks = PostgreSQLOperatorPickStateRepository(
+        database_url=application_settings.database_url
+    )
+    research = PostgreSQLResearchSignalRepository(
         database_url=application_settings.database_url
     )
 
@@ -169,6 +174,7 @@ def build_production_application(
         on_item_failure=item_failure("results"),
         on_item_success=item_success("results"),
         should_stop=should_stop,
+        research=research,
     )
     live_closing_proxy = LiveClosingProxyWorker(
         PostgreSQLLiveClosingProxyRepository(database_url=application_settings.database_url),
@@ -274,6 +280,14 @@ def build_production_application(
             application_settings.registration_policy.minimum_time_to_kickoff_seconds
         ),
         stale_retry_policy=settings.stale_quote_retry_policy,
+        on_exposure_blocked=lambda evaluation_id, blocked_at, blocked_stage: (
+            research.record_exposure_block(
+                evaluation_id,
+                blocked_at=blocked_at,
+                blocked_stage=blocked_stage,
+                policy=application_settings.registration_policy,
+            )
+        ),
     )
     return ProductionApplication(
         settings,
@@ -290,5 +304,6 @@ def build_production_application(
         model_lifecycle,
         opportunity,
         live_closing_proxy,
+        research,
         operator_picks,
     )
