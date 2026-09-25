@@ -11,7 +11,7 @@ from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
@@ -262,82 +262,281 @@ class ResearchDashboardService:
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
-        rows = self.signals(params)
-        settled = [row for row in rows if row["outcome"] != "PENDING"]
-        clvs = [row["clv_ppm"] for row in rows if row["clv_ppm"] is not None]
+        tab = params.get("tab", ["active"])[0].strip().casefold()
+        if tab not in {"active", "history"}:
+            tab = "active"
+
+        metric_params = {
+            key: value
+            for key, value in params.items()
+            if key not in {"tab", "result"}
+        }
+        filtered = self.signals(metric_params)
+
+        def kickoff_timestamp(row: dict[str, Any]) -> float:
+            kickoff = row.get("kickoff_at")
+            return kickoff.timestamp() if isinstance(kickoff, datetime) else float("inf")
+
+        active_rows = tuple(
+            sorted(
+                (row for row in filtered if row["outcome"] == "PENDING"),
+                key=kickoff_timestamp,
+            )
+        )
+        history_rows = tuple(
+            sorted(
+                (row for row in filtered if row["outcome"] != "PENDING"),
+                key=kickoff_timestamp,
+                reverse=True,
+            )
+        )
+        result_filter = params.get("result", [""])[0].strip().upper()
+        rows = (
+            tuple(
+                row
+                for row in history_rows
+                if not result_filter or row["outcome"] == result_filter
+            )
+            if tab == "history"
+            else active_rows
+        )
+
+        settled = history_rows
+        wins = sum(row["outcome"] == "WIN" for row in settled)
+        clvs = [row["clv_ppm"] for row in settled if row["clv_ppm"] is not None]
+        positive_clvs = sum(value > 0 for value in clvs)
         pnl = sum(row["pnl_minor"] or 0 for row in settled)
-        unique_fixtures = len({row["fixture_id"] for row in rows})
+        win_rate = (wins / len(settled) * 100) if settled else None
         avg_clv = (sum(clvs) / len(clvs) / 10_000) if clvs else None
+        positive_clv_rate = (positive_clvs / len(clvs) * 100) if clvs else None
 
         def field(name: str) -> str:
             return escape(params.get(name, [""])[0], quote=True)
 
-        body_rows = []
-        for row in rows:
-            clv = "—" if row["clv_ppm"] is None else f'{row["clv_ppm"] / 10_000:+.2f}%'
-            pnl_rsd = "—" if row["pnl_minor"] is None else f'{row["pnl_minor"] / 100:+.0f}'
-            exposure = f'{row["last_open_exposure_minor"] / 100:.0f}/{row["exposure_cap_minor"] / 100:.0f}'
-            match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
-            competition = escape(row.get("competition_name") or "—")
-            body_rows.append(
-                "<tr>"
-                f'<td><b>{match}</b><small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
-                f'<td>{_time(row["kickoff_at"])}</td>'
-                f'<td>{escape(row["market"])} {escape(row["selection"])}</td>'
-                f'<td>{_pct(row["model_probability"])}<small>{escape(row["probability_bucket"])}</small></td>'
-                f'<td>{_pct(row["market_fair_probability"])}</td>'
-                f'<td>{_odd(row["odds"])}<small>{escape(row["odds_bucket"])}</small></td>'
-                f'<td>{_pct(row["edge"])}</td>'
-                f'<td>{_pct(row["expected_value"])}<small>{escape(row["ev_bucket"])}</small></td>'
-                f'<td>{_time(row["first_blocked_at"])}<small>{row["quote_age_seconds"]}s · {escape(row["freshness"])}</small></td>'
-                f'<td>{escape(row["bookmaker"])}<small>{escape(row["source"])}</small></td>'
-                f'<td>{exposure} RSD<small>x{row["blocked_count"]}</small></td>'
-                f'<td>{_odd(row["closing_odds"])}<small>{_time(row["closing_observed_at"])}</small></td>'
-                f'<td>{clv}</td>'
-                f'<td><b>{escape(row["outcome"])}</b><small>{pnl_rsd} RSD · {escape(row.get("result_phase") or "waiting")}</small></td>'
-                "</tr>"
+        def tab_href(next_tab: str) -> str:
+            query_params = {
+                key: value[0]
+                for key, value in params.items()
+                if value and value[0] and key not in {"tab", "result"}
+            }
+            query_params["tab"] = next_tab
+            return "/research?" + urlencode(query_params)
+
+        def signed_class(value: float | None) -> str:
+            if value is None or value == 0:
+                return "neutral"
+            return "positive" if value > 0 else "negative"
+
+        def market_label(row: dict[str, Any]) -> str:
+            market = "O/U 2.5" if row["market"] == "OU_25" else row["market"]
+            return f'{market} {row["selection"]}'
+
+        def result_badge(outcome: str) -> str:
+            css = {
+                "WIN": "win",
+                "LOSS": "loss",
+                "VOID": "void",
+                "PENDING": "pending",
+            }.get(outcome, "void")
+            return f'<span class="badge result-{css}">{escape(outcome)}</span>'
+
+        def freshness_badge(value: str) -> str:
+            css = {
+                "FRESH": "fresh",
+                "USABLE_STALE": "stale",
+                "HARD_STALE": "hard-stale",
+            }.get(value, "void")
+            label = value.replace("_", " ")
+            return f'<span class="mini-badge freshness-{css}">{escape(label)}</span>'
+
+        body_rows: list[str] = []
+        if tab == "active":
+            for row in rows:
+                exposure = (
+                    f'{row["last_open_exposure_minor"] / 100:.0f}/'
+                    f'{row["exposure_cap_minor"] / 100:.0f}'
+                )
+                match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
+                competition = escape(row.get("competition_name") or "—")
+                body_rows.append(
+                    '<tr class="row-pending">'
+                    f'<td class="match"><b>{match}</b>'
+                    f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
+                    f'<td><b>{_time(row["kickoff_at"])}</b></td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
+                    f'<td><b>{_pct(row["model_probability"])}</b>'
+                    f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
+                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])}</small></td>'
+                    f'<td class="{signed_class(row["edge"])}"><b>{_pct(row["edge"])}</b></td>'
+                    f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
+                    f'<small>{escape(row["ev_bucket"])}</small></td>'
+                    f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
+                    f'<td>{_time(row["first_blocked_at"])}'
+                    f'<small>{row["quote_age_seconds"]}s · {freshness_badge(row["freshness"])}</small></td>'
+                    f'<td><b>{exposure} RSD</b><small>blocked ×{row["blocked_count"]}</small></td>'
+                    f'<td>{result_badge(row["outcome"])}</td>'
+                    "</tr>"
+                )
+            headers = (
+                "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
+                "<th>Odds</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
+                "<th>Detected</th><th>Exposure</th><th>Status</th>"
             )
-        rows_html = "".join(body_rows) or '<tr><td colspan="14">No signals match these filters.</td></tr>'
+            empty_text = "No active research picks match these filters."
+            colspan = 11
+        else:
+            for row in rows:
+                clv_value = (
+                    None if row["clv_ppm"] is None else row["clv_ppm"] / 10_000
+                )
+                clv = "—" if clv_value is None else f"{clv_value:+.2f}%"
+                pnl_value = None if row["pnl_minor"] is None else row["pnl_minor"] / 100
+                pnl_rsd = "—" if pnl_value is None else f"{pnl_value:+.0f} RSD"
+                match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
+                competition = escape(row.get("competition_name") or "—")
+                home = row.get("regulation_home_goals")
+                away = row.get("regulation_away_goals")
+                score = (
+                    f"{home}–{away}"
+                    if home is not None and away is not None
+                    else "—"
+                )
+                row_class = f'row-{row["outcome"].casefold()}'
+                body_rows.append(
+                    f'<tr class="{row_class}">'
+                    f'<td class="match"><b>{match}</b>'
+                    f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
+                    f'<td>{_time(row["kickoff_at"])}</td>'
+                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["bookmaker"])}</small></td>'
+                    f'<td><b>{_odd(row["closing_odds"])}</b><small>{_time(row["closing_observed_at"])}</small></td>'
+                    f'<td class="{signed_class(clv_value)}"><b>{clv}</b></td>'
+                    f'<td><b>{_pct(row["model_probability"])}</b>'
+                    f'<small>fair {_pct(row["market_fair_probability"])}</small></td>'
+                    f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
+                    f'<small>{escape(row["ev_bucket"])}</small></td>'
+                    f'<td>{result_badge(row["outcome"])}'
+                    f'<small>{score} · {escape(row.get("result_provider_status") or row.get("result_phase") or "settled")}</small></td>'
+                    f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
+                    f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
+                    f'<td>{_time(row["first_blocked_at"])}</td>'
+                    "</tr>"
+                )
+            headers = (
+                "<th>Match</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
+                "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
+                "<th>Result</th><th>P/L</th><th>Bookmaker</th><th>Detected</th>"
+            )
+            empty_text = "No historical research picks match these filters."
+            colspan = 12
+
+        rows_html = (
+            "".join(body_rows)
+            or f'<tr><td class="empty" colspan="{colspan}">{empty_text}</td></tr>'
+        )
+        win_rate_text = "—" if win_rate is None else f"{win_rate:.1f}%"
         avg_clv_text = "—" if avg_clv is None else f"{avg_clv:+.2f}%"
+        positive_clv_text = (
+            "—" if positive_clv_rate is None else f"{positive_clv_rate:.1f}%"
+        )
+        pnl_text = f"{pnl / 100:+.0f} RSD"
+        pnl_class = signed_class(pnl)
+        avg_clv_class = signed_class(avg_clv)
+
+        result_filter_html = ""
+        if tab == "history":
+            options = "".join(
+                f'<option {"selected" if field("result") == value else ""}>{value}</option>'
+                for value in ("WIN", "LOSS", "VOID")
+            )
+            result_filter_html = (
+                '<select name="result" aria-label="Result filter">'
+                '<option value="">All results</option>'
+                + options
+                + "</select>"
+            )
+
+        active_class = "active" if tab == "active" else ""
+        history_class = "active" if tab == "history" else ""
+        active_href = escape(tab_href("active"), quote=True)
+        history_href = escape(tab_href("history"), quote=True)
+        clear_href = f"/research?tab={tab}"
+
         return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantBet Research</title><style>
-:root{{color-scheme:dark;background:#0b0d10;color:#eef1f4;font-family:Inter,system-ui,sans-serif}}
-*{{box-sizing:border-box}}body{{margin:0;padding:24px}}main{{max-width:1900px;margin:auto}}
-h1{{margin:0 0 6px}}p{{color:#9ca6b2}}.cards{{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}}
-.card{{background:#15191f;border:1px solid #29313a;border-radius:10px;padding:12px 16px;min-width:150px}}
-.card b{{display:block;font-size:22px}}form{{display:flex;gap:8px;flex-wrap:wrap;background:#11151a;padding:12px;border-radius:10px;margin-bottom:14px}}
-input,select,button{{background:#0b0d10;color:#eef1f4;border:1px solid #394451;border-radius:6px;padding:8px}}
-button{{cursor:pointer}}.table{{overflow:auto;border:1px solid #29313a;border-radius:10px}}
-table{{border-collapse:collapse;width:100%;font-size:13px}}th,td{{padding:10px;border-bottom:1px solid #232a32;text-align:left;white-space:nowrap;vertical-align:top}}
-th{{position:sticky;top:0;background:#15191f}}small{{display:block;color:#87919d;margin-top:3px}}
-footer{{color:#76808b;margin-top:14px;font-size:12px}}a{{color:#d5dce4}}
+:root{{--bg:#07100d;--panel:#0c1712;--panel-2:#101e18;--panel-3:#14241c;--line:#20372c;--line-soft:#182a22;--text:#f2f7f4;--muted:#81958a;--accent:#31d17c;--accent-soft:rgba(49,209,124,.12);--blue:#59a8ff;--win:#3cdb86;--loss:#ff6574;--warn:#f2bd58;--void:#9aa9a1;color-scheme:dark;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 12% -10%,rgba(49,209,124,.11),transparent 28%),var(--bg);color:var(--text)}}
+main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:22px}}
+.brand{{display:flex;align-items:center;gap:12px}}.brand-mark{{width:42px;height:42px;border-radius:12px;background:linear-gradient(145deg,#37e188,#139b5a);display:grid;place-items:center;font-weight:900;color:#04120a;box-shadow:0 10px 30px rgba(49,209,124,.18)}}
+h1{{font-size:24px;line-height:1.1;margin:0}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:800;margin-bottom:4px}}
+.subtitle{{margin:0;color:var(--muted);font-size:13px}}.readonly{{border:1px solid var(--line);background:var(--panel);padding:8px 11px;border-radius:999px;color:#a7b8af;font-size:12px;white-space:nowrap}}
+.tabs{{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#09130f;border:1px solid var(--line-soft);border-radius:12px;width:max-content}}
+.tabs a{{text-decoration:none;color:#8fa198;padding:9px 16px;border-radius:8px;font-weight:800;font-size:13px;transition:.15s ease}}
+.tabs a:hover{{color:var(--text);background:#122119}}.tabs a.active{{background:var(--accent);color:#03130a;box-shadow:0 5px 18px rgba(49,209,124,.18)}}
+.cards{{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:10px;margin-bottom:14px}}
+.card{{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:12px;padding:14px 15px;min-height:84px}}
+.card:after{{content:"";position:absolute;width:72px;height:72px;border-radius:50%;right:-26px;top:-30px;background:rgba(49,209,124,.055)}}
+.card small{{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:800}}.card b{{display:block;font-size:22px;margin-top:8px;letter-spacing:-.02em}}
+.card .positive{{color:var(--win)}}.card .negative{{color:var(--loss)}}.card .neutral{{color:var(--text)}}
+.toolbar{{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px}}
+form{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;flex:1}}input,select,button{{height:36px;background:#09130f;color:var(--text);border:1px solid #2a4136;border-radius:8px;padding:0 10px;font:inherit;font-size:12px;outline:none}}
+input{{width:132px}}input[name="league"]{{width:170px}}input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 2px rgba(49,209,124,.1)}}
+button{{background:var(--accent);color:#03130a;border-color:var(--accent);font-weight:900;cursor:pointer;padding:0 14px}}button:hover{{filter:brightness(1.05)}}
+.clear{{color:#a4b4ab;text-decoration:none;font-size:12px;padding:8px 6px}}.clear:hover{{color:white}}
+.table-shell{{background:var(--panel);border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.17)}}
+.table-title{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#102018,#0c1712)}}
+.table-title b{{font-size:14px}}.table-title span{{font-size:12px;color:var(--muted)}}.table{{overflow:auto;max-height:70vh}}
+table{{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line-soft);text-align:left;white-space:nowrap;vertical-align:middle}}
+th{{position:sticky;top:0;z-index:3;background:#0d1a14;color:#81978c;text-transform:uppercase;letter-spacing:.06em;font-size:10px;font-weight:900}}
+tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#112119}}tbody tr:last-child td{{border-bottom:0}}
+td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
+.pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#15271e;border:1px solid #294435;color:#dff5e8;font-weight:900;font-size:11px}}
+.badge{{display:inline-flex;align-items:center;justify-content:center;min-width:68px;padding:6px 9px;border-radius:999px;font-weight:950;font-size:10px;letter-spacing:.06em}}
+.result-win{{background:rgba(60,219,134,.14);border:1px solid rgba(60,219,134,.36);color:var(--win)}}.result-loss{{background:rgba(255,101,116,.13);border:1px solid rgba(255,101,116,.35);color:var(--loss)}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
+.mini-badge{{display:inline-flex;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:850;vertical-align:1px}}.freshness-fresh{{background:rgba(60,219,134,.12);color:var(--win)}}.freshness-stale{{background:rgba(242,189,88,.13);color:var(--warn)}}.freshness-hard-stale{{background:rgba(255,101,116,.12);color:var(--loss)}}
+.positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 3px 0 var(--win)}}.row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
+.empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#70847a;margin-top:12px;font-size:11px}}
+@media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
+@media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
 </style></head><body><main>
-<h1>QuantBet Shadow / Research</h1>
-<p>Exposure-only preliminary signals, projected to one canonical shadow pick per fixture. Read-only; no bankroll reservation, pick registration, settlement control or worker scheduler.</p>
-<div class="cards">
-<div class="card"><small>Signals</small><b>{len(rows)}</b></div>
-<div class="card"><small>Unique fixtures</small><b>{unique_fixtures}</b></div>
-<div class="card"><small>Resolved</small><b>{len(settled)}</b></div>
-<div class="card"><small>Flat P/L</small><b>{pnl / 100:+.0f} RSD</b></div>
-<div class="card"><small>Avg research CLV</small><b>{avg_clv_text}</b></div>
-</div>
+<header class="topbar">
+<div class="brand"><div class="brand-mark">QB</div><div><div class="eyebrow">Shadow intelligence</div><h1>QuantBet Research</h1><p class="subtitle">Exposure-blocked value signals · one canonical pick per fixture</p></div></div>
+<div class="readonly">● READ-ONLY RESEARCH</div>
+</header>
+<nav class="tabs" aria-label="Research sections">
+<a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
+<a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
+</nav>
+<section class="cards">
+<div class="card"><small>Active picks</small><b>{len(active_rows)}</b></div>
+<div class="card"><small>History</small><b>{len(history_rows)}</b></div>
+<div class="card"><small>Win rate</small><b>{win_rate_text}</b></div>
+<div class="card"><small>Flat P/L</small><b class="{pnl_class}">{pnl_text}</b></div>
+<div class="card"><small>Avg research CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
+<div class="card"><small>Positive CLV</small><b>{positive_clv_text}</b></div>
+</section>
+<div class="toolbar">
 <form method="get">
-<select name="market"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
-<input name="league" placeholder="League contains" value="{field("league")}">
+<input type="hidden" name="tab" value="{tab}">
+<select name="market" aria-label="Market filter"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
+<input name="league" placeholder="League" value="{field("league")}">
 <input name="p_min" placeholder="Model p min %" value="{field("p_min")}">
 <input name="p_max" placeholder="Model p max %" value="{field("p_max")}">
 <input name="ev_min" placeholder="EV min %" value="{field("ev_min")}">
 <input name="ev_max" placeholder="EV max %" value="{field("ev_max")}">
 <input name="odds_min" placeholder="Odds min" value="{field("odds_min")}">
 <input name="odds_max" placeholder="Odds max" value="{field("odds_max")}">
-<select name="result"><option value="">All results</option>{''.join(f'<option {"selected" if field("result")==v else ""}>{v}</option>' for v in ("WIN","LOSS","VOID","PENDING"))}</select>
-<button type="submit">Filter</button><a href="/research">Clear</a>
+{result_filter_html}
+<button type="submit">Apply filters</button><a class="clear" href="{clear_href}">Clear</a>
 </form>
-<div class="table"><table><thead><tr>
-<th>Match</th><th>Kickoff</th><th>Market</th><th>Model p</th><th>Market fair p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Detected</th><th>Bookmaker</th><th>Exposure</th><th>Research close</th><th>CLV</th><th>Counterfactual</th>
-</tr></thead><tbody>{rows_html}</tbody></table></div>
-<footer>Research close = last stored same-series/source pre-kickoff quote. CLV is shown only when that quote is later than the entry quote. Times are Europe/Belgrade.</footer>
+</div>
+<section class="table-shell">
+<div class="table-title"><b>{"Active research board" if tab == "active" else "Settled research history"}</b><span>{len(rows)} shown</span></div>
+<div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
+</section>
+<footer><span>Research close = last stored same-series/source pre-kickoff quote. CLV is shown only when the closing quote is later than entry.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only</span></footer>
 </main></body></html>"""
 
 
