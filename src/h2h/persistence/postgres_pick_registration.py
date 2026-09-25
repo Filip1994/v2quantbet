@@ -458,7 +458,7 @@ class PostgreSQLPickRegistrationRepository:
         *,
         checked_at: datetime,
     ) -> tuple[str, ...]:
-        """Read-only candidate gate; final registration repeats every check under locks."""
+        """Candidate gate; exposure-only rejections are shadow-recorded without reserving bankroll."""
         checked = _utc(checked_at, "checked_at")
         with self.connect() as connection, connection.cursor() as cursor:
             evaluation = self._load_evaluation(cursor, evaluation_id)
@@ -525,6 +525,26 @@ class PostgreSQLPickRegistrationRepository:
                         "risk_reserved_past_10m_count": int(exposure_row[10]),
                         "risk_reserved_future_kickoff_count": int(exposure_row[11]),
                     },
+                )
+            if failures == ["MAX_OPEN_EXPOSURE_EXCEEDED"]:
+                self._persist_policy(cursor, policy, checked)
+                cursor.execute(
+                    "INSERT INTO research_exposure_blocked_signals "
+                    "(evaluation_id, fixture_id, fixture_observation_id, config_fingerprint, "
+                    "reason_code, blocked_at, open_exposure_minor, proposed_stake_minor, "
+                    "max_open_exposure_minor, capture_source) "
+                    "VALUES (%s, %s, %s, %s, 'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, %s, %s, "
+                    "'LIVE_GATE') ON CONFLICT (evaluation_id) DO NOTHING",
+                    (
+                        evaluation.evaluation_id,
+                        evaluation.fixture_id,
+                        fixture.fixture_observation_id,
+                        policy.fingerprint,
+                        checked,
+                        exposure,
+                        policy.fixed_stake_minor,
+                        policy.max_open_exposure_minor,
+                    ),
                 )
             return tuple(failures)
 
