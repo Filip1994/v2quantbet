@@ -302,7 +302,7 @@ def _cleanup(account_id: str, candidates: tuple[DurableCandidate, ...]) -> None:
     with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
         cursor.execute(
             "TRUNCATE pick_operator_state_events, daily_bulletin_memberships, daily_bulletins, "
-            "pick_realized_clv, pick_settlement_events, "
+            "research_exposure_signals, pick_realized_clv, pick_settlement_events, "
             "fixture_result_acquisition_states, fixture_result_observations, "
             "pick_manual_closing_overrides, "
             "pick_live_close_finalizations, pick_live_close_observations, "
@@ -580,6 +580,63 @@ def test_concurrent_bankroll_consumers_respect_balance_and_exposure(
             assert cursor.fetchone() == (1, 1)
     finally:
         _cleanup(account, candidates)
+
+
+def test_exposure_blocked_research_capture_is_durable_and_bankroll_neutral() -> None:
+    _migrate()
+    first = _candidate()
+    second = _candidate()
+    account = f"task10-research-{uuid4()}"
+    configured = _policy(account, max_open_exposure_minor=30_000)
+    repository = PostgreSQLPickRegistrationRepository(database_url=DATABASE_URL)
+    try:
+        now = datetime.now(UTC)
+        repository.bootstrap_bankroll(configured, occurred_at=now)
+        registered = repository.register(
+            first.evaluation_id,
+            f"research-blocker-{account}",
+            configured,
+            decided_at=now,
+        )
+        assert registered.pick is not None
+        assert repository.preliminary_rejection_codes(
+            second.evaluation_id,
+            configured,
+            checked_at=now,
+        ) == ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+
+        repository.record_exposure_blocked_signal(
+            second.evaluation_id,
+            configured,
+            blocked_at=now,
+        )
+        repository.record_exposure_blocked_signal(
+            second.evaluation_id,
+            configured,
+            blocked_at=now + timedelta(seconds=1),
+        )
+
+        with psycopg.connect(DATABASE_URL) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT block_count, first_open_exposure_minor, last_open_exposure_minor, "
+                "max_open_exposure_minor, fixed_stake_minor, capture_origin "
+                "FROM research_exposure_signals WHERE evaluation_id = %s",
+                (second.evaluation_id,),
+            )
+            assert cursor.fetchone() == (2, 30_000, 30_000, 30_000, 30_000, "LIVE")
+            cursor.execute(
+                "SELECT COUNT(*) FROM bankroll_ledger_entries "
+                "WHERE bankroll_account_id = %s AND entry_type = 'STAKE_RESERVED'",
+                (account,),
+            )
+            assert cursor.fetchone()[0] == 1
+            cursor.execute(
+                "SELECT COUNT(*) FROM registered_picks WHERE evaluation_id = %s",
+                (second.evaluation_id,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        _cleanup(account, (first, second))
 
 
 def test_transaction_failure_leaves_no_partial_decision_pick_or_reservation() -> None:
