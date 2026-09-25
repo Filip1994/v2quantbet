@@ -41,7 +41,7 @@ def main() -> None:
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
     )
     server = ResearchDashboardHTTPService(
-        service
+        service,
         host="0.0.0.0",
         port=_integer("PORT", "8080"),
     )
