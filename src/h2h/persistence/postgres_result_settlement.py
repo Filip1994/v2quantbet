@@ -76,13 +76,19 @@ class PostgreSQLResultSettlementRepository:
             cursor.execute(
                 "INSERT INTO fixture_result_acquisition_states "
                 "(fixture_id, phase, next_check_at, updated_at, version) "
-                "SELECT DISTINCT r.fixture_id, 'WAITING', "
+                "SELECT DISTINCT target.fixture_id, 'WAITING', "
                 "latest.kickoff_at + (%s * interval '1 second'), %s, 1 "
-                "FROM registered_picks r JOIN LATERAL ("
-                "SELECT kickoff_at FROM fixture_observations f WHERE f.fixture_id = r.fixture_id "
+                "FROM ("
+                "SELECT fixture_id FROM registered_picks "
+                "UNION "
+                "SELECT e.fixture_id FROM research_exposure_signals signal "
+                "JOIN value_evaluations e ON e.evaluation_id = signal.evaluation_id"
+                ") target JOIN LATERAL ("
+                "SELECT kickoff_at FROM fixture_observations f "
+                "WHERE f.fixture_id = target.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE LEFT JOIN fixture_result_acquisition_states s "
-                "ON s.fixture_id = r.fixture_id WHERE s.fixture_id IS NULL "
+                "ON s.fixture_id = target.fixture_id WHERE s.fixture_id IS NULL "
                 "ON CONFLICT DO NOTHING RETURNING fixture_id",
                 (self.policy.initial_delay_seconds, now),
             )
@@ -257,7 +263,33 @@ class PostgreSQLResultSettlementRepository:
         contradicting_observation_id = (
             result.result_observation_id if newly_confirmed_correction else state[4]
         )
-        if settled:
+        cursor.execute(
+            "SELECT "
+            "EXISTS (SELECT 1 FROM registered_picks WHERE fixture_id = %s), "
+            "EXISTS ("
+            "SELECT 1 FROM research_exposure_signals signal "
+            "JOIN value_evaluations e ON e.evaluation_id = signal.evaluation_id "
+            "WHERE e.fixture_id = %s"
+            ")",
+            (result.fixture_id, result.fixture_id),
+        )
+        has_registered_picks, has_research_signals = cursor.fetchone()
+        research_only_final = bool(
+            has_research_signals
+            and not has_registered_picks
+            and result.is_terminal_candidate
+            and count >= 2
+            and first_seen is not None
+            and checked - first_seen
+            >= timedelta(seconds=self.policy.finality_delay_seconds)
+        )
+        if research_only_final:
+            # Research-only fixtures have no settlement event to drive the normal
+            # post-settlement correction loop. Two stable terminal observations are
+            # sufficient for bankroll-neutral counterfactual outcome research.
+            phase = "COMPLETE"
+            next_check = checked
+        elif settled:
             correction_deadline = settled[2] + timedelta(
                 seconds=self.policy.correction_window_seconds
             )
