@@ -187,6 +187,7 @@ def run(
     kickoff_at=None,
     provider_snapshot_max_age_seconds=28800,
     record_research_signal=None,
+    record_research_production=None,
     repository=None,
 ):
     repository = repository or Repository()
@@ -218,6 +219,7 @@ def run(
         provider_snapshot_max_age_seconds=provider_snapshot_max_age_seconds,
         clock=lambda: NOW,
         record_research_signal=record_research_signal,
+        record_research_production=record_research_production,
     )
     return worker.run_once(), source, registration, repository
 
@@ -229,6 +231,21 @@ def test_candidate_requires_second_provider_request_and_accepts_final_reprice() 
     assert cycle.registered_pick_ids == ("pick-1",)
     assert registration.executed[0][0] == "evaluation-final"
     assert registration.completed[0][2]["stale_quote"] is False
+
+
+def test_production_pick_is_recorded_in_research_with_preliminary_candidate() -> None:
+    recorded = []
+
+    cycle, source, _, _ = run(
+        market(2.0),
+        record_research_production=lambda evaluation_id, pick_id, qualified_at: recorded.append(
+            (evaluation_id, pick_id, qualified_at)
+        ),
+    )
+
+    assert source.calls == 2
+    assert cycle.registered_pick_ids == ("pick-1",)
+    assert recorded == [("evaluation-preliminary", "pick-1", NOW)]
 
 
 def test_final_price_movement_can_reject_edge_or_ev() -> None:
