@@ -149,6 +149,42 @@ def _parse_float(raw: str | None) -> float | None:
     return float(raw)
 
 
+def _one_signal_per_fixture(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """Project historical shadow rows onto the production one-pick-per-fixture rule."""
+
+    chosen: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+    for row in rows:
+        fixture_id = str(row["fixture_id"])
+        first_blocked_at = row["first_blocked_at"]
+        if not isinstance(first_blocked_at, datetime):
+            raise TypeError("first_blocked_at must be a datetime")
+
+        def strength(name: str) -> float:
+            value = _number(row.get(name))
+            return float("-inf") if value is None else value
+
+        rank = (
+            first_blocked_at,
+            -strength("expected_value"),
+            -strength("edge"),
+            -strength("odds"),
+            str(row["evaluation_id"]),
+        )
+        current = chosen.get(fixture_id)
+        if current is None or rank < current[0]:
+            chosen[fixture_id] = (rank, row)
+
+    return tuple(
+        sorted(
+            (item[1] for item in chosen.values()),
+            key=lambda row: (row["last_blocked_at"], str(row["evaluation_id"])),
+            reverse=True,
+        )
+    )
+
+
 class ResearchDashboardService:
     def __init__(
         self,
@@ -186,7 +222,8 @@ class ResearchDashboardService:
         return item
 
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
-        rows = tuple(self._derived(row) for row in self._repository.list_signals(limit=5000))
+        canonical = _one_signal_per_fixture(self._repository.list_signals(limit=5000))
+        rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         result = params.get("result", [""])[0].strip().upper()
@@ -277,7 +314,7 @@ th{{position:sticky;top:0;background:#15191f}}small{{display:block;color:#87919d
 footer{{color:#76808b;margin-top:14px;font-size:12px}}a{{color:#d5dce4}}
 </style></head><body><main>
 <h1>QuantBet Shadow / Research</h1>
-<p>Exposure-only preliminary signals. Read-only; no bankroll reservation, pick registration, settlement control or worker scheduler.</p>
+<p>Exposure-only preliminary signals, projected to one canonical shadow pick per fixture. Read-only; no bankroll reservation, pick registration, settlement control or worker scheduler.</p>
 <div class="cards">
 <div class="card"><small>Signals</small><b>{len(rows)}</b></div>
 <div class="card"><small>Unique fixtures</small><b>{unique_fixtures}</b></div>
