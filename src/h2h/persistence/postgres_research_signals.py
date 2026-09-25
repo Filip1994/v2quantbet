@@ -1,4 +1,4 @@
-"""Durable exposure-blocked research signals and read-only research projection."""
+"""Durable final-gate research candidates and read-only research projection."""
 
 from __future__ import annotations
 
@@ -76,23 +76,28 @@ class PostgreSQLResearchSignalRepository:
             cursor.execute(
                 "INSERT INTO research_signals (research_signal_id, evaluation_id, fixture_id, "
                 "stage, block_reason, first_blocked_at, last_blocked_at, blocked_count, "
-                "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor) "
+                "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor, "
+                "qualified_at) "
                 "SELECT %s, e.evaluation_id, e.fixture_id, 'PRELIMINARY', "
-                "'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, 1, %s, %s, %s "
+                "'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, 1, %s, %s, %s, %s "
                 "FROM value_evaluations e WHERE e.evaluation_id = %s "
                 "ON CONFLICT (fixture_id) DO UPDATE SET "
-                "first_open_exposure_minor = CASE WHEN EXCLUDED.first_blocked_at < "
-                "research_signals.first_blocked_at THEN EXCLUDED.first_open_exposure_minor "
+                "first_open_exposure_minor = CASE WHEN research_signals.first_blocked_at "
+                "IS NULL OR EXCLUDED.first_blocked_at < research_signals.first_blocked_at "
+                "THEN EXCLUDED.first_open_exposure_minor "
                 "ELSE research_signals.first_open_exposure_minor END, "
-                "last_open_exposure_minor = CASE WHEN EXCLUDED.last_blocked_at >= "
-                "research_signals.last_blocked_at THEN EXCLUDED.last_open_exposure_minor "
+                "last_open_exposure_minor = CASE WHEN research_signals.last_blocked_at "
+                "IS NULL OR EXCLUDED.last_blocked_at >= research_signals.last_blocked_at "
+                "THEN EXCLUDED.last_open_exposure_minor "
                 "ELSE research_signals.last_open_exposure_minor END, "
                 "first_blocked_at = LEAST(research_signals.first_blocked_at, "
                 "EXCLUDED.first_blocked_at), "
                 "last_blocked_at = GREATEST(research_signals.last_blocked_at, "
                 "EXCLUDED.last_blocked_at), "
-                "blocked_count = research_signals.blocked_count + 1, "
-                "exposure_cap_minor = EXCLUDED.exposure_cap_minor "
+                "blocked_count = COALESCE(research_signals.blocked_count, 0) + 1, "
+                "block_reason = 'MAX_OPEN_EXPOSURE_EXCEEDED', "
+                "exposure_cap_minor = EXCLUDED.exposure_cap_minor, "
+                "qualified_at = LEAST(research_signals.qualified_at, EXCLUDED.qualified_at) "
                 "RETURNING research_signal_id",
                 (
                     signal_id,
@@ -101,8 +106,40 @@ class PostgreSQLResearchSignalRepository:
                     open_exposure_minor,
                     open_exposure_minor,
                     exposure_cap_minor,
+                    blocked,
                     evaluation_id,
                 ),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise LookupError(f"value evaluation {evaluation_id!r} does not exist")
+            return str(row[0])
+
+    def record_production_candidate(
+        self,
+        evaluation_id: str,
+        *,
+        qualified_at: datetime,
+        production_pick_id: str,
+    ) -> str:
+        signal_id = research_signal_id(evaluation_id)
+        qualified = _utc(qualified_at, "qualified_at")
+        if not isinstance(production_pick_id, str) or not production_pick_id.strip():
+            raise ValueError("production_pick_id must be a non-empty string")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO research_signals (research_signal_id, evaluation_id, fixture_id, "
+                "stage, block_reason, first_blocked_at, last_blocked_at, blocked_count, "
+                "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor, "
+                "qualified_at, production_pick_id) "
+                "SELECT %s, e.evaluation_id, e.fixture_id, 'PRELIMINARY', NULL, NULL, NULL, "
+                "NULL, NULL, NULL, NULL, %s, %s FROM value_evaluations e "
+                "WHERE e.evaluation_id = %s "
+                "ON CONFLICT (fixture_id) DO UPDATE SET "
+                "production_pick_id = EXCLUDED.production_pick_id, "
+                "qualified_at = LEAST(research_signals.qualified_at, EXCLUDED.qualified_at) "
+                "RETURNING research_signal_id",
+                (signal_id, qualified, production_pick_id.strip(), evaluation_id),
             )
             row = cursor.fetchone()
             if row is None:
@@ -118,7 +155,10 @@ class PostgreSQLResearchSignalRepository:
                 "f.provider_fixture_id, f.league_id, f.season, rs.stage, rs.block_reason, "
                 "rs.first_blocked_at, rs.last_blocked_at, rs.blocked_count, "
                 "rs.first_open_exposure_minor, rs.last_open_exposure_minor, "
-                "rs.exposure_cap_minor, latest.home_team, latest.away_team, "
+                "rs.exposure_cap_minor, rs.qualified_at, rs.production_pick_id, "
+                "CASE WHEN rs.production_pick_id IS NULL THEN 'BLOCKED_EXPOSURE' "
+                "ELSE COALESCE(operator_state.state, 'PLAYED') END, "
+                "latest.home_team, latest.away_team, "
                 "latest.competition_name, latest.country, latest.kickoff_at, "
                 "latest.provider_status, e.market, e.selected_selection, e.bookmaker_key, "
                 "e.model_probability, e.selected_devig_probability, e.selected_odd, "
@@ -139,18 +179,23 @@ class PostgreSQLResearchSignalRepository:
                 "AND q.source = e.source AND q.observed_at < latest.kickoff_at "
                 "ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC LIMIT 1) "
                 "closing ON TRUE "
+                "LEFT JOIN LATERAL (SELECT op.state FROM pick_operator_state_events op "
+                "WHERE op.pick_id = rs.production_pick_id "
+                "ORDER BY op.occurred_at DESC, op.persisted_at DESC, op.event_id DESC LIMIT 1) "
+                "operator_state ON TRUE "
                 "LEFT JOIN fixture_result_acquisition_states state "
                 "ON state.fixture_id = e.fixture_id "
                 "LEFT JOIN fixture_result_observations result "
                 "ON result.result_observation_id = state.current_observation_id "
-                "ORDER BY rs.last_blocked_at DESC, rs.evaluation_id DESC LIMIT %s",
+                "ORDER BY rs.qualified_at DESC, rs.evaluation_id DESC LIMIT %s",
                 (limit,),
             )
             columns = (
                 "research_signal_id", "evaluation_id", "fixture_id", "provider_fixture_id",
                 "league_id", "season", "stage", "block_reason", "first_blocked_at",
                 "last_blocked_at", "blocked_count", "first_open_exposure_minor",
-                "last_open_exposure_minor", "exposure_cap_minor", "home_team", "away_team",
+                "last_open_exposure_minor", "exposure_cap_minor", "qualified_at",
+                "production_pick_id", "disposition", "home_team", "away_team",
                 "competition_name", "country", "kickoff_at", "fixture_status", "market",
                 "selection", "bookmaker", "model_probability", "market_fair_probability",
                 "odds", "edge", "expected_value", "quote_observed_at", "quote_captured_at",
