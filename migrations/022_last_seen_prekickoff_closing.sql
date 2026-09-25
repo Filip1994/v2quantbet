@@ -7,14 +7,12 @@
 
 CREATE TABLE pick_closing_contract_corrections (
     correction_id TEXT PRIMARY KEY CHECK (length(trim(correction_id)) > 0),
-    pick_id TEXT NOT NULL UNIQUE
-        REFERENCES registered_picks(pick_id) ON DELETE RESTRICT,
-    finalization_id TEXT NOT NULL UNIQUE
-        REFERENCES pick_closing_finalizations(finalization_id) ON DELETE RESTRICT,
+    pick_id TEXT NOT NULL UNIQUE CHECK (length(trim(pick_id)) > 0),
+    finalization_id TEXT NOT NULL UNIQUE CHECK (length(trim(finalization_id)) > 0),
     prior_outcome TEXT NOT NULL CHECK (prior_outcome = 'STALE_QUOTE'),
     prior_closing_snapshot_id TEXT,
     corrected_closing_snapshot_id TEXT NOT NULL
-        REFERENCES quote_snapshots(snapshot_id) ON DELETE RESTRICT,
+        CHECK (length(trim(corrected_closing_snapshot_id)) > 0),
     reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
     corrected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
