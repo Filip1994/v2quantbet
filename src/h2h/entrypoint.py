@@ -157,7 +157,7 @@ def _run_active_leader(
         ),
         ScheduledJob(
             "research_monitoring",
-            float(lifecycle.monitoring_interval_seconds),
+            min(60.0, float(lifecycle.monitoring_interval_seconds)),
             application.research.worker.run_once,
             has_pending_work=lambda: application.research.worker.has_pending,
         ),
