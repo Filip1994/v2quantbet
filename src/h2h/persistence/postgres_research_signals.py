@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
+from h2h.domain.fixture_identity import ProviderFixtureReference, ResolvedFixtureIdentity
 from h2h.domain.odds import Market, Selection
 from h2h.domain.settlement import realized_clv_ppm
 
 
 ConnectionFactory = Callable[[], Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchCloseRefreshTarget:
+    fixture_identity: ResolvedFixtureIdentity
+    bookmaker_id: int
 
 
 class PostgreSQLResearchSignalRepository:
@@ -33,6 +42,129 @@ class PostgreSQLResearchSignalRepository:
         except ImportError as exc:
             raise RuntimeError("PostgreSQL support requires psycopg[binary]") from exc
         return psycopg.connect(self._database_url)
+
+    @staticmethod
+    def _utc(value: datetime, name: str) -> datetime:
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"{name} must be timezone-aware")
+        return value.astimezone(UTC)
+
+    def claim_due_close_targets(
+        self,
+        *,
+        as_of: datetime,
+        window_seconds: int,
+        refresh_interval_seconds: int,
+        allowed_statuses: tuple[str, ...],
+        limit: int,
+    ) -> tuple[ResearchCloseRefreshTarget, ...]:
+        now = self._utc(as_of, "as_of")
+        for name, value in (
+            ("window_seconds", window_seconds),
+            ("refresh_interval_seconds", refresh_interval_seconds),
+            ("limit", limit),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if not allowed_statuses:
+            raise ValueError("allowed_statuses must not be empty")
+        latest_attempt = now - timedelta(seconds=refresh_interval_seconds)
+        cutoff = now + timedelta(seconds=window_seconds)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH latest_fixture AS ("
+                "SELECT DISTINCT ON (fo.fixture_id) fo.fixture_id, fo.kickoff_at, "
+                "fo.provider_status FROM fixture_observations fo "
+                "ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC"
+                ") "
+                "SELECT DISTINCT s.fixture_id, f.provider, f.provider_fixture_id, "
+                "e.bookmaker_id, lf.kickoff_at "
+                "FROM research_exposure_blocked_signals s "
+                "JOIN value_evaluations e ON e.evaluation_id = s.evaluation_id "
+                "JOIN fixtures f ON f.fixture_id = s.fixture_id "
+                "JOIN latest_fixture lf ON lf.fixture_id = s.fixture_id "
+                "LEFT JOIN research_close_refresh_states st "
+                "ON st.fixture_id = s.fixture_id AND st.bookmaker_id = e.bookmaker_id "
+                "WHERE lf.kickoff_at > %s AND lf.kickoff_at <= %s "
+                "AND lf.provider_status = ANY(%s) "
+                "AND (st.last_attempt_at IS NULL OR st.last_attempt_at <= %s) "
+                "ORDER BY lf.kickoff_at, s.fixture_id, e.bookmaker_id LIMIT %s",
+                (now, cutoff, list(allowed_statuses), latest_attempt, limit * 3),
+            )
+            rows = cursor.fetchall()
+            claimed: list[ResearchCloseRefreshTarget] = []
+            for fixture_id, provider, provider_fixture_id, bookmaker_id, _kickoff in rows:
+                if len(claimed) >= limit:
+                    break
+                cursor.execute(
+                    "INSERT INTO research_close_refresh_states "
+                    "(fixture_id, bookmaker_id, last_attempt_at, attempt_count, last_outcome, "
+                    "last_persisted_snapshot_count, last_error_class, updated_at) "
+                    "VALUES (%s, %s, %s, 1, 'CLAIMED', 0, NULL, %s) "
+                    "ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET "
+                    "last_attempt_at = EXCLUDED.last_attempt_at, "
+                    "attempt_count = research_close_refresh_states.attempt_count + 1, "
+                    "last_outcome = 'CLAIMED', last_persisted_snapshot_count = 0, "
+                    "last_error_class = NULL, updated_at = EXCLUDED.updated_at "
+                    "WHERE research_close_refresh_states.last_attempt_at <= %s "
+                    "RETURNING fixture_id",
+                    (
+                        fixture_id,
+                        int(bookmaker_id),
+                        now,
+                        now,
+                        latest_attempt,
+                    ),
+                )
+                if cursor.fetchone() is None:
+                    continue
+                claimed.append(
+                    ResearchCloseRefreshTarget(
+                        ResolvedFixtureIdentity(
+                            fixture_id=str(fixture_id),
+                            provider_reference=ProviderFixtureReference(
+                                str(provider), str(provider_fixture_id)
+                            ),
+                        ),
+                        int(bookmaker_id),
+                    )
+                )
+            return tuple(claimed)
+
+    def finish_close_refresh(
+        self,
+        target: ResearchCloseRefreshTarget,
+        *,
+        outcome: str,
+        persisted_snapshot_count: int,
+        completed_at: datetime,
+        error_class: str | None = None,
+    ) -> None:
+        if outcome not in {"SUCCESS", "NO_QUOTES", "ERROR"}:
+            raise ValueError("invalid research close refresh outcome")
+        if (
+            isinstance(persisted_snapshot_count, bool)
+            or not isinstance(persisted_snapshot_count, int)
+            or persisted_snapshot_count < 0
+        ):
+            raise ValueError("persisted_snapshot_count must be non-negative")
+        completed = self._utc(completed_at, "completed_at")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE research_close_refresh_states SET last_outcome = %s, "
+                "last_persisted_snapshot_count = %s, last_error_class = %s, updated_at = %s "
+                "WHERE fixture_id = %s AND bookmaker_id = %s",
+                (
+                    outcome,
+                    persisted_snapshot_count,
+                    error_class,
+                    completed,
+                    target.fixture_identity.fixture_id,
+                    target.bookmaker_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("research close refresh claim disappeared")
 
     def signals(
         self, *, limit: int = 2000, provider_fixture_id: str | None = None
