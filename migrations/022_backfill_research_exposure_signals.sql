@@ -350,3 +350,72 @@ ON CONFLICT (evaluation_id) DO UPDATE SET
     capture_origin = CASE
         WHEN research_exposure_signals.capture_origin = 'LIVE' THEN 'LIVE'
         ELSE 'LOG_BACKFILL' END;
+
+
+-- Additional high-confidence backfill from historical engine deployments:
+-- 326b0420-8f92-4b82-808c-b0e5b62e5f32, 4660b739-144a-4316-8180-12b4a5fe0a2e, 24bfa70d-7048-41c9-ab16-537389cd5ebf, 86141a34-589c-46a7-b431-0d708059e34a, bd676382-f612-4e7e-8681-17f34c938228, 56843226-2b5a-47bf-abc1-1954e73caa79
+WITH backfill(
+    evaluation_id, first_blocked_at, last_blocked_at, block_count,
+    first_open_exposure_minor, last_open_exposure_minor,
+    max_open_exposure_minor, fixed_stake_minor
+) AS (
+    VALUES
+        ('value-evaluation-v1:b285a484d0e90e9e4d2902eaace5871e4c2c08bfd872ff22210bfce600ba0f5c','2026-09-24T17:35:17.376380+00:00'::timestamptz,'2026-09-24T17:35:17.376380+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:348be2d1aa722447290395092e9ce12905d23e3d1ce4b19ce9528bee6a85e250','2026-09-24T17:35:17.413355+00:00'::timestamptz,'2026-09-24T17:35:17.413355+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:8655863d3854647d03692aa127d2f827c31441c7c699c44703c44a53fd61cb4f','2026-09-24T17:41:32.414008+00:00'::timestamptz,'2026-09-24T17:41:32.414008+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:86979c9cb316a6db577456277b8d28251889c992afbe28fb3c9473028bd872ac','2026-09-24T17:41:32.447202+00:00'::timestamptz,'2026-09-24T17:41:32.447202+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:a477e0e9c24c9871ad10123cd45d06602c0dfc4f1f08ffd9b945aaf692d47fb1','2026-09-24T17:46:44.987524+00:00'::timestamptz,'2026-09-24T17:46:44.987524+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:aa4f51a110b465402206f0e14b43bfd09bb16d9678957f763009cdf9c1b0f593','2026-09-24T17:46:45.025437+00:00'::timestamptz,'2026-09-24T17:46:45.025437+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:6d2ac6c6548c57238e0f5dfdcb1202ab0c7b547473e217425e9e6c4078ceea91','2026-09-24T17:46:45.065668+00:00'::timestamptz,'2026-09-24T17:46:45.065668+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:f9967d023e89245409a68df42a72e016718434bd9bacd109f799b10a316ac89b','2026-09-24T17:46:45.098258+00:00'::timestamptz,'2026-09-24T17:46:45.098258+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:d7c62dbf386930d995a865806c5c65cb574a5f8709f518c485f74de94c87ac19','2026-09-24T17:47:48.407051+00:00'::timestamptz,'2026-09-24T17:47:48.407051+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:241cb41b84a8d2ab3701594547fec14eb2472bf2a6ba90a8b1e04d56e63348e7','2026-09-24T17:47:48.437613+00:00'::timestamptz,'2026-09-24T17:47:48.437613+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:e353f2c8e87883880a0bf1bb1a50210f9fcc57228d5beea03997a3e5a6a59ece','2026-09-24T17:49:59.567313+00:00'::timestamptz,'2026-09-24T17:49:59.567313+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:0f03986f43290fac423b2e6cf769654ec4785c395cbc1cb396b52381f685fb85','2026-09-24T17:49:59.598476+00:00'::timestamptz,'2026-09-24T17:49:59.598476+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:2aa716ad8bcd8667f2d5bc6abb14b05db92581d086e5e0981b148a17c13b9b78','2026-09-24T17:49:59.628793+00:00'::timestamptz,'2026-09-24T17:49:59.628793+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:3256131fc90729a391013c9c06fe2e658db508f45355677ba5c9617ebe877f51','2026-09-24T17:51:04.087572+00:00'::timestamptz,'2026-09-24T17:51:04.087572+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:485e100df222c4a6ffad07b7df2c9431fdb8a284006cc1bceefe6bebf1f3481b','2026-09-24T17:51:04.122824+00:00'::timestamptz,'2026-09-24T17:51:04.122824+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:cee34c339fc33d0d10c6fbe9330f85f09292f8bc7f8ee7f80f11f61844e0d89e','2026-09-24T17:51:04.158534+00:00'::timestamptz,'2026-09-24T17:51:04.158534+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:9c7758f182485682ed3cb8e8350d740bb66636c554913e0c798399040493fd64','2026-09-24T17:51:04.287733+00:00'::timestamptz,'2026-09-24T17:51:04.287733+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:b01e14bfadc308466a27f4d768194caefb461248aaf5d593cf25246ae6d0b603','2026-09-24T17:52:10.897834+00:00'::timestamptz,'2026-09-24T17:52:10.897834+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:a0272836a500b5f87f2fbd82f46c646083ba81e266b55084d10a1ea57c73de43','2026-09-24T17:52:10.938883+00:00'::timestamptz,'2026-09-24T17:52:10.938883+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:2f65139e2888cf972e30b6374834471a2bbc303b1ea427cf3f8d79934a6374cc','2026-09-24T17:52:12.538520+00:00'::timestamptz,'2026-09-24T17:52:12.538520+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:d0105275159cd6d305c45ee7df692a595d9c654f1d76b9588cc4be1c15720363','2026-09-24T17:52:12.574030+00:00'::timestamptz,'2026-09-24T17:52:12.574030+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:78a9e710de6ad5f6568cf19b2976f1260d290ea9bbd0e1edb520def20fc01c0f','2026-09-24T17:56:27.243736+00:00'::timestamptz,'2026-09-24T17:56:27.243736+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:786792c6c56cfd883d04df00b02cdcb20db58e49846b00ecdb90f58441b6f238','2026-09-24T17:56:27.280812+00:00'::timestamptz,'2026-09-24T17:56:27.280812+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:8dc23a51360f9a036f766b9bfd70f697b6927c1c7ab8ac2464bebac1e147780a','2026-09-24T17:56:27.314267+00:00'::timestamptz,'2026-09-24T17:56:27.314267+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:489ea099df5735ee18f10e5d23ea1d91ba17d57f9945aed16c5232550dda2a2d','2026-09-24T17:56:28.778830+00:00'::timestamptz,'2026-09-24T17:56:28.778830+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:390804d2b61a750065943412b2721738f2913fda084d904816009b0b6bb71a61','2026-09-24T17:56:28.811062+00:00'::timestamptz,'2026-09-24T17:56:28.811062+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:db30df23f6ddc9c03c256602a9ff473293f4b3bdfcb21e5fb737cc2332889fc4','2026-09-24T18:03:59.538907+00:00'::timestamptz,'2026-09-24T18:03:59.538907+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:a5b2bb70221fa53ca8d475857b65e97a163419c3d52fd2f2d203c34e57872197','2026-09-24T18:04:01.376149+00:00'::timestamptz,'2026-09-24T18:04:01.376149+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:1021dfeaadf7fc703e88fc9c80685c5904533a6aa331323c7736073b761bd2c6','2026-09-24T18:04:01.424572+00:00'::timestamptz,'2026-09-24T18:04:01.424572+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:f1509b6983cc41c27320e2082396644c3212c84c80aad475369b9b42bc70303b','2026-09-24T18:04:01.465594+00:00'::timestamptz,'2026-09-24T18:04:01.465594+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:cffe38ad04bbcb3f18d07bba4416d1bfa5358f4d5ef18d9553fa26c6ea5058d1','2026-09-24T18:04:01.501287+00:00'::timestamptz,'2026-09-24T18:04:01.501287+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:47644e7249d4fcb4bc2732d6e9bb2e64ef6a97db755bd86a2dbb58aec7ee58dc','2026-09-24T18:05:06.862831+00:00'::timestamptz,'2026-09-24T18:05:06.862831+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:580e15bc3807a2b26cb6a80c8c1ecadbca6ee9605f3119305a519e8bb2634bee','2026-09-24T18:05:06.907954+00:00'::timestamptz,'2026-09-24T18:05:06.907954+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:dd9561556e7a097f43b4898798db559673495aec46e2a5d3bef95c53dbf4d0f1','2026-09-24T18:05:06.962751+00:00'::timestamptz,'2026-09-24T18:05:06.962751+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:a6ce420df1652aa78447dcb8772a1d3042cb691f08a43dea2c97e52a89f63383','2026-09-24T18:05:07.012190+00:00'::timestamptz,'2026-09-24T18:05:07.012190+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:87ce36d9a717addc092c41f50b28db5fc194cc66ebd3b2c2cd81174a100c1f8d','2026-09-24T16:00:47.127455+00:00'::timestamptz,'2026-09-24T16:00:47.127455+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:61aa66b7a74b3149d88d8a80beee890950047be19911345a78b5c308f1fb4808','2026-09-24T16:00:47.201646+00:00'::timestamptz,'2026-09-24T16:00:47.201646+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:b7aa092b6798cd64e4ca40ae5cc3ca89649a0d03e0ca9f732fc43fb72f36aa8b','2026-09-24T16:00:47.247052+00:00'::timestamptz,'2026-09-24T16:00:47.247052+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:14ab8ce5eab589ff7ad022e3b6e5999c3f1dc9b0692d471d366a8d3cbc694700','2026-09-24T16:00:47.291662+00:00'::timestamptz,'2026-09-24T16:00:47.291662+00:00'::timestamptz,1,300000,300000,300000,30000),
+        ('value-evaluation-v1:6a5a5f401a58d786471a56ada2b67fc2474ca33f350d2d6a2dc55ac961ac7e14','2026-09-24T16:02:56.766884+00:00'::timestamptz,'2026-09-24T16:02:56.766884+00:00'::timestamptz,1,300000,300000,300000,30000)
+)
+INSERT INTO research_exposure_signals (
+    evaluation_id, first_blocked_at, last_blocked_at, block_count,
+    first_open_exposure_minor, last_open_exposure_minor,
+    max_open_exposure_minor, fixed_stake_minor, capture_origin, created_at
+)
+SELECT b.evaluation_id,b.first_blocked_at,b.last_blocked_at,b.block_count,
+       b.first_open_exposure_minor,b.last_open_exposure_minor,
+       b.max_open_exposure_minor,b.fixed_stake_minor,'LOG_BACKFILL',b.first_blocked_at
+FROM backfill b JOIN value_evaluations e ON e.evaluation_id=b.evaluation_id
+ON CONFLICT (evaluation_id) DO UPDATE SET
+    first_blocked_at=LEAST(research_exposure_signals.first_blocked_at,EXCLUDED.first_blocked_at),
+    last_blocked_at=GREATEST(research_exposure_signals.last_blocked_at,EXCLUDED.last_blocked_at),
+    block_count=research_exposure_signals.block_count+EXCLUDED.block_count,
+    first_open_exposure_minor=CASE WHEN EXCLUDED.first_blocked_at<research_exposure_signals.first_blocked_at THEN EXCLUDED.first_open_exposure_minor ELSE research_exposure_signals.first_open_exposure_minor END,
+    last_open_exposure_minor=CASE WHEN EXCLUDED.last_blocked_at>research_exposure_signals.last_blocked_at THEN EXCLUDED.last_open_exposure_minor ELSE research_exposure_signals.last_open_exposure_minor END,
+    max_open_exposure_minor=EXCLUDED.max_open_exposure_minor,
+    fixed_stake_minor=EXCLUDED.fixed_stake_minor,
+    capture_origin=CASE WHEN research_exposure_signals.capture_origin='LIVE' THEN 'LIVE' ELSE 'LOG_BACKFILL' END;
