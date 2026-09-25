@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "preDeployCommand": "python -m h2h.migrate",
+    "startCommand": "python -m h2h.research_dashboard_entrypoint",
+    "healthcheckPath": "/livez",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE",
+    "numReplicas": 1
+  }
+}
