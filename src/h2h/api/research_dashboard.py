@@ -1,4 +1,4 @@
-"""Authenticated read-only dashboard for QuantBet shadow/research signals."""
+"""Read-only dashboard for QuantBet shadow/research signals."""
 
 from __future__ import annotations
 
@@ -359,6 +359,9 @@ class ResearchDashboardHTTPService:
 
     @staticmethod
     def _authorize(handler: BaseHTTPRequestHandler) -> bool:
+        public = os.environ.get("QUANTBET_RESEARCH_PUBLIC", "").strip().casefold()
+        if public in {"1", "true", "yes", "on"}:
+            return True
         password = os.environ.get("QUANTBET_RESEARCH_PASSWORD", "")
         username = os.environ.get("QUANTBET_RESEARCH_USER", "quantbet")
         if not password:
