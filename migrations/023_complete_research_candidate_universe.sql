@@ -18,8 +18,7 @@ ALTER TABLE research_signals
 
 ALTER TABLE research_signals
     ADD COLUMN qualified_at TIMESTAMPTZ,
-    ADD COLUMN production_pick_id TEXT
-        REFERENCES registered_picks(pick_id) ON DELETE RESTRICT;
+    ADD COLUMN production_pick_id TEXT;
 
 UPDATE research_signals
 SET qualified_at = first_blocked_at
@@ -82,5 +81,14 @@ SELECT
 FROM production_candidates pc
 JOIN value_evaluations e ON e.evaluation_id = pc.research_evaluation_id
 ON CONFLICT (fixture_id) DO UPDATE SET
+    research_signal_id = EXCLUDED.research_signal_id,
+    evaluation_id = EXCLUDED.evaluation_id,
     production_pick_id = EXCLUDED.production_pick_id,
-    qualified_at = LEAST(research_signals.qualified_at, EXCLUDED.qualified_at);
+    qualified_at = EXCLUDED.qualified_at,
+    block_reason = NULL,
+    first_blocked_at = NULL,
+    last_blocked_at = NULL,
+    blocked_count = NULL,
+    first_open_exposure_minor = NULL,
+    last_open_exposure_minor = NULL,
+    exposure_cap_minor = NULL;
