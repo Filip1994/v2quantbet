@@ -344,7 +344,7 @@ class ResearchDashboardService:
                     "FROM fixture_result_acquisition_states"
                 )
                 pending_results, corrections, results_updated = cursor.fetchone()
-        except Exception:
+        except Exception:  # noqa: BLE001 - health UI must degrade without breaking Research
             return (
                 {"label": "Database", "state": "bad", "summary": "Unreachable", "detail": "Research could not read operational PostgreSQL facts."},
                 *unavailable[1:],
