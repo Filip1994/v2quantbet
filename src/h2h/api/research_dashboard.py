@@ -112,6 +112,10 @@ class ResearchDashboardService:
         return "—" if value is None else f"{float(value) * 100:.2f}%"
 
     @staticmethod
+    def _odd(value: Any) -> str:
+        return "—" if value is None else f"{float(value):.2f}"
+
+    @staticmethod
     def _clv(value: Any) -> str:
         return "—" if value is None else f"{float(value) / 10000:+.2f}%"
 
@@ -149,7 +153,7 @@ class ResearchDashboardService:
                 f"<td><strong>{escape(item['market'])} {escape(item['selection'])}</strong>"
                 f"<small>{escape(item['bookmaker_key'])} · blocked {escape(self._dt(item['blocked_at']))}</small></td>"
                 f"<td class='num'><strong>{item['entry_odd']:.2f}</strong>"
-                f"<small>shadow close {('—' if item['shadow_closing_odd'] is None else f'{item['shadow_closing_odd']:.2f}')}</small></td>"
+                f"<small>shadow close {self._odd(item['shadow_closing_odd'])}</small></td>"
                 f"<td class='num'><strong>{self._pct(item['model_probability'])}</strong>"
                 f"<small>market {self._pct(item['market_fair_probability'])}</small></td>"
                 f"<td class='num'><strong>{self._pct(item['edge'])}</strong>"
