@@ -82,7 +82,6 @@ class ProductionApplication:
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
     live_closing_proxy: LiveClosingProxyWorker
-    research: PostgreSQLResearchSignalRepository
     operator_picks: PostgreSQLOperatorPickStateRepository
 
     def close(self) -> None:
@@ -304,6 +303,5 @@ def build_production_application(
         model_lifecycle,
         opportunity,
         live_closing_proxy,
-        research,
         operator_picks,
     )
