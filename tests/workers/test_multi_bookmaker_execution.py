@@ -355,3 +355,52 @@ def test_best_price_is_final_verified_and_incomplete_winner_falls_back() -> None
     assert cycle.fallback_attempts == 1
     assert cycle.bookmaker_wins == ((34, 1),)
     assert registration.rejected[0][1] == ("FINAL_QUOTE_MARKET_INCOMPLETE",)
+
+
+
+class ExposureOnlyReject(Registration):
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return ("MAX_OPEN_EXPOSURE_EXCEEDED",)
+
+
+class ExposurePlusEligibilityReject(Registration):
+    def preliminary_rejection_codes(self, _evaluation_id):
+        return ("EDGE_BELOW_MINIMUM", "MAX_OPEN_EXPOSURE_EXCEEDED")
+
+
+def _exposure_rejection_worker(registration, recorder):
+    return OpportunityWorker(
+        Repository(),
+        SimpleNamespace(fetch_quotes=lambda **_kwargs: quotes(8, 2.0)),
+        SimpleNamespace(ingest=lambda *_args, **_kwargs: 0),
+        SimpleNamespace(execute=lambda _fixture_id: SimpleNamespace(prediction_id="prediction")),
+        Evaluator(),
+        registration,
+        bookmaker_id=8,
+        bookmaker_ids=(8,),
+        allowed_statuses=("NS",),
+        ensure_model_available=lambda _fixture: None,
+        should_stop=lambda: False,
+        maximum_quote_age_seconds=300,
+        minimum_time_to_kickoff_seconds=600,
+        stale_retry_policy=POLICY,
+        record_exposure_blocked=recorder,
+        clock=lambda: NOW,
+    )
+
+
+def test_exposure_only_rejection_is_persisted_to_research_sidecar() -> None:
+    recorded = []
+
+    cycle = _exposure_rejection_worker(ExposureOnlyReject(), recorded.append).run_once()
+
+    assert cycle.registered_pick_ids == ()
+    assert recorded == ["evaluation:pre-8"]
+
+
+def test_research_sidecar_ignores_candidates_failing_other_gates() -> None:
+    recorded = []
+
+    _exposure_rejection_worker(ExposurePlusEligibilityReject(), recorded.append).run_once()
+
+    assert recorded == []
