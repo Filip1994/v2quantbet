@@ -74,15 +74,20 @@ class PostgreSQLResultSettlementRepository:
         now = _utc(reconciled_at, "reconciled_at")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO fixture_result_acquisition_states "
+                "WITH tracked_fixtures AS ("
+                "SELECT fixture_id FROM registered_picks "
+                "UNION SELECT e.fixture_id FROM research_signals rs "
+                "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id"
+                ") INSERT INTO fixture_result_acquisition_states "
                 "(fixture_id, phase, next_check_at, updated_at, version) "
-                "SELECT DISTINCT r.fixture_id, 'WAITING', "
+                "SELECT DISTINCT tracked.fixture_id, 'WAITING', "
                 "latest.kickoff_at + (%s * interval '1 second'), %s, 1 "
-                "FROM registered_picks r JOIN LATERAL ("
-                "SELECT kickoff_at FROM fixture_observations f WHERE f.fixture_id = r.fixture_id "
+                "FROM tracked_fixtures tracked JOIN LATERAL ("
+                "SELECT kickoff_at FROM fixture_observations f "
+                "WHERE f.fixture_id = tracked.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE LEFT JOIN fixture_result_acquisition_states s "
-                "ON s.fixture_id = r.fixture_id WHERE s.fixture_id IS NULL "
+                "ON s.fixture_id = tracked.fixture_id WHERE s.fixture_id IS NULL "
                 "ON CONFLICT DO NOTHING RETURNING fixture_id",
                 (self.policy.initial_delay_seconds, now),
             )
@@ -308,6 +313,46 @@ class PostgreSQLResultSettlementRepository:
             if now < row[3]:
                 return None
             return row[0]
+
+    def complete_research_only_fixture(
+        self,
+        fixture_id: str,
+        result_observation_id: str,
+        *,
+        completed_at: datetime,
+    ) -> bool:
+        """Stop result polling once a research-only fixture has a stable terminal result."""
+        completed = _utc(completed_at, "completed_at")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM registered_picks WHERE fixture_id = %s)",
+                (fixture_id,),
+            )
+            if bool(cursor.fetchone()[0]):
+                return False
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM research_signals rs "
+                "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id "
+                "WHERE e.fixture_id = %s)",
+                (fixture_id,),
+            )
+            if not bool(cursor.fetchone()[0]):
+                return False
+            cursor.execute(
+                "SELECT candidate_observation_id FROM fixture_result_acquisition_states "
+                "WHERE fixture_id = %s FOR UPDATE",
+                (fixture_id,),
+            )
+            state = cursor.fetchone()
+            if state is None or state[0] != result_observation_id:
+                raise ResultNotStableError("research fixture result is not the stable candidate")
+            cursor.execute(
+                "UPDATE fixture_result_acquisition_states SET phase = 'COMPLETE', "
+                "next_check_at = %s, lease_expires_at = NULL, updated_at = %s, "
+                "version = version + 1 WHERE fixture_id = %s",
+                (completed, completed, fixture_id),
+            )
+            return True
 
     def unsettled_pick_ids(self, fixture_id: str) -> tuple[str, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
