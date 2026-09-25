@@ -440,10 +440,22 @@ class ResearchDashboardService:
                     else "—"
                 )
                 row_class = f'row-{row["outcome"].casefold()}'
+                provider_status = escape(
+                    row.get("result_provider_status")
+                    or row.get("result_phase")
+                    or "settled"
+                )
+                result_panel = (
+                    f'<div class="result-panel result-panel-{row["outcome"].casefold()}">'
+                    f'<div class="score">{score.replace("–", " : ")}</div>'
+                    f'<div class="result-meta">{result_badge(row["outcome"])}'
+                    f'<span>{provider_status}</span></div></div>'
+                )
                 body_rows.append(
                     f'<tr class="{row_class}">'
                     f'<td class="match"><b>{match}</b>'
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
+                    f'<td class="result-cell">{result_panel}</td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
@@ -454,17 +466,15 @@ class ResearchDashboardService:
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
                     f'<td>{disposition_badge(row["disposition"])}</td>'
-                    f'<td>{result_badge(row["outcome"])}'
-                    f'<small>{score} · {escape(row.get("result_provider_status") or row.get("result_phase") or "settled")}</small></td>'
                     f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
                     f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
                     f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
             headers = (
-                "<th>Match</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
+                "<th>Match</th><th>Result</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
                 "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
-                "<th>Route</th><th>Result</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
+                "<th>Route</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
             )
             empty_text = "No historical research picks match these filters."
             colspan = 13
@@ -513,7 +523,7 @@ class ResearchDashboardService:
 :root{{--bg:#111315;--panel:#181b1f;--panel-2:#1c2024;--panel-3:#22272c;--line:#30363d;--line-soft:#252a2f;--text:#eceff1;--muted:#9299a1;--accent:#c2c8ce;--accent-soft:rgba(194,200,206,.10);--blue:#86a6c2;--win:#69c98f;--loss:#e06f78;--warn:#c6a35d;--void:#9aa1a8;color-scheme:dark;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
 *{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(180deg,#14171a 0%,var(--bg) 180px);color:var(--text)}}
 main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:22px}}
-.brand{{display:flex;align-items:center;gap:12px}}.brand-mark{{width:42px;height:42px;border-radius:12px;background:linear-gradient(145deg,#d4d8dc,#8f969d);display:grid;place-items:center;font-weight:900;color:#15181b;box-shadow:0 10px 28px rgba(0,0,0,.22);border:1px solid #d8dde1}}
+.brand{{display:flex;align-items:center;gap:14px}}.sportsbook-logo{{height:46px;min-width:154px;display:flex;align-items:center;padding:0 13px;border-radius:10px;background:linear-gradient(180deg,#25292d,#1a1d20);border:1px solid #3d4349;box-shadow:inset 0 1px rgba(255,255,255,.04),0 10px 28px rgba(0,0,0,.22);font-weight:950;letter-spacing:-.03em}}.logo-q{{display:grid;place-items:center;width:31px;height:31px;margin-right:8px;border:2px solid #d4d8dc;border-radius:50%;color:#f0f2f3;font-size:18px;line-height:1}}.logo-word{{color:#d8dcdf;font-size:15px}}.logo-bet{{margin-left:2px;color:#d3aa5f;font-size:15px}}
 h1{{font-size:24px;line-height:1.1;margin:0}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#aab1b8;font-weight:800;margin-bottom:4px}}
 .subtitle{{margin:0;color:var(--muted);font-size:13px}}.readonly{{border:1px solid var(--line);background:#1a1e22;padding:8px 11px;border-radius:999px;color:#aeb5bc;font-size:12px;white-space:nowrap}}
 .tabs{{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#171a1d;border:1px solid var(--line);border-radius:12px;width:max-content}}
@@ -539,15 +549,16 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
 .badge{{display:inline-flex;align-items:center;justify-content:center;min-width:68px;padding:6px 9px;border-radius:999px;font-weight:950;font-size:10px;letter-spacing:.06em}}
 .route-played{{background:rgba(134,166,194,.12);border:1px solid rgba(134,166,194,.32);color:#a9c3d9}}.route-skipped{{background:rgba(154,161,168,.10);border:1px solid rgba(154,161,168,.25);color:#aab1b8}}.route-blocked{{background:rgba(198,163,93,.11);border:1px solid rgba(198,163,93,.30);color:var(--warn)}}
-.result-win{{background:rgba(105,201,143,.11);border:1px solid rgba(105,201,143,.32);color:var(--win)}}.result-loss{{background:rgba(224,111,120,.11);border:1px solid rgba(224,111,120,.32);color:var(--loss)}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
+.result-win{{background:rgba(105,201,143,.15);border:1px solid rgba(105,201,143,.42);color:#82dda6}}.result-loss{{background:rgba(224,111,120,.15);border:1px solid rgba(224,111,120,.42);color:#f08790}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
+.result-cell{{min-width:154px;padding-top:7px!important;padding-bottom:7px!important}}.result-panel{{min-width:132px;padding:8px 10px;border-radius:10px;border:1px solid #3a4046;background:#202428;box-shadow:inset 0 1px rgba(255,255,255,.03)}}.result-panel .score{{font-size:23px;line-height:1;font-weight:950;letter-spacing:.04em;color:#f4f6f7;margin-bottom:7px}}.result-meta{{display:flex;align-items:center;gap:7px}}.result-meta .badge{{min-width:57px;padding:4px 7px;font-size:9px}}.result-meta>span:last-child{{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#9199a0;font-weight:800}}.result-panel-win{{background:linear-gradient(135deg,rgba(105,201,143,.14),#202428 62%);border-color:rgba(105,201,143,.34)}}.result-panel-loss{{background:linear-gradient(135deg,rgba(224,111,120,.15),#202428 62%);border-color:rgba(224,111,120,.36)}}.result-panel-void{{background:linear-gradient(135deg,rgba(154,161,168,.10),#202428 62%)}}
 .mini-badge{{display:inline-flex;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:850;vertical-align:1px}}.freshness-fresh{{background:rgba(105,201,143,.10);color:var(--win)}}.freshness-stale{{background:rgba(198,163,93,.11);color:var(--warn)}}.freshness-hard-stale{{background:rgba(224,111,120,.10);color:var(--loss)}}
-.positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 3px 0 var(--win)}}.row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
+.positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 4px 0 var(--win);background:linear-gradient(90deg,rgba(105,201,143,.045),transparent 25%)}}.row-loss{{box-shadow:inset 4px 0 var(--loss);background:linear-gradient(90deg,rgba(224,111,120,.05),transparent 25%)}}.row-void{{box-shadow:inset 4px 0 var(--void);background:linear-gradient(90deg,rgba(154,161,168,.035),transparent 25%)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
 .empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#7f878e;margin-top:12px;font-size:11px}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
 @media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
 </style></head><body><main>
 <header class="topbar">
-<div class="brand"><div class="brand-mark">QB</div><div><div class="eyebrow">Research universe</div><h1>QuantBet Research</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
+<div class="brand"><div class="sportsbook-logo" aria-label="QuantBet"><span class="logo-q">Q</span><span class="logo-word">QUANT</span><span class="logo-bet">BET</span></div><div><div class="eyebrow">Research universe</div><h1>Research Board</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
 <nav class="tabs" aria-label="Research sections">
