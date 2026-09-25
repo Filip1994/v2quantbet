@@ -58,7 +58,16 @@ Exclude:
 
 The initial scope may retain the German Bundesliga, 2. Bundesliga and 3. Liga, subject to normal data-quality checks.
 
-### 5. Cup competitions
+### 5. Explicit competition blocklist
+
+Exclude specifically blocked competitions whose production behavior is not accepted even when
+the provider classifies them as senior leagues.
+
+Current explicit exclusion:
+
+- Czech-Republic `3. liga - MSFL`.
+
+### 6. Cup competitions
 
 Exclude all cup and knockout competitions from Phase I, including but not limited to:
 
@@ -92,6 +101,7 @@ Rejected fixtures should expose a stable reason code, for example:
 - `EXCLUDED_ENGLISH_TIER_4_OR_LOWER`;
 - `EXCLUDED_GERMAN_TIER_4_OR_LOWER`;
 - `EXCLUDED_CUP_COMPETITION`;
+- `EXCLUDED_EXPLICIT_COMPETITION`;
 - `AMBIGUOUS_COMPETITION_METADATA`.
 
 ## Phase I policy
