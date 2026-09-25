@@ -70,3 +70,22 @@ def test_record_exposure_blocked_upserts_by_fixture_not_evaluation() -> None:
     assert "SELECT %s, e.evaluation_id, e.fixture_id" in cursor.query
     assert "ON CONFLICT (fixture_id) DO UPDATE" in cursor.query
     assert cursor.params[-1] == evaluation_id
+
+
+def test_record_production_candidate_upserts_same_fixture_universe() -> None:
+    cursor = _Cursor()
+    connection = _Connection(cursor)
+    repository = PostgreSQLResearchSignalRepository(connect=lambda: connection)
+    evaluation_id = "value-evaluation-v1:" + "b" * 64
+
+    signal_id = repository.record_production_candidate(
+        evaluation_id,
+        qualified_at=datetime(2026, 9, 25, 13, tzinfo=UTC),
+        production_pick_id="registered-pick-v1:" + "c" * 64,
+    )
+
+    assert signal_id == "research-signal-v1:" + "a" * 64
+    assert "qualified_at, production_pick_id" in cursor.query
+    assert "ON CONFLICT (fixture_id) DO UPDATE" in cursor.query
+    assert "production_pick_id = EXCLUDED.production_pick_id" in cursor.query
+    assert cursor.params[-1] == evaluation_id

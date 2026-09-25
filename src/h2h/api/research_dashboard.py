@@ -161,12 +161,12 @@ def _one_signal_per_fixture(
     chosen: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
         fixture_id = str(row["fixture_id"])
-        first_blocked_at = row["first_blocked_at"]
-        if not isinstance(first_blocked_at, datetime):
-            raise TypeError("first_blocked_at must be a datetime")
+        qualified_at = row.get("qualified_at") or row.get("first_blocked_at")
+        if not isinstance(qualified_at, datetime):
+            raise TypeError("qualified_at must be a datetime")
 
         rank = (
-            first_blocked_at,
+            qualified_at,
             -strength(row, "expected_value"),
             -strength(row, "edge"),
             -strength(row, "odds"),
@@ -179,7 +179,10 @@ def _one_signal_per_fixture(
     return tuple(
         sorted(
             (item[1] for item in chosen.values()),
-            key=lambda row: (row["last_blocked_at"], str(row["evaluation_id"])),
+            key=lambda row: (
+                row.get("qualified_at") or row.get("last_blocked_at"),
+                str(row["evaluation_id"]),
+            ),
             reverse=True,
         )
     )
@@ -201,9 +204,12 @@ class ResearchDashboardService:
 
     def _derived(self, row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
+        qualified_at = item.get("qualified_at") or item.get("first_blocked_at")
+        if not isinstance(qualified_at, datetime):
+            raise TypeError("qualified_at must be a datetime")
         quote_age = max(
             0,
-            int((item["first_blocked_at"] - item["quote_observed_at"]).total_seconds()),
+            int((qualified_at - item["quote_observed_at"]).total_seconds()),
         )
         item["quote_age_seconds"] = quote_age
         item["freshness"] = (
@@ -227,6 +233,10 @@ class ResearchDashboardService:
         market = params.get("market", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         result = params.get("result", [""])[0].strip().upper()
+        disposition = params.get("disposition", [""])[0].strip().upper()
+        p_bucket = params.get("p_bucket", [""])[0].strip()
+        ev_bucket = params.get("ev_bucket", [""])[0].strip()
+        odds_bucket = params.get("odds_bucket", [""])[0].strip()
         p_min = _parse_fraction(params.get("p_min", [""])[0])
         p_max = _parse_fraction(params.get("p_max", [""])[0])
         ev_min = _parse_fraction(params.get("ev_min", [""])[0])
@@ -245,6 +255,14 @@ class ResearchDashboardService:
             if league and league not in (row.get("competition_name") or "").casefold():
                 return False
             if result and row["outcome"] != result:
+                return False
+            if disposition and row.get("disposition") != disposition:
+                return False
+            if p_bucket and row["probability_bucket"] != p_bucket:
+                return False
+            if ev_bucket and row["ev_bucket"] != ev_bucket:
+                return False
+            if odds_bucket and row["odds_bucket"] != odds_bucket:
                 return False
             if p_min is not None and p < p_min:
                 return False
@@ -304,11 +322,14 @@ class ResearchDashboardService:
         settled = history_rows
         wins = sum(row["outcome"] == "WIN" for row in settled)
         clvs = [row["clv_ppm"] for row in settled if row["clv_ppm"] is not None]
-        positive_clvs = sum(value > 0 for value in clvs)
         pnl = sum(row["pnl_minor"] or 0 for row in settled)
         win_rate = (wins / len(settled) * 100) if settled else None
         avg_clv = (sum(clvs) / len(clvs) / 10_000) if clvs else None
-        positive_clv_rate = (positive_clvs / len(clvs) * 100) if clvs else None
+        played_count = sum(row.get("disposition") == "PLAYED" for row in filtered)
+        skipped_count = sum(row.get("disposition") == "SKIPPED" for row in filtered)
+        blocked_count = sum(
+            row.get("disposition") == "BLOCKED_EXPOSURE" for row in filtered
+        )
 
         def field(name: str) -> str:
             return escape(params.get(name, [""])[0], quote=True)
@@ -340,6 +361,15 @@ class ResearchDashboardService:
             }.get(outcome, "void")
             return f'<span class="badge result-{css}">{escape(outcome)}</span>'
 
+        def disposition_badge(disposition: str) -> str:
+            css = {
+                "PLAYED": "played",
+                "SKIPPED": "skipped",
+                "BLOCKED_EXPOSURE": "blocked",
+            }.get(disposition, "skipped")
+            label = disposition.replace("_", " ")
+            return f'<span class="badge route-{css}">{escape(label)}</span>'
+
         def freshness_badge(value: str) -> str:
             css = {
                 "FRESH": "fresh",
@@ -353,8 +383,13 @@ class ResearchDashboardService:
         if tab == "active":
             for row in rows:
                 exposure = (
-                    f'{row["last_open_exposure_minor"] / 100:.0f}/'
-                    f'{row["exposure_cap_minor"] / 100:.0f}'
+                    "—"
+                    if row["last_open_exposure_minor"] is None
+                    or row["exposure_cap_minor"] is None
+                    else (
+                        f'{row["last_open_exposure_minor"] / 100:.0f}/'
+                        f'{row["exposure_cap_minor"] / 100:.0f} RSD'
+                    )
                 )
                 match = f'{escape(row["home_team"])} – {escape(row["away_team"])}'
                 competition = escape(row.get("competition_name") or "—")
@@ -367,23 +402,26 @@ class ResearchDashboardService:
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])}</small></td>'
+                    f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td class="{signed_class(row["edge"])}"><b>{_pct(row["edge"])}</b></td>'
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
                     f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
-                    f'<td>{_time(row["first_blocked_at"])}'
+                    f'<td>{_time(row["qualified_at"])}'
                     f'<small>{row["quote_age_seconds"]}s · {freshness_badge(row["freshness"])}</small></td>'
-                    f'<td><b>{exposure} RSD</b><small>blocked ×{row["blocked_count"]}</small></td>'
+                    f'<td><b>{exposure}</b><small>'
+                    f'{"blocked ×" + str(row["blocked_count"]) if row["blocked_count"] is not None else "production candidate"}'
+                    f'</small></td>'
                     f'<td>{result_badge(row["outcome"])}</td>'
                     "</tr>"
                 )
             headers = (
                 "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
-                "<th>Odds</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
-                "<th>Detected</th><th>Exposure</th><th>Status</th>"
+                "<th>Odds</th><th>Route</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
+                "<th>Qualified</th><th>Exposure</th><th>Status</th>"
             )
             empty_text = "No active research picks match these filters."
-            colspan = 11
+            colspan = 12
         else:
             for row in rows:
                 clv_value = (
@@ -408,27 +446,28 @@ class ResearchDashboardService:
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
-                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["bookmaker"])}</small></td>'
+                    f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
                     f'<td><b>{_odd(row["closing_odds"])}</b><small>{_time(row["closing_observed_at"])}</small></td>'
                     f'<td class="{signed_class(clv_value)}"><b>{clv}</b></td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
-                    f'<small>fair {_pct(row["market_fair_probability"])}</small></td>'
+                    f'<small>{escape(row["probability_bucket"])} · fair {_pct(row["market_fair_probability"])}</small></td>'
                     f'<td class="{signed_class(row["expected_value"])}"><b>{_pct(row["expected_value"])}</b>'
                     f'<small>{escape(row["ev_bucket"])}</small></td>'
+                    f'<td>{disposition_badge(row["disposition"])}</td>'
                     f'<td>{result_badge(row["outcome"])}'
                     f'<small>{score} · {escape(row.get("result_provider_status") or row.get("result_phase") or "settled")}</small></td>'
                     f'<td class="{signed_class(pnl_value)}"><b>{pnl_rsd}</b></td>'
                     f'<td><b>{escape(row["bookmaker"])}</b><small>{escape(row["source"])}</small></td>'
-                    f'<td>{_time(row["first_blocked_at"])}</td>'
+                    f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
             headers = (
                 "<th>Match</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
                 "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
-                "<th>Result</th><th>P/L</th><th>Bookmaker</th><th>Detected</th>"
+                "<th>Route</th><th>Result</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
             )
             empty_text = "No historical research picks match these filters."
-            colspan = 12
+            colspan = 13
 
         rows_html = (
             "".join(body_rows)
@@ -436,12 +475,17 @@ class ResearchDashboardService:
         )
         win_rate_text = "—" if win_rate is None else f"{win_rate:.1f}%"
         avg_clv_text = "—" if avg_clv is None else f"{avg_clv:+.2f}%"
-        positive_clv_text = (
-            "—" if positive_clv_rate is None else f"{positive_clv_rate:.1f}%"
-        )
         pnl_text = f"{pnl / 100:+.0f} RSD"
         pnl_class = signed_class(pnl)
         avg_clv_class = signed_class(avg_clv)
+
+        def option_list(name: str, values: tuple[str, ...]) -> str:
+            selected = field(name)
+            return "".join(
+                f'<option value="{escape(value, quote=True)}" '
+                f'{"selected" if selected == value else ""}>{escape(value)}</option>'
+                for value in values
+            )
 
         result_filter_html = ""
         if tab == "history":
@@ -475,7 +519,7 @@ h1{{font-size:24px;line-height:1.1;margin:0}}.eyebrow{{font-size:11px;text-trans
 .tabs{{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#171a1d;border:1px solid var(--line);border-radius:12px;width:max-content}}
 .tabs a{{text-decoration:none;color:#9ca3aa;padding:9px 16px;border-radius:8px;font-weight:800;font-size:13px;transition:.15s ease}}
 .tabs a:hover{{color:var(--text);background:#24292e}}.tabs a.active{{background:#d4d8dc;color:#17191b;box-shadow:0 5px 16px rgba(0,0,0,.24)}}
-.cards{{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:10px;margin-bottom:14px}}
+.cards{{display:grid;grid-template-columns:repeat(8,minmax(130px,1fr));gap:10px;margin-bottom:14px}}
 .card{{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:12px;padding:14px 15px;min-height:84px}}
 .card:after{{content:"";position:absolute;width:72px;height:72px;border-radius:50%;right:-26px;top:-30px;background:rgba(255,255,255,.028)}}
 .card small{{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:800}}.card b{{display:block;font-size:22px;margin-top:8px;letter-spacing:-.02em}}
@@ -494,6 +538,7 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#20252a}}t
 td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
 .badge{{display:inline-flex;align-items:center;justify-content:center;min-width:68px;padding:6px 9px;border-radius:999px;font-weight:950;font-size:10px;letter-spacing:.06em}}
+.route-played{{background:rgba(134,166,194,.12);border:1px solid rgba(134,166,194,.32);color:#a9c3d9}}.route-skipped{{background:rgba(154,161,168,.10);border:1px solid rgba(154,161,168,.25);color:#aab1b8}}.route-blocked{{background:rgba(198,163,93,.11);border:1px solid rgba(198,163,93,.30);color:var(--warn)}}
 .result-win{{background:rgba(105,201,143,.11);border:1px solid rgba(105,201,143,.32);color:var(--win)}}.result-loss{{background:rgba(224,111,120,.11);border:1px solid rgba(224,111,120,.32);color:var(--loss)}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
 .mini-badge{{display:inline-flex;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:850;vertical-align:1px}}.freshness-fresh{{background:rgba(105,201,143,.10);color:var(--win)}}.freshness-stale{{background:rgba(198,163,93,.11);color:var(--warn)}}.freshness-hard-stale{{background:rgba(224,111,120,.10);color:var(--loss)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 3px 0 var(--win)}}.row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
@@ -502,7 +547,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 @media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
 </style></head><body><main>
 <header class="topbar">
-<div class="brand"><div class="brand-mark">QB</div><div><div class="eyebrow">Shadow intelligence</div><h1>QuantBet Research</h1><p class="subtitle">Exposure-blocked value signals · one canonical pick per fixture</p></div></div>
+<div class="brand"><div class="brand-mark">QB</div><div><div class="eyebrow">Research universe</div><h1>QuantBet Research</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
 <nav class="tabs" aria-label="Research sections">
@@ -510,17 +555,23 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
 </nav>
 <section class="cards">
-<div class="card"><small>Active picks</small><b>{len(active_rows)}</b></div>
-<div class="card"><small>History</small><b>{len(history_rows)}</b></div>
+<div class="card"><small>Active</small><b>{len(active_rows)}</b></div>
+<div class="card"><small>Settled</small><b>{len(history_rows)}</b></div>
+<div class="card"><small>Played</small><b>{played_count}</b></div>
+<div class="card"><small>Skipped</small><b>{skipped_count}</b></div>
+<div class="card"><small>Exposure blocked</small><b>{blocked_count}</b></div>
 <div class="card"><small>Win rate</small><b>{win_rate_text}</b></div>
 <div class="card"><small>Flat P/L</small><b class="{pnl_class}">{pnl_text}</b></div>
-<div class="card"><small>Avg research CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
-<div class="card"><small>Positive CLV</small><b>{positive_clv_text}</b></div>
+<div class="card"><small>Avg CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
 </section>
 <div class="toolbar">
 <form method="get">
 <input type="hidden" name="tab" value="{tab}">
 <select name="market" aria-label="Market filter"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
+<select name="disposition" aria-label="Route filter"><option value="">All routes</option>{option_list("disposition", ("PLAYED","SKIPPED","BLOCKED_EXPOSURE"))}</select>
+<select name="p_bucket" aria-label="Probability bucket"><option value="">All p buckets</option>{option_list("p_bucket", ("40–45%","45–50%","50–55%","55–60%","60–65%","65–70%","70–75%","75%+"))}</select>
+<select name="ev_bucket" aria-label="EV bucket"><option value="">All EV buckets</option>{option_list("ev_bucket", ("7–10%","10–15%","15–20%","20–30%","30%+"))}</select>
+<select name="odds_bucket" aria-label="Odds bucket"><option value="">All odds buckets</option>{option_list("odds_bucket", ("1.40–1.60","1.61–1.80","1.81–2.00","2.01–2.50","2.51–3.00","3.01–3.50","other"))}</select>
 <input name="league" placeholder="League" value="{field("league")}">
 <input name="p_min" placeholder="Model p min %" value="{field("p_min")}">
 <input name="p_max" placeholder="Model p max %" value="{field("p_max")}">
@@ -536,7 +587,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="table-title"><b>{"Active research board" if tab == "active" else "Settled research history"}</b><span>{len(rows)} shown</span></div>
 <div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
 </section>
-<footer><span>Research close = last stored same-series/source pre-kickoff quote. CLV is shown only when the closing quote is later than entry.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only</span></footer>
+<footer><span>Universe = every canonical candidate that reached production eligibility: PLAYED/SKIPPED production picks plus exposure-blocked candidates. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
 </main></body></html>"""
 
 
