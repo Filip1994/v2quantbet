@@ -129,7 +129,17 @@ class PostgreSQLResearchSignalRepository:
             raise TypeError("policy must be an OddsLifecyclePolicy")
         with self.connect() as connection, connection.cursor() as cursor:
             self._lock(cursor, f"research-monitoring:{signal_id}")
-            self._require_context(cursor, signal_id)
+            context = self._require_context(cursor, signal_id)
+            cursor.execute(
+                "SELECT kickoff_at FROM fixture_observations WHERE fixture_id = %s "
+                "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1",
+                (context[1],),
+            )
+            fixture = cursor.fetchone()
+            if fixture is None:
+                raise PickMonitoringConflictError("no authoritative fixture observation")
+            lead_seconds = max(900, policy.closing_max_age_seconds * 3)
+            next_refresh = max(started, fixture[0] - timedelta(seconds=lead_seconds))
             existing = self._load_state(cursor, signal_id)
             if existing is not None:
                 if existing.policy != policy:
@@ -153,31 +163,51 @@ class PostgreSQLResearchSignalRepository:
                     policy.current_max_age_seconds,
                     policy.closing_max_age_seconds,
                     started,
-                    started,
+                    next_refresh,
                     started,
                 ),
             )
             return self._load_state(cursor, signal_id, required=True)
 
     def claim_due(self, *, claimed_at: datetime, limit: int) -> tuple[str, ...]:
+        """Claim at most one representative per selected quote series.
+
+        Multiple blocked evaluations can share one fixture/bookmaker/market/selection series.
+        Advancing every state on that series makes one provider refresh serve all of them.
+        """
         claimed = _utc(claimed_at, "claimed_at")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("limit must be a positive integer")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT signal_id, monitoring_interval_seconds "
-                "FROM research_signal_monitoring_states "
-                "WHERE state = 'MONITORING' AND next_refresh_at <= %s "
-                "ORDER BY next_refresh_at, signal_id FOR UPDATE SKIP LOCKED LIMIT %s",
+                "SELECT signal_id, selected_series_id, monitoring_interval_seconds FROM ("
+                "SELECT DISTINCT ON (e.selected_series_id) "
+                "m.signal_id, e.selected_series_id, m.monitoring_interval_seconds, "
+                "m.next_refresh_at "
+                "FROM research_signal_monitoring_states m "
+                "JOIN research_signals s ON s.signal_id = m.signal_id "
+                "JOIN value_evaluations e ON e.evaluation_id = s.evaluation_id "
+                "WHERE m.state = 'MONITORING' AND m.next_refresh_at <= %s "
+                "ORDER BY e.selected_series_id, m.next_refresh_at, m.signal_id"
+                ") due ORDER BY next_refresh_at, signal_id LIMIT %s",
                 (claimed, limit),
             )
             rows = cursor.fetchall()
-            for signal_id, interval in rows:
+            for _signal_id, series_id, interval in rows:
                 cursor.execute(
-                    "UPDATE research_signal_monitoring_states SET next_refresh_at = %s, "
-                    "updated_at = %s, version = version + 1 "
-                    "WHERE signal_id = %s AND state = 'MONITORING'",
-                    (claimed + timedelta(seconds=int(interval)), claimed, signal_id),
+                    "UPDATE research_signal_monitoring_states m SET "
+                    "next_refresh_at = %s, updated_at = %s, version = version + 1 "
+                    "FROM research_signals s, value_evaluations e "
+                    "WHERE m.signal_id = s.signal_id "
+                    "AND e.evaluation_id = s.evaluation_id "
+                    "AND e.selected_series_id = %s "
+                    "AND m.state = 'MONITORING' AND m.next_refresh_at <= %s",
+                    (
+                        claimed + timedelta(seconds=int(interval)),
+                        claimed,
+                        series_id,
+                        claimed,
+                    ),
                 )
             return tuple(str(row[0]) for row in rows)
 
