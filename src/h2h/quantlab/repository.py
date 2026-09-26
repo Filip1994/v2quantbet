@@ -23,6 +23,40 @@ def _row_dicts(cursor: Any) -> tuple[dict[str, Any], ...]:
     return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
 
 
+def _raw_team_stat(raw_payload: Any, team_id: int, stat_name: str) -> int | None:
+    payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+    if not isinstance(payload, dict):
+        return None
+    response = payload.get("response")
+    if not isinstance(response, list):
+        return None
+    for record in response:
+        if not isinstance(record, dict):
+            continue
+        team = record.get("team")
+        if not isinstance(team, dict) or team.get("id") != team_id:
+            continue
+        statistics = record.get("statistics")
+        if not isinstance(statistics, list):
+            return None
+        for stat in statistics:
+            if not isinstance(stat, dict):
+                continue
+            if str(stat.get("type") or "").strip().casefold() != stat_name.casefold():
+                continue
+            value = stat.get("value")
+            if isinstance(value, bool) or value is None:
+                return None
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            if isinstance(value, str) and value.strip().isdigit():
+                return int(value.strip())
+            return None
+    return None
+
+
 class PostgreSQLQuantLabRepository:
     """Reads shared immutable football facts; writes only quantlab_* state."""
 
@@ -53,6 +87,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_market_observations",
             "quantlab_market_captures",
             "quantlab_goal_decisions",
+            "quantlab_count_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
             "quantlab_standings_snapshots",
@@ -173,6 +208,118 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
         )
+
+    def count_market_rows(
+        self,
+        fixture_id: str,
+        *,
+        lab: str,
+        decision_at: datetime,
+    ) -> tuple[dict[str, Any], ...]:
+        if lab not in {"CORNER", "CARD"}:
+            raise ValueError("count-market lab must be CORNER or CARD")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
+                "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
+                "captured_at FROM quantlab_market_observations "
+                "WHERE fixture_id = %s AND lab_owner = %s AND captured_at <= %s "
+                "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, market_observation_id",
+                (fixture_id, lab, decision_at),
+            )
+            return _row_dicts(cursor)
+
+    def save_count_decision(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_count_decisions ("
+                "decision_id, fixture_id, lab, decision_at, policy_version, model_name, "
+                "model_version, bookmaker_id, bookmaker_name, provider_bet_id, "
+                "provider_bet_name, market_key, selection, line, selected_observation_id, "
+                "companion_observation_id, quote_observed_at, odds, companion_odds, "
+                "market_probability, model_probability, edge, expected_value, decision, "
+                "reason, evidence_fingerprint, details"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    item.decision_id,
+                    item.fixture_id,
+                    item.lab,
+                    item.decision_at,
+                    item.policy_version,
+                    item.model_name,
+                    item.model_version,
+                    item.bookmaker_id,
+                    item.bookmaker_name,
+                    item.provider_bet_id,
+                    item.provider_bet_name,
+                    item.market_key,
+                    item.selection,
+                    item.line,
+                    item.selected_observation_id,
+                    item.companion_observation_id,
+                    item.quote_observed_at,
+                    item.odds,
+                    item.companion_odds,
+                    item.market_probability,
+                    item.model_probability,
+                    item.edge,
+                    item.expected_value,
+                    item.decision,
+                    item.reason,
+                    item.evidence_fingerprint,
+                    _json(item.details),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_count_shadow_bet(self, item: Any, *, stake_minor: int) -> bool:
+        if item.decision != "PICK" or item.lab not in {"CORNER", "CARD"}:
+            raise ValueError("only CORNER/CARD PICK decisions may create count shadow bets")
+        shadow_bet_id = _identifier(
+            "quantlab-shadow-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "lab": item.lab,
+                "market_key": item.market_key,
+                "selection": item.selection,
+                "line": item.line,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_shadow_bets ("
+                "shadow_bet_id, fixture_id, lab, bookmaker_id, bookmaker_name, provider_bet_id, "
+                "provider_bet_name, market_key, selection, line, model_name, model_version, "
+                "model_probability, market_probability, edge, expected_value, odds, "
+                "quote_observed_at, decision_at, stake_minor"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (
+                    shadow_bet_id,
+                    item.fixture_id,
+                    item.lab,
+                    item.bookmaker_id,
+                    item.bookmaker_name,
+                    item.provider_bet_id,
+                    item.provider_bet_name,
+                    item.market_key,
+                    item.selection,
+                    item.line,
+                    item.model_name,
+                    item.model_version,
+                    item.model_probability,
+                    item.market_probability,
+                    item.edge,
+                    item.expected_value,
+                    item.odds,
+                    item.quote_observed_at,
+                    item.decision_at,
+                    stake_minor,
+                ),
+            )
+            return cursor.rowcount > 0
 
     def save_goal_decision(self, item: Any) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
@@ -738,6 +885,93 @@ class PostgreSQLQuantLabRepository:
                 (referee, decision_at, decision_at, decision_at, limit),
             )
             return _row_dicts(cursor)
+
+    def team_corner_history(
+        self,
+        team_id: int,
+        *,
+        before: datetime,
+        limit: int = 10,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.fixture_id, s.raw_payload, "
+                "COALESCE(q.home_team_id, p.provider_home_team_id) AS home_team_id, "
+                "COALESCE(q.away_team_id, p.provider_away_team_id) AS away_team_id, "
+                "COALESCE(q.kickoff_at, po.kickoff_at) AS kickoff_at "
+                "FROM quantlab_match_statistics_observations s "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team_id, away_team_id, kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") q ON TRUE "
+                "LEFT JOIN fixtures p ON p.fixture_id = s.fixture_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT kickoff_at FROM fixture_observations o WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") po ON TRUE "
+                "WHERE s.available_at <= %s AND COALESCE(q.kickoff_at, po.kickoff_at) < %s "
+                "AND (COALESCE(q.home_team_id, p.provider_home_team_id) = %s "
+                " OR COALESCE(q.away_team_id, p.provider_away_team_id) = %s) "
+                "ORDER BY COALESCE(q.kickoff_at, po.kickoff_at) DESC, s.available_at DESC "
+                "LIMIT %s",
+                (before, before, team_id, team_id, limit),
+            )
+            rows = _row_dicts(cursor)
+
+        history: list[dict[str, Any]] = []
+        for row in rows:
+            home_team_id = row.get("home_team_id")
+            away_team_id = row.get("away_team_id")
+            if home_team_id is None or away_team_id is None:
+                continue
+            home_id = int(home_team_id)
+            away_id = int(away_team_id)
+            home_corners = _raw_team_stat(row.get("raw_payload"), home_id, "Corner Kicks")
+            away_corners = _raw_team_stat(row.get("raw_payload"), away_id, "Corner Kicks")
+            if home_corners is None or away_corners is None:
+                continue
+            if team_id == home_id:
+                corners_for, corners_against, was_home = home_corners, away_corners, True
+            elif team_id == away_id:
+                corners_for, corners_against, was_home = away_corners, home_corners, False
+            else:
+                continue
+            history.append(
+                {
+                    "fixture_id": row["fixture_id"],
+                    "kickoff_at": row["kickoff_at"],
+                    "corners_for": corners_for,
+                    "corners_against": corners_against,
+                    "was_home": was_home,
+                }
+            )
+        return tuple(history)
+
+    def latest_card_feature(
+        self,
+        fixture_id: str,
+        *,
+        decision_at: datetime,
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload FROM quantlab_card_feature_snapshots "
+                "WHERE fixture_id = %s AND decision_at <= %s "
+                "ORDER BY decision_at DESC, feature_snapshot_id DESC LIMIT 1",
+                (fixture_id, decision_at),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            return dict(zip(columns, row, strict=True))
 
     def save_card_feature_snapshot(self, item: Any) -> str:
         snapshot_id = _identifier(
