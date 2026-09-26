@@ -141,6 +141,13 @@ class QuantLabRuntime:
                     captured_at=now,
                 )
                 self._repository.save_fixture_context(parsed)
+                context = {
+                    "referee": parsed.referee,
+                    "kickoff_at": parsed.kickoff_at,
+                    "available_at": parsed.available_at,
+                }
+            if not context.get("referee"):
+                continue
             if not self._repository.statistics_exists(fixture_id):
                 payload = self._provider.fetch_statistics(int(fixture["provider_fixture_id"]))
                 parsed_stats = parse_fixture_statistics(
