@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from h2h.quantlab.goal_lab.injuries import build_goal_injury_features
+from h2h.quantlab.goal_lab.lineups import parse_goal_lineup_context
 from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
 
@@ -160,6 +161,90 @@ def test_goal_injury_features_reject_future_snapshot() -> None:
 
     with pytest.raises(ValueError, match="after decision_at"):
         build_goal_injury_features(
+            capture,
+            home_team_id=10,
+            away_team_id=11,
+            decision_at=NOW,
+        )
+
+
+def _lineup_capture(response: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "lineup_capture_id": "lineup-1",
+        "available_at": NOW - timedelta(minutes=10),
+        "status": "AVAILABLE",
+        "response_team_count": len(response),
+        "reason": None,
+        "source": "api-football:fixtures/lineups",
+        "raw_payload": {"response": response},
+    }
+
+
+def test_goal_lineup_parser_preserves_categorical_context_separately() -> None:
+    capture = _lineup_capture(
+        [
+            {
+                "team": {"id": 10},
+                "formation": "4-3-3",
+                "startXI": [
+                    {"player": {"id": player_id, "name": f"H{player_id}"}}
+                    for player_id in range(100, 111)
+                ],
+                "substitutes": [
+                    {"player": {"id": player_id, "name": f"HB{player_id}"}}
+                    for player_id in range(120, 127)
+                ],
+            },
+            {
+                "team": {"id": 11},
+                "formation": "3-5-2",
+                "startXI": [
+                    {"player": {"id": player_id, "name": f"A{player_id}"}}
+                    for player_id in range(200, 211)
+                ],
+                "substitutes": [
+                    {"player": {"id": player_id, "name": f"AB{player_id}"}}
+                    for player_id in range(220, 227)
+                ],
+            },
+        ]
+    )
+
+    numeric, meta = parse_goal_lineup_context(
+        capture,
+        home_team_id=10,
+        away_team_id=11,
+        decision_at=NOW,
+    )
+
+    assert numeric["lineup_coverage_flag"] == 1.0
+    assert numeric["home_starting_xi_count"] == 11.0
+    assert numeric["away_starting_xi_count"] == 11.0
+    assert numeric["home_bench_count"] == 7.0
+    assert meta["home_formation"] == "4-3-3"
+    assert meta["away_formation"] == "3-5-2"
+    assert len(meta["home_starting_player_ids"]) == 11
+
+
+def test_empty_lineup_response_is_not_treated_as_zero_player_lineup() -> None:
+    numeric, meta = parse_goal_lineup_context(
+        _lineup_capture([]),
+        home_team_id=10,
+        away_team_id=11,
+        decision_at=NOW,
+    )
+
+    assert numeric["lineup_coverage_flag"] == 0.0
+    assert "home_starting_xi_count" not in numeric
+    assert meta["quality"] == "NOT_PUBLISHED"
+
+
+def test_goal_lineup_parser_rejects_future_capture() -> None:
+    capture = _lineup_capture([])
+    capture["available_at"] = NOW + timedelta(seconds=1)
+
+    with pytest.raises(ValueError, match="after decision_at"):
+        parse_goal_lineup_context(
             capture,
             home_team_id=10,
             away_team_id=11,
