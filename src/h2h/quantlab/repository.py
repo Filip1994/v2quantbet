@@ -960,7 +960,7 @@ class PostgreSQLQuantLabRepository:
                 " OR COALESCE(q.away_team_id, p.provider_away_team_id) = %s) "
                 "ORDER BY COALESCE(q.kickoff_at, po.kickoff_at) DESC, s.available_at DESC "
                 "LIMIT %s",
-                (before, before, team_id, team_id, limit),
+                (before, before, team_id, team_id, max(limit * 4, 20)),
             )
             rows = _row_dicts(cursor)
 
@@ -991,6 +991,8 @@ class PostgreSQLQuantLabRepository:
                     "was_home": was_home,
                 }
             )
+            if len(history) >= limit:
+                break
         return tuple(history)
 
     def latest_card_feature(
