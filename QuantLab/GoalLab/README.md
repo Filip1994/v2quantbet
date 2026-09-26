@@ -18,18 +18,19 @@ information is not silently mixed into an independent sports probability model.
 
 ## League scope
 
-GoalLab uses GOAL_SCOPE_V1 and intentionally has a much broader universe than CardLab
+GoalLab uses GOAL_SCOPE_V2 and intentionally has a much broader universe than CardLab
 and CornerLab.
 
 Eligible by default: professional senior competitions not explicitly excluded.
 
 GoalLab no longer inherits production Phase-I fixture discovery. QuantLab first captures
-global API-Football date shards into its own fixture inventory, then applies GOAL_SCOPE_V1
+global API-Football date shards into its own fixture inventory, then applies GOAL_SCOPE_V2
 locally. This is what allows GoalLab to retain lower professional leagues that production
 may intentionally ignore.
 
 Excluded locally before fixture-specific QuantLab requests:
 
+- all women\'s football, detected from normalized competition/team metadata;
 - youth competitions U5 through U23 and equivalent Under labels;
 - academy, reserve/reserves and amateur/amateurs competitions;
 - reserve-team suffixes such as B and II where detected by the deterministic rule;
@@ -45,8 +46,8 @@ and a new/updated version rather than ad-hoc runtime inference.
 ## Markets
 
 The shared collector requests one all-market Bet365/1xBet payload for globally discovered
-upcoming fixtures. GOAL persistence still follows GOAL_SCOPE_V1, while CARD/CORNER
-research follows the broader CARDCORNER_MARKET_DRIVEN_V3 universe. Canonical modeling
+upcoming fixtures. GOAL persistence still follows GOAL_SCOPE_V2, while CARD/CORNER
+research follows the broader CARDCORNER_MARKET_DRIVEN_V4 universe. Canonical modeling
 and settlement support remain explicit and versioned.
 
 ## Shadow Pick Engine V1
