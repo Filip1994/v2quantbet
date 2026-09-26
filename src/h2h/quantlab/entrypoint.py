@@ -23,7 +23,10 @@ from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
-from h2h.quantlab.goal_lab.structural_shadow_engine import GoalLabStructuralShadowEngine
+from h2h.quantlab.goal_lab.structural_shadow_engine import (
+    GoalLabStructuralShadowEngine,
+    StructuralGoalPolicy,
+)
 from h2h.quantlab.provider import QuantLabApiFootballClient
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -61,13 +64,23 @@ def _positive_integer(name: str, default: str) -> int:
     return value
 
 
+def _boolean(name: str, default: str = "false") -> bool:
+    value = os.getenv(name, default).strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: int = 20) -> None:
-    """Emit a bounded read-only snapshot for operational inspection."""
-    for row in repository.list_bets("GOAL", limit=limit):
+    """Emit the dedicated canonical GoalLab pick sector."""
+    for row in repository.list_goal_picks(limit=limit):
         LOGGER.info(
-            "QuantLab GoalLab shadow pick fixture=%s match=%s vs %s league=%s "
-            "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
-            "model_p=%s market_p=%s edge=%s ev=%s",
+            "GoalLab canonical pick fixture=%s match=%s vs %s league=%s "
+            "kickoff=%s bookmaker=%s market=%s selection=%s odds=%s "
+            "model_p=%s market_p=%s edge=%s ev=%s lambda_home=%s lambda_away=%s "
+            "outcome=%s pnl_minor=%s model_version=%s",
             row.get("fixture_id"),
             row.get("home_team"),
             row.get("away_team"),
@@ -76,12 +89,16 @@ def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: i
             row.get("bookmaker_name"),
             row.get("market_key"),
             row.get("selection"),
-            row.get("line"),
             row.get("odds"),
             row.get("model_probability"),
             row.get("market_probability"),
             row.get("edge"),
             row.get("expected_value"),
+            row.get("expected_home_goals"),
+            row.get("expected_away_goals"),
+            row.get("outcome") or "PENDING",
+            row.get("pnl_minor"),
+            row.get("model_version"),
         )
 
 
@@ -122,7 +139,16 @@ def main() -> None:
         PostgreSQLActiveDixonColesModelRepository(database_url),
     )
     goal_control_engine = GoalLabShadowPickEngine(repository, model_loader)
-    goal_structural_engine = GoalLabStructuralShadowEngine(repository)
+    goal_pick_authority = _boolean("QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false")
+    goal_structural_engine = GoalLabStructuralShadowEngine(
+        repository,
+        policy=StructuralGoalPolicy(pick_authority=goal_pick_authority),
+    )
+    LOGGER.info(
+        "GoalLab DC+ pick authority=%s policy=%s",
+        goal_pick_authority,
+        goal_structural_engine._policy.pick_policy_version,
+    )
     goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
