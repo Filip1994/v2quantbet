@@ -54,3 +54,37 @@ versioned.
 ## Referee variables
 
 Referee card/foul variables do not belong to GoalLab v1.
+
+
+## Shadow decision engine
+
+Task 002 adds GOALLAB_SHADOW_POLICY_V1 as the first executable GoalLab shadow-pick
+pipeline.
+
+The control model is the already-active, validated API-Football Dixon-Coles artifact for
+the fixture's exact league and season. QuantLab reads that model only; it does not train,
+activate or mutate production model state.
+
+Task 002 canonical markets are intentionally narrow:
+
+- O/U 2.5 (provider bet 5): OVER / UNDER;
+- BTTS (provider bet 8): YES / NO.
+
+A market is evaluable only when both complementary selections from the same bookmaker and
+capture are present. Market fair probability uses proportional two-way de-vig. The engine
+records every evaluated outcome as PICK or PASS with an explicit reason. Missing active
+model, missing team coverage, incomplete markets, stale quotes and policy failures remain
+visible rather than being converted into synthetic probabilities.
+
+GOALLAB_SHADOW_POLICY_V1 defaults:
+
+- minimum edge: 3 percentage points;
+- minimum expected value: 3%;
+- odds: 1.40–4.00;
+- maximum quote age: 13 hours;
+- minimum time to kickoff: 15 minutes;
+- flat shadow stake: 10,000 minor units.
+
+When multiple supported bookmakers qualify for the same market/selection/evidence cycle,
+only the best available price becomes a shadow PICK. These thresholds are laboratory
+controls only and do not alter production registration policy.
