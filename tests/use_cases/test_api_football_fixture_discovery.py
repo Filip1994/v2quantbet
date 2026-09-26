@@ -97,7 +97,7 @@ def test_phase_i_policy_is_authoritative_for_multi_league_provider_payload() -> 
         "Premier League",
         "La Liga",
         "Serie A",
-         "Bundesliga",
+        "Bundesliga",
         "Major League Soccer",
     }
 
