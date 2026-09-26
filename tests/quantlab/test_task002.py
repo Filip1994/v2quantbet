@@ -3,8 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from h2h.odds.budget import ApiBudgetExceededError
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
+from h2h.quantlab.runtime import QuantLabRuntime
 
 
 NOW = datetime(2026, 9, 26, 10, 0, tzinfo=UTC)
@@ -170,3 +172,42 @@ def test_goal_engine_requires_complete_two_sided_market():
     assert result.decisions_inserted == 1
     assert repo.decisions[0].reason == "NO_COMPLETE_GOAL_MARKET"
     assert repo.shadows == []
+
+
+def test_runtime_evaluates_goal_shadow_picks_after_api_budget_stops_collection():
+    fixture = _fixture()
+
+    class BudgetRepo:
+        def fixture_discovery_due(self, *_args, **_kwargs):
+            return True
+
+        def upcoming_fixtures(self, **_kwargs):
+            return (fixture,)
+
+    class ExhaustedProvider:
+        def fetch_fixtures_for_date(self, _fixture_date):
+            raise ApiBudgetExceededError("exhausted")
+
+    class GoalEngine:
+        def __init__(self):
+            self.calls = []
+
+        def run_fixture(self, item, *, decision_at):
+            self.calls.append((item["fixture_id"], decision_at))
+            return SimpleNamespace(decisions_inserted=1, picks_inserted=1)
+
+    goal_engine = GoalEngine()
+    runtime = QuantLabRuntime(
+        BudgetRepo(),
+        ExhaustedProvider(),
+        clock=lambda: NOW,
+        goal_engine=goal_engine,
+    )
+
+    result = runtime.run_once()
+
+    assert result["fixtures_discovered"] == 0
+    assert result["market_fixtures"] == 0
+    assert result["goal_decisions"] == 1
+    assert result["goal_picks"] == 1
+    assert goal_engine.calls == [("api-football:9001", NOW)]
