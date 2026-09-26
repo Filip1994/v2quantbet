@@ -1,8 +1,9 @@
 """GoalLab DC+ Pro Structural V1 market evaluation.
 
 The structural model owns probabilities. Bookmaker odds are used only for de-vig market
-probability, edge and expected value. V1 remains evaluation-only until its holdout and
-leakage audit are recorded; qualifying value is therefore PASS/STRUCTURAL_VALUE_SIGNAL_ONLY.
+probability, edge and expected value. Candidate evidence is always recorded. Canonical
+pick persistence is controlled by an explicit authority gate that remains off by default
+until the holdout/leakage audit is accepted.
 """
 
 from __future__ import annotations
@@ -15,11 +16,18 @@ from math import isfinite
 from typing import Any
 
 from h2h.quantlab.goal_lab.model import MODEL_NAME, GoalStructuralModelService
+from h2h.quantlab.goal_lab.picks import (
+    FLAT_STAKE_MINOR,
+    PICK_POLICY_VERSION,
+    GoalCanonicalPick,
+    candidate_rank,
+    choose_canonical_candidate,
+)
 from h2h.quantlab.goal_lab.shadow_engine import GoalDecision, GoalEngineResult
 from h2h.quantlab.scope import goal_scope
 
 
-POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V1"
+POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2"
 MIN_EDGE = 0.03
 MIN_EXPECTED_VALUE = 0.03
 MIN_ODDS = 1.40
@@ -50,11 +58,14 @@ class StructuralGoalPolicy:
     max_odds: float = MAX_ODDS
     max_quote_age_seconds: int = MAX_QUOTE_AGE_SECONDS
     min_seconds_to_kickoff: int = MIN_SECONDS_TO_KICKOFF
+    flat_stake_minor: int = FLAT_STAKE_MINOR
+    pick_authority: bool = False
+    pick_policy_version: str = PICK_POLICY_VERSION
     version: str = POLICY_VERSION
 
 
 class GoalLabStructuralShadowEngine:
-    """Run structural probabilities without granting V1 shadow-pick authority."""
+    """Evaluate DC+ value and optionally persist one canonical GoalLab pick per fixture."""
 
     def __init__(self, repository: Any, *, policy: StructuralGoalPolicy | None = None) -> None:
         self._repository = repository
@@ -259,17 +270,53 @@ class GoalLabStructuralShadowEngine:
             if score > current_score:
                 winners[key] = item
 
+        qualifying = tuple(winners.values())
+        canonical = choose_canonical_candidate(qualifying)
+        ranked_candidates = sorted(qualifying, key=candidate_rank, reverse=True)
+        rank_payload = {
+            "rule_version": self._policy.pick_policy_version,
+            "rank_order": ["expected_value", "edge", "model_probability", "odds"],
+            "candidate_count": len(ranked_candidates),
+            "candidates": [
+                {
+                    "rank": index + 1,
+                    "bookmaker_id": int(candidate["pair"]["bookmaker_id"]),
+                    "bookmaker_name": str(candidate["pair"]["bookmaker_name"]),
+                    "market_key": str(candidate["pair"]["market_key"]),
+                    "selection": str(candidate["selection"]),
+                    "line": (
+                        None
+                        if candidate["pair"].get("line") is None
+                        else float(candidate["pair"]["line"])
+                    ),
+                    "odds": float(candidate["odds"]),
+                    "model_probability": float(candidate["model_probability"]),
+                    "market_probability": float(candidate["market_probability"]),
+                    "edge": float(candidate["edge"]),
+                    "expected_value": float(candidate["expected_value"]),
+                }
+                for index, candidate in enumerate(ranked_candidates)
+            ],
+        }
+
         inserted = 0
+        picks_inserted = 0
         for item in evaluated:
             pair = item["pair"]
             line = None if pair.get("line") is None else float(pair["line"])
             key = (str(pair["market_key"]), str(item["selection"]), line)
+            decision_outcome = "PASS"
             if item["reason"] is None:
-                reason = (
-                    "STRUCTURAL_VALUE_SIGNAL_ONLY"
-                    if winners.get(key) is item
-                    else "BETTER_PRICE_AVAILABLE"
-                )
+                if winners.get(key) is not item:
+                    reason = "BETTER_PRICE_AVAILABLE"
+                elif item is canonical:
+                    if self._policy.pick_authority:
+                        reason = "CANONICAL_FIXTURE_VALUE_PICK"
+                        decision_outcome = "PICK"
+                    else:
+                        reason = "CANONICAL_FIXTURE_SIGNAL_ONLY"
+                else:
+                    reason = "QUALIFIED_NOT_CANONICAL_FIXTURE_PICK"
             else:
                 reason = str(item["reason"])
 
@@ -317,7 +364,7 @@ class GoalLabStructuralShadowEngine:
                 model_probability=float(item["model_probability"]),
                 edge=float(item["edge"]),
                 expected_value=float(item["expected_value"]),
-                decision="PASS",
+                decision=decision_outcome,
                 reason=reason,
                 evidence_fingerprint=evidence,
                 details={
@@ -332,12 +379,56 @@ class GoalLabStructuralShadowEngine:
                     "companion_selection": item["companion_selection"],
                     "quote_age_seconds": item["quote_age_seconds"],
                     "seconds_to_kickoff": item["seconds_to_kickoff"],
-                    "shadow_pick_authority": False,
-                    "authority_gate": "HOLDOUT_AND_LEAKAGE_AUDIT_REQUIRED",
+                    "shadow_pick_authority": self._policy.pick_authority,
+                    "authority_gate": (
+                        "GRANTED"
+                        if self._policy.pick_authority
+                        else "HOLDOUT_AND_LEAKAGE_AUDIT_REQUIRED"
+                    ),
+                    "pick_policy_version": self._policy.pick_policy_version,
+                    "qualifying_candidate_count": len(qualifying),
+                    "canonical_fixture_candidate": item is canonical,
+                    "selection_rank_payload": rank_payload,
                     "bookmaker_features_used": False,
                     "provider_predictions_used": False,
                 },
             )
             inserted += int(bool(self._repository.save_goal_decision(decision)))
+            if decision_outcome == "PICK":
+                pick = GoalCanonicalPick(
+                    fixture_id=str(fixture["fixture_id"]),
+                    source_decision_id=decision.decision_id,
+                    decision_at=now,
+                    kickoff_at=kickoff,
+                    pick_policy_version=self._policy.pick_policy_version,
+                    model_name=MODEL_NAME,
+                    model_version=estimate.model.model_version,
+                    bookmaker_id=int(pair["bookmaker_id"]),
+                    bookmaker_name=str(pair["bookmaker_name"]),
+                    provider_bet_id=int(pair["provider_bet_id"]),
+                    provider_bet_name=str(pair["provider_bet_name"]),
+                    market_key=str(pair["market_key"]),
+                    selection=str(item["selection"]),
+                    line=line,
+                    selected_observation_id=str(selected["market_observation_id"]),
+                    companion_observation_id=str(companion["market_observation_id"]),
+                    quote_observed_at=_utc(pair["captured_at"], "captured_at"),
+                    odds=float(item["odds"]),
+                    companion_odds=float(item["companion_odds"]),
+                    market_probability=float(item["market_probability"]),
+                    model_probability=float(item["model_probability"]),
+                    edge=float(item["edge"]),
+                    expected_value=float(item["expected_value"]),
+                    expected_home_goals=estimate.expected_home_goals,
+                    expected_away_goals=estimate.expected_away_goals,
+                    rho=estimate.model.rho,
+                    stake_minor=self._policy.flat_stake_minor,
+                    qualifying_candidate_count=len(qualifying),
+                    selection_rank_payload=rank_payload,
+                )
+                picks_inserted += int(bool(self._repository.save_goal_pick(pick)))
 
-        return GoalEngineResult(decisions_inserted=inserted, picks_inserted=0)
+        return GoalEngineResult(
+            decisions_inserted=inserted,
+            picks_inserted=picks_inserted,
+        )
