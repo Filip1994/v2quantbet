@@ -312,3 +312,51 @@ remain unchanged.
 
 No production fixture discovery, model, odds adapter, pick registration, bankroll,
 staking, Research Board or scheduler runtime was changed by this correction.
+
+
+## 2026-09-26 — Fixture-universe correction verification
+
+**Owner:** QuantLab core
+
+### CI
+
+GitHub Actions run 36220405108 passed:
+
+- lint: PASS
+- complete pytest suite: **1002 passed in 24.84s**
+- PostgreSQL integration migrations include
+  `026_quantlab_fixture_universe.sql`
+
+### Railway
+
+The first healthy runtime deployment containing migration 026, independent fixture
+discovery, repository rewiring and the corrected scope file is:
+
+- commit: `2877a3216d950e1166d40f13177273a067c19a7d`
+- deployment: `e97bfefe-1b59-48ac-8c4d-8e14b8575e2e`
+- service: `quantbet-quantlab`
+- environment: production
+- status: **SUCCESS**
+- healthcheck: **SUCCESS**
+- runtime log: `QuantLab cycle completed`
+
+The runtime log also reported `QuantLab API hard ceiling reached; collection stopped for
+UTC day`. This means the new global date-shard discovery could not spend another live
+provider request during this verification window. That is the intended safety behavior:
+the 1,000/day QuantLab hard ceiling was not bypassed for verification.
+
+Because the schema check passed and the service started successfully, the new
+`quantlab_fixtures`, `quantlab_fixture_observations` and
+`quantlab_fixture_discovery_shards` tables are available to the running service.
+The first live date-shard acquisition will occur after the next UTC daily provider-budget
+reset, subject to the shared production-reserve guard.
+
+### Isolation audit
+
+The fixture-universe correction changes QuantLab-owned runtime, QuantLab migrations,
+QuantLab documentation and tests only. Production Phase-I discovery remains unchanged and
+is no longer authoritative for the QuantLab upcoming universe.
+
+### Production impact
+
+**NONE.**
