@@ -24,6 +24,7 @@
     ├── budget.py
     ├── runtime.py
     ├── scope.py
+    ├── fixture_discovery.py
     ├── market_collector.py
     ├── market_classifier.py
     ├── goal_lab/
@@ -49,6 +50,7 @@ writes only QuantLab-owned state. It must not write:
 The QuantLab core owns:
 
 - API budget accounting
+- independent global API-Football date-shard fixture discovery
 - all-market Bet365/1xBet ingestion
 - versioned zero-request league eligibility
 - feature provenance conventions
@@ -92,8 +94,15 @@ Every feature snapshot carries or can be audited back to:
 
 No feature may use information that became available after the shadow decision timestamp.
 
-QuantLab-owned Task 001 tables are append-only:
+QuantLab owns its fixture universe independently from production Phase-I discovery.
+`quantlab_fixtures` stores provider fixture identity; date-shard captures are append-only in
+`quantlab_fixture_observations` and `quantlab_fixture_discovery_shards`. Production fixture
+and result tables remain read-only historical fallbacks only.
 
+QuantLab-owned Task 001 observation/snapshot tables are append-only:
+
+- quantlab_fixture_observations
+- quantlab_fixture_discovery_shards
 - quantlab_market_observations
 - quantlab_fixture_context_observations
 - quantlab_match_statistics_observations
@@ -124,14 +133,18 @@ A second shared-provider guard preserves production capacity. V1 defaults are:
 
 Priority order:
 
-1. Reuse already persisted production facts.
-2. Reject out-of-scope leagues locally for zero API cost.
-3. Derive zero-API features locally.
-4. Reuse one all-market odds response across Bet365 and 1xBet.
-5. Cache league/team/reference data.
-6. Spend fixture-specific calls only when the hypothesis requires them.
-7. Do not fetch completed-match statistics when referee coverage is absent.
-8. Stop QuantLab before production operational capacity is endangered.
+1. Discover the laboratory universe with global `/fixtures?date=...` shards rather than
+   inheriting the narrower production Phase-I universe.
+2. Persist shard success even when zero fixtures are returned; refresh date shards no more
+   often than every six hours by default and include one prior UTC day for final statuses.
+3. Reject out-of-scope competitions locally before any fixture-specific odds/context call.
+4. Reuse already persisted production facts only as read-only historical fallback.
+5. Derive zero-API features locally.
+6. Reuse one all-market odds response across Bet365 and 1xBet.
+7. Cache league/team/reference data.
+8. Spend fixture-specific calls only when the hypothesis requires them.
+9. Do not fetch completed-match statistics when referee coverage is absent.
+10. Stop QuantLab before production operational capacity is endangered.
 
 ## Evaluation contract
 
