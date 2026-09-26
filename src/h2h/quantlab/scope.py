@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 
 GOAL_SCOPE_VERSION = "GOAL_SCOPE_V1"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_TOP10_LEAGUES_V2"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V3"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -114,25 +114,6 @@ _TEAM_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# CardLab/CornerLab V2: one domestic top-flight competition in each of ten
-# data-rich leagues. Exact normalized-name matching is intentional: lower divisions,
-# cups, reserve competitions and similarly named leagues must not inherit eligibility.
-_TOP10_LEAGUE_RULES: dict[str, tuple[str, ...]] = {
-    "england": ("premier league",),
-    "spain": ("la liga",),
-    "italy": ("serie a",),
-    "germany": ("bundesliga",),
-    "france": ("ligue 1",),
-    "netherlands": ("eredivisie",),
-    "portugal": ("primeira liga",),
-    "belgium": ("jupiler pro league", "pro league"),
-    "turkey": ("super lig", "super league"),
-    "turkiye": ("super lig", "super league"),
-    "usa": ("major league soccer", "mls"),
-    "united states": ("major league soccer", "mls"),
-}
-
-
 def _ascii(value: object) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(char for char in text if not unicodedata.combining(char))
@@ -192,23 +173,14 @@ def card_corner_scope(
     home_team: object = "",
     away_team: object = "",
 ) -> ScopeDecision:
-    """Restrict CardLab/CornerLab provider spend to the deterministic Top-10 set."""
-    if _is_youth_or_amateur(
-        competition_name,
-        competition_type,
-        home_team,
-        away_team,
-    ):
-        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "youth_or_amateur")
-    country_key = _ascii(country)
-    competition_key = _ascii(competition_name)
-    if competition_key in _TOP10_LEAGUE_RULES.get(country_key, ()):
-        return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "top10_league")
-    return ScopeDecision(
-        False,
-        CONTEXT_SCOPE_VERSION,
-        "outside_top10_league_allowlist",
-    )
+    """Allow market-driven CardLab/CornerLab research across the discovered universe.
+
+    Competition metadata is retained for audit only. Market presence and canonical
+    settlement support, not a league allowlist, determine whether a CARD/CORNER
+    candidate can become an actionable shadow decision.
+    """
+    del country, competition_name, competition_type, home_team, away_team
+    return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "market_driven_candidate")
 
 
 def eligible_labs(**fixture: object) -> tuple[str, ...]:

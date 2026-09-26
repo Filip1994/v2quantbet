@@ -14,16 +14,17 @@ Planned structural features include:
 - rest and fixture congestion
 - selected attacking-pressure proxies when timestamp-safe
 
-## League scope
+## Research scope
 
-CornerLab v1 shares CARDCORNER_TOP10_LEAGUES_V2 with CardLab. The only eligible
-domestic leagues are Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
-Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Major League Soccer (MLS).
+CornerLab now uses `CARDCORNER_MARKET_DRIVEN_V3`.
 
-Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
-competitions are rejected locally before fixture-specific CornerLab spend. This is
-deliberate API-cost control rather than a claim that corner markets can never exist
-outside the allowlist.
+There is no domestic Top-10 league allowlist. QuantLab scans the globally discovered
+upcoming universe, requests the all-market Bet365/1xBet payload, and persists CORNER
+markets wherever the provider actually publishes them.
+
+A market being present does not automatically make it pick-eligible. Raw corner markets
+are retained for research, while shadow PICK generation still requires an explicitly
+canonicalized settlement shape.
 
 ## Markets
 

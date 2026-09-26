@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from h2h.odds.budget import ApiBudgetExceededError
-from h2h.quantlab.budget import QUANTLAB_HARD_DAILY_LIMIT, QuantLabRequestBudget
+from h2h.quantlab.budget import DEFAULT_PROVIDER_DAILY_LIMIT, QuantLabRequestBudget
 from h2h.quantlab.card_lab.features import (
     MATCH_IMPORTANCE_VERSION,
     TABLE_PRESSURE_VERSION,
@@ -269,7 +269,7 @@ class _BudgetConnection:
 def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     connection = _BudgetConnection()
     budget = QuantLabRequestBudget(
-        daily_limit=1000,
+        shared_daily_limit=75_000,
         connect=lambda: connection,
         clock=lambda: NOW,
     )
@@ -282,57 +282,44 @@ def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     assert 'provider_request_category("quantlab_context")' in client_source
 
 
-def test_quantlab_budget_cannot_be_configured_above_hard_limit() -> None:
+def test_quantlab_budget_uses_shared_75k_provider_envelope_without_local_cap() -> None:
     budget = QuantLabRequestBudget(
-        daily_limit=5000,
         connect=lambda: _BudgetConnection(),
         clock=lambda: NOW,
     )
-    assert budget.daily_limit == QUANTLAB_HARD_DAILY_LIMIT == 1000
+    assert budget.daily_limit == DEFAULT_PROVIDER_DAILY_LIMIT == 75_000
+    assert budget.shared_daily_limit == 75_000
+    assert budget.production_reserve == 0
 
 
-def test_quantlab_budget_stops_at_reserved_production_capacity() -> None:
-    connection = _BudgetConnection({"discovery": 6000})
+def test_quantlab_budget_stops_only_at_shared_provider_capacity() -> None:
+    connection = _BudgetConnection({"discovery": 74_999})
     budget = QuantLabRequestBudget(
         connect=lambda: connection,
         clock=lambda: NOW,
-        shared_daily_limit=7500,
-        production_reserve=1500,
+        shared_daily_limit=75_000,
+        production_reserve=0,
     )
 
-    with pytest.raises(ApiBudgetExceededError, match="production provider capacity"):
+    budget.acquire()
+    connection.usage["discovery"] = 75_000
+    with pytest.raises(ApiBudgetExceededError, match="shared football API budget"):
         budget.acquire()
 
 
 def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
-    assert card_corner_scope(
-        country="England",
-        competition_name="Premier League",
-    ).allowed
-    assert card_corner_scope(
-        country="Belgium",
-        competition_name="Jupiler Pro League",
-    ).allowed
-    assert card_corner_scope(
-        country="USA",
-        competition_name="Major League Soccer",
-    ).allowed
-    assert not card_corner_scope(
-        country="Scotland",
-        competition_name="Premiership",
-    ).allowed
-    assert not card_corner_scope(
-        country="England",
-        competition_name="Championship",
-    ).allowed
-    assert not card_corner_scope(
-        country="Poland",
-        competition_name="Ekstraklasa",
-    ).allowed
-    assert not card_corner_scope(
-        country="World",
-        competition_name="UEFA Champions League",
-    ).allowed
+    for country, competition in (
+        ("England", "Premier League"),
+        ("Scotland", "Premiership"),
+        ("England", "Championship"),
+        ("Poland", "Ekstraklasa"),
+        ("World", "UEFA Champions League"),
+        ("Sweden", "Division 2 - Norrland"),
+        ("Japan", "J1 League"),
+    ):
+        decision = card_corner_scope(country=country, competition_name=competition)
+        assert decision.allowed
+        assert decision.reason == "market_driven_candidate"
 
     assert goal_scope(country="Poland", competition_name="III Liga").allowed
     assert not goal_scope(
@@ -562,7 +549,7 @@ def test_global_discovery_is_independent_from_production_scope() -> None:
     assert rows[1].fixture.country == "Japan"
 
 
-def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> None:
+def test_runtime_scans_global_discovery_for_market_driven_card_corner_research() -> None:
     class Provider:
         def __init__(self):
             self.date_calls = []
@@ -636,6 +623,9 @@ def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> 
         def save_market_capture(self, **_kwargs):
             return None
 
+        def market_labs_for_fixture(self, _fixture_id):
+            return frozenset()
+
     provider = Provider()
     repo = Repo()
     runtime = QuantLabRuntime(
@@ -652,9 +642,9 @@ def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> 
     result = runtime.run_once()
 
     assert result["fixtures_discovered"] == 3
-    assert result["market_fixtures"] == 1
+    assert result["market_fixtures"] == 3
     assert provider.date_calls == [NOW.date()]
-    assert provider.odds_calls == [1]
+    assert provider.odds_calls == [1, 2, 3]
     assert {item.fixture.competition_name for item in repo.observations} == {
         "III Liga",
         "J1 League",
@@ -680,11 +670,11 @@ def test_market_capture_watermark_is_persistent_even_without_market_rows() -> No
     assert "INSERT INTO quantlab_market_captures" in save_source
 
 
-def test_runtime_defaults_are_api_conservative() -> None:
+def test_runtime_defaults_use_expanded_research_budget() -> None:
     settings = QuantLabRuntimeSettings()
-    assert settings.market_refresh_seconds == 43200
+    assert settings.market_refresh_seconds == 3600
     assert settings.standings_refresh_seconds == 21600
-    assert settings.history_backfill_per_cycle == 0
+    assert settings.history_backfill_per_cycle == 25
 
 
 def test_goal_scope_rejects_broader_youth_aliases_and_far_east_aliases() -> None:

@@ -53,7 +53,8 @@ def test_production_config_has_no_explicit_competition_scope() -> None:
     assert settings.model_training_max_scopes == 1
     assert settings.model_training_max_provider_requests == 2
     assert settings.api_reserve == 0
-    assert settings.model_training_daily_limit == 7500
+    assert settings.api_daily_limit == 75000
+    assert settings.model_training_daily_limit == 75000
     assert settings.model_training_operational_reserve == 0
     assert settings.model_training_policy.min_matches == 80
     assert settings.model_training_policy.xi == 0.0018

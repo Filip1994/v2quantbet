@@ -1,5 +1,7 @@
 # Task 001 — QuantLab Market Collector + CardLab v1 Context
 
+> **Superseded scope note (2026-09-26):** the historical Top-10 budget gate described below was replaced by `CARDCORNER_MARKET_DRIVEN_V3` after the football provider budget increased to 75,000 requests/day. The remainder of this file records the implementation contract as it existed at the time.
+
 Status: implemented on main; verification record is maintained in QuantLab/WORKLOG.md.
 
 ## Objective

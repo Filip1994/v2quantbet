@@ -90,7 +90,7 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "GoalLab" in html
     assert "CornerLab" in html
     assert "CardLab" in html
-    assert "42 / 1,000" in html
+    assert "42 / 75,000" in html
     assert "300.00 RSD" in html
     assert "DC+ Core" in html
     assert "Upcoming fixture / GoalLab decision pipeline" in html

@@ -235,6 +235,9 @@ def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
         def upcoming_fixtures(self, **_kwargs):
             return (item,)
 
+        def market_labs_for_fixture(self, _fixture_id):
+            return frozenset({"CORNER", "CARD"})
+
     class ExhaustedProvider:
         def fetch_fixtures_for_date(self, _fixture_date):
             raise ApiBudgetExceededError("exhausted")
@@ -266,7 +269,7 @@ def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
     assert corner.calls == [("api-football:3001", NOW)]
     assert card.calls == [("api-football:3001", NOW)]
 
-def test_context_queue_scans_beyond_global_fixture_limit_before_filtering():
+def test_context_queue_is_broad_and_market_driven():
     from types import SimpleNamespace
 
     from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -277,12 +280,6 @@ def test_context_queue_scans_beyond_global_fixture_limit_before_filtering():
         "country": "Sweden",
         "competition_name": "Division 2 - Norrland",
     }
-    top = {
-        **fixture(),
-        "fixture_id": "api-football:top",
-        "country": "England",
-        "competition_name": "Premier League",
-    }
 
     class QueueRepo:
         def __init__(self):
@@ -290,9 +287,11 @@ def test_context_queue_scans_beyond_global_fixture_limit_before_filtering():
 
         def upcoming_fixtures(self, *, limit, **_kwargs):
             self.limits.append(limit)
-            if limit <= 1:
-                return (lower,)
-            return (lower, top)
+            return (lower,)
+
+        def market_labs_for_fixture(self, fixture_id):
+            assert fixture_id == "api-football:low"
+            return frozenset({"CORNER"})
 
     class Engine:
         def __init__(self):
@@ -311,15 +310,15 @@ def test_context_queue_scans_beyond_global_fixture_limit_before_filtering():
         clock=lambda: NOW,
     )
 
-    decisions, picks = runtime._evaluate_context_picks(engine, NOW)
+    decisions, picks = runtime._evaluate_context_picks(engine, "CORNER", NOW)
 
     assert decisions == 1
     assert picks == 0
-    assert engine.calls == ["api-football:top"]
-    assert repo.limits == [2500]
+    assert engine.calls == ["api-football:low"]
+    assert repo.limits == [1]
 
 
-def test_collection_prioritizes_top10_queue_without_increasing_cycle_fixture_limit():
+def test_collection_allows_lower_league_and_only_fetches_card_context_when_market_exists():
     from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
 
     lower = {
@@ -333,18 +332,6 @@ def test_collection_prioritizes_top10_queue_without_increasing_cycle_fixture_lim
         "country": "Sweden",
         "competition_name": "Division 2 - Norrland",
     }
-    top = {
-        **fixture(),
-        "fixture_id": "api-football:top",
-        "provider_fixture_id": 4002,
-        "league_id": 39,
-        "season": 2026,
-        "home_team_id": 12,
-        "away_team_id": 13,
-        "country": "England",
-        "competition_name": "Premier League",
-    }
-
     class QueueRepo:
         def __init__(self):
             self.limits = []
@@ -352,22 +339,24 @@ def test_collection_prioritizes_top10_queue_without_increasing_cycle_fixture_lim
 
         def upcoming_fixtures(self, *, limit, **_kwargs):
             self.limits.append(limit)
-            if limit <= 1:
-                return (lower,)
-            return (lower, top)
+            return (lower,)
 
         def market_capture_due(self, *_args, **_kwargs):
             return False
+
+        def market_labs_for_fixture(self, fixture_id):
+            assert fixture_id == "api-football:low"
+            return frozenset({"CARD", "CORNER"})
 
         def context_due(self, fixture_id, **_kwargs):
             self.context_checked.append(fixture_id)
             return False
 
         def latest_context_before(self, fixture_id, **_kwargs):
-            assert fixture_id == "api-football:top"
+            assert fixture_id == "api-football:low"
             return {
                 "referee": "Ref",
-                "kickoff_at": top["kickoff_at"],
+                "kickoff_at": lower["kickoff_at"],
                 "available_at": NOW - timedelta(minutes=1),
             }
 
@@ -392,5 +381,5 @@ def test_collection_prioritizes_top10_queue_without_increasing_cycle_fixture_lim
 
     assert market_fixtures == 0
     assert card_snapshots == 0
-    assert repo.context_checked == ["api-football:top"]
-    assert repo.limits == [1, 2500]
+    assert repo.context_checked == ["api-football:low"]
+    assert repo.limits == [1, 1]
