@@ -225,13 +225,13 @@ class QuantLabRuntime:
             except ApiBudgetExceededError:
                 raise
             except Exception as exc:
-                LOGGER.error(
+                error_text = str(exc)
+                LOGGER.exception(
                     "QuantLab history backfill fixture failed fixture=%s "
                     "error_class=%s error=%s",
                     fixture_id,
                     type(exc).__name__,
-                    str(exc),
-                    exc_info=True,
+                    error_text,
                 )
         return completed
 
@@ -339,13 +339,13 @@ class QuantLabRuntime:
                     str(exc),
                 )
             except Exception as exc:
-                LOGGER.error(
+                error_text = str(exc)
+                LOGGER.exception(
                     "QuantLab upcoming fixture collection failed fixture=%s "
                     "error_class=%s error=%s",
                     fixture_id,
                     type(exc).__name__,
-                    str(exc),
-                    exc_info=True,
+                    error_text,
                 )
         return market_fixtures, card_snapshots
 
