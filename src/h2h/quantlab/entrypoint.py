@@ -7,11 +7,17 @@ import os
 from threading import Event
 
 from h2h.logging_config import configure_logging
+from h2h.persistence.postgres_model_lifecycle import (
+    PostgreSQLActiveDixonColesModelRepository,
+    PostgreSQLDixonColesModelVersionRepository,
+)
 from h2h.quantlab.budget import QuantLabRequestBudget
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
+from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 from h2h.quantlab.provider import QuantLabApiFootballClient
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+from h2h.use_cases.model_lifecycle import LoadActiveDixonColesModel
 from h2h.workers.runtime import install_shutdown_handlers
 
 
@@ -53,7 +59,7 @@ def main() -> None:
     database_url = _database_url()
     repository = PostgreSQLQuantLabRepository(database_url)
     if not repository.check_database():
-        raise RuntimeError("QuantLab Task 001 schema is unavailable")
+        raise RuntimeError("QuantLab Task 002 schema is unavailable")
 
     configured_limit = _positive_integer("QUANTBET_QUANTLAB_API_DAILY_LIMIT", "1000")
     api_daily_limit = min(configured_limit, 1000)
@@ -76,9 +82,16 @@ def main() -> None:
         budget=budget,
         timeout=float(os.getenv("QUANTBET_QUANTLAB_API_TIMEOUT_SECONDS", "10")),
     )
+    model_loader = LoadActiveDixonColesModel(
+        PostgreSQLDixonColesModelVersionRepository(database_url),
+        PostgreSQLActiveDixonColesModelRepository(database_url),
+    )
+    goal_engine = GoalLabShadowPickEngine(repository, model_loader)
+
     runtime = QuantLabRuntime(
         repository,
         provider,
+        goal_engine=goal_engine,
         settings=QuantLabRuntimeSettings(
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
             discovery_lookback_days=_integer(
