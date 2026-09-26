@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -57,7 +56,7 @@ def parse_line(selection: str) -> Decimal | None:
 
 def _decimal_odd(value: object) -> Decimal:
     if isinstance(value, bool):
-        raise ValueError("odd must be numeric")
+        raise TypeError("odd must be numeric")
     try:
         odd = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
