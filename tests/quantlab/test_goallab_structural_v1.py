@@ -14,7 +14,10 @@ from h2h.quantlab.goal_lab.model import (
     _build_training,
 )
 from h2h.quantlab.goal_lab.shadow_engine import GoalEngineResult
-from h2h.quantlab.goal_lab.structural_shadow_engine import GoalLabStructuralShadowEngine
+from h2h.quantlab.goal_lab.structural_shadow_engine import (
+    GoalLabStructuralShadowEngine,
+    StructuralGoalPolicy,
+)
 
 
 NOW = datetime(2026, 9, 26, 10, 0, tzinfo=UTC)
@@ -198,13 +201,78 @@ def test_structural_value_signal_has_no_shadow_pick_authority() -> None:
 
     assert result.picks_inserted == 0
     signals = [
-        item for item in repo.decisions if item.reason == "STRUCTURAL_VALUE_SIGNAL_ONLY"
+        item for item in repo.decisions if item.reason == "CANONICAL_FIXTURE_SIGNAL_ONLY"
     ]
     assert len(signals) == 1
     assert signals[0].decision == "PASS"
     assert signals[0].selection == "OVER"
     assert signals[0].details["shadow_pick_authority"] is False
     assert repo.shadow_calls == 0
+
+
+def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> None:
+    class Repo:
+        def __init__(self) -> None:
+            self.decisions = []
+            self.picks = []
+
+        def goal_market_pairs(self, fixture_id, *, decision_at):
+            assert fixture_id == "api-football:9001"
+            assert decision_at == NOW
+            return (_pair(),)
+
+        def save_goal_decision(self, item):
+            self.decisions.append(item)
+            return True
+
+        def save_goal_pick(self, item):
+            self.picks.append(item)
+            return True
+
+    class Model:
+        def estimate(self, _fixture, *, decision_at):
+            assert decision_at == NOW
+            artifact = SimpleNamespace(
+                model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "c" * 64,
+                rho=-0.04,
+                feature_version=FEATURE_VERSION,
+                training_sample_size=600,
+                history_match_count=900,
+            )
+            snapshot = SimpleNamespace(home_history_size=15, away_history_size=14)
+            estimate = SimpleNamespace(
+                expected_home_goals=2.1,
+                expected_away_goals=1.0,
+                model=artifact,
+                snapshot=snapshot,
+                market_probabilities=lambda: {
+                    "OVER_2_5": 0.72,
+                    "UNDER_2_5": 0.28,
+                    "BTTS_YES": 0.58,
+                },
+            )
+            return SimpleNamespace(estimate=estimate, reason="MODEL_READY", details={})
+
+    repo = Repo()
+    engine = GoalLabStructuralShadowEngine(
+        repo,
+        policy=StructuralGoalPolicy(pick_authority=True),
+    )
+    engine._model = Model()
+
+    result = engine.run_fixture(_fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 1
+    assert len(repo.picks) == 1
+    pick = repo.picks[0]
+    assert pick.market_key == "OU_25"
+    assert pick.selection == "OVER"
+    assert pick.odds == 2.0
+    assert pick.qualifying_candidate_count == 1
+    assert pick.selection_rank_payload["candidate_count"] == 1
+    picked_decisions = [item for item in repo.decisions if item.decision == "PICK"]
+    assert len(picked_decisions) == 1
+    assert picked_decisions[0].reason == "CANONICAL_FIXTURE_VALUE_PICK"
 
 
 def test_composite_goal_engine_runs_control_and_structural_paths() -> None:
