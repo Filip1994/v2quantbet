@@ -268,6 +268,7 @@ def build_goal_model_validation(
         league_ids,
         dates,
         _histories,
+        _player_histories,
         _pairs,
         history_match_count,
     ) = _build_training(history)
