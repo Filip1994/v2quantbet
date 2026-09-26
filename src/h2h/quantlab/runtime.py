@@ -210,17 +210,52 @@ class QuantLabRuntime:
                             str(exc),
                         )
 
-                if not self._repository.statistics_exists(fixture_id):
+                if not self._repository.statistics_capture_exists(fixture_id):
                     payload = self._provider.fetch_statistics(provider_fixture_id)
-                    parsed_stats = parse_fixture_statistics(
-                        payload,
-                        fixture_id=fixture_id,
-                        provider_fixture_id=provider_fixture_id,
-                        home_team_id=home_team_id,
-                        away_team_id=away_team_id,
-                        captured_at=now,
-                    )
-                    self._repository.save_match_statistics(parsed_stats)
+                    response = payload.get("response") if isinstance(payload, dict) else None
+                    response_team_count = len(response) if isinstance(response, list) else 0
+                    try:
+                        parsed_stats = parse_fixture_statistics(
+                            payload,
+                            fixture_id=fixture_id,
+                            provider_fixture_id=provider_fixture_id,
+                            home_team_id=home_team_id,
+                            away_team_id=away_team_id,
+                            captured_at=now,
+                        )
+                    except ValueError as exc:
+                        if (
+                            "does not contain both fixture teams" not in str(exc)
+                            or not isinstance(response, list)
+                        ):
+                            raise
+                        self._repository.save_statistics_capture(
+                            fixture_id=fixture_id,
+                            provider_fixture_id=provider_fixture_id,
+                            captured_at=now,
+                            status="UNAVAILABLE",
+                            response_team_count=response_team_count,
+                            reason=str(exc),
+                            raw_payload=dict(payload),
+                        )
+                        LOGGER.info(
+                            "QuantLab statistics unavailable fixture=%s provider_fixture_id=%s "
+                            "response_team_count=%s",
+                            fixture_id,
+                            provider_fixture_id,
+                            response_team_count,
+                        )
+                    else:
+                        self._repository.save_match_statistics(parsed_stats)
+                        self._repository.save_statistics_capture(
+                            fixture_id=fixture_id,
+                            provider_fixture_id=provider_fixture_id,
+                            captured_at=now,
+                            status="AVAILABLE",
+                            response_team_count=response_team_count,
+                            reason=None,
+                            raw_payload=dict(payload),
+                        )
                 completed += 1
             except ApiBudgetExceededError:
                 raise
