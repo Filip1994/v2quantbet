@@ -18,6 +18,7 @@ from h2h.quantlab.corner_lab.readiness_audit import (
     log_cornerlab_v2_readiness,
     log_cornerlab_v2_training_readiness,
 )
+from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_holdout
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
@@ -95,6 +96,7 @@ def main() -> None:
     try:
         log_cornerlab_v2_audit(repository, LOGGER)
         log_cornerlab_v2_readiness(repository, LOGGER)
+        log_cornerlab_historical_holdout(repository, LOGGER)
     except Exception:
         LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
 
