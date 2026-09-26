@@ -111,6 +111,7 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_standings_snapshots
 - quantlab_card_feature_snapshots
 - quantlab_goal_decisions
+- quantlab_goal_decisions
 
 ## Market collector contract
 
@@ -124,6 +125,26 @@ is eligible for that fixture. GOAL rows may be stored across GOAL_SCOPE_V1; CARD
 and UNCLASSIFIED rows are stored only on CARDCORNER_TOP10_LEAGUES_V2 fixtures. Successful
 odds responses also create a quantlab_market_captures watermark even when zero rows are
 stored, so empty responses are not re-polled on every cycle or restart.
+
+## GoalLab shadow decision contract
+
+Task 002 adds `GOALLAB_SHADOW_POLICY_V1` as a shadow-only control decision path.
+
+- The model is the already-active, validated production Dixon-Coles artifact for the exact
+  API-Football league/season, loaded read-only. QuantLab never activates or mutates it.
+- Supported control markets are only O/U 2.5 (provider bet 5) and BTTS (provider bet 8).
+- A decision requires a complete two-sided quote from the same bookmaker and capture.
+- Fair market probability uses proportional two-way de-vig.
+- Default PICK gates are edge >= 3 percentage points, EV >= 3%, odds 1.40-4.00,
+  quote age <= 13 hours and at least 15 minutes to kickoff.
+- All evaluated outcomes are auditable in `quantlab_goal_decisions`; only PICK outcomes
+  may create `quantlab_shadow_bets`.
+- Missing model coverage, missing complete markets and policy failures are explicit PASS
+  reasons. Probabilities are never fabricated.
+
+Shadow evaluation runs independently of the provider budget, so already-persisted odds can
+still be evaluated after the daily API ceiling has stopped collection. Task 002 itself
+adds zero provider calls.
 
 ## API policy
 
