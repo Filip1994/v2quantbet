@@ -448,3 +448,175 @@ New CardLab/CornerLab Top-10 membership:
 
 Scottish Premiership is now outside the CardLab/CornerLab allowlist. GoalLab scope is
 unchanged. No production model, pick, bankroll or discovery behavior is changed.
+
+
+## 2026-09-26 — Task 002 implementation: GoalLab shadow pick engine
+
+**Owner:** QuantLab core + GoalLab
+
+### Objective
+
+Convert already-persisted QuantLab fixtures and GOAL market observations into auditable
+shadow-only GoalLab decisions and expose the upcoming fixture/decision pipeline in the
+QuantLab dashboard.
+
+### Files/schema changed
+
+- `migrations/028_quantlab_goal_shadow_engine.sql`
+- `src/h2h/quantlab/goal_lab/shadow_engine.py`
+- `src/h2h/quantlab/repository.py`
+- `src/h2h/quantlab/runtime.py`
+- `src/h2h/quantlab/entrypoint.py`
+- `src/h2h/quantlab/dashboard.py`
+- `tests/quantlab/test_task002.py`
+- QuantLab docs and integration latest-migration expectations
+
+### Implementation
+
+1. Added append-only `quantlab_goal_decisions` for both PICK and PASS evidence.
+2. Added `GOALLAB_SHADOW_POLICY_V1`.
+3. GoalLab resolves the existing validated active API-Football Dixon-Coles artifact for
+   the exact league/season as a read-only control model. It does not train or activate
+   production model state.
+4. Canonical Task 002 evaluation is intentionally limited to complete same-capture,
+   same-bookmaker two-way markets:
+   - provider bet 5: O/U 2.5 OVER/UNDER;
+   - provider bet 8: BTTS YES/NO.
+5. Two-way proportional de-vig computes market probability. Edge and EV are recorded from
+   the selected model probability.
+6. Explicit PASS reasons cover no active model, missing team coverage, missing complete
+   market, stale/future quote, kickoff too close, odds outside range, edge below minimum,
+   EV below minimum and better price available.
+7. Default experiment thresholds are edge >= 3pp, EV >= 3%, odds 1.40–4.00, quote age
+   <= 13h, kickoff > 15m, flat shadow stake 10,000 minor units.
+8. Only the best qualifying bookmaker price per market/selection/evidence cycle is a PICK.
+9. Only PICK decisions write to `quantlab_shadow_bets`.
+10. Deterministic decision/shadow IDs make repeated cycles over unchanged evidence
+    idempotent.
+11. Goal shadow evaluation runs after collection and remains active when provider
+    collection is stopped by the daily API ceiling.
+12. GoalLab dashboard now includes an upcoming fixture/decision pipeline showing scope,
+    market capture, PICK/PASS reason, model and candidate value.
+
+### API-cost impact
+
+**Zero new API-Football endpoints and zero additional provider requests.** Task 002 uses
+persisted QuantLab market observations and read-only production model artifacts.
+
+### Leakage / provenance
+
+All selected market observations must have `captured_at <= decision_at < kickoff_at`.
+The exact immutable model version and market observation IDs are persisted in decision
+evidence. No result/post-kickoff data is used in the decision stage.
+
+### Production impact
+
+**NONE.** Task 002 does not write production quotes, value evaluations, pick decisions,
+registered picks, bankroll, model versions or active model pointers.
+
+
+## 2026-09-26 — Task 002 implementation: GoalLab shadow pick engine
+
+**Owner:** QuantLab core + GoalLab
+
+### Files/schema changed
+
+- `src/h2h/quantlab/goal_lab/shadow_engine.py`
+- `src/h2h/quantlab/repository.py`
+- `src/h2h/quantlab/runtime.py`
+- `src/h2h/quantlab/entrypoint.py`
+- `src/h2h/quantlab/dashboard.py`
+- `migrations/028_quantlab_goal_shadow_engine.sql`
+- `tests/quantlab/test_task002.py`
+- `tests/api/test_quantlab_dashboard.py`
+- integration latest-migration assertions
+- `QuantLab/TASKS/002_GOALLAB_SHADOW_PICK_ENGINE.md`
+- `QuantLab/ARCHITECTURE.md`
+- `QuantLab/GoalLab/README.md`
+
+### What changed
+
+1. Added `GOALLAB_SHADOW_POLICY_V1`, the first real QuantLab PASS/PICK decision engine.
+2. GoalLab uses the existing validated active Dixon-Coles artifact for the exact
+   API-Football league/season as a **read-only control model**. QuantLab does not retrain,
+   activate or mutate production model state.
+3. V1 supports only complete two-sided canonical goal markets:
+   - provider bet 5: O/U 2.5 OVER/UNDER;
+   - provider bet 8: BTTS YES/NO.
+4. Market fair probability uses proportional two-way de-vig:
+   `(1/selected_odds) / ((1/selected_odds) + (1/companion_odds))`.
+5. V1 shadow gates are frozen at:
+   - minimum edge 3 percentage points;
+   - minimum EV 3%;
+   - odds 1.40 to 4.00;
+   - maximum quote age 13 hours;
+   - at least 15 minutes to kickoff;
+   - flat shadow stake 10,000 minor units.
+6. Added append-only `quantlab_goal_decisions`. Both PICK and PASS outcomes are recorded
+   with model, policy, quote-pair and arithmetic provenance.
+7. Missing model coverage, missing complete quotes, stale quotes, odds limits and
+   edge/EV failures are explicit PASS reasons. No model probability is fabricated.
+8. When multiple books qualify for the same market/selection/evidence cycle, only the
+   best odds become PICK; inferior qualifying books are PASS/BETTER_PRICE_AVAILABLE.
+9. A unique first-PICK guard prevents repeated shadow bets for the same
+   fixture/market/selection/line/policy. Shadow rows are created only after the PICK
+   decision itself is newly persisted.
+10. Runtime evaluates persisted GoalLab evidence independently of collection. Therefore
+    the daily API ceiling may stop new provider calls while the shadow engine still
+    produces decisions from already-stored quotes.
+11. GoalLab dashboard now shows an upcoming fixture/decision pipeline with Goal scope,
+    Card/Corner scope, last odds capture, latest decision/reason, model and candidate
+    edge/EV.
+
+### Data sources / API impact
+
+Task 002 adds **zero provider requests**.
+
+Inputs are:
+
+- persisted `quantlab_fixture_observations`;
+- persisted `quantlab_market_observations`;
+- read-only active `dixon_coles_model_versions` /
+  `dixon_coles_active_models` through the existing validated loader.
+
+The existing collection budget, 1,000/day QuantLab hard ceiling and production reserve
+remain unchanged.
+
+### Leakage / provenance
+
+- Decision time must precede kickoff.
+- Only market rows with `captured_at <= decision_at` are eligible.
+- Complete quote pairs must share fixture, bookmaker, provider bet and capture timestamp.
+- Exact immutable `model_version_id` and policy version are persisted with each decision.
+- No result, closing price or post-kickoff fact is used to create a PICK.
+
+### Production impact
+
+**NONE.**
+
+No write was added to production `quote_series`, `value_evaluations`,
+`pick_decisions`, `registered_picks`, bankroll or active-model state. Production
+registration/staking/model behavior is unchanged.
+
+### Verification
+
+Unit, integration, full CI and Railway verification are recorded after the implementation
+branch is validated and deployed.
+
+
+## 2026-09-26 — Task 002 CI verification
+
+**Owner:** QuantLab core + GoalLab
+
+GitHub Actions run `36223824735` passed:
+
+- lint: **PASS**
+- full pytest suite: **1009 passed in 26.58s**
+- migration chain includes `028_quantlab_goal_shadow_engine.sql`
+
+Isolation diff from Task 002 baseline `c0f3f897a8807f18dd05196335fd53119418be57`
+contains QuantLab runtime/docs/migration/tests plus only the two integration assertions
+that identify the latest migration. No production model, registration, pick, staking or
+bankroll implementation file is changed.
+
+Railway verification follows after merge to main.

@@ -52,6 +52,35 @@ class StubRepository:
     def api_usage_today(self) -> int:
         return 42
 
+    def list_goal_fixture_status(self, **_kwargs):
+        return (
+            {
+                "fixture_id": "api-football:124",
+                "league_id": 39,
+                "season": 2026,
+                "home_team_id": 10,
+                "away_team_id": 20,
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "competition_name": "Premier League",
+                "country": "England",
+                "competition_type": "League",
+                "kickoff_at": NOW,
+                "provider_status": "NS",
+                "market_captured_at": NOW,
+                "decision_at": NOW,
+                "decision": "PASS",
+                "reason": "EDGE_BELOW_MINIMUM",
+                "model_version": "dc-v1",
+                "market_key": "OU_25",
+                "selection": "OVER",
+                "bookmaker_name": "Bet365",
+                "odds": 1.95,
+                "edge": 0.01,
+                "expected_value": 0.01,
+            },
+        )
+
 
 def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     repository = StubRepository()
@@ -64,6 +93,8 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "42 / 1,000" in html
     assert "300.00 RSD" in html
     assert "DC+ Core" in html
+    assert "Upcoming fixture / GoalLab decision pipeline" in html
+    assert "EDGE_BELOW_MINIMUM" in html
     assert "SHADOW ONLY" in html
 
 
