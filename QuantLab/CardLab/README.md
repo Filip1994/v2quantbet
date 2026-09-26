@@ -29,7 +29,7 @@ allowed only for ten domestic top flights implemented in src/h2h/quantlab/scope.
 - Portugal — Primeira Liga
 - Belgium — Jupiler Pro League / Pro League
 - Turkey/Türkiye — Süper Lig
-- Scotland — Premiership
+- USA — Major League Soccer (MLS)
 
 Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
 competitions are rejected locally before CardLab context/statistics spend. The purpose
