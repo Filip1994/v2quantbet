@@ -175,7 +175,7 @@ class ReferenceShadowPickEngine:
                 return False
             if tokens & {"yellow", "red", "booking", "bookings", "points"}:
                 return False
-        return "total" in tokens or {"over", "under"} <= tokens
+        return True
 
     def _fixture_pass(
         self,
