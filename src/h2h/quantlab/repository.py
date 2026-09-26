@@ -62,6 +62,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_corner_model_versions",
             "quantlab_corner_feature_snapshots",
             "quantlab_team_history_captures",
+            "quantlab_league_coverage_captures",
         )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -867,6 +868,76 @@ class PostgreSQLQuantLabRepository:
             row = cursor.fetchone()
         last = None if row is None else row[0]
         return last is None or last <= now - timedelta(seconds=refresh_seconds)
+
+    def latest_league_statistics_coverage(
+        self,
+        league_id: int,
+        season: int,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> dict[str, Any] | None:
+        if league_id <= 0 or season <= 0 or refresh_seconds <= 0:
+            raise ValueError("league_id, season and refresh_seconds must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT captured_at, statistics_fixtures, response_item_count, raw_payload "
+                "FROM quantlab_league_coverage_captures "
+                "WHERE league_id = %s AND season = %s AND captured_at <= %s "
+                "ORDER BY captured_at DESC, coverage_capture_id DESC LIMIT 1",
+                (league_id, season, now),
+            )
+            row = cursor.fetchone()
+        if row is None or row[0] <= now - timedelta(seconds=refresh_seconds):
+            return None
+        raw_payload = json.loads(row[3]) if isinstance(row[3], str) else row[3]
+        return {
+            "captured_at": row[0],
+            "statistics_fixtures": row[1],
+            "response_item_count": int(row[2]),
+            "raw_payload": raw_payload,
+        }
+
+    def save_league_statistics_coverage(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        captured_at: datetime,
+        statistics_fixtures: bool | None,
+        response_item_count: int,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if league_id <= 0 or season <= 0 or response_item_count < 0:
+            raise ValueError("invalid league coverage capture")
+        capture_id = _identifier(
+            "quantlab-league-coverage-v1:",
+            {
+                "league_id": league_id,
+                "season": season,
+                "captured_at": captured_at.isoformat(),
+                "statistics_fixtures": statistics_fixtures,
+                "response_item_count": response_item_count,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_league_coverage_captures ("
+                "coverage_capture_id, league_id, season, captured_at, "
+                "statistics_fixtures, response_item_count, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    league_id,
+                    season,
+                    captured_at,
+                    statistics_fixtures,
+                    response_item_count,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
 
     def statistics_exists(self, fixture_id: str) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
