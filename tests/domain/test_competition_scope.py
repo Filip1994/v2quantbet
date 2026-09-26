@@ -65,6 +65,22 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
             RejectionReason.AFRICA,
         ),
         (
+            CompetitionMetadata("Japan", "J1 League", "league"),
+            RejectionReason.ASIA,
+        ),
+        (
+            CompetitionMetadata("Saudi-Arabia", "Pro League", "league"),
+            RejectionReason.ASIA,
+        ),
+        (
+            CompetitionMetadata("Australia", "A-League", "league"),
+            RejectionReason.ASIA,
+        ),
+        (
+            CompetitionMetadata("World", "AFC Champions League", "league"),
+            RejectionReason.ASIA,
+        ),
+        (
             CompetitionMetadata("England", "League Two", "league", 4),
             RejectionReason.ENGLISH_TIER,
         ),
