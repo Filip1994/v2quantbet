@@ -201,7 +201,7 @@ class PostgreSQLQuantLabRepository:
                     "bookmaker_name, provider_bet_id, provider_bet_name, raw_selection, "
                     "parsed_line, odds, provider_updated_at, captured_at, lab_owner, "
                     "classifier_version, raw_payload"
-                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                     "ON CONFLICT DO NOTHING",
                     (
                         item.market_observation_id,
@@ -230,7 +230,7 @@ class PostgreSQLQuantLabRepository:
                 "INSERT INTO quantlab_fixture_context_observations ("
                 "context_observation_id, fixture_id, provider_fixture_id, referee, "
                 "provider_status, kickoff_at, provider_updated_at, available_at, raw_payload"
-                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
                 (
                     item.context_observation_id,
                     item.fixture_id,
@@ -252,7 +252,7 @@ class PostgreSQLQuantLabRepository:
                 "away_fouls, home_yellow_cards, away_yellow_cards, home_red_cards, "
                 "away_red_cards, home_second_yellow_cards, away_second_yellow_cards, "
                 "available_at, raw_payload"
-                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                 "ON CONFLICT DO NOTHING",
                 (
                     item.statistics_observation_id,
@@ -292,7 +292,7 @@ class PostgreSQLQuantLabRepository:
             cursor.execute(
                 "INSERT INTO quantlab_standings_snapshots ("
                 "standings_snapshot_id, league_id, season, available_at, raw_payload"
-                ") VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                ") VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
                 (snapshot_id, league_id, season, available_at, _json(raw_payload)),
             )
         return snapshot_id
@@ -389,7 +389,7 @@ class PostgreSQLQuantLabRepository:
                 "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
                 "away_table_pressure, table_pressure, match_importance, feature_version, "
                 "feature_payload"
-                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                 "ON CONFLICT DO NOTHING",
                 (
                     snapshot_id,
