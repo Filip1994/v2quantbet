@@ -21,6 +21,7 @@ from h2h.quantlab.corner_lab.readiness_audit import (
 from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_holdout
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
+from h2h.quantlab.goal_lab.audit import ensure_latest_goal_model_validation
 from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
@@ -268,6 +269,10 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
+                try:
+                    ensure_latest_goal_model_validation(repository, LOGGER)
+                except Exception:
+                    LOGGER.exception("GoalLab DC+ validation failed")
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
                     bool(readiness["model_fit_eligible"])
