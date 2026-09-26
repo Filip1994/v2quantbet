@@ -94,6 +94,7 @@ def test_structural_training_features_do_not_include_target_result() -> None:
         _league_ids,
         _dates,
         _histories,
+        _player_histories,
         _pairs,
         usable_matches,
     ) = _build_training(rows)
