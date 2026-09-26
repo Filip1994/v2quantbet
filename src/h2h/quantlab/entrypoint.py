@@ -163,6 +163,9 @@ def main() -> None:
             corner_team_history_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_REFRESH_SECONDS", "21600"
             ),
+            league_coverage_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_LEAGUE_COVERAGE_REFRESH_SECONDS", "21600"
+            ),
         ),
     )
 
