@@ -165,6 +165,9 @@ def test_structural_value_signal_has_no_shadow_pick_authority() -> None:
             self.decisions.append(item)
             return True
 
+        def goal_model_validation(self, _model_version):
+            return None
+
         def save_goal_shadow_bet(self, *_args, **_kwargs):
             self.shadow_calls += 1
             raise AssertionError("Structural V1 must not create shadow bets")
@@ -224,6 +227,13 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
         def save_goal_decision(self, item):
             self.decisions.append(item)
             return True
+
+        def goal_model_validation(self, _model_version):
+            return {
+                "status": "OK",
+                "authority_review_status": "READY_FOR_MANUAL_REVIEW",
+                "leakage_audit": {"status": "PASS"},
+            }
 
         def save_goal_pick(self, item):
             self.picks.append(item)
