@@ -70,14 +70,16 @@ exclusions.
 
 ### CornerLab
 
-Owns corner probabilities and corner-market experiments. Fixture-specific spend is
-restricted by CARDCORNER_TOP10_LEAGUES_V2.
+Owns corner probabilities and corner-market experiments. Card/Corner discovery is
+market-driven under CARDCORNER_MARKET_DRIVEN_V3: competition name no longer gates
+eligibility; persisted market presence and canonical settlement support do.
 
 ### CardLab
 
 Owns card/foul probabilities and card-market experiments. Referee and match-context
 variables belong here unless a later experiment explicitly demonstrates a justified
-cross-lab use. Fixture-specific spend is restricted by CARDCORNER_TOP10_LEAGUES_V2.
+cross-lab use. CardLab uses the same market-driven universe and requests referee/context
+only after a CARD market has actually been observed for the fixture.
 
 ## Data contract
 
@@ -147,34 +149,25 @@ adds zero provider calls.
 
 ## API policy
 
-QuantLab has a hard daily ceiling of 1,000 API-Football requests under
-quantlab_context. Configuration can lower this ceiling but cannot raise it.
+QuantBet now operates with one shared **75,000 requests/day** football provider envelope.
 
-A second shared-provider guard preserves production capacity. V1 defaults are:
+- `provider_request_usage` remains the durable category telemetry.
+- QuantLab requests are still attributed to `quantlab_context`.
+- There is no separate 1,000/day QuantLab hard cap.
+- There is no reserved 1,500-call production slice in the active QuantLab contract.
+- All services stop at the same shared provider envelope.
+- Deduplication, cache TTLs, capture watermarks and coverage checks remain mandatory
+  because they protect data quality and throughput, not merely cost.
 
-- shared provider envelope: 7,500 requests/day;
-- QuantLab production reserve: 1,500 requests/day;
-- therefore QuantLab stops early if total shared usage has reached 6,000, even when its
-  own 1,000-call allowance is not exhausted.
+Current broad research defaults:
 
-Priority order:
-
-1. Discover the laboratory universe with global `/fixtures?date=...` shards rather than
-   inheriting the narrower production Phase-I universe.
-2. Persist shard success even when zero fixtures are returned; refresh date shards no more
-   often than every six hours by default and include one prior UTC day for final statuses.
-3. Reject out-of-scope competitions locally before any fixture-specific odds/context call.
-4. Reuse already persisted production facts only as read-only historical fallback.
-5. Derive zero-API features locally.
-6. Reuse one all-market odds response across Bet365 and 1xBet, then persist only lab-
-   eligible ownership classes.
-7. Treat a successful empty/filtered odds response as a real capture for refresh gating.
-8. Default odds refresh to 12 hours and standings refresh to 6 hours; automatic historical
-   statistics backfill is disabled by default until a separately budgeted backfill is run.
-9. Cache league/team/reference data.
-10. Spend fixture-specific calls only when the hypothesis requires them.
-11. Do not fetch completed-match statistics when referee coverage is absent.
-12. Stop QuantLab before production operational capacity is endangered.
+- global date-shard discovery remains cached;
+- upcoming fixture scan limit: 1,000;
+- all-market odds refresh: 1 hour;
+- historical completed-match statistics backfill: 25 fixtures per 5-minute cycle by
+  default, subject to missing-data checks;
+- CardLab target context is pulled only when CARD market evidence exists;
+- standings/context keep slower TTLs because provider publication cadence is slower.
 
 ## Evaluation contract
 
