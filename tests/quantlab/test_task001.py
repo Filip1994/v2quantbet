@@ -151,9 +151,13 @@ def test_collector_reuses_one_fixture_response_for_both_books_and_all_markets() 
     class Repo:
         def __init__(self):
             self.saved = ()
+            self.capture = None
 
         def save_market_observations(self, rows):
             self.saved = tuple(rows)
+
+        def save_market_capture(self, **kwargs):
+            self.capture = kwargs
 
     provider = Provider()
     repo = Repo()
@@ -166,6 +170,41 @@ def test_collector_reuses_one_fixture_response_for_both_books_and_all_markets() 
     assert provider.calls == [42]
     assert repo.saved == rows
     assert {row.bookmaker_id for row in rows} == {8, 11}
+    assert repo.capture["raw_observation_count"] == len(rows)
+    assert repo.capture["stored_observation_count"] == len(rows)
+
+
+def test_collector_filters_card_corner_rows_and_watermarks_empty_or_filtered_capture() -> None:
+    class Provider:
+        def fetch_odds(self, fixture_id):
+            assert fixture_id == 42
+            return _odds_payload()
+
+    class Repo:
+        def __init__(self):
+            self.saved = ()
+            self.capture = None
+
+        def save_market_observations(self, rows):
+            self.saved = tuple(rows)
+
+        def save_market_capture(self, **kwargs):
+            self.capture = kwargs
+
+    repo = Repo()
+    rows = QuantLabMarketCollector(repo, Provider()).collect_fixture(
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+        allowed_labs={"GOAL"},
+    )
+
+    assert rows
+    assert {row.lab_owner for row in rows} == {"GOAL"}
+    assert {row.lab_owner for row in repo.saved} == {"GOAL"}
+    assert repo.capture["raw_observation_count"] == 4
+    assert repo.capture["stored_observation_count"] == 2
+    assert set(repo.capture["allowed_labs"]) == {"GOAL"}
 
 
 def test_collector_write_path_has_no_production_table_mutations() -> None:
@@ -267,12 +306,24 @@ def test_quantlab_budget_stops_at_reserved_production_capacity() -> None:
 
 def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
     assert card_corner_scope(
+        country="England",
+        competition_name="Premier League",
+    ).allowed
+    assert card_corner_scope(
+        country="Belgium",
+        competition_name="Jupiler Pro League",
+    ).allowed
+    assert not card_corner_scope(
+        country="England",
+        competition_name="Championship",
+    ).allowed
+    assert not card_corner_scope(
         country="Poland",
         competition_name="Ekstraklasa",
     ).allowed
     assert not card_corner_scope(
-        country="Poland",
-        competition_name="III Liga",
+        country="World",
+        competition_name="UEFA Champions League",
     ).allowed
 
     assert goal_scope(country="Poland", competition_name="III Liga").allowed
@@ -574,6 +625,9 @@ def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> 
         def save_market_observations(self, observations):
             self.saved_markets = tuple(observations)
 
+        def save_market_capture(self, **_kwargs):
+            return None
+
     provider = Provider()
     repo = Repo()
     runtime = QuantLabRuntime(
@@ -607,6 +661,22 @@ def test_fixture_discovery_repository_writes_only_quantlab_tables() -> None:
     assert "INSERT INTO quantlab_fixture_observations" in source
     assert "INSERT INTO quantlab_fixture_discovery_shards" in source
     assert "INSERT INTO fixtures " not in source
+
+
+def test_market_capture_watermark_is_persistent_even_without_market_rows() -> None:
+    due_source = inspect.getsource(PostgreSQLQuantLabRepository.market_capture_due)
+    save_source = inspect.getsource(PostgreSQLQuantLabRepository.save_market_capture)
+
+    assert "quantlab_market_captures" in due_source
+    assert "quantlab_market_observations" in due_source
+    assert "INSERT INTO quantlab_market_captures" in save_source
+
+
+def test_runtime_defaults_are_api_conservative() -> None:
+    settings = QuantLabRuntimeSettings()
+    assert settings.market_refresh_seconds == 43200
+    assert settings.standings_refresh_seconds == 21600
+    assert settings.history_backfill_per_cycle == 0
 
 
 def test_goal_scope_rejects_broader_youth_aliases_and_far_east_aliases() -> None:
