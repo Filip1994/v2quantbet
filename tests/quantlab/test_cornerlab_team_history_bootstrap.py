@@ -144,6 +144,14 @@ class Repo:
     def completed_for_team_statistics(self, _team_ids, **_kwargs):
         return self.historical
 
+    def latest_league_statistics_coverage(self, _league_id, _season, **_kwargs):
+        return {
+            "captured_at": NOW,
+            "statistics_fixtures_supported": True,
+            "response_item_count": 1,
+            "raw_payload": {},
+        }
+
     def statistics_capture_exists(self, fixture_id):
         return fixture_id in self.statistics_captures
 
@@ -253,3 +261,4 @@ def test_corner_team_history_defaults_are_bounded() -> None:
     assert settings.corner_team_history_teams_per_cycle == 120
     assert settings.corner_team_statistics_per_cycle == 360
     assert settings.corner_team_history_refresh_seconds == 21600
+    assert settings.statistics_coverage_refresh_seconds == 604800
