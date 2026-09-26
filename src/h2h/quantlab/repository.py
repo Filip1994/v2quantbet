@@ -229,7 +229,37 @@ class PostgreSQLQuantLabRepository:
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
                 (before, limit),
             )
-            return _row_dicts(cursor)
+            production = _row_dicts(cursor)
+            cursor.execute(
+                "SELECT f.fixture_id, f.provider_fixture_id, latest.league_id, latest.season, "
+                "latest.home_team_id, latest.away_team_id, latest.home_team, latest.away_team, "
+                "latest.competition_name, latest.country, latest.competition_type, "
+                "latest.kickoff_at, latest.provider_status "
+                "FROM quantlab_fixtures f "
+                "JOIN LATERAL ("
+                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
+                "        competition_name, country, competition_type, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE latest.kickoff_at < %s "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_match_statistics_observations s "
+                "                WHERE s.fixture_id = f.fixture_id) "
+                "ORDER BY latest.kickoff_at DESC LIMIT %s",
+                (before, limit),
+            )
+            discovered = _row_dicts(cursor)
+
+        by_fixture = {str(item["fixture_id"]): item for item in production}
+        for item in discovered:
+            by_fixture[str(item["fixture_id"])] = item
+        ordered = sorted(
+            by_fixture.values(),
+            key=lambda item: (item["kickoff_at"], str(item["fixture_id"])),
+            reverse=True,
+        )
+        return tuple(ordered[:limit])
 
     def market_capture_due(
         self, fixture_id: str, *, now: datetime, refresh_seconds: int
