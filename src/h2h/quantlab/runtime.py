@@ -23,13 +23,13 @@ LOGGER = logging.getLogger("quantbet.quantlab")
 class QuantLabRuntimeSettings:
     lookahead_hours: int = 36
     discovery_lookback_days: int = 1
-    fixture_limit: int = 250
+    fixture_limit: int = 1000
     fixture_discovery_refresh_seconds: int = 21600
-    market_refresh_seconds: int = 43200
+    market_refresh_seconds: int = 3600
     context_refresh_seconds: int = 21600
     standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
-    history_backfill_per_cycle: int = 0
+    history_backfill_per_cycle: int = 25
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -173,8 +173,6 @@ class QuantLabRuntime:
         for fixture in candidates:
             if completed >= target:
                 break
-            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
-                continue
             fixture_id = str(fixture["fixture_id"])
             context = self._repository.latest_context_before(fixture_id, decision_at=now)
             if context is None:
@@ -191,8 +189,6 @@ class QuantLabRuntime:
                     "kickoff_at": parsed.kickoff_at,
                     "available_at": parsed.available_at,
                 }
-            if not context.get("referee"):
-                continue
             if not self._repository.statistics_exists(fixture_id):
                 payload = self._provider.fetch_statistics(int(fixture["provider_fixture_id"]))
                 parsed_stats = parse_fixture_statistics(
@@ -208,19 +204,12 @@ class QuantLabRuntime:
         return completed
 
     def _context_upcoming(self, now: datetime) -> tuple[dict[str, Any], ...]:
-        """Return Top-10 fixtures from a wider DB-only scan so broad GoalLab cannot starve them."""
-        scan_limit = max(self._settings.fixture_limit * 10, 2500)
-        fixtures = self._repository.upcoming_fixtures(
+        """Return the broad market-driven CardLab/CornerLab upcoming queue."""
+        return self._repository.upcoming_fixtures(
             start_at=now,
             end_at=now + timedelta(hours=self._settings.lookahead_hours),
-            limit=scan_limit,
+            limit=self._settings.fixture_limit,
         )
-        eligible = tuple(
-            fixture
-            for fixture in fixtures
-            if card_corner_scope(**self._scope_kwargs(fixture)).allowed
-        )
-        return eligible[: self._settings.fixture_limit]
 
     def _collect_upcoming(self, now: datetime) -> tuple[int, int]:
         goal_queue = self._repository.upcoming_fixtures(
@@ -262,6 +251,9 @@ class QuantLabRuntime:
                 market_fixtures += 1
 
             if not context_allowed:
+                continue
+            market_labs = self._repository.market_labs_for_fixture(fixture_id)
+            if "CARD" not in market_labs:
                 continue
             context = self._capture_context(fixture, now)
             standings = self._standings(fixture, now)
@@ -316,14 +308,22 @@ class QuantLabRuntime:
             picks += int(outcome.picks_inserted)
         return decisions, picks
 
-    def _evaluate_context_picks(self, engine: Any | None, now: datetime) -> tuple[int, int]:
+    def _evaluate_context_picks(
+        self,
+        engine: Any | None,
+        lab: str,
+        now: datetime,
+    ) -> tuple[int, int]:
         if engine is None:
             return 0, 0
+        if lab not in {"CORNER", "CARD"}:
+            raise ValueError("lab must be CORNER or CARD")
         fixtures = self._context_upcoming(now)
         decisions = 0
         picks = 0
         for fixture in fixtures:
-            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+            fixture_id = str(fixture["fixture_id"])
+            if lab not in self._repository.market_labs_for_fixture(fixture_id):
                 continue
             outcome = engine.run_fixture(fixture, decision_at=now)
             decisions += int(outcome.decisions_inserted)
@@ -351,7 +351,7 @@ class QuantLabRuntime:
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
         except ApiBudgetExceededError:
-            LOGGER.warning("QuantLab API hard ceiling reached; collection stopped for UTC day")
+            LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
 
@@ -367,7 +367,7 @@ class QuantLabRuntime:
 
         try:
             corner_decisions, corner_picks = self._evaluate_context_picks(
-                self._corner_engine, now
+                self._corner_engine, "CORNER", now
             )
             result["corner_decisions"] = corner_decisions
             result["corner_picks"] = corner_picks
@@ -376,7 +376,7 @@ class QuantLabRuntime:
 
         try:
             card_decisions, card_picks = self._evaluate_context_picks(
-                self._card_engine, now
+                self._card_engine, "CARD", now
             )
             result["card_decisions"] = card_decisions
             result["card_picks"] = card_picks
