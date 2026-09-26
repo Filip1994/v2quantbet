@@ -59,12 +59,14 @@ class QuantLabRuntime:
         *,
         settings: QuantLabRuntimeSettings | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        goal_engine: Any | None = None,
     ) -> None:
         self._repository = repository
         self._provider = provider
         self._settings = settings or QuantLabRuntimeSettings()
         self._clock = clock
         self._collector = QuantLabMarketCollector(repository, provider)
+        self._goal_engine = goal_engine
 
     @staticmethod
     def _scope_kwargs(fixture: dict[str, Any]) -> dict[str, object]:
@@ -270,6 +272,24 @@ class QuantLabRuntime:
             card_snapshots += 1
         return market_fixtures, card_snapshots
 
+    def _evaluate_goal_picks(self, now: datetime) -> tuple[int, int]:
+        if self._goal_engine is None:
+            return 0, 0
+        fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=self._settings.fixture_limit,
+        )
+        decisions = 0
+        picks = 0
+        for fixture in fixtures:
+            if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            outcome = self._goal_engine.run_fixture(fixture, decision_at=now)
+            decisions += int(outcome.decisions_inserted)
+            picks += int(outcome.picks_inserted)
+        return decisions, picks
+
     def run_once(self) -> dict[str, int]:
         now = self._clock().astimezone(UTC)
         result = {
@@ -277,6 +297,8 @@ class QuantLabRuntime:
             "history_backfilled": 0,
             "market_fixtures": 0,
             "card_snapshots": 0,
+            "goal_decisions": 0,
+            "goal_picks": 0,
         }
         try:
             result["fixtures_discovered"] = self._discover_fixtures(now)
@@ -288,12 +310,25 @@ class QuantLabRuntime:
             LOGGER.warning("QuantLab API hard ceiling reached; collection stopped for UTC day")
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
+
+        # Shadow evaluation is intentionally independent from provider budget. Existing
+        # persisted quotes can still produce auditable PASS/PICK decisions after the
+        # daily API ceiling has stopped collection.
+        try:
+            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+            result["goal_decisions"] = goal_decisions
+            result["goal_picks"] = goal_picks
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
-            "market_fixtures=%d card_snapshots=%d",
+            "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
             result["market_fixtures"],
             result["card_snapshots"],
+            result["goal_decisions"],
+            result["goal_picks"],
         )
         return result
