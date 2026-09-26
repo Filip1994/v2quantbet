@@ -81,6 +81,22 @@ class QuantLabApiFootballClient:
             cache_ttl_seconds=21600.0,
         )
 
+    def fetch_team_recent_fixtures(
+        self,
+        team_id: int,
+        *,
+        last: int = 12,
+    ) -> Mapping[str, Any]:
+        if isinstance(team_id, bool) or not isinstance(team_id, int) or team_id <= 0:
+            raise ValueError("team_id must be a positive integer")
+        if isinstance(last, bool) or not isinstance(last, int) or not 3 <= last <= 50:
+            raise ValueError("last must be an integer between 3 and 50")
+        return self._get(
+            "fixtures",
+            {"team": team_id, "last": last, "timezone": "UTC"},
+            cache_ttl_seconds=21600.0,
+        )
+
     def fetch_standings(self, league_id: int, season: int) -> Mapping[str, Any]:
         if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in (league_id, season)):
             raise ValueError("league_id and season must be positive integers")
