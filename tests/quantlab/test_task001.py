@@ -549,7 +549,7 @@ def test_global_discovery_is_independent_from_production_scope() -> None:
     assert rows[1].fixture.country == "Japan"
 
 
-def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> None:
+def test_runtime_scans_global_discovery_for_market_driven_card_corner_research() -> None:
     class Provider:
         def __init__(self):
             self.date_calls = []
@@ -623,6 +623,9 @@ def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> 
         def save_market_capture(self, **_kwargs):
             return None
 
+        def market_labs_for_fixture(self, _fixture_id):
+            return frozenset()
+
     provider = Provider()
     repo = Repo()
     runtime = QuantLabRuntime(
@@ -639,9 +642,9 @@ def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> 
     result = runtime.run_once()
 
     assert result["fixtures_discovered"] == 3
-    assert result["market_fixtures"] == 1
+    assert result["market_fixtures"] == 3
     assert provider.date_calls == [NOW.date()]
-    assert provider.odds_calls == [1]
+    assert provider.odds_calls == [1, 2, 3]
     assert {item.fixture.competition_name for item in repo.observations} == {
         "III Liga",
         "J1 League",
@@ -667,7 +670,7 @@ def test_market_capture_watermark_is_persistent_even_without_market_rows() -> No
     assert "INSERT INTO quantlab_market_captures" in save_source
 
 
-def test_runtime_defaults_are_api_conservative() -> None:
+def test_runtime_defaults_use_expanded_research_budget() -> None:
     settings = QuantLabRuntimeSettings()
     assert settings.market_refresh_seconds == 3600
     assert settings.standings_refresh_seconds == 21600
