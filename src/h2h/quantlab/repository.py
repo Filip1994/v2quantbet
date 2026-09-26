@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
@@ -77,12 +77,22 @@ class PostgreSQLQuantLabRepository:
                 "q.model_probability, q.market_probability, q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
                 "q.closing_observed_at, q.stake_minor, q.outcome, q.pnl_minor, "
-                "q.settled_at, latest.home_team, latest.away_team, "
-                "latest.competition_name, latest.country, latest.kickoff_at "
+                "q.settled_at, COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country, "
+                "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
                 "FROM quantlab_shadow_bets q "
-                "JOIN LATERAL (SELECT home_team, away_team, competition_name, country, kickoff_at "
-                "FROM fixture_observations o WHERE o.fixture_id = q.fixture_id "
-                "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
                 "WHERE q.lab = %s ORDER BY q.decision_at DESC, q.shadow_bet_id DESC LIMIT %s",
                 (lab, limit),
             )
@@ -97,23 +107,99 @@ class PostgreSQLQuantLabRepository:
     ) -> tuple[dict[str, Any], ...]:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT f.fixture_id, f.provider_fixture_id::BIGINT AS provider_fixture_id, "
-                "f.league_id, f.season, f.provider_home_team_id AS home_team_id, "
-                "f.provider_away_team_id AS away_team_id, latest.home_team, latest.away_team, "
+                "SELECT f.fixture_id, f.provider_fixture_id, latest.league_id, latest.season, "
+                "latest.home_team_id, latest.away_team_id, latest.home_team, latest.away_team, "
                 "latest.competition_name, latest.country, latest.competition_type, "
                 "latest.kickoff_at, latest.provider_status "
-                "FROM fixtures f "
+                "FROM quantlab_fixtures f "
                 "JOIN LATERAL ("
-                "  SELECT home_team, away_team, competition_name, country, competition_type, "
-                "         kickoff_at, provider_status "
-                "  FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
-                "  ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
+                "        competition_name, country, competition_type, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE "
                 "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
                 (start_at, end_at, limit),
             )
             return _row_dicts(cursor)
+
+    def fixture_discovery_due(
+        self,
+        fixture_date: date,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(captured_at) FROM quantlab_fixture_discovery_shards "
+                "WHERE fixture_date = %s",
+                (fixture_date,),
+            )
+            row = cursor.fetchone()
+        last = None if row is None else row[0]
+        return last is None or last <= now - timedelta(seconds=refresh_seconds)
+
+    def save_fixture_discovery(
+        self,
+        *,
+        fixture_date: date,
+        captured_at: datetime,
+        observations: Iterable[Any],
+    ) -> int:
+        rows = tuple(observations)
+        shard_id = _identifier(
+            "quantlab-fixture-shard-v1:",
+            {
+                "fixture_date": fixture_date.isoformat(),
+                "captured_at": captured_at.isoformat(),
+                "fixture_count": len(rows),
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            for item in rows:
+                fixture = item.fixture
+                provider_fixture_id = int(fixture.provider_fixture_id or "")
+                cursor.execute(
+                    "INSERT INTO quantlab_fixtures "
+                    "(fixture_id, provider_fixture_id, first_seen_at) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (fixture_id) DO NOTHING",
+                    (fixture.fixture_id, provider_fixture_id, captured_at),
+                )
+                cursor.execute(
+                    "INSERT INTO quantlab_fixture_observations ("
+                    "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+                    "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+                    "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                    "ON CONFLICT DO NOTHING",
+                    (
+                        item.fixture_observation_id,
+                        fixture.fixture_id,
+                        provider_fixture_id,
+                        fixture.competition_id,
+                        fixture.season,
+                        fixture.provider_home_team_id,
+                        fixture.provider_away_team_id,
+                        fixture.home_team,
+                        fixture.away_team,
+                        fixture.competition_name,
+                        fixture.country,
+                        fixture.competition_type,
+                        fixture.kickoff_at,
+                        fixture.status,
+                        item.captured_at,
+                        _json(item.raw_payload),
+                    ),
+                )
+            cursor.execute(
+                "INSERT INTO quantlab_fixture_discovery_shards "
+                "(discovery_shard_id, fixture_date, captured_at, fixture_count) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (shard_id, fixture_date, captured_at, len(rows)),
+            )
+        return len(rows)
 
     def completed_for_context_backfill(
         self, *, before: datetime, limit: int = 80
