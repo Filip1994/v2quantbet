@@ -628,7 +628,6 @@ def _team_feature_map(
     venue: str,
     target_kickoff: datetime,
     target_season: int,
-    target_league_id: int,
 ) -> dict[str, float]:
     result: dict[str, float] = {}
     for window in (3, 5, 10):
