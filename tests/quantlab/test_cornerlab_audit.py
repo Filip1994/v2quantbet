@@ -34,6 +34,7 @@ def test_cornerlab_calibration_scores_over_probability_once_per_sample() -> None
     result = _calibration(
         (
             {
+                "fixture_id": "fixture-1",
                 "model_probability": 0.7,
                 "line": 10.5,
                 "actual_total_corners": 11,
@@ -41,6 +42,7 @@ def test_cornerlab_calibration_scores_over_probability_once_per_sample() -> None
                 "competition_name": "League A",
             },
             {
+                "fixture_id": "fixture-2",
                 "model_probability": 0.3,
                 "line": 10.5,
                 "actual_total_corners": 10,
