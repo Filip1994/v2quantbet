@@ -102,7 +102,7 @@ class Loader:
         return SimpleNamespace(model_version_id="dc-control-v1", model=Model())
 
 
-def test_goal_engine_creates_only_best_price_shadow_pick_and_records_passes():
+def test_goal_control_records_best_value_signal_but_never_creates_shadow_pick():
     repo = Repo(
         (
             _pair(bookmaker_id=8, bookmaker_name="Bet365", over=2.0, under=1.8),
@@ -114,20 +114,21 @@ def test_goal_engine_creates_only_best_price_shadow_pick_and_records_passes():
     result = engine.run_fixture(_fixture(), decision_at=NOW)
 
     assert result.decisions_inserted == 4
-    assert result.picks_inserted == 1
-    picks = [item for item in repo.decisions if item.decision == "PICK"]
-    assert len(picks) == 1
-    pick = picks[0]
-    assert pick.bookmaker_name == "Bet365"
-    assert pick.market_key == "OU_25"
-    assert pick.selection == "OVER"
-    assert pick.odds == 2.0
-    assert pick.model_probability == 0.60
-    assert pick.market_probability > 0.47
-    assert pick.edge > 0.12
-    assert pick.expected_value == pytest.approx(0.20)
+    assert result.picks_inserted == 0
+    signals = [item for item in repo.decisions if item.reason == "CONTROL_VALUE_SIGNAL_ONLY"]
+    assert len(signals) == 1
+    signal = signals[0]
+    assert signal.decision == "PASS"
+    assert signal.bookmaker_name == "Bet365"
+    assert signal.market_key == "OU_25"
+    assert signal.selection == "OVER"
+    assert signal.odds == 2.0
+    assert signal.model_probability == 0.60
+    assert signal.market_probability > 0.47
+    assert signal.edge > 0.12
+    assert signal.expected_value == pytest.approx(0.20)
     assert any(item.reason == "BETTER_PRICE_AVAILABLE" for item in repo.decisions)
-    assert repo.shadows[0][1] == 10_000
+    assert repo.shadows == []
 
 
 def test_goal_engine_is_idempotent_for_same_model_and_quote_evidence():
@@ -138,7 +139,7 @@ def test_goal_engine_is_idempotent_for_same_model_and_quote_evidence():
     second = engine.run_fixture(_fixture(), decision_at=NOW)
 
     assert first.decisions_inserted == 2
-    assert first.picks_inserted == 1
+    assert first.picks_inserted == 0
     assert second.decisions_inserted == 0
     assert second.picks_inserted == 0
 
