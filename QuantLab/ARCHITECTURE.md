@@ -97,7 +97,7 @@ Every feature snapshot carries or can be audited back to:
 
 No feature may use information that became available after the shadow decision timestamp.
 
-Women\'s football is a global hard exclusion shared with production. QuantLab drops identified women fixtures at date-shard parsing and all lab scopes reject them, including legacy rows already present in the research inventory.
+Women's football is a global hard exclusion shared with production. QuantLab drops identified women fixtures at date-shard parsing and all lab scopes reject them, including legacy rows already present in the research inventory.
 
 QuantLab owns its fixture universe independently from production Phase-I discovery.
 `quantlab_fixtures` stores provider fixture identity; date-shard captures are append-only in
