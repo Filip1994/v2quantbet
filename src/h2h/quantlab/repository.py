@@ -629,7 +629,8 @@ class PostgreSQLQuantLabRepository:
                 "WHERE latest.kickoff_at < %s "
                 "AND result.result_classification = 'PLAYED_SETTLEABLE' "
                 "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures sc "
-                "                WHERE sc.fixture_id = f.fixture_id) "
+                "                WHERE sc.fixture_id = f.fixture_id "
+                "                  AND sc.reason IS DISTINCT FROM 'legacy-statistics-observation') "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
                 (before, limit),
             )
@@ -649,7 +650,8 @@ class PostgreSQLQuantLabRepository:
                 "WHERE latest.kickoff_at < %s "
                 "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
                 "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures sc "
-                "                WHERE sc.fixture_id = f.fixture_id) "
+                "                WHERE sc.fixture_id = f.fixture_id "
+                "                  AND sc.reason IS DISTINCT FROM 'legacy-statistics-observation') "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
                 (before, limit),
             )
@@ -716,10 +718,16 @@ class PostgreSQLQuantLabRepository:
             return bool(cursor.fetchone()[0])
 
     def statistics_capture_exists(self, fixture_id: str) -> bool:
+        """Return whether CornerLab V2 enrichment has already been attempted.
+
+        Migration 032 seeded legacy captures for pre-V2 card/foul-only statistics.
+        Those rows deliberately do not block the one-time pressure-statistics refresh.
+        """
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT EXISTS (SELECT 1 FROM quantlab_statistics_captures "
-                "WHERE fixture_id = %s)",
+                "WHERE fixture_id = %s "
+                "AND reason IS DISTINCT FROM 'legacy-statistics-observation')",
                 (fixture_id,),
             )
             return bool(cursor.fetchone()[0])
