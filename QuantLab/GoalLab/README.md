@@ -118,3 +118,16 @@ GOALLAB_SHADOW_POLICY_V1 defaults:
 When multiple supported bookmakers qualify for the same market/selection/evidence cycle,
 only the best available price becomes a shadow PICK. These thresholds are laboratory
 controls only and do not alter production registration policy.
+
+
+## Plain Dixon-Coles control retirement
+
+The original Task 002 plain production Dixon-Coles path is retained only as a benchmark
+for future DC+ comparison. It no longer has authority to create GoalLab shadow bets.
+
+Policy `GOALLAB_CONTROL_POLICY_V2` records qualifying plain-DC value observations as
+`PASS / CONTROL_VALUE_SIGNAL_ONLY`. Migration
+`031_retire_goallab_control_picks.sql` removes the earlier plain-control GoalLab rows
+from `quantlab_shadow_bets` while preserving the immutable Task 002 decision audit.
+
+Future GoalLab shadow PICK generation belongs to a separately versioned DC+ model.
