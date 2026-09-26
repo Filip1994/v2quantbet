@@ -128,7 +128,8 @@ _TOP10_LEAGUE_RULES: dict[str, tuple[str, ...]] = {
     "belgium": ("jupiler pro league", "pro league"),
     "turkey": ("super lig", "super league"),
     "turkiye": ("super lig", "super league"),
-    "scotland": ("premiership",),
+    "usa": ("major league soccer", "mls"),
+    "united states": ("major league soccer", "mls"),
 }
 
 

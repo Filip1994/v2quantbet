@@ -313,6 +313,14 @@ def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
         country="Belgium",
         competition_name="Jupiler Pro League",
     ).allowed
+    assert card_corner_scope(
+        country="USA",
+        competition_name="Major League Soccer",
+    ).allowed
+    assert not card_corner_scope(
+        country="Scotland",
+        competition_name="Premiership",
+    ).allowed
     assert not card_corner_scope(
         country="England",
         competition_name="Championship",
