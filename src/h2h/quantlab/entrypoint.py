@@ -87,20 +87,14 @@ def main() -> None:
     if not repository.check_database():
         raise RuntimeError("QuantLab Task 003 schema is unavailable")
 
-    configured_limit = _positive_integer("QUANTBET_QUANTLAB_API_DAILY_LIMIT", "1000")
-    api_daily_limit = min(configured_limit, 1000)
+    api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
     api_key = os.getenv("API_FOOTBALL_KEY", "").strip()
     if not api_key:
         raise ValueError("API_FOOTBALL_KEY is required for QuantLab collection")
 
     budget = QuantLabRequestBudget(
-        daily_limit=api_daily_limit,
-        shared_daily_limit=_positive_integer(
-            "QUANTBET_QUANTLAB_SHARED_PROVIDER_LIMIT", "7500"
-        ),
-        production_reserve=_integer(
-            "QUANTBET_QUANTLAB_PRODUCTION_RESERVE", "1500"
-        ),
+        shared_daily_limit=api_daily_limit,
+        production_reserve=_integer("QUANTBET_API_RESERVE", "0"),
         database_url=database_url,
     )
     provider = QuantLabApiFootballClient(
@@ -127,12 +121,12 @@ def main() -> None:
             discovery_lookback_days=_integer(
                 "QUANTBET_QUANTLAB_DISCOVERY_LOOKBACK_DAYS", "1"
             ),
-            fixture_limit=_positive_integer("QUANTBET_QUANTLAB_FIXTURE_LIMIT", "250"),
+            fixture_limit=_positive_integer("QUANTBET_QUANTLAB_FIXTURE_LIMIT", "1000"),
             fixture_discovery_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_FIXTURE_DISCOVERY_REFRESH_SECONDS", "21600"
             ),
             market_refresh_seconds=_positive_integer(
-                "QUANTBET_QUANTLAB_MARKET_REFRESH_SECONDS", "43200"
+                "QUANTBET_QUANTLAB_MARKET_REFRESH_SECONDS", "3600"
             ),
             context_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CONTEXT_REFRESH_SECONDS", "21600"
@@ -144,7 +138,7 @@ def main() -> None:
                 "QUANTBET_QUANTLAB_FEATURE_REFRESH_SECONDS", "1800"
             ),
             history_backfill_per_cycle=_integer(
-                "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "0"
+                "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
             ),
         ),
     )
