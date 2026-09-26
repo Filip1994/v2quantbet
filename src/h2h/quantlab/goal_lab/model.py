@@ -41,6 +41,106 @@ MIN_FEATURE_OBSERVATIONS = 20
 HISTORY_LIMIT = 10_000
 SHORT_REST_DAYS = 4.0
 
+CONTRACT_COVERAGE_V1 = {
+    "A_BASE_DC": {"status": "FULL", "implemented": list(range(1, 11)), "pending": []},
+    "B_RECENT_RESULT_GOAL_FORM": {
+        "status": "FULL",
+        "implemented": list(range(11, 43)),
+        "pending": [],
+    },
+    "C_VENUE_FORM": {"status": "FULL", "implemented": list(range(43, 55)), "pending": []},
+    "D_SEASON_AGGREGATES": {
+        "status": "FULL",
+        "implemented": list(range(55, 69)),
+        "pending": [],
+    },
+    "E_SHOT_PRODUCTION_PREVENTION": {
+        "status": "FULL",
+        "implemented": list(range(69, 96)),
+        "pending": [],
+    },
+    "F_GOALKEEPER_FINISHING": {
+        "status": "FULL",
+        "implemented": list(range(96, 104)),
+        "pending": [],
+    },
+    "G_POSSESSION_PASSING": {
+        "status": "FULL",
+        "implemented": list(range(104, 118)),
+        "pending": [],
+    },
+    "H_SET_PIECES_TERRITORY": {
+        "status": "FULL",
+        "implemented": list(range(118, 128)),
+        "pending": [],
+    },
+    "I_DISCIPLINE_HISTORICAL": {
+        "status": "PARTIAL",
+        "implemented": list(range(128, 134)),
+        "pending": [134, 135],
+        "pending_reason": "penalty event/conceded history is not persisted",
+    },
+    "J_REST_CONGESTION": {
+        "status": "FULL",
+        "implemented": list(range(136, 151)),
+        "pending": [],
+    },
+    "K_STANDINGS_HISTORICAL": {
+        "status": "PENDING_ACQUISITION",
+        "implemented": [],
+        "pending": list(range(151, 172)),
+    },
+    "L_INJURY_SUSPENSION": {
+        "status": "PENDING_ACQUISITION",
+        "implemented": [],
+        "pending": list(range(172, 194)),
+    },
+    "M_TARGET_LINEUP_FORMATION": {
+        "status": "SEPARATE_LATE_LAYER",
+        "implemented": [],
+        "pending": list(range(194, 216)),
+    },
+    "N_PLAYER_FORM_AGGREGATION": {
+        "status": "PENDING_ACQUISITION",
+        "implemented": [],
+        "pending": list(range(216, 233)),
+    },
+    "O_MANAGER_CONTEXT": {
+        "status": "PENDING_ACQUISITION",
+        "implemented": [],
+        "pending": list(range(233, 241)),
+    },
+    "P_H2H": {"status": "FULL", "implemented": list(range(241, 251)), "pending": []},
+    "Q_OPPONENT_ADJUSTED_FORM": {
+        "status": "FULL",
+        "implemented": list(range(251, 260)),
+        "pending": [],
+    },
+    "R_MATCHUP_INTERACTIONS": {
+        "status": "PARTIAL",
+        "implemented": list(range(260, 270)),
+        "pending": list(range(270, 275)),
+        "pending_reason": "availability/table-pressure interactions require pending blocks",
+    },
+    "OPTIONAL_MARKET_AWARE": {
+        "status": "SEPARATE_MODEL_ONLY",
+        "implemented": [],
+        "pending": list(range(275, 287)),
+    },
+    "OPTIONAL_PROVIDER_ENSEMBLE": {
+        "status": "SEPARATE_MODEL_ONLY",
+        "implemented": [],
+        "pending": list(range(287, 298)),
+    },
+    "MISSINGNESS": {
+        "status": "PARTIAL",
+        "implemented": [298, 299, 300, 301, 302, 303, 305],
+        "pending": [304],
+        "pending_reason": "source ages are retained in provenance rather than one scalar feature",
+    },
+}
+
+
 _RESULT_METRICS = (
     "goals_for",
     "goals_against",
@@ -652,6 +752,15 @@ def _team_feature_map(
     )
     result[f"{prefix}_history_match_count"] = float(len(samples))
     result[f"{prefix}_season_match_count"] = float(len(season_samples))
+    recent_for_coverage = samples[-5:]
+    result[f"{prefix}_fixture_stats_coverage_l5"] = (
+        0.0
+        if not recent_for_coverage
+        else float(
+            sum(item.statistics_observation_id is not None for item in recent_for_coverage)
+            / len(recent_for_coverage)
+        )
+    )
 
     if samples:
         last_kickoff = samples[-1].kickoff_at
@@ -933,6 +1042,11 @@ def _feature_map(
         features.get("away_venue_l5_goals_against"),
         "diff",
     )
+    features["total_shot_differential"] = _binary_op(
+        features.get("home_l5_shots_for"),
+        features.get("away_l5_shots_for"),
+        "diff",
+    )
     features["pass_volume_differential"] = _binary_op(
         features.get("home_l5_passes"),
         features.get("away_l5_passes"),
@@ -976,6 +1090,22 @@ def _feature_map(
         or not isfinite(away_possession)
         else away_possession * (1.0 - home_possession)
     )
+    features["fixture_stats_coverage_flag"] = float(
+        max(
+            features.get("home_fixture_stats_coverage_l5", 0.0),
+            features.get("away_fixture_stats_coverage_l5", 0.0),
+        )
+        > 0.0
+    )
+    features["h2h_sample_size_flag"] = float(
+        float(features.get("h2h_sample_size") or 0.0) > 0.0
+    )
+    # These blocks are intentionally explicit rather than silently zero-imputed.
+    # They remain constant until timestamp-safe acquisition is implemented.
+    features["lineup_coverage_flag"] = 0.0
+    features["injury_coverage_flag"] = 0.0
+    features["player_stats_coverage_flag"] = 0.0
+    features["standings_coverage_flag"] = 0.0
     return features
 
 
@@ -1541,28 +1671,17 @@ class GoalStructuralModelService:
                 "bookmaker_features_used": False,
                 "provider_predictions_used": False,
                 "target_match_live_stats_used": False,
+                "contract_coverage": CONTRACT_COVERAGE_V1,
                 "contract_blocks_active": [
-                    "A_BASE_DC",
-                    "B_RECENT_RESULT_GOAL_FORM",
-                    "C_VENUE_FORM",
-                    "D_SEASON_AGGREGATES",
-                    "E_SHOT_PRODUCTION_PREVENTION",
-                    "F_GOALKEEPER_FINISHING",
-                    "G_POSSESSION_PASSING",
-                    "H_SET_PIECES_TERRITORY",
-                    "I_DISCIPLINE_HISTORICAL",
-                    "J_REST_CONGESTION",
-                    "P_H2H",
-                    "R_MATCHUP_INTERACTIONS",
-                    "MISSINGNESS",
+                    name
+                    for name, coverage in CONTRACT_COVERAGE_V1.items()
+                    if coverage["status"] in {"FULL", "PARTIAL"}
                 ],
                 "contract_blocks_pending_acquisition": [
-                    "K_STANDINGS_HISTORICAL",
-                    "L_INJURY_SUSPENSION",
-                    "M_TARGET_LINEUP_FORMATION",
-                    "N_PLAYER_FORM_AGGREGATION",
-                    "O_MANAGER_CONTEXT",
-                    "Q_OPPONENT_ADJUSTED_FORM",
+                    name
+                    for name, coverage in CONTRACT_COVERAGE_V1.items()
+                    if coverage["status"]
+                    in {"PENDING_ACQUISITION", "SEPARATE_LATE_LAYER"}
                 ],
             },
         )
