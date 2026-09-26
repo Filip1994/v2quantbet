@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from h2h.quantlab.coverage import parse_fixture_statistics_coverage
+from h2h.quantlab.coverage import (
+    parse_fixture_statistics_coverage,
+    parse_league_coverage_flags,
+)
 from h2h.quantlab.runtime import QuantLabRuntime
 
 
@@ -23,7 +26,12 @@ def _coverage_payload(value):
                                 "lineups": True,
                                 "statistics_fixtures": value,
                                 "statistics_players": True,
-                            }
+                            },
+                            "standings": True,
+                            "players": True,
+                            "injuries": True,
+                            "predictions": False,
+                            "odds": True,
                         },
                     }
                 ],
@@ -192,3 +200,22 @@ def test_unknown_coverage_does_not_fabricate_unavailable() -> None:
     assert provider.statistics_calls == [42]
     assert repo.coverage_captures[0]["statistics_fixtures"] is None
     assert repo.statistics_captures[0]["status"] == "AVAILABLE"
+
+
+def test_full_league_coverage_parser_preserves_endpoint_flags() -> None:
+    flags = parse_league_coverage_flags(
+        _coverage_payload(True),
+        league_id=39,
+        season=2026,
+    )
+
+    assert flags == {
+        "statistics_fixtures": True,
+        "statistics_players": True,
+        "lineups": True,
+        "standings": True,
+        "players": True,
+        "injuries": True,
+        "predictions": False,
+        "odds": True,
+    }
