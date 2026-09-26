@@ -153,10 +153,11 @@ Flat research stake is 10,000 minor units.
 ## Pick authority gate
 
 `QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY` is an explicit manual authority request and
-defaults to OFF.
+defaults to OFF. `QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION` must also equal the
+**exact immutable DC+ model hash** being evaluated.
 
-Even when requested ON, the engine will not create a GoalLab pick unless the **exact
-model version** has:
+Even when authority is requested ON, the engine will not create a GoalLab pick unless the
+exact approved model version has:
 
 - a recorded chronological DC-vs-DC+ holdout;
 - a PASS leakage audit;
@@ -164,7 +165,8 @@ model version** has:
 - `authority_review_status = READY_FOR_MANUAL_REVIEW`.
 
 Validation does not automatically promote a model. The metrics are evidence for the
-explicit authority decision.
+explicit authority decision. When new data produces a different model hash, pick creation
+pauses until that new hash is explicitly approved.
 
 ## Dedicated GoalLab Picks sector
 
