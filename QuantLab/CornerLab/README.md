@@ -18,7 +18,7 @@ Planned structural features include:
 
 CornerLab v1 shares CARDCORNER_TOP10_LEAGUES_V2 with CardLab. The only eligible
 domestic leagues are Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
-Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Scottish Premiership.
+Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Major League Soccer (MLS).
 
 Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
 competitions are rejected locally before fixture-specific CornerLab spend. This is
