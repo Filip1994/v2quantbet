@@ -37,6 +37,7 @@ class QuantLabRuntimeSettings:
     goal_injury_refresh_seconds: int = 14400
     goal_lineup_refresh_seconds: int = 900
     goal_lineup_window_minutes: int = 120
+    goal_coach_refresh_seconds: int = 86400
     history_backfill_per_cycle: int = 25
     goal_team_history_last: int = 15
     goal_team_history_teams_per_cycle: int = 120
@@ -60,6 +61,7 @@ class QuantLabRuntimeSettings:
             ("goal_injury_refresh_seconds", self.goal_injury_refresh_seconds),
             ("goal_lineup_refresh_seconds", self.goal_lineup_refresh_seconds),
             ("goal_lineup_window_minutes", self.goal_lineup_window_minutes),
+            ("goal_coach_refresh_seconds", self.goal_coach_refresh_seconds),
             ("goal_team_history_last", self.goal_team_history_last),
             ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
             ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
@@ -359,6 +361,36 @@ class QuantLabRuntime:
             raw_payload=dict(payload),
         )
         return True
+
+    def _capture_goal_coaches(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> int:
+        captured = 0
+        for key in ("home_team_id", "away_team_id"):
+            team_id = int(fixture[key])
+            if team_id <= 0:
+                continue
+            if not self._repository.goal_coach_capture_due(
+                team_id,
+                now=now,
+                refresh_seconds=self._settings.goal_coach_refresh_seconds,
+            ):
+                continue
+            payload = self._provider.fetch_team_coaches(team_id)
+            response = payload.get("response") if isinstance(payload, dict) else None
+            response_item_count = len(response) if isinstance(response, list) else 0
+            self._repository.save_goal_coach_capture(
+                team_id=team_id,
+                available_at=now,
+                status="AVAILABLE",
+                response_item_count=response_item_count,
+                reason=None,
+                raw_payload=dict(payload),
+            )
+            captured += 1
+        return captured
 
     def _capture_historical_statistics(
         self,
@@ -825,6 +857,7 @@ class QuantLabRuntime:
                     standings = self._standings(fixture, now)
                     self._capture_goal_injuries(fixture, now)
                     self._capture_goal_lineup(fixture, now)
+                    self._capture_goal_coaches(fixture, now)
 
                 if not context_allowed:
                     continue
