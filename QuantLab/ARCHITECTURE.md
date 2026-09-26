@@ -54,7 +54,8 @@ The QuantLab core owns:
 - all-market Bet365/1xBet ingestion
 - versioned zero-request league eligibility
 - feature provenance conventions
-- shadow-bet ledger
+- append-only shadow decision evidence and shadow-bet ledger
+- GoalLab read-only control-model evaluation over active Dixon-Coles artifacts
 - settlement conventions
 - P&L / ROI / CLV / drawdown reporting
 - dashboard routing
@@ -109,6 +110,7 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_match_statistics_observations
 - quantlab_standings_snapshots
 - quantlab_card_feature_snapshots
+- quantlab_goal_decisions
 
 ## Market collector contract
 
@@ -170,3 +172,20 @@ All labs report the same core metrics:
 - market/line split
 
 QuantLab results never automatically promote a model into production.
+
+
+## GoalLab shadow decision contract
+
+Task 002 evaluates persisted QuantLab GOAL observations without making provider requests.
+It resolves the existing active Dixon-Coles artifact by exact API-Football
+league/season/team-ID namespace through the validated production model loader, but never
+writes model lifecycle state.
+
+Only complete two-sided O/U 2.5 and BTTS captures are canonicalized in V1. PICK/PASS
+decisions are append-only in quantlab_goal_decisions. Only PICK decisions may create a
+quantlab_shadow_bets row. Decision and shadow IDs are deterministic so repeated runtime
+cycles over unchanged evidence are idempotent.
+
+The GoalLab decision stage runs even when the QuantLab provider daily ceiling has already
+been reached, because it operates only on persisted observations and read-only model
+artifacts.
