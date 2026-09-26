@@ -221,7 +221,13 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("only PICK decisions may create shadow bets")
         shadow_bet_id = _identifier(
             "quantlab-shadow-v1:",
-            {"goal_decision_id": item.decision_id},
+            {
+                "fixture_id": item.fixture_id,
+                "lab": "GOAL",
+                "market_key": item.market_key,
+                "selection": item.selection,
+                "line": item.line,
+            },
         )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -263,6 +269,7 @@ class PostgreSQLQuantLabRepository:
         lookahead_hours: int = 36,
         limit: int = 250,
     ) -> tuple[dict[str, Any], ...]:
+        end_at = now + timedelta(hours=lookahead_hours)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT f.fixture_id, latest.league_id, latest.season, latest.home_team_id, "
@@ -289,10 +296,9 @@ class PostgreSQLQuantLabRepository:
                 " FROM quantlab_goal_decisions d WHERE d.fixture_id = f.fixture_id "
                 " ORDER BY decision_at DESC, (decision = 'PICK') DESC, decision_id DESC LIMIT 1"
                 ") decision ON TRUE "
-                "WHERE latest.kickoff_at >= %s "
-                "AND latest.kickoff_at < %s + make_interval(hours => %s) "
+                "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
-                (now, now, lookahead_hours, limit),
+                (now, end_at, limit),
             )
             return _row_dicts(cursor)
 
