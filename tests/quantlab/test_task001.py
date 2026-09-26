@@ -16,9 +16,11 @@ from h2h.quantlab.card_lab.features import (
 )
 from h2h.quantlab.card_lab.rivalry import RIVALRY_REGISTRY_VERSION, rivalry_indicator
 from h2h.quantlab.dashboard import QuantLabDashboardService
+from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
 from h2h.quantlab.market_collector import QuantLabMarketCollector, parse_market_response
 from h2h.quantlab.provider import QuantLabApiFootballClient
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
 from h2h.quantlab.scope import card_corner_scope, goal_scope
 
 
@@ -81,6 +83,35 @@ def _odds_payload():
                 ],
             }
         ]
+    }
+
+
+def _fixture_payload(
+    fixture_id,
+    league_id,
+    competition_name,
+    country,
+    *,
+    competition_type="League",
+    kickoff="2026-09-26T02:30:00+00:00",
+):
+    return {
+        "fixture": {
+            "id": fixture_id,
+            "date": kickoff,
+            "status": {"short": "NS"},
+        },
+        "league": {
+            "id": league_id,
+            "name": competition_name,
+            "country": country,
+            "type": competition_type,
+            "season": 2026,
+        },
+        "teams": {
+            "home": {"id": fixture_id * 2, "name": f"Home {fixture_id}"},
+            "away": {"id": fixture_id * 2 + 1, "name": f"Away {fixture_id}"},
+        },
     }
 
 
@@ -450,3 +481,140 @@ def test_cardlab_dashboard_displays_feature_values_and_provenance() -> None:
     assert "MATCH_IMPORTANCE_V1" in html
     assert "quantlab_completed_fixture_statistics" in html
     assert "CARDLAB_FEATURES_V1" in html
+
+
+def test_global_discovery_is_independent_from_production_scope() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(1, 1001, "III Liga", "Poland"),
+            _fixture_payload(2, 98, "J1 League", "Japan"),
+            _fixture_payload(3, 1002, "Premier League U20", "England"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.fixture_id for row in rows] == [
+        "api-football:1",
+        "api-football:2",
+        "api-football:3",
+    ]
+    assert rows[0].fixture.competition_name == "III Liga"
+    assert rows[1].fixture.country == "Japan"
+
+
+def test_runtime_filters_scope_after_global_discovery_before_fixture_calls() -> None:
+    class Provider:
+        def __init__(self):
+            self.date_calls = []
+            self.odds_calls = []
+
+        def fetch_fixtures_for_date(self, fixture_date):
+            self.date_calls.append(fixture_date)
+            return {
+                "response": [
+                    _fixture_payload(1, 1001, "III Liga", "Poland"),
+                    _fixture_payload(2, 98, "J1 League", "Japan"),
+                    _fixture_payload(3, 1002, "Premier League U20", "England"),
+                ]
+            }
+
+        def fetch_odds(self, fixture_id):
+            self.odds_calls.append(fixture_id)
+            return {
+                "response": [
+                    {
+                        "fixture": {"id": fixture_id},
+                        "bookmakers": [],
+                    }
+                ]
+            }
+
+    class Repo:
+        def __init__(self):
+            self.observations = ()
+            self.saved_markets = ()
+
+        def fixture_discovery_due(self, *_args, **_kwargs):
+            return True
+
+        def save_fixture_discovery(self, *, observations, **_kwargs):
+            self.observations = tuple(observations)
+            return len(self.observations)
+
+        def completed_for_context_backfill(self, **_kwargs):
+            return ()
+
+        def upcoming_fixtures(self, **_kwargs):
+            rows = []
+            for item in self.observations:
+                fixture = item.fixture
+                rows.append(
+                    {
+                        "fixture_id": fixture.fixture_id,
+                        "provider_fixture_id": int(fixture.provider_fixture_id),
+                        "league_id": fixture.competition_id,
+                        "season": fixture.season,
+                        "home_team_id": fixture.provider_home_team_id,
+                        "away_team_id": fixture.provider_away_team_id,
+                        "home_team": fixture.home_team,
+                        "away_team": fixture.away_team,
+                        "competition_name": fixture.competition_name,
+                        "country": fixture.country,
+                        "competition_type": fixture.competition_type,
+                        "kickoff_at": fixture.kickoff_at,
+                        "provider_status": fixture.status,
+                    }
+                )
+            return tuple(rows)
+
+        def market_capture_due(self, *_args, **_kwargs):
+            return True
+
+        def save_market_observations(self, observations):
+            self.saved_markets = tuple(observations)
+
+    provider = Provider()
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        provider,
+        settings=QuantLabRuntimeSettings(
+            lookahead_hours=1,
+            discovery_lookback_days=0,
+            history_backfill_per_cycle=0,
+        ),
+        clock=lambda: NOW,
+    )
+
+    result = runtime.run_once()
+
+    assert result["fixtures_discovered"] == 3
+    assert result["market_fixtures"] == 1
+    assert provider.date_calls == [NOW.date()]
+    assert provider.odds_calls == [1]
+    assert {item.fixture.competition_name for item in repo.observations} == {
+        "III Liga",
+        "J1 League",
+        "Premier League U20",
+    }
+
+
+def test_fixture_discovery_repository_writes_only_quantlab_tables() -> None:
+    source = inspect.getsource(PostgreSQLQuantLabRepository.save_fixture_discovery)
+
+    assert "INSERT INTO quantlab_fixtures" in source
+    assert "INSERT INTO quantlab_fixture_observations" in source
+    assert "INSERT INTO quantlab_fixture_discovery_shards" in source
+    assert "INSERT INTO fixtures " not in source
+
+
+def test_goal_scope_rejects_broader_youth_aliases_and_far_east_aliases() -> None:
+    assert not goal_scope(
+        country="England",
+        competition_name="Premier League U12",
+    ).allowed
+    assert not goal_scope(
+        country="Korea Republic",
+        competition_name="K League 1",
+    ).allowed
