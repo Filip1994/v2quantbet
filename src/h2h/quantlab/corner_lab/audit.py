@@ -372,16 +372,56 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
         value_by_selection = _rows(cursor)
 
         cursor.execute(
-            "SELECT line, COUNT(*)::BIGINT AS row_count, "
+            "SELECT line, selection, COUNT(*)::BIGINT AS row_count, "
             "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
+            "COUNT(*) FILTER (WHERE decision = 'PICK' "
+            " AND reason = 'VALUE_THRESHOLD_PASSED')::BIGINT AS pick_count, "
+            "COUNT(*) FILTER (WHERE decision = 'PICK' "
+            " AND reason = 'VALUE_THRESHOLD_PASSED')::NUMERIC "
+            "/ NULLIF(COUNT(*), 0) AS pick_rate, "
+            "MIN(model_probability) AS model_p_min, "
+            "percentile_cont(0.05) WITHIN GROUP (ORDER BY model_probability) AS model_p_p05, "
+            "percentile_cont(0.50) WITHIN GROUP (ORDER BY model_probability) AS model_p_median, "
+            "AVG(model_probability) AS model_p_mean, "
+            "percentile_cont(0.95) WITHIN GROUP (ORDER BY model_probability) AS model_p_p95, "
+            "MAX(model_probability) AS model_p_max, "
+            "MIN(edge) AS edge_min, "
+            "percentile_cont(0.05) WITHIN GROUP (ORDER BY edge) AS edge_p05, "
+            "percentile_cont(0.50) WITHIN GROUP (ORDER BY edge) AS edge_median, "
+            "AVG(edge) AS edge_mean, "
+            "percentile_cont(0.95) WITHIN GROUP (ORDER BY edge) AS edge_p95, "
+            "MAX(edge) AS edge_max, "
+            "MIN(expected_value) AS ev_min, "
+            "percentile_cont(0.05) WITHIN GROUP (ORDER BY expected_value) AS ev_p05, "
+            "percentile_cont(0.50) WITHIN GROUP (ORDER BY expected_value) AS ev_median, "
+            "AVG(expected_value) AS ev_mean, "
+            "percentile_cont(0.95) WITHIN GROUP (ORDER BY expected_value) AS ev_p95, "
+            "MAX(expected_value) AS ev_max "
+            "FROM quantlab_context_market_decisions "
+            "WHERE policy_version = %s AND line IS NOT NULL AND model_probability IS NOT NULL "
+            "GROUP BY line, selection ORDER BY line, selection LIMIT 80",
+            (POLICY_VERSION,),
+        )
+        value_by_line_and_selection = _rows(cursor)
+
+        cursor.execute(
+            "SELECT bookmaker_name, selection, COUNT(*)::BIGINT AS row_count, "
+            "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
+            "COUNT(*) FILTER (WHERE decision = 'PICK' "
+            " AND reason = 'VALUE_THRESHOLD_PASSED')::BIGINT AS pick_count, "
+            "COUNT(*) FILTER (WHERE decision = 'PICK' "
+            " AND reason = 'VALUE_THRESHOLD_PASSED')::NUMERIC "
+            "/ NULLIF(COUNT(*), 0) AS pick_rate, "
             "AVG(model_probability) AS mean_model_probability, "
             "AVG(edge) AS mean_edge, AVG(expected_value) AS mean_ev "
             "FROM quantlab_context_market_decisions "
-            "WHERE policy_version = %s AND line IS NOT NULL AND model_probability IS NOT NULL "
-            "GROUP BY line ORDER BY row_count DESC, line LIMIT 40",
+            "WHERE policy_version = %s AND bookmaker_name IS NOT NULL "
+            "AND model_probability IS NOT NULL "
+            "GROUP BY bookmaker_name, selection "
+            "ORDER BY bookmaker_name, selection",
             (POLICY_VERSION,),
         )
-        value_by_line = _rows(cursor)
+        value_by_bookmaker_and_selection = _rows(cursor)
 
         cursor.execute(
             "SELECT COUNT(*)::BIGINT AS decision_rows, "
@@ -406,6 +446,107 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             (POLICY_VERSION,),
         )
         decisions_by_model = _rows(cursor)
+
+        cursor.execute(
+            "WITH active_model AS ("
+            " SELECT model_version FROM quantlab_corner_model_versions "
+            " ORDER BY trained_at DESC, model_version DESC LIMIT 1"
+            "), active_picks AS ("
+            " SELECT d.* FROM quantlab_context_market_decisions d "
+            " JOIN active_model m ON m.model_version = d.model_version "
+            " WHERE d.policy_version = %s AND d.decision = 'PICK' "
+            " AND d.reason = 'VALUE_THRESHOLD_PASSED'"
+            ") "
+            "SELECT COUNT(*)::BIGINT AS row_count, "
+            "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
+            "COUNT(DISTINCT (fixture_id, line))::BIGINT AS fixture_line_count, "
+            "MIN(model_version) AS model_version "
+            "FROM active_picks",
+            (POLICY_VERSION,),
+        )
+        active_pick_summary = _one(cursor)
+
+        cursor.execute(
+            "WITH active_model AS ("
+            " SELECT model_version FROM quantlab_corner_model_versions "
+            " ORDER BY trained_at DESC, model_version DESC LIMIT 1"
+            "), active_picks AS ("
+            " SELECT d.* FROM quantlab_context_market_decisions d "
+            " JOIN active_model m ON m.model_version = d.model_version "
+            " WHERE d.policy_version = %s AND d.decision = 'PICK' "
+            " AND d.reason = 'VALUE_THRESHOLD_PASSED'"
+            ") "
+            "SELECT d.fixture_id, "
+            "COALESCE(q.home_team, p.home_team) AS home_team, "
+            "COALESCE(q.away_team, p.away_team) AS away_team, "
+            "COALESCE(q.competition_name, p.competition_name) AS competition_name, "
+            "COALESCE(q.country, p.country) AS country, "
+            "COALESCE(q.kickoff_at, p.kickoff_at) AS kickoff_at, "
+            "COUNT(*)::BIGINT AS pick_rows, "
+            "COUNT(DISTINCT d.line)::BIGINT AS distinct_lines "
+            "FROM active_picks d "
+            "LEFT JOIN LATERAL ("
+            " SELECT home_team, away_team, competition_name, country, kickoff_at "
+            " FROM quantlab_fixture_observations o WHERE o.fixture_id = d.fixture_id "
+            " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+            ") q ON TRUE "
+            "LEFT JOIN LATERAL ("
+            " SELECT home_team, away_team, competition_name, country, kickoff_at "
+            " FROM fixture_observations o WHERE o.fixture_id = d.fixture_id "
+            " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+            ") p ON TRUE "
+            "GROUP BY d.fixture_id, q.home_team, p.home_team, q.away_team, p.away_team, "
+            "q.competition_name, p.competition_name, q.country, p.country, "
+            "q.kickoff_at, p.kickoff_at "
+            "ORDER BY kickoff_at, d.fixture_id",
+            (POLICY_VERSION,),
+        )
+        active_pick_by_fixture = _rows(cursor)
+
+        cursor.execute(
+            "WITH active_model AS ("
+            " SELECT model_version FROM quantlab_corner_model_versions "
+            " ORDER BY trained_at DESC, model_version DESC LIMIT 1"
+            "), active_picks AS ("
+            " SELECT d.* FROM quantlab_context_market_decisions d "
+            " JOIN active_model m ON m.model_version = d.model_version "
+            " WHERE d.policy_version = %s AND d.decision = 'PICK' "
+            " AND d.reason = 'VALUE_THRESHOLD_PASSED'"
+            ") "
+            "SELECT d.decision_at, d.fixture_id, "
+            "COALESCE(q.home_team, p.home_team) AS home_team, "
+            "COALESCE(q.away_team, p.away_team) AS away_team, "
+            "COALESCE(q.competition_name, p.competition_name) AS competition_name, "
+            "COALESCE(q.country, p.country) AS country, "
+            "COALESCE(q.kickoff_at, p.kickoff_at) AS kickoff_at, "
+            "d.bookmaker_id, d.bookmaker_name, d.provider_bet_name, d.line, d.selection, "
+            "d.model_probability, d.market_probability, d.edge, d.expected_value, "
+            "d.odds, d.companion_odds, "
+            "(d.details->>'expected_total_corners')::NUMERIC AS expected_total_corners, "
+            "(d.details->>'home_history_size')::BIGINT AS home_history_size, "
+            "(d.details->>'away_history_size')::BIGINT AS away_history_size, "
+            "d.model_version "
+            "FROM active_picks d "
+            "LEFT JOIN LATERAL ("
+            " SELECT home_team, away_team, competition_name, country, kickoff_at "
+            " FROM quantlab_fixture_observations o WHERE o.fixture_id = d.fixture_id "
+            " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+            ") q ON TRUE "
+            "LEFT JOIN LATERAL ("
+            " SELECT home_team, away_team, competition_name, country, kickoff_at "
+            " FROM fixture_observations o WHERE o.fixture_id = d.fixture_id "
+            " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+            ") p ON TRUE "
+            "ORDER BY kickoff_at, d.fixture_id, d.line, d.selection, "
+            "d.bookmaker_id, d.decision_at LIMIT 500",
+            (POLICY_VERSION,),
+        )
+        active_pick_rows = _rows(cursor)
+        active_pick_summary = {
+            **active_pick_summary,
+            "returned_rows": len(active_pick_rows),
+            "truncated": int(active_pick_summary.get("row_count") or 0) > len(active_pick_rows),
+        }
 
         fixture_meta_cte = (
             "WITH fixture_meta AS ("
@@ -488,7 +629,13 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
         "value_filter": {
             "summary": value_summary,
             "by_selection": value_by_selection,
-            "by_line_top40": value_by_line,
+            "by_line_and_selection": value_by_line_and_selection,
+            "by_bookmaker_and_selection": value_by_bookmaker_and_selection,
+        },
+        "active_model_picks": {
+            "summary": active_pick_summary,
+            "by_fixture": active_pick_by_fixture,
+            "rows": active_pick_rows,
         },
         "quality": _quality(quality_rows),
         "calibration": _calibration(calibration_rows),
@@ -511,4 +658,30 @@ def log_cornerlab_v2_audit(repository: Any, logger: logging.Logger) -> None:
             "QuantLab CornerLab V2 audit section=%s payload=%s",
             key,
             json.dumps(report[key], sort_keys=True, default=str, separators=(",", ":")),
+        )
+
+    active_picks = report["active_model_picks"]
+    logger.info(
+        "QuantLab CornerLab V2 audit section=active_model_pick_summary payload=%s",
+        json.dumps(
+            {
+                "summary": active_picks["summary"],
+                "by_fixture": active_picks["by_fixture"],
+            },
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        ),
+    )
+    rows = active_picks["rows"]
+    for start in range(0, len(rows), 25):
+        logger.info(
+            "QuantLab CornerLab V2 audit section=active_model_pick_rows batch=%s payload=%s",
+            start // 25 + 1,
+            json.dumps(
+                rows[start : start + 25],
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ),
         )
