@@ -15,26 +15,19 @@ CardLab v1 immediately uses five timestamp-safe match-context variables:
 The exact V1 formulas, provenance requirements and leakage rules are frozen in
 [FEATURES_V1.md](./FEATURES_V1.md).
 
-## League scope
+## Research scope
 
-CardLab v1 uses CARDCORNER_TOP10_LEAGUES_V2. Fixture-specific provider calls are
-allowed only for ten domestic top flights implemented in src/h2h/quantlab/scope.py:
+CardLab now uses `CARDCORNER_MARKET_DRIVEN_V3`.
 
-- England — Premier League
-- Spain — La Liga
-- Italy — Serie A
-- Germany — Bundesliga
-- France — Ligue 1
-- Netherlands — Eredivisie
-- Portugal — Primeira Liga
-- Belgium — Jupiler Pro League / Pro League
-- Turkey/Türkiye — Süper Lig
-- USA — Major League Soccer (MLS)
+There is no Top-10 competition gate. QuantLab first discovers fixtures globally and
+collects all-market odds. CARD markets are retained wherever the provider publishes them.
 
-Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
-competitions are rejected locally before CardLab context/statistics spend. The purpose
-is API discipline and predictable referee/card-data coverage, not a claim that card
-markets cannot exist elsewhere.
+Target referee/standings/context calls are then made only for fixtures that actually have
+persisted CARD market evidence. Historical completed-match statistics backfill is broad
+because cards/fouls also feed model research and cross-lab feature engineering.
+
+Ambiguous card semantics (for example booking points vs card counts, team-only cards,
+halves, handicaps) remain research-only until explicitly canonicalized.
 
 ## Separation
 
