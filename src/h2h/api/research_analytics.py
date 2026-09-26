@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from html import escape
 from math import sqrt
 from statistics import mean, median
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V1"
