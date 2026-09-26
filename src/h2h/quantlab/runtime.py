@@ -35,6 +35,8 @@ class QuantLabRuntimeSettings:
     standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
     goal_injury_refresh_seconds: int = 14400
+    goal_lineup_refresh_seconds: int = 900
+    goal_lineup_window_minutes: int = 120
     history_backfill_per_cycle: int = 25
     goal_team_history_last: int = 15
     goal_team_history_teams_per_cycle: int = 120
@@ -56,6 +58,8 @@ class QuantLabRuntimeSettings:
             ("standings_refresh_seconds", self.standings_refresh_seconds),
             ("feature_refresh_seconds", self.feature_refresh_seconds),
             ("goal_injury_refresh_seconds", self.goal_injury_refresh_seconds),
+            ("goal_lineup_refresh_seconds", self.goal_lineup_refresh_seconds),
+            ("goal_lineup_window_minutes", self.goal_lineup_window_minutes),
             ("goal_team_history_last", self.goal_team_history_last),
             ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
             ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
@@ -294,6 +298,64 @@ class QuantLabRuntime:
             response_item_count=response_item_count,
             reason=None,
             source="api-football:injuries",
+            raw_payload=dict(payload),
+        )
+        return True
+
+    def _capture_goal_lineup(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        fixture_id = str(fixture["fixture_id"])
+        provider_fixture_id = int(fixture["provider_fixture_id"])
+        kickoff = fixture.get("kickoff_at")
+        if provider_fixture_id <= 0 or not isinstance(kickoff, datetime):
+            return False
+        kickoff_utc = kickoff.astimezone(UTC)
+        seconds_to_kickoff = (kickoff_utc - now).total_seconds()
+        if (
+            seconds_to_kickoff <= 0
+            or seconds_to_kickoff > self._settings.goal_lineup_window_minutes * 60
+        ):
+            return False
+        if not self._repository.goal_lineup_capture_due(
+            fixture_id,
+            now=now,
+            refresh_seconds=self._settings.goal_lineup_refresh_seconds,
+        ):
+            return False
+
+        coverage = self._fixture_statistics_coverage(fixture, now)
+        if coverage is not None and coverage.get("lineups") is False:
+            raw_coverage = coverage.get("raw_payload")
+            self._repository.save_goal_lineup_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                available_at=now,
+                status="UNAVAILABLE",
+                response_team_count=0,
+                reason="league-season-lineups-false",
+                source="api-football:leagues",
+                raw_payload=(
+                    dict(raw_coverage)
+                    if isinstance(raw_coverage, dict)
+                    else {"coverage": raw_coverage}
+                ),
+            )
+            return False
+
+        payload = self._provider.fetch_lineups(provider_fixture_id)
+        response = payload.get("response") if isinstance(payload, dict) else None
+        response_team_count = len(response) if isinstance(response, list) else 0
+        self._repository.save_goal_lineup_capture(
+            fixture_id=fixture_id,
+            provider_fixture_id=provider_fixture_id,
+            available_at=now,
+            status="AVAILABLE",
+            response_team_count=response_team_count,
+            reason=None,
+            source="api-football:fixtures/lineups",
             raw_payload=dict(payload),
         )
         return True
@@ -762,6 +824,7 @@ class QuantLabRuntime:
                 if goal_allowed and "GOAL" in market_labs:
                     standings = self._standings(fixture, now)
                     self._capture_goal_injuries(fixture, now)
+                    self._capture_goal_lineup(fixture, now)
 
                 if not context_allowed:
                     continue
