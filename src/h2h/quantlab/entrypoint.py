@@ -163,6 +163,9 @@ def main() -> None:
             goal_lineup_window_minutes=_positive_integer(
                 "QUANTBET_QUANTLAB_GOAL_LINEUP_WINDOW_MINUTES", "120"
             ),
+            goal_coach_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_COACH_REFRESH_SECONDS", "86400"
+            ),
             history_backfill_per_cycle=_integer(
                 "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
             ),
