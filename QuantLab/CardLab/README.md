@@ -17,10 +17,11 @@ The exact V1 formulas, provenance requirements and leakage rules are frozen in
 
 ## Research scope
 
-CardLab now uses `CARDCORNER_MARKET_DRIVEN_V3`.
+CardLab now uses `CARDCORNER_MARKET_DRIVEN_V4`.
 
-There is no Top-10 competition gate. QuantLab first discovers fixtures globally and
-collects all-market odds. CARD markets are retained wherever the provider publishes them.
+There is no Top-10 competition gate. Women\'s football is a global hard exclusion. For
+remaining fixtures, QuantLab discovers the broad universe and CARD markets are retained
+wherever the provider publishes them.
 
 Target referee/standings/context calls are then made only for fixtures that actually have
 persisted CARD market evidence. Historical completed-match statistics backfill is broad
@@ -37,9 +38,9 @@ or CornerLab unless a later separately-versioned experiment explicitly tests tha
 ## Market ingestion
 
 The shared QuantLab collector parses one returned Bet365/1xBet all-market payload, but
-CARD rows are persisted only when the fixture passes CARDCORNER_TOP10_LEAGUES_V2.
-UNCLASSIFIED rows are retained only on Top-10 fixtures so unknown card/corner-like
-markets cannot leak into broad GoalLab-only storage.
+CARD and UNCLASSIFIED rows are persisted only when the fixture passes
+CARDCORNER_MARKET_DRIVEN_V4. That scope is market-driven for senior men\'s football but
+hard-rejects women\'s football before fixture-specific provider spend.
 
 ## Settlement warning
 
