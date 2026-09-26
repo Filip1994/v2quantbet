@@ -28,10 +28,10 @@ def _history_rows(count: int = 220) -> tuple[dict[str, object], ...]:
         away_attack = 7.0 + (away % 4) + ((index + 2) % 5) * 0.5
         home_possession = 48.0 + (home % 5) * 2.0 + (index % 3)
         away_possession = 100.0 - home_possession
-        home_shots = int(round(home_attack + 4))
-        away_shots = int(round(away_attack + 3))
-        home_sot = max(2, int(round(home_shots * 0.42)))
-        away_sot = max(2, int(round(away_shots * 0.40)))
+        home_shots = round(home_attack + 4)
+        away_shots = round(away_attack + 3)
+        home_sot = max(2, round(home_shots * 0.42))
+        away_sot = max(2, round(away_shots * 0.40))
         home_corners = 2 + int(home_shots / 4) + int(home_possession >= 54) + index % 2
         away_corners = 2 + int(away_shots / 4) + int(away_possession >= 52) + (index + 1) % 2
 
