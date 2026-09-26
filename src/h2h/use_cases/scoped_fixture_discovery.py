@@ -30,6 +30,8 @@ class ScopedFixtureDiscovery:
                     name=fixture.competition_name,
                     type=fixture.competition_type,
                     level=None,
+                    home_team=fixture.home_team,
+                    away_team=fixture.away_team,
                 )
             )
             if decision.eligible:
