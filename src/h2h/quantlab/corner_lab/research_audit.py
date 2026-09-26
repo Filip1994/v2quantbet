@@ -11,7 +11,8 @@ from statistics import fmean, variance
 from typing import Any
 
 import numpy as np
-from scipy.stats import poisson
+from scipy.optimize import minimize_scalar
+from scipy.stats import nbinom, poisson
 
 from h2h.quantlab.corner_lab.model import (
     FEATURE_NAMES,
@@ -80,6 +81,202 @@ def _predict_mu(
     design = np.concatenate(([1.0], z))
     eta = float(np.clip(design @ beta, -6.0, 6.0))
     return float(exp(eta))
+
+
+def _predict_training_mu(
+    x: np.ndarray,
+    *,
+    beta: np.ndarray,
+    means: np.ndarray,
+    scales: np.ndarray,
+) -> np.ndarray:
+    finite = np.isfinite(x)
+    imputed = np.where(finite, x, means)
+    z = (imputed - means) / scales
+    design = np.column_stack([np.ones(len(z)), z])
+    return np.exp(np.clip(design @ beta, -6.0, 6.0))
+
+
+def _nb2_logpmf(actual: float, mu: float, alpha: float) -> float:
+    if mu <= 0 or alpha <= 0:
+        return float("-inf")
+    size = 1.0 / alpha
+    probability = size / (size + mu)
+    return float(
+        lgamma(actual + size)
+        - lgamma(size)
+        - lgamma(actual + 1.0)
+        + size * log(probability)
+        + actual * log(1.0 - probability)
+    )
+
+
+def _fit_nb2_alpha(y: np.ndarray, mu: np.ndarray) -> float | None:
+    if len(y) == 0 or len(y) != len(mu):
+        return None
+    denominator = float(np.sum(mu * mu))
+    moment = (
+        float(np.sum((y - mu) ** 2 - mu)) / denominator
+        if denominator > 0
+        else 0.0
+    )
+    initial = min(5.0, max(1e-4, moment))
+    lower = log(1e-4)
+    upper = log(5.0)
+
+    def objective(log_alpha: float) -> float:
+        alpha = exp(log_alpha)
+        value = -sum(
+            _nb2_logpmf(float(actual), float(mean), alpha)
+            for actual, mean in zip(y, mu, strict=True)
+        )
+        return float(value)
+
+    result = minimize_scalar(
+        objective,
+        bounds=(lower, upper),
+        method="bounded",
+        options={"xatol": 1e-6},
+    )
+    if not result.success:
+        return initial
+    return float(exp(result.x))
+
+
+def _nb2_probability_over(mu: float, line: float, alpha: float) -> float:
+    size = 1.0 / alpha
+    probability = size / (size + mu)
+    return 1.0 - float(nbinom.cdf(int(line), size, probability))
+
+
+def _distribution_comparison(
+    rows: list[dict[str, Any]],
+    *,
+    alpha: float | None,
+) -> dict[str, Any]:
+    if not rows or alpha is None:
+        return {"status": "UNAVAILABLE"}
+
+    poisson_count_ll: list[float] = []
+    nb_count_ll: list[float] = []
+    line_rows: list[dict[str, Any]] = []
+    all_poisson_brier: list[float] = []
+    all_nb_brier: list[float] = []
+    all_poisson_loss: list[float] = []
+    all_nb_loss: list[float] = []
+
+    for item in rows:
+        actual = float(item["actual"])
+        mu = float(item["mu"])
+        poisson_count_ll.append(
+            actual * log(mu) - mu - lgamma(actual + 1.0)
+        )
+        nb_count_ll.append(_nb2_logpmf(actual, mu, alpha))
+
+    for line in STANDARD_HALF_LINES:
+        observed: list[float] = []
+        poisson_probabilities: list[float] = []
+        nb_probabilities: list[float] = []
+        poisson_briers: list[float] = []
+        nb_briers: list[float] = []
+        poisson_losses: list[float] = []
+        nb_losses: list[float] = []
+
+        for item in rows:
+            actual = float(item["actual"])
+            mu = float(item["mu"])
+            outcome = 1.0 if actual > line else 0.0
+            poisson_probability = 1.0 - float(poisson.cdf(int(line), mu))
+            nb_probability = _nb2_probability_over(mu, line, alpha)
+            poisson_brier, poisson_loss = _score_binary(
+                poisson_probability,
+                outcome,
+            )
+            nb_brier, nb_loss = _score_binary(nb_probability, outcome)
+            observed.append(outcome)
+            poisson_probabilities.append(poisson_probability)
+            nb_probabilities.append(nb_probability)
+            poisson_briers.append(poisson_brier)
+            nb_briers.append(nb_brier)
+            poisson_losses.append(poisson_loss)
+            nb_losses.append(nb_loss)
+
+        all_poisson_brier.extend(poisson_briers)
+        all_nb_brier.extend(nb_briers)
+        all_poisson_loss.extend(poisson_losses)
+        all_nb_loss.extend(nb_losses)
+        line_rows.append(
+            {
+                "line": line,
+                "n": len(observed),
+                "observed_over_rate": _rounded(fmean(observed)),
+                "poisson_mean_over": _rounded(fmean(poisson_probabilities)),
+                "nb2_mean_over": _rounded(fmean(nb_probabilities)),
+                "poisson_brier": _rounded(fmean(poisson_briers)),
+                "nb2_brier": _rounded(fmean(nb_briers)),
+                "nb2_minus_poisson_brier": _rounded(
+                    fmean(nb_briers) - fmean(poisson_briers)
+                ),
+                "poisson_log_loss": _rounded(fmean(poisson_losses)),
+                "nb2_log_loss": _rounded(fmean(nb_losses)),
+                "nb2_minus_poisson_log_loss": _rounded(
+                    fmean(nb_losses) - fmean(poisson_losses)
+                ),
+            }
+        )
+
+    poisson_mean_count_ll = fmean(poisson_count_ll)
+    nb_mean_count_ll = fmean(nb_count_ll)
+    poisson_mean_brier = fmean(all_poisson_brier)
+    nb_mean_brier = fmean(all_nb_brier)
+    poisson_mean_loss = fmean(all_poisson_loss)
+    nb_mean_loss = fmean(all_nb_loss)
+
+    if (
+        nb_mean_count_ll > poisson_mean_count_ll
+        and nb_mean_brier < poisson_mean_brier
+        and nb_mean_loss < poisson_mean_loss
+    ):
+        signal = "NB2_DISTRIBUTION_PROMISING"
+    elif (
+        nb_mean_count_ll <= poisson_mean_count_ll
+        and nb_mean_brier >= poisson_mean_brier
+        and nb_mean_loss >= poisson_mean_loss
+    ):
+        signal = "POISSON_DISTRIBUTION_PREFERRED"
+    else:
+        signal = "MIXED_DISTRIBUTION_SIGNAL"
+
+    return {
+        "status": "OK",
+        "nb2_alpha": _rounded(alpha),
+        "nb2_size": _rounded(1.0 / alpha),
+        "count_log_likelihood": {
+            "poisson_mean": _rounded(poisson_mean_count_ll),
+            "nb2_mean": _rounded(nb_mean_count_ll),
+            "nb2_minus_poisson": _rounded(
+                nb_mean_count_ll - poisson_mean_count_ll
+            ),
+        },
+        "all_lines": {
+            "poisson_mean_brier": _rounded(poisson_mean_brier),
+            "nb2_mean_brier": _rounded(nb_mean_brier),
+            "nb2_minus_poisson_brier": _rounded(
+                nb_mean_brier - poisson_mean_brier
+            ),
+            "poisson_mean_log_loss": _rounded(poisson_mean_loss),
+            "nb2_mean_log_loss": _rounded(nb_mean_loss),
+            "nb2_minus_poisson_log_loss": _rounded(
+                nb_mean_loss - poisson_mean_loss
+            ),
+        },
+        "line_comparison": line_rows,
+        "research_signal": signal,
+        "note": (
+            "NB2 uses the exact same structural mean mu as Poisson; only the "
+            "training-fitted dispersion alpha changes the predictive distribution."
+        ),
+    }
 
 
 def _summarize_prediction_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -186,6 +383,13 @@ def run_cornerlab_historical_holdout(
         }
 
     beta, means, scales, objective = fitted
+    train_mu = _predict_training_mu(
+        x_train,
+        beta=beta,
+        means=means,
+        scales=scales,
+    )
+    nb2_alpha = _fit_nb2_alpha(y_train, train_mu)
     predictions: list[dict[str, Any]] = []
     holdout_usable_matches = 0
 
@@ -252,6 +456,10 @@ def run_cornerlab_historical_holdout(
         "fit_objective": _rounded(float(objective)),
         "summary": _summarize_prediction_rows(predictions),
         "line_calibration_over": _line_calibration(predictions),
+        "poisson_vs_nb2": _distribution_comparison(
+            predictions,
+            alpha=nb2_alpha,
+        ),
         "league_split_n_ge_8": league_split[:30],
         "bookmaker_split": {
             "status": "NOT_AVAILABLE",
