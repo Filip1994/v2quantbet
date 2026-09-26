@@ -783,3 +783,24 @@ Railway production verification:
 
 Task 003 adds zero provider calls in the decision engines and changes no production
 prediction, registration, bankroll, staking or active-model state.
+
+
+## 2026-09-26 — Retire plain-DC GoalLab shadow picks
+
+**Owner:** QuantLab core + GoalLab
+
+The first GoalLab shadow engine used the existing production Dixon-Coles artifact as a
+read-only control. GoalLab's intended experiment family is DC+, so plain-control value
+signals must not be presented as GoalLab model picks.
+
+Correction:
+
+- migration `031_retire_goallab_control_picks.sql` deletes only
+  `quantlab_shadow_bets` rows where `lab='GOAL'` and
+  `model_name='Dixon-Coles Control'`;
+- immutable `quantlab_goal_decisions` evidence is preserved for audit;
+- plain Dixon-Coles moves to `GOALLAB_CONTROL_POLICY_V2`;
+- qualifying control value is recorded as
+  `PASS / CONTROL_VALUE_SIGNAL_ONLY`, never as PICK;
+- the control evaluator remains available for future DC-vs-DC+ comparison;
+- production model, production picks, bankroll and registration are untouched.

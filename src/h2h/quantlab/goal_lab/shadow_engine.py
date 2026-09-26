@@ -16,7 +16,7 @@ from h2h.quant.dixon_coles import DixonColesFitError
 from h2h.quantlab.scope import goal_scope
 
 
-POLICY_VERSION = "GOALLAB_SHADOW_POLICY_V1"
+POLICY_VERSION = "GOALLAB_CONTROL_POLICY_V2"
 MODEL_NAME = "Dixon-Coles Control"
 
 
@@ -354,7 +354,7 @@ class GoalLabShadowPickEngine:
             key = (str(pair["market_key"]), str(item["selection"]), line)
             if item["reason"] is None:
                 if winners.get(key) is item:
-                    decision_value, reason = "PICK", "VALUE_THRESHOLD_PASSED"
+                    decision_value, reason = "PASS", "CONTROL_VALUE_SIGNAL_ONLY"
                 else:
                     decision_value, reason = "PASS", "BETTER_PRICE_AVAILABLE"
             else:
@@ -415,15 +415,8 @@ class GoalLabShadowPickEngine:
             )
             decision_inserted = bool(self._repository.save_goal_decision(decision))
             decisions_inserted += int(decision_inserted)
-            if decision_value == "PICK" and decision_inserted:
-                picks_inserted += int(
-                    bool(
-                        self._repository.save_goal_shadow_bet(
-                            decision,
-                            stake_minor=self._policy.flat_stake_minor,
-                        )
-                    )
-                )
+            # Plain production Dixon-Coles is a GoalLab control benchmark only.
+            # It must never create GoalLab shadow bets; DC+ will own pick generation.
 
         return GoalEngineResult(
             decisions_inserted=decisions_inserted,
