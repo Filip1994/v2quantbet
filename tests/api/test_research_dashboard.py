@@ -301,6 +301,25 @@ def test_research_dashboard_can_be_explicitly_public(monkeypatch) -> None:
     assert ResearchDashboardHTTPService._authorize(object()) is True
 
 
+def test_research_dashboard_exposes_exact_diagnostic_rows() -> None:
+    dashboard = ResearchDashboardService(Repository())
+
+    payload = dashboard.diagnostic_details("OTHER_EXTREME")
+
+    assert payload["contract_version"] == "RESEARCH_DIAGNOSTIC_DRILLDOWN_V1"
+    assert payload["bucket"] == "OTHER_EXTREME"
+    assert payload["count"] == 1
+    assert payload["wins"] == 1
+    assert payload["losses"] == 0
+    assert payload["rows"][0]["fixture_id"] == "api-football:123"
+    assert payload["rows"][0]["home_team"] == "Home"
+    assert payload["rows"][0]["away_team"] == "Away"
+    assert payload["rows"][0]["market"] == "BTTS"
+    assert payload["rows"][0]["selection"] == "YES"
+    assert payload["rows"][0]["score"] == {"home": 1, "away": 1}
+    assert payload["rows"][0]["clv_pct"] == 10.0
+
+
 def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     dashboard = ResearchDashboardService(Repository())
 
