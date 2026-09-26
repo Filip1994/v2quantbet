@@ -54,6 +54,37 @@ def _money(minor: int | None, currency: str) -> str:
     return f"{sign}{value:,.2f} {currency}"
 
 
+def _rate(value: Any) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:.2f}"
+
+
+def _score(value: Any) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:.3f}"
+
+
+def _provenance(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return "—"
+    parts: list[str] = []
+    for key in (
+        "referee_card_rate",
+        "referee_foul_rate",
+        "derby_rivalry_indicator",
+        "table_pressure",
+        "match_importance",
+    ):
+        item = payload.get(key)
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source") or "unknown")
+        version = str(item.get("version") or "unknown")
+        available = str(item.get("available_at") or "unavailable")
+        parts.append(f"{key}: {source} · {version} · {available}")
+    return " | ".join(parts) if parts else "—"
+
+
 def _bookmaker_badge(name: Any) -> str:
     raw = str(name or "Unavailable")
     key = "".join(char for char in raw.casefold() if char.isalnum())
@@ -208,6 +239,48 @@ class QuantLabDashboardService:
                 "</td></tr>"
             )
 
+        card_context_html = ""
+        if lab_key == "card":
+            context_rows = self._repository.list_card_features()
+            rendered_context = ""
+            for item in context_rows:
+                rivalry = item.get("derby_rivalry_indicator")
+                rivalry_text = "UNKNOWN" if rivalry is None else "YES" if int(rivalry) == 1 else "NO"
+                match = (
+                    f'{escape(str(item.get("home_team") or "?"))} – '
+                    f'{escape(str(item.get("away_team") or "?"))}'
+                )
+                rendered_context += (
+                    "<tr>"
+                    f'<td class="match"><b>{match}</b><small>{escape(str(item.get("competition_name") or "—"))} · {_time(item.get("kickoff_at"))}</small></td>'
+                    f'<td>{escape(str(item.get("referee") or "UNKNOWN"))}</td>'
+                    f'<td>{_rate(item.get("referee_card_rate"))}<small>n={int(item.get("referee_sample_size") or 0)}</small></td>'
+                    f'<td>{_rate(item.get("referee_foul_rate"))}<small>n={int(item.get("referee_foul_sample_size") or 0)}</small></td>'
+                    f'<td>{escape(rivalry_text)}</td>'
+                    f'<td>{_score(item.get("home_table_pressure"))}</td>'
+                    f'<td>{_score(item.get("away_table_pressure"))}</td>'
+                    f'<td>{_score(item.get("match_importance"))}</td>'
+                    f'<td>{_time(item.get("available_at"))}<small>{escape(str(item.get("feature_version") or "—"))}</small></td>'
+                    f'<td class="provenance">{escape(_provenance(item.get("feature_payload")))}</td>'
+                    "</tr>"
+                )
+            if not rendered_context:
+                rendered_context = (
+                    '<tr><td class="empty" colspan="10">'
+                    'No CardLab v1 feature snapshots yet. Missing values are never fabricated.'
+                    "</td></tr>"
+                )
+            card_context_html = (
+                '<section class="table-shell context-table">'
+                '<div class="table-title"><b>CardLab v1 context snapshots</b>'
+                f'<span>{len(context_rows)} fixtures</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Match</th><th>Referee</th><th>Cards / match</th><th>Fouls / match</th>'
+                '<th>Derby</th><th>Home pressure</th><th>Away pressure</th><th>Importance</th>'
+                '<th>Snapshot</th><th>Provenance</th>'
+                f'</tr></thead><tbody>{rendered_context}</tbody></table></div></section>'
+            )
+
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
             ("Shadow bets", str(len(rows))),
@@ -248,6 +321,7 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;min-width:82px;height:27px;padding:0 8px;border-radius:7px;font-weight:950}}.bookmaker-bet365{{background:#146947}}.brand-bet365 strong{{color:#f3d24b}}.bookmaker-1xbet{{background:#182f47}}.brand-1xbet b{{color:#61aef4}}.brand-1xbet strong{{color:white}}
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
+.context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
 footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
@@ -259,6 +333,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
+{card_context_html}
 <section class="table-shell"><div class="table-title"><b>{escape(title)} shadow ledger</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
 <th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
