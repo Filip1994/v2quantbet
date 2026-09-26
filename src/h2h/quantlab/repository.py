@@ -57,6 +57,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_feature_snapshots",
             "quantlab_goal_injury_captures",
             "quantlab_goal_lineup_captures",
+            "quantlab_goal_coach_captures",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -1184,6 +1185,97 @@ class PostgreSQLQuantLabRepository:
             "raw_payload": payload,
         }
 
+    def goal_coach_capture_due(
+        self,
+        team_id: int,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        if team_id <= 0 or refresh_seconds <= 0:
+            raise ValueError("team_id and refresh_seconds must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(available_at) FROM quantlab_goal_coach_captures "
+                "WHERE team_id = %s",
+                (team_id,),
+            )
+            row = cursor.fetchone()
+        last = None if row is None else row[0]
+        return last is None or last <= now - timedelta(seconds=refresh_seconds)
+
+    def save_goal_coach_capture(
+        self,
+        *,
+        team_id: int,
+        available_at: datetime,
+        status: str,
+        response_item_count: int,
+        reason: str | None,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
+            raise ValueError("coach capture status must be AVAILABLE or UNAVAILABLE")
+        if team_id <= 0 or response_item_count < 0:
+            raise ValueError("invalid coach capture")
+        capture_id = _identifier(
+            "quantlab-goal-coach-v1:",
+            {
+                "team_id": team_id,
+                "available_at": available_at.isoformat(),
+                "status": status,
+                "response_item_count": response_item_count,
+                "reason": reason,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_coach_captures ("
+                "coach_capture_id, team_id, available_at, status, response_item_count, "
+                "reason, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    team_id,
+                    available_at,
+                    status,
+                    response_item_count,
+                    reason,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
+
+    def latest_goal_coach_capture(
+        self,
+        team_id: int,
+        *,
+        decision_at: datetime,
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT coach_capture_id, available_at, status, response_item_count, "
+                "reason, raw_payload "
+                "FROM quantlab_goal_coach_captures "
+                "WHERE team_id = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, coach_capture_id DESC LIMIT 1",
+                (team_id, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[5]) if isinstance(row[5], str) else row[5]
+        return {
+            "coach_capture_id": row[0],
+            "available_at": row[1],
+            "status": row[2],
+            "response_item_count": int(row[3]),
+            "reason": row[4],
+            "source": "api-football:coachs",
+            "raw_payload": payload,
+        }
+
     def statistics_exists(self, fixture_id: str) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -1467,6 +1559,29 @@ class PostgreSQLQuantLabRepository:
                 "  WHERE i.fixture_id = f.fixture_id AND i.available_at <= f.kickoff_at "
                 "  ORDER BY i.available_at DESC, i.injury_capture_id DESC LIMIT 1"
                 " ) ic ON TRUE"
+                "), coaches AS ("
+                " SELECT f.fixture_id, "
+                " hc.coach_capture_id AS home_coach_capture_id, "
+                " hc.available_at AS home_coach_available_at, "
+                " hc.status AS home_coach_status, hc.reason AS home_coach_reason, "
+                " hc.raw_payload AS home_coach_payload, "
+                " ac.coach_capture_id AS away_coach_capture_id, "
+                " ac.available_at AS away_coach_available_at, "
+                " ac.status AS away_coach_status, ac.reason AS away_coach_reason, "
+                " ac.raw_payload AS away_coach_payload "
+                " FROM fixture_rows f "
+                " LEFT JOIN LATERAL ("
+                "  SELECT c.coach_capture_id, c.available_at, c.status, c.reason, c.raw_payload "
+                "  FROM quantlab_goal_coach_captures c "
+                "  WHERE c.team_id = f.home_team_id AND c.available_at <= f.kickoff_at "
+                "  ORDER BY c.available_at DESC, c.coach_capture_id DESC LIMIT 1"
+                " ) hc ON TRUE "
+                " LEFT JOIN LATERAL ("
+                "  SELECT c.coach_capture_id, c.available_at, c.status, c.reason, c.raw_payload "
+                "  FROM quantlab_goal_coach_captures c "
+                "  WHERE c.team_id = f.away_team_id AND c.available_at <= f.kickoff_at "
+                "  ORDER BY c.available_at DESC, c.coach_capture_id DESC LIMIT 1"
+                " ) ac ON TRUE"
                 ") "
                 "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
                 "f.home_team_id, f.away_team_id, f.competition_name, f.kickoff_at, "
@@ -1483,6 +1598,10 @@ class PostgreSQLQuantLabRepository:
                 "st.standings_snapshot_id, st.standings_available_at, st.standings_payload, "
                 "inj.injury_capture_id, inj.injury_available_at, inj.injury_status, "
                 "inj.injury_reason, inj.injury_source, inj.injury_payload, "
+                "co.home_coach_capture_id, co.home_coach_available_at, "
+                "co.home_coach_status, co.home_coach_reason, co.home_coach_payload, "
+                "co.away_coach_capture_id, co.away_coach_available_at, "
+                "co.away_coach_status, co.away_coach_reason, co.away_coach_payload, "
                 "s.home_fouls, s.away_fouls, "
                 "s.home_yellow_cards, s.away_yellow_cards, "
                 "s.home_red_cards, s.away_red_cards, "
@@ -1502,6 +1621,7 @@ class PostgreSQLQuantLabRepository:
                 "FROM fixture_rows f LEFT JOIN stats s USING (fixture_id) "
                 "LEFT JOIN standings st USING (fixture_id) "
                 "LEFT JOIN injuries inj USING (fixture_id) "
+                "LEFT JOIN coaches co USING (fixture_id) "
                 "WHERE f.league_id IS NOT NULL AND f.home_team_id IS NOT NULL "
                 "AND f.away_team_id IS NOT NULL "
                 "ORDER BY f.kickoff_at DESC, f.fixture_id DESC LIMIT %s",
