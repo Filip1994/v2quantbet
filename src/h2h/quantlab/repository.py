@@ -322,6 +322,20 @@ class PostgreSQLQuantLabRepository:
             )
             return cursor.rowcount > 0
 
+    def goal_pick_exists(
+        self,
+        fixture_id: str,
+        *,
+        pick_policy_version: str,
+    ) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM quantlab_goal_picks "
+                "WHERE fixture_id = %s AND pick_policy_version = %s)",
+                (fixture_id, pick_policy_version),
+            )
+            return bool(cursor.fetchone()[0])
+
     def save_goal_pick(self, item: Any) -> bool:
         if item.pick_policy_version != "GOALLAB_DC_PLUS_PICK_POLICY_V1":
             raise ValueError("unsupported GoalLab pick policy")
