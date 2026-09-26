@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
-from h2h.quantlab.scope import card_corner_scope, goal_scope
+from h2h.quantlab.scope import goal_scope
 
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
