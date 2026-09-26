@@ -1922,6 +1922,19 @@ class PostgreSQLQuantLabRepository:
                 "  WHERE c.team_id = f.away_team_id AND c.available_at <= f.kickoff_at "
                 "  ORDER BY c.available_at DESC, c.coach_capture_id DESC LIMIT 1"
                 " ) ac ON TRUE"
+                "), players AS ("
+                " SELECT f.fixture_id, pc.player_capture_id, "
+                " pc.available_at AS player_available_at, pc.status AS player_status, "
+                " pc.reason AS player_reason, pc.source AS player_source, "
+                " pc.raw_payload AS player_payload "
+                " FROM fixture_rows f "
+                " LEFT JOIN LATERAL ("
+                "  SELECT p.player_capture_id, p.available_at, p.status, p.reason, "
+                "         p.source, p.raw_payload "
+                "  FROM quantlab_goal_player_captures p "
+                "  WHERE p.fixture_id = f.fixture_id AND p.available_at <= %s "
+                "  ORDER BY p.available_at DESC, p.player_capture_id DESC LIMIT 1"
+                " ) pc ON TRUE"
                 ") "
                 "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
                 "f.home_team_id, f.away_team_id, f.competition_name, f.kickoff_at, "
@@ -1942,6 +1955,8 @@ class PostgreSQLQuantLabRepository:
                 "co.home_coach_status, co.home_coach_reason, co.home_coach_payload, "
                 "co.away_coach_capture_id, co.away_coach_available_at, "
                 "co.away_coach_status, co.away_coach_reason, co.away_coach_payload, "
+                "pl.player_capture_id, pl.player_available_at, pl.player_status, "
+                "pl.player_reason, pl.player_source, pl.player_payload, "
                 "s.home_fouls, s.away_fouls, "
                 "s.home_yellow_cards, s.away_yellow_cards, "
                 "s.home_red_cards, s.away_red_cards, "
@@ -1962,10 +1977,11 @@ class PostgreSQLQuantLabRepository:
                 "LEFT JOIN standings st USING (fixture_id) "
                 "LEFT JOIN injuries inj USING (fixture_id) "
                 "LEFT JOIN coaches co USING (fixture_id) "
+                "LEFT JOIN players pl USING (fixture_id) "
                 "WHERE f.league_id IS NOT NULL AND f.home_team_id IS NOT NULL "
                 "AND f.away_team_id IS NOT NULL "
                 "ORDER BY f.kickoff_at DESC, f.fixture_id DESC LIMIT %s",
-                (before, before, before, limit),
+                (before, before, before, before, limit),
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
