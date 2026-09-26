@@ -39,6 +39,7 @@ MIN_TEAM_HISTORY = 5
 MIN_TRAINING_EXAMPLES = 300
 MIN_FEATURE_OBSERVATIONS = 20
 HISTORY_LIMIT = 10_000
+SHORT_REST_DAYS = 4.0
 
 _RESULT_METRICS = (
     "goals_for",
@@ -541,6 +542,85 @@ def _mean(
     return float("nan") if not values else float(sum(values) / len(values))
 
 
+def _trend(
+    samples: list[TeamMatchSample],
+    metric: str,
+    *,
+    count: int,
+) -> float:
+    eligible = samples[-count:]
+    points = [
+        (index, value)
+        for index, item in enumerate(eligible)
+        if (value := item.values.get(metric)) is not None
+    ]
+    if len(points) < 2:
+        return float("nan")
+    x = np.asarray([item[0] for item in points], dtype=float)
+    y = np.asarray([item[1] for item in points], dtype=float)
+    x = x - float(np.mean(x))
+    denominator = float(np.dot(x, x))
+    if denominator <= 0:
+        return float("nan")
+    return float(np.dot(x, y - float(np.mean(y))) / denominator)
+
+
+def _consecutive_venue_count(samples: list[TeamMatchSample], venue: str) -> float:
+    count = 0
+    for item in reversed(samples):
+        if item.venue != venue:
+            break
+        count += 1
+    return float(count)
+
+
+def _league_season_context(
+    histories: dict[int, list[TeamMatchSample]],
+    *,
+    league_id: int,
+    season: int,
+) -> dict[str, float]:
+    samples = [
+        item
+        for team_samples in histories.values()
+        for item in team_samples
+        if item.league_id == league_id and item.season == season
+    ]
+    goals = [
+        float(value)
+        for item in samples
+        if (value := item.values.get("goals_for")) is not None
+    ]
+    unique_matches = {item.fixture_id for item in samples if item.fixture_id}
+    return {
+        "league_season_goals_per_team_match": (
+            float("nan") if not goals else float(np.mean(goals))
+        ),
+        "league_season_match_count": float(len(unique_matches)),
+    }
+
+
+def _opponent_context_mean(
+    histories: dict[int, list[TeamMatchSample]],
+    samples: list[TeamMatchSample],
+    *,
+    metric: str,
+    target_kickoff: datetime,
+    count: int = 5,
+) -> float:
+    values: list[float] = []
+    for item in samples[-count:]:
+        opponent_history = [
+            sample
+            for sample in histories.get(item.opponent_id, [])
+            if sample.kickoff_at < target_kickoff
+        ]
+        value = _mean(opponent_history, metric, count=5)
+        if isfinite(value):
+            values.append(value)
+    return float("nan") if not values else float(np.mean(values))
+
+
 def _team_feature_map(
     samples: list[TeamMatchSample],
     *,
@@ -548,6 +628,7 @@ def _team_feature_map(
     venue: str,
     target_kickoff: datetime,
     target_season: int,
+    target_league_id: int,
 ) -> dict[str, float]:
     result: dict[str, float] = {}
     for window in (3, 5, 10):
@@ -564,6 +645,12 @@ def _team_feature_map(
     for metric in _SEASON_METRICS:
         result[f"{prefix}_season_{metric}"] = _mean(season_samples, metric)
 
+    result[f"{prefix}_goal_difference_trend_l5"] = _trend(
+        samples, "goal_difference", count=5
+    )
+    result[f"{prefix}_goal_difference_trend_l10"] = _trend(
+        samples, "goal_difference", count=10
+    )
     result[f"{prefix}_history_match_count"] = float(len(samples))
     result[f"{prefix}_season_match_count"] = float(len(season_samples))
 
@@ -571,6 +658,10 @@ def _team_feature_map(
         last_kickoff = samples[-1].kickoff_at
         rest_days = max(0.0, (target_kickoff - last_kickoff).total_seconds() / 86_400.0)
         result[f"{prefix}_rest_days"] = rest_days
+        result[f"{prefix}_short_rest_flag"] = float(rest_days < SHORT_REST_DAYS)
+        result[f"{prefix}_consecutive_away_matches"] = _consecutive_venue_count(
+            samples, "AWAY"
+        )
         for days in (7, 14, 21):
             cutoff = target_kickoff.timestamp() - days * 86_400.0
             result[f"{prefix}_matches_last_{days}d"] = float(
@@ -578,6 +669,8 @@ def _team_feature_map(
             )
     else:
         result[f"{prefix}_rest_days"] = float("nan")
+        result[f"{prefix}_short_rest_flag"] = float("nan")
+        result[f"{prefix}_consecutive_away_matches"] = float("nan")
         for days in (7, 14, 21):
             result[f"{prefix}_matches_last_{days}d"] = float("nan")
     return result
@@ -644,6 +737,8 @@ def _binary_op(a: float | None, b: float | None, op: str) -> float:
         return a - b
     if op == "product":
         return a * b
+    if op == "ratio":
+        return float("nan") if abs(b) <= 1e-12 else a / b
     raise ValueError(op)
 
 
@@ -655,6 +750,7 @@ def _feature_map(
     away_id: int,
     target_kickoff: datetime,
     target_season: int,
+    target_league_id: int,
 ) -> dict[str, float]:
     home = _team_feature_map(
         histories.get(home_id, []),
@@ -671,6 +767,97 @@ def _feature_map(
         target_season=target_season,
     )
     features = {**home, **away, **_h2h_features(pairs, home_id, away_id, target_kickoff)}
+    league = _league_season_context(
+        histories, league_id=target_league_id, season=target_season
+    )
+    features.update(league)
+    league_scoring = league["league_season_goals_per_team_match"]
+    features["home_season_scoring_vs_league"] = _binary_op(
+        features.get("home_season_goals_for"), league_scoring, "ratio"
+    )
+    features["away_season_scoring_vs_league"] = _binary_op(
+        features.get("away_season_goals_for"), league_scoring, "ratio"
+    )
+    features["home_season_conceding_vs_league"] = _binary_op(
+        features.get("home_season_goals_against"), league_scoring, "ratio"
+    )
+    features["away_season_conceding_vs_league"] = _binary_op(
+        features.get("away_season_goals_against"), league_scoring, "ratio"
+    )
+
+    home_history = histories.get(home_id, [])
+    away_history = histories.get(away_id, [])
+    features["home_attack_opponent_adjusted_l5"] = _binary_op(
+        features.get("home_l5_goals_for"),
+        _opponent_context_mean(
+            histories,
+            home_history,
+            metric="goals_against",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["away_attack_opponent_adjusted_l5"] = _binary_op(
+        features.get("away_l5_goals_for"),
+        _opponent_context_mean(
+            histories,
+            away_history,
+            metric="goals_against",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["home_defence_opponent_adjusted_l5"] = _binary_op(
+        features.get("home_l5_goals_against"),
+        _opponent_context_mean(
+            histories,
+            home_history,
+            metric="goals_for",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["away_defence_opponent_adjusted_l5"] = _binary_op(
+        features.get("away_l5_goals_against"),
+        _opponent_context_mean(
+            histories,
+            away_history,
+            metric="goals_for",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["home_sot_opponent_adjusted_l5"] = _binary_op(
+        features.get("home_l5_sot_for"),
+        _opponent_context_mean(
+            histories,
+            home_history,
+            metric="sot_against",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["away_sot_opponent_adjusted_l5"] = _binary_op(
+        features.get("away_l5_sot_for"),
+        _opponent_context_mean(
+            histories,
+            away_history,
+            metric="sot_against",
+            target_kickoff=target_kickoff,
+        ),
+        "diff",
+    )
+    features["home_strength_of_schedule_l5"] = _opponent_context_mean(
+        histories, home_history, metric="ppg", target_kickoff=target_kickoff
+    )
+    features["away_strength_of_schedule_l5"] = _opponent_context_mean(
+        histories, away_history, metric="ppg", target_kickoff=target_kickoff
+    )
+    features["schedule_strength_differential"] = _binary_op(
+        features.get("home_strength_of_schedule_l5"),
+        features.get("away_strength_of_schedule_l5"),
+        "diff",
+    )
 
     features["matchup_goal_attack_x_defence_home"] = _binary_op(
         features.get("home_l5_goals_for"),
@@ -721,6 +908,59 @@ def _feature_map(
         features.get("home_matches_last_14d"),
         features.get("away_matches_last_14d"),
         "diff",
+    )
+    features["home_venue_attack_vs_away_venue_attack"] = _binary_op(
+        features.get("home_venue_l5_goals_for"),
+        features.get("away_venue_l5_goals_for"),
+        "diff",
+    )
+    features["home_venue_defence_vs_away_venue_defence"] = _binary_op(
+        features.get("home_venue_l5_goals_against"),
+        features.get("away_venue_l5_goals_against"),
+        "diff",
+    )
+    features["pass_volume_differential"] = _binary_op(
+        features.get("home_l5_passes"),
+        features.get("away_l5_passes"),
+        "diff",
+    )
+    features["pass_accuracy_differential"] = _binary_op(
+        features.get("home_l5_pass_accuracy"),
+        features.get("away_l5_pass_accuracy"),
+        "diff",
+    )
+    features["both_teams_short_rest"] = _binary_op(
+        features.get("home_short_rest_flag"),
+        features.get("away_short_rest_flag"),
+        "product",
+    )
+    features["home_rest_x_away_congestion"] = _binary_op(
+        features.get("home_rest_days"),
+        features.get("away_matches_last_14d"),
+        "product",
+    )
+    features["away_rest_x_home_congestion"] = _binary_op(
+        features.get("away_rest_days"),
+        features.get("home_matches_last_14d"),
+        "product",
+    )
+    home_possession = features.get("home_l5_possession")
+    away_possession = features.get("away_l5_possession")
+    features["home_possession_x_away_low_possession"] = (
+        float("nan")
+        if home_possession is None
+        or away_possession is None
+        or not isfinite(home_possession)
+        or not isfinite(away_possession)
+        else home_possession * (1.0 - away_possession)
+    )
+    features["away_possession_x_home_low_possession"] = (
+        float("nan")
+        if home_possession is None
+        or away_possession is None
+        or not isfinite(home_possession)
+        or not isfinite(away_possession)
+        else away_possession * (1.0 - home_possession)
     )
     return features
 
@@ -830,6 +1070,7 @@ def _build_training(
                     away_id=away_id,
                     target_kickoff=kickoff,
                     target_season=int(row["season"]),
+                    target_league_id=league_id,
                 )
             )
             home_targets.append(float(home_goals))
@@ -1390,6 +1631,7 @@ class GoalStructuralModelService:
             away_id=away_id,
             target_kickoff=kickoff,
             target_season=int(fixture["season"]),
+            target_league_id=league_id,
         )
         model_feature_names = tuple(params["model_feature_names"])
         base_feature_names = tuple(params["base_feature_names"])
