@@ -13,6 +13,7 @@ from h2h.persistence.postgres_model_lifecycle import (
 )
 from h2h.quantlab.budget import QuantLabRequestBudget
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
+from h2h.quantlab.corner_lab.audit import log_cornerlab_v2_audit
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
@@ -86,6 +87,11 @@ def main() -> None:
     repository = PostgreSQLQuantLabRepository(database_url)
     if not repository.check_database():
         raise RuntimeError("QuantLab schema is unavailable")
+
+    try:
+        log_cornerlab_v2_audit(repository, LOGGER)
+    except Exception:  # noqa: BLE001
+        LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
 
     api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
     api_key = os.getenv("API_FOOTBALL_KEY", "").strip()
