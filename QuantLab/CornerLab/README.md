@@ -16,19 +16,21 @@ Planned structural features include:
 
 ## League scope
 
-CornerLab v1 shares CARDCORNER_STRONG_LEAGUES_V1 with CardLab. Fixture-specific
-QuantLab provider spend is allowed only for the deterministic strong-league allowlist
-in src/h2h/quantlab/scope.py.
+CornerLab v1 shares CARDCORNER_TOP10_LEAGUES_V2 with CardLab. The only eligible
+domestic leagues are Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
+Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Scottish Premiership.
 
-Lower leagues, youth/academy, reserve and amateur competitions are rejected locally
-before fixture-specific CornerLab requests. This is deliberate API-cost control rather
-than a claim that corner markets can never exist outside the allowlist.
+Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
+competitions are rejected locally before fixture-specific CornerLab spend. This is
+deliberate API-cost control rather than a claim that corner markets can never exist
+outside the allowlist.
 
 ## Markets
 
-For an eligible fixture, the shared raw collector retains every Bet365/1xBet market and
-line returned by the provider. Corner ownership is versioned; unknown markets remain
-UNCLASSIFIED. Canonical settlement support is added market by market.
+The shared collector parses one all-market Bet365/1xBet payload. CORNER rows and
+UNCLASSIFIED rows are persisted only for Top-10 fixtures; broad GoalLab-only fixtures
+do not store corner-owned or unknown market rows. Canonical settlement support is added
+market by market.
 
 ## Referee variables
 
