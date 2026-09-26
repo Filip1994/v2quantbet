@@ -804,3 +804,68 @@ Correction:
   `PASS / CONTROL_VALUE_SIGNAL_ONLY`, never as PICK;
 - the control evaluator remains available for future DC-vs-DC+ comparison;
 - production model, production picks, bankroll and registration are untouched.
+
+
+## 2026-09-26 — 75k provider envelope + market-driven research universe
+
+**Owner:** QuantBet provider core + QuantLab
+
+### Trigger
+
+The football API plan was increased to **75,000 requests/day**. This is the shared
+QuantBet football-provider capacity, not a private QuantLab allowance.
+
+The previous QuantLab 1,000/day ceiling and CardLab/CornerLab Top-10 allowlist were
+budget-conservation mechanisms and are no longer the active research contract.
+
+### Provider budget correction
+
+- Global default `QUANTBET_API_DAILY_LIMIT`: 75,000.
+- QuantLab uses the same shared provider envelope.
+- Removed the separate 1,000/day QuantLab hard clamp.
+- Removed the separate 1,500-call QuantLab production-reserve guard.
+- `quantlab_context` remains a request-telemetry category so research usage is still
+  attributable.
+- Model-training and dashboard defaults are aligned to the 75,000-call envelope.
+- Persistent budget telemetry and advisory-lock accounting remain restart-safe.
+
+### CardLab / CornerLab scope correction
+
+Replaced `CARDCORNER_TOP10_LEAGUES_V2` with
+`CARDCORNER_MARKET_DRIVEN_V3`.
+
+- No domestic-league allowlist.
+- Global QuantLab fixture discovery remains the universe source.
+- Upcoming fixtures can receive one all-market Bet365/1xBet odds request regardless of
+  competition name.
+- CARD/CORNER rows are retained wherever those markets actually exist.
+- CardLab target referee/standings/context is requested only after persisted CARD market
+  evidence exists.
+- Shadow evaluation skips fixtures that do not have the relevant persisted market owner.
+- Market presence does not bypass settlement semantics: ambiguous raw markets remain
+  research-only until canonicalized.
+
+### Expanded research acquisition defaults
+
+- upcoming per-cycle fixture limit: 1,000;
+- all-market odds refresh: 1 hour;
+- historical completed-match statistics backfill: 25 fixtures per cycle by default;
+- historical statistics no longer require referee coverage before being acquired.
+
+The higher budget is used to improve coverage and history depth, not to disable dedupe,
+TTL, watermark or leakage controls.
+
+### GoalLab DC+ Pro research specification
+
+Added:
+
+- `QuantLab/GoalLab/API_FOOTBALL_RESEARCH_CATALOG.md`;
+- `QuantLab/GoalLab/DC_PLUS_PRO_V1.md`.
+
+The DC+ Pro registry starts broad with 300+ structural, availability, lineup/player,
+manager, H2H, interaction, market-aware, provider-ensemble and missingness candidates.
+Feature removal is intended to be evidence-driven through out-of-sample evaluation and
+ablation rather than an artificially small initial feature set.
+
+Production pick registration, bankroll and active production model state remain
+unchanged by this research-universe expansion.
