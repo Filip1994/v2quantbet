@@ -56,6 +56,7 @@ The QuantLab core owns:
 - feature provenance conventions
 - append-only shadow decision evidence and shadow-bet ledger
 - GoalLab read-only control-model evaluation over active Dixon-Coles artifacts
+- CornerLab/CardLab shadow-only count-market probability/value evaluation
 - settlement conventions
 - P&L / ROI / CLV / drawdown reporting
 - dashboard routing
@@ -111,6 +112,7 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_standings_snapshots
 - quantlab_card_feature_snapshots
 - quantlab_goal_decisions
+- quantlab_count_decisions
 
 ## Market collector contract
 
@@ -144,6 +146,25 @@ Task 002 adds `GOALLAB_SHADOW_POLICY_V1` as a shadow-only control decision path.
 Shadow evaluation runs independently of the provider budget, so already-persisted odds can
 still be evaluated after the daily API ceiling has stopped collection. Task 002 itself
 adds zero provider calls.
+
+## CornerLab / CardLab shadow decision contract
+
+Task 003 adds a shared append-only `quantlab_count_decisions` ledger for CORNER/CARD
+PICK/PASS evidence.
+
+CornerLab uses `CORNER_POISSON_FORM_V1`, estimated only from stored completed-match
+corner observations with minimum per-team history and venue-split fallback. CardLab uses
+`CARD_REFEREE_POISSON_V1`, driven numerically by the timestamp-safe referee card rate
+and guarded by the existing foul/table-pressure/match-importance feature coverage.
+
+Both engines evaluate only conservative complete two-sided half-count total markets,
+de-vig the bookmaker pair proportionally, apply explicit edge/EV/odds/freshness gates,
+and select the best qualifying Bet365/1xBet price. Integer lines and ambiguous market
+semantics are PASSed rather than approximated.
+
+Task 003 decision evaluation is outside the provider-budget collection block and adds zero
+provider requests itself. Missing history/context/market evidence becomes an auditable
+PASS. GoalLab scope is unchanged.
 
 ## API policy
 
