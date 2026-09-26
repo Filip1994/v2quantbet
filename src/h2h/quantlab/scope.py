@@ -30,7 +30,7 @@ _FAR_EAST_COUNTRIES = frozenset(
     {
         "brunei", "cambodia", "china", "chinese taipei", "hong kong", "indonesia",
         "japan", "laos", "macau", "macao", "malaysia", "mongolia", "myanmar",
-        "north korea", "philippines", "singapore", "south korea", "taiwan",
+        "north korea", "philippines", "singapore", "south korea", "korea republic",\n        "republic of korea", "taiwan",
         "thailand", "timor leste", "vietnam",
     }
 )
