@@ -1,141 +1,254 @@
 # GoalLab
 
-GoalLab owns QuantLab experiments for goals and BTTS.
+GoalLab is QuantLab's isolated pre-match goals/BTTS research system.
 
-## Initial model family
+It does **not** write production registered picks, production bankroll state or production
+model activation state.
 
-DC+ Core keeps current Dixon-Coles as the control/base and tests incremental structural
-features:
+## Current model
 
-- recent goals for/against
-- recent points/form
-- home/away splits
-- rest-day differential
-- fixture congestion
+The pick-producing research model family is:
 
-Market-aware variants must be evaluated separately from structural DC+ so that market
-information is not silently mixed into an independent sports probability model.
+- model: **DC+ Pro Structural**
+- model prefix: `DC_PLUS_PRO_STRUCTURAL_V1:`
+- feature version: `GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1`
+- evaluation policy: `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2`
+- canonical pick policy: `GOALLAB_DC_PLUS_PICK_POLICY_V1`
+- settlement rule: `GOALLAB_SETTLEMENT_V1`
 
-## League scope
+Plain production Dixon-Coles remains a read-only control under
+`GOALLAB_CONTROL_POLICY_V2`. It has no GoalLab PICK authority.
 
-GoalLab uses GOAL_SCOPE_V2 and intentionally has a much broader universe than CardLab
-and CornerLab.
+## What DC+ does
 
-Eligible by default: professional senior competitions not explicitly excluded.
+DC+ preserves the Dixon-Coles score model:
 
-GoalLab no longer inherits production Phase-I fixture discovery. QuantLab first captures
-global API-Football date shards into its own fixture inventory, then applies GOAL_SCOPE_V2
-locally. This is what allows GoalLab to retain lower professional leagues that production
-may intentionally ignore.
+```
+log(lambda_home) =
+    intercept
+  + home_advantage
+  + home_attack
+  + away_defence
+  + league_effect
+  + learned_home_structural_offset
 
-Excluded locally before fixture-specific QuantLab requests:
+log(lambda_away) =
+    intercept
+  + away_attack
+  + home_defence
+  + league_effect
+  + learned_away_structural_offset
+```
 
-- all women's football, detected from normalized competition/team metadata;
-- youth competitions U5 through U23 and equivalent Under labels;
-- academy, reserve/reserves and amateur/amateurs competitions;
-- reserve-team suffixes such as B and II where detected by the deterministic rule;
-- all African countries plus competitions explicitly identified as CAF/Africa;
-- Far East countries in the V1 region registry: Brunei, Cambodia, China, Chinese Taipei,
-  Hong Kong, Indonesia, Japan, Laos, Macau/Macao, Malaysia, Mongolia, Myanmar, North
-  Korea, Philippines, Singapore, South Korea/Korea Republic, Taiwan, Thailand,
-  Timor-Leste and Vietnam.
+The Dixon-Coles `rho` correction remains for 0-0, 0-1, 1-0 and 1-1.
 
-The scope is versioned in src/h2h/quantlab/scope.py. Scope changes require documentation
-and a new/updated version rather than ad-hoc runtime inference.
+Structural offsets are learned with ridge regularization. Bookmaker odds, API-Football
+`/predictions`, target-match live statistics and hand-written football-effect
+coefficients are not DC+ Structural probability inputs.
 
-## Markets
+Model identity is data/feature/parameter driven rather than wall-clock driven. Unchanged
+training data therefore does not create a new model version every cycle.
 
-The shared collector requests one all-market Bet365/1xBet payload for globally discovered
-upcoming fixtures. GOAL persistence still follows GOAL_SCOPE_V2, while CARD/CORNER
-research follows the broader CARDCORNER_MARKET_DRIVEN_V4 universe. Canonical modeling
-and settlement support remain explicit and versioned.
+## Structural feature contract
 
-## Shadow Pick Engine V1
+The canonical 305-variable registry is in
+[DC_PLUS_PRO_V1.md](./DC_PLUS_PRO_V1.md).
 
-Task 002 introduces `GOALLAB_SHADOW_POLICY_V1` as the first end-to-end shadow decision
-engine.
+Every model artifact persists:
 
-The control probability source is the existing validated active Dixon-Coles artifact for
-the exact league/season. QuantLab reads that artifact but cannot activate, retrain or
-mutate production model state.
+- exact active model feature names;
+- base feature names;
+- feature means/scales;
+- contract block coverage;
+- training sample/history counts;
+- parameters and regularization settings;
+- source/provenance rules.
 
-V1 evaluates only complete two-sided:
+The GoalLab dashboard renders the **exact active feature names for the current artifact**.
+This matters because a contract block can exist in code while sparse provider coverage can
+still keep a concrete feature out of a particular fitted artifact.
+
+Implemented Structural blocks include:
+
+- Base DC / reliability;
+- recent goals/results/form;
+- venue form;
+- season and league-normalized strength;
+- shots, SOT, inside-box and conversion proxies;
+- finishing / goalkeeper proxies;
+- possession and passing;
+- corners / territorial proxies;
+- historical discipline;
+- rest and congestion;
+- timestamp-safe standings;
+- timestamp-safe injury/suspension counts;
+- historical projected-player form from prior completed `/fixtures/players` captures;
+- manager/coach context;
+- H2H;
+- opponent-adjusted form;
+- regularized matchup interactions;
+- explicit missingness/coverage indicators.
+
+Target lineup/formation is intentionally **not silently mixed into Structural DC+**.
+It remains a separately versioned Late-Lineup layer because lineups are normally published
+close to kickoff.
+
+## Timestamp / leakage rules
+
+For a target prediction:
+
+- only completed earlier matches can enter rolling historical features;
+- target-match live statistics/events/players never enter a pre-match prediction;
+- standings, injuries and manager context must have `available_at <= decision_at`;
+- target lineup, if used later, belongs to the separate late layer;
+- every target feature snapshot retains provenance and the exact model version.
+
+Historical player projection uses only player appearances before the target kickoff.
+The target fixture's `/fixtures/players` response is never used to build its own features.
+
+## Canonical markets
+
+GoalLab currently evaluates only markets with explicit settlement semantics:
 
 - O/U 2.5 — OVER / UNDER;
 - BTTS — YES / NO.
 
-Market fair probability is proportional two-way de-vig. Default shadow gates are:
+A quote is evaluable only when both complementary selections from the **same bookmaker
+and capture** are present.
+
+Market fair probability is proportional two-way de-vig.
+
+## Candidate gates
+
+A candidate must satisfy all of:
 
 - edge >= 3 percentage points;
 - expected value >= 3%;
 - odds 1.40 through 4.00;
 - quote age <= 13 hours;
-- kickoff at least 15 minutes away;
-- flat shadow stake 10,000 minor units.
+- kickoff at least 15 minutes away.
 
-If model coverage or a complete market is absent, the engine records PASS rather than
-inventing data. The GoalLab dashboard includes an upcoming-fixture decision pipeline with
-scope, odds-capture, model, candidate and PASS/PICK reason.
+Odds are used only after DC+ has produced sports probabilities.
 
-This evaluator makes no provider requests. It can run on persisted quotes even when the
-daily QuantLab API ceiling is already exhausted.
+## How one GoalLab pick is chosen
 
-## Referee variables
+Research evidence and actual GoalLab picks are separate concepts.
 
-Referee card/foul variables do not belong to GoalLab v1.
+1. DC+ evaluates every canonical market/selection/eligible bookmaker.
+2. For the same market/selection, the best qualifying price is retained.
+3. All remaining qualifying candidates for the fixture are ranked by:
+   1. expected value;
+   2. edge;
+   3. model probability;
+   4. odds;
+   5. deterministic market/selection/bookmaker tie-break.
+4. Exactly **one canonical GoalLab pick per fixture/pick-policy version** may be persisted.
+5. All other evaluated candidates remain immutable decision evidence.
 
+The pick stores the exact source decision and feature snapshot, so it is always possible
+to reconstruct why that pick existed.
 
-## Shadow decision engine
+Flat research stake is 10,000 minor units.
 
-Task 002 adds GOALLAB_SHADOW_POLICY_V1 as the first executable GoalLab shadow-pick
-pipeline.
+## Pick authority gate
 
-The control model is the already-active, validated API-Football Dixon-Coles artifact for
-the fixture's exact league and season. QuantLab reads that model only; it does not train,
-activate or mutate production model state.
+`QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY` is an explicit manual authority request and
+defaults to OFF.
 
-Task 002 canonical markets are intentionally narrow:
+Even when requested ON, the engine will not create a GoalLab pick unless the **exact
+model version** has:
 
-- O/U 2.5 (provider bet 5): OVER / UNDER;
-- BTTS (provider bet 8): YES / NO.
+- a recorded chronological DC-vs-DC+ holdout;
+- a PASS leakage audit;
+- enough common holdout coverage for manual review;
+- `authority_review_status = READY_FOR_MANUAL_REVIEW`.
 
-A market is evaluable only when both complementary selections from the same bookmaker and
-capture are present. Market fair probability uses proportional two-way de-vig. The engine
-records every evaluated outcome as PICK or PASS with an explicit reason. Missing active
-model, missing team coverage, incomplete markets, stale quotes and policy failures remain
-visible rather than being converted into synthetic probabilities.
+Validation does not automatically promote a model. The metrics are evidence for the
+explicit authority decision.
 
-GOALLAB_SHADOW_POLICY_V1 defaults:
+## Dedicated GoalLab Picks sector
 
-- minimum edge: 3 percentage points;
-- minimum expected value: 3%;
-- odds: 1.40–4.00;
-- maximum quote age: 13 hours;
-- minimum time to kickoff: 15 minutes;
-- flat shadow stake: 10,000 minor units.
+Canonical picks live in `quantlab_goal_picks`, separate from generic QuantLab shadow
+research rows.
 
-When multiple supported bookmakers qualify for the same market/selection/evidence cycle,
-only the best available price becomes a shadow PICK. These thresholds are laboratory
-controls only and do not alter production registration policy.
+Each pick stores:
 
+- source DC+ decision ID;
+- exact feature snapshot ID;
+- model and policy versions;
+- bookmaker and entry quote evidence;
+- market / selection / line;
+- model probability and de-vig market probability;
+- edge and EV;
+- `lambda_home`, `lambda_away` and `rho`;
+- flat stake;
+- number of qualifying candidates;
+- the complete candidate ranking payload.
 
-## Plain Dixon-Coles control retirement
+The table is append-only.
 
-The original Task 002 plain production Dixon-Coles path is retained only as a benchmark
-for future DC+ comparison. It no longer has authority to create GoalLab shadow bets.
+## Settlement and results
 
-Policy `GOALLAB_CONTROL_POLICY_V2` records qualifying plain-DC value observations as
-`PASS / CONTROL_VALUE_SIGNAL_ONLY`. Migration
-`031_retire_goallab_control_picks.sql` removes the earlier plain-control GoalLab rows
-from `quantlab_shadow_bets` while preserving the immutable Task 002 decision audit.
+Settlements live in the separate append-only
+`quantlab_goal_pick_settlements` table.
 
-Future GoalLab shadow PICK generation belongs to a separately versioned DC+ model.
+Settlement uses the shared stable result pipeline only when
+`fixture_result_acquisition_states.phase = COMPLETE`.
 
+Rules:
 
-## DC+ Pro references
+- O/U 2.5 uses regulation total goals;
+- BTTS uses regulation goals;
+- non-played voidable terminal fixtures settle VOID;
+- WIN P&L = stake × (odds - 1);
+- LOSS P&L = -stake;
+- VOID P&L = 0.
+
+Every settlement retains the exact result observation used.
+
+## DC+ validation
+
+Each immutable model artifact may receive one
+`GOALLAB_CHRONOLOGICAL_HOLDOUT_V1` validation record.
+
+The chronological holdout compares DC+ Structural against plain Dixon-Coles on the same
+common evaluation fixtures and records:
+
+- exact-score mean/total log likelihood;
+- home/away goal MAE;
+- total-goals MAE/RMSE;
+- Over 2.5 Brier score and calibration mean;
+- BTTS Brier score and calibration mean;
+- common evaluation sample size;
+- leakage checklist;
+- DC+ minus DC metric deltas.
+
+No unrecorded automatic “winner” rule grants pick authority.
+
+## GoalLab dashboard
+
+The Goal tab is the operational surface for:
+
+- current DC+ model/version;
+- exact active variables;
+- contract coverage by feature block;
+- validation status and DC+ vs DC metrics;
+- upcoming DC+ decision pipeline;
+- canonical GoalLab picks only;
+- pending/WIN/LOSS/VOID settlement state;
+- P&L / ROI and model probabilities.
+
+CornerLab and CardLab remain separate labs and are not part of GoalLab pick semantics.
+
+## Scope
+
+GoalLab uses `GOAL_SCOPE_V2`.
+
+The independent QuantLab fixture inventory is discovered from API-Football date shards,
+then Goal scope is applied locally. Women's football remains globally hard-blocked from
+QuantBet/QuantLab.
+
+See also:
 
 - [API-Football Research Catalog](./API_FOOTBALL_RESEARCH_CATALOG.md)
-- [DC+ Pro V1 specification](./DC_PLUS_PRO_V1.md)
-
-These documents define the broad provider feature universe and the large candidate feature
-registry for the next GoalLab model.
+- [DC+ Pro V1 contract](./DC_PLUS_PRO_V1.md)
