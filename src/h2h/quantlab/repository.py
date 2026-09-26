@@ -788,6 +788,8 @@ class PostgreSQLQuantLabRepository:
                 ") latest ON TRUE "
                 "WHERE latest.kickoff_at < %s "
                 "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND latest.home_team_id IS NOT NULL "
+                "AND latest.away_team_id IS NOT NULL "
                 "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
                 "ORDER BY latest.kickoff_at DESC, f.fixture_id LIMIT %s",
                 (before, list(ids), list(ids), limit),
