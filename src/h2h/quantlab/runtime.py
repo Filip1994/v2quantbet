@@ -438,6 +438,7 @@ class QuantLabRuntime:
                     team_id,
                     now=now,
                     refresh_seconds=self._settings.goal_team_history_refresh_seconds,
+                    minimum_requested_last=self._settings.goal_team_history_last,
                 )
             ):
                 payload = self._provider.fetch_team_recent_fixtures(
@@ -558,6 +559,7 @@ class QuantLabRuntime:
                     team_id,
                     now=now,
                     refresh_seconds=self._settings.corner_team_history_refresh_seconds,
+                    minimum_requested_last=self._settings.corner_team_history_last,
                 )
             ):
                 payload = self._provider.fetch_team_recent_fixtures(
