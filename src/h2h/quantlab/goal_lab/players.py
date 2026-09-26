@@ -237,6 +237,13 @@ def projected_team_player_features(
         "duels": 0.0,
         "duels_won": 0.0,
     }
+    xi_per90 = {
+        "shots": 0.0,
+        "sot": 0.0,
+        "goals_assists": 0.0,
+        "key_passes": 0.0,
+        "defensive_actions": 0.0,
+    }
     creator_by_player: list[float] = []
     goals_by_player: list[float] = []
 
@@ -260,6 +267,17 @@ def projected_team_player_features(
         }
         for key, value in player_totals.items():
             totals[key] += value
+        xi_per90["shots"] += _per90(player_totals["shots"], minutes)
+        xi_per90["sot"] += _per90(player_totals["sot"], minutes)
+        xi_per90["goals_assists"] += _per90(
+            player_totals["goals"] + player_totals["assists"],
+            minutes,
+        )
+        xi_per90["key_passes"] += _per90(player_totals["key_passes"], minutes)
+        xi_per90["defensive_actions"] += _per90(
+            player_totals["defensive_actions"],
+            minutes,
+        )
 
         ratings = [
             (item.rating, item.minutes)
@@ -307,17 +325,13 @@ def projected_team_player_features(
             if rating_minutes <= 0
             else rating_weighted_sum / rating_minutes
         ),
-        f"{prefix}_projected_xi_shots_per90": _per90(totals["shots"], total_minutes),
-        f"{prefix}_projected_xi_sot_per90": _per90(totals["sot"], total_minutes),
-        f"{prefix}_projected_xi_key_passes_per90": _per90(
-            totals["key_passes"], total_minutes
-        ),
-        f"{prefix}_projected_xi_goals_assists_per90": _per90(
-            totals["goals"] + totals["assists"], total_minutes
-        ),
-        f"{prefix}_projected_xi_defensive_actions_per90": _per90(
-            totals["defensive_actions"], total_minutes
-        ),
+        f"{prefix}_projected_xi_shots_per90": xi_per90["shots"],
+        f"{prefix}_projected_xi_sot_per90": xi_per90["sot"],
+        f"{prefix}_projected_xi_key_passes_per90": xi_per90["key_passes"],
+        f"{prefix}_projected_xi_goals_assists_per90": xi_per90["goals_assists"],
+        f"{prefix}_projected_xi_defensive_actions_per90": xi_per90[
+            "defensive_actions"
+        ],
         f"{prefix}_projected_xi_duel_win_rate": (
             float("nan") if totals["duels"] <= 0 else totals["duels_won"] / totals["duels"]
         ),
