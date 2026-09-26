@@ -315,13 +315,11 @@ def log_cornerlab_v2_training_readiness(
     model_fit_eligible = training_sample_size >= MIN_TRAINING_EXAMPLES
     logger.info(
         "QuantLab CornerLab V2 cycle readiness history_match_count=%d "
-        "training_sample_size=%d minimum_training_examples=%d training_shortfall=%d "
-        "model_fit_eligible=%s",
+        "training_sample_size=%d minimum_training_examples=%d training_shortfall=%d",
         history_match_count,
         training_sample_size,
         MIN_TRAINING_EXAMPLES,
         training_shortfall,
-        model_fit_eligible,
     )
     return {
         "history_match_count": history_match_count,
