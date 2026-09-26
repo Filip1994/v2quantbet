@@ -78,7 +78,7 @@ historical fallback and do not define QuantLab eligibility.
 
 CARDCORNER_TOP10_LEAGUES_V2 gates CardLab/CornerLab fixture-specific spend to exactly
 ten domestic top flights: Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
-Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Scottish Premiership.
+Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Major League Soccer (MLS).
 Lower divisions, cups and UEFA club competitions are rejected locally for those labs.
 
 GOAL_SCOPE_V1 remains broad but excludes:
