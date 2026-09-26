@@ -174,6 +174,12 @@ class QuantLabRuntime:
             if completed >= target:
                 break
             fixture_id = str(fixture.get("fixture_id") or "")
+            scope = self._scope_kwargs(fixture)
+            if (
+                not goal_scope(**scope).allowed
+                and not card_corner_scope(**scope).allowed
+            ):
+                continue
             try:
                 provider_fixture_id = int(fixture["provider_fixture_id"])
                 home_team_id = int(fixture["home_team_id"])
@@ -417,6 +423,8 @@ class QuantLabRuntime:
         picks = 0
         for fixture in fixtures:
             fixture_id = str(fixture["fixture_id"])
+            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
             if lab not in self._repository.market_labs_for_fixture(fixture_id):
                 continue
             outcome = engine.run_fixture(fixture, decision_at=now)
