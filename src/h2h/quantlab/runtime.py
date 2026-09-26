@@ -689,13 +689,18 @@ class QuantLabRuntime:
                     )
                     market_fixtures += 1
 
+                market_labs = self._repository.market_labs_for_fixture(fixture_id)
+                standings = None
+                if goal_allowed and "GOAL" in market_labs:
+                    standings = self._standings(fixture, now)
+
                 if not context_allowed:
                     continue
-                market_labs = self._repository.market_labs_for_fixture(fixture_id)
                 if "CARD" not in market_labs:
                     continue
                 context = self._capture_context(fixture, now)
-                standings = self._standings(fixture, now)
+                if standings is None:
+                    standings = self._standings(fixture, now)
                 if context is None:
                     continue
                 if not self._repository.feature_snapshot_due(
