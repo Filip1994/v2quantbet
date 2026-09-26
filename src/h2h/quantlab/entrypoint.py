@@ -81,7 +81,13 @@ def main() -> None:
         provider,
         settings=QuantLabRuntimeSettings(
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
+            discovery_lookback_days=_integer(
+                "QUANTBET_QUANTLAB_DISCOVERY_LOOKBACK_DAYS", "1"
+            ),
             fixture_limit=_positive_integer("QUANTBET_QUANTLAB_FIXTURE_LIMIT", "250"),
+            fixture_discovery_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_FIXTURE_DISCOVERY_REFRESH_SECONDS", "21600"
+            ),
             market_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_MARKET_REFRESH_SECONDS", "900"
             ),
