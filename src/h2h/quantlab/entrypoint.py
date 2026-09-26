@@ -178,6 +178,9 @@ def main() -> None:
             goal_team_statistics_per_cycle=_positive_integer(
                 "QUANTBET_QUANTLAB_GOAL_TEAM_STATS_PER_CYCLE", "360"
             ),
+            goal_player_history_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_PLAYER_HISTORY_PER_CYCLE", "60"
+            ),
             goal_team_history_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_REFRESH_SECONDS", "21600"
             ),
