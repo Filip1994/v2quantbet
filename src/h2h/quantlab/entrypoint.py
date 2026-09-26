@@ -12,6 +12,8 @@ from h2h.persistence.postgres_model_lifecycle import (
     PostgreSQLDixonColesModelVersionRepository,
 )
 from h2h.quantlab.budget import QuantLabRequestBudget
+from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
+from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 from h2h.quantlab.provider import QuantLabApiFootballClient
@@ -51,13 +53,20 @@ def _positive_integer(name: str, default: str) -> int:
     return value
 
 
-def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: int = 20) -> None:
+def _log_latest_picks(
+    repository: PostgreSQLQuantLabRepository,
+    lab: str,
+    *,
+    limit: int = 20,
+) -> None:
     """Emit a bounded read-only snapshot for operational inspection."""
-    for row in repository.list_bets("GOAL", limit=limit):
+    label = {"GOAL": "GoalLab", "CORNER": "CornerLab", "CARD": "CardLab"}[lab]
+    for row in repository.list_bets(lab, limit=limit):
         LOGGER.info(
-            "QuantLab GoalLab shadow pick fixture=%s match=%s vs %s league=%s "
+            "QuantLab %s shadow pick fixture=%s match=%s vs %s league=%s "
             "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
             "model_p=%s market_p=%s edge=%s ev=%s",
+            label,
             row.get("fixture_id"),
             row.get("home_team"),
             row.get("away_team"),
@@ -83,7 +92,7 @@ def main() -> None:
     database_url = _database_url()
     repository = PostgreSQLQuantLabRepository(database_url)
     if not repository.check_database():
-        raise RuntimeError("QuantLab Task 002 schema is unavailable")
+        raise RuntimeError("QuantLab Task 003 schema is unavailable")
 
     configured_limit = _positive_integer("QUANTBET_QUANTLAB_API_DAILY_LIMIT", "1000")
     api_daily_limit = min(configured_limit, 1000)
@@ -111,11 +120,15 @@ def main() -> None:
         PostgreSQLActiveDixonColesModelRepository(database_url),
     )
     goal_engine = GoalLabShadowPickEngine(repository, model_loader)
+    corner_engine = CornerLabShadowPickEngine(repository)
+    card_engine = CardLabShadowPickEngine(repository)
 
     runtime = QuantLabRuntime(
         repository,
         provider,
         goal_engine=goal_engine,
+        corner_engine=corner_engine,
+        card_engine=card_engine,
         settings=QuantLabRuntimeSettings(
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
             discovery_lookback_days=_integer(
@@ -152,7 +165,8 @@ def main() -> None:
         dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
     )
     cycle_seconds = _positive_integer("QUANTBET_QUANTLAB_CYCLE_SECONDS", "300")
-    _log_latest_goal_picks(repository)
+    for lab in ("GOAL", "CORNER", "CARD"):
+        _log_latest_picks(repository, lab)
 
     try:
         server.start()
