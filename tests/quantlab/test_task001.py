@@ -686,3 +686,119 @@ def test_goal_scope_rejects_broader_youth_aliases_and_far_east_aliases() -> None
         country="Korea Republic",
         competition_name="K League 1",
     ).allowed
+
+
+def test_history_backfill_skips_malformed_fixture_and_continues() -> None:
+    malformed = {
+        "fixture_id": "api-football:bad-history",
+        "provider_fixture_id": 9001,
+        "home_team_id": None,
+        "away_team_id": 22,
+    }
+    valid = {
+        "fixture_id": "api-football:good-history",
+        "provider_fixture_id": 9002,
+        "home_team_id": 31,
+        "away_team_id": 32,
+    }
+
+    class Repo:
+        def completed_for_context_backfill(self, **_kwargs):
+            return (malformed, valid)
+
+        def latest_context_before(self, fixture_id, **_kwargs):
+            if fixture_id == "api-football:good-history":
+                return {"referee": None}
+            return None
+
+        def statistics_exists(self, fixture_id):
+            return fixture_id == "api-football:good-history"
+
+    class Provider:
+        def fetch_fixture(self, _fixture_id):
+            raise AssertionError("malformed fixture must fail before provider access")
+
+        def fetch_statistics(self, _fixture_id):
+            raise AssertionError("existing statistics must not be refetched")
+
+    runtime = QuantLabRuntime(
+        Repo(),
+        Provider(),
+        settings=QuantLabRuntimeSettings(history_backfill_per_cycle=1),
+        clock=lambda: NOW,
+    )
+
+    assert runtime._backfill_history(NOW) == 1
+
+
+def test_upcoming_collection_isolates_bad_fixture_and_scans_next_fixture() -> None:
+    bad = {
+        "fixture_id": "api-football:bad-upcoming",
+        "provider_fixture_id": 7001,
+        "league_id": 1,
+        "season": 2026,
+        "home_team_id": 10,
+        "away_team_id": 11,
+        "home_team": "Bad Home",
+        "away_team": "Bad Away",
+        "competition_name": "Example League",
+        "country": "Example",
+        "competition_type": "League",
+        "kickoff_at": NOW + timedelta(hours=2),
+        "provider_status": "NS",
+    }
+    good = {
+        **bad,
+        "fixture_id": "api-football:good-upcoming",
+        "provider_fixture_id": 7002,
+        "home_team_id": 12,
+        "away_team_id": 13,
+        "home_team": "Good Home",
+        "away_team": "Good Away",
+    }
+
+    class Repo:
+        def __init__(self):
+            self.captures = []
+
+        def upcoming_fixtures(self, **_kwargs):
+            return (bad, good)
+
+        def market_capture_due(self, *_args, **_kwargs):
+            return True
+
+        def save_market_observations(self, _rows):
+            return 0
+
+        def save_market_capture(self, **kwargs):
+            self.captures.append(kwargs)
+
+        def market_labs_for_fixture(self, _fixture_id):
+            return frozenset()
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_odds(self, fixture_id):
+            self.calls.append(fixture_id)
+            if fixture_id == 7001:
+                raise ValueError("malformed provider odds payload")
+            return {"response": [{"fixture": {"id": fixture_id}, "bookmakers": []}]}
+
+    provider = Provider()
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        provider,
+        settings=QuantLabRuntimeSettings(fixture_limit=2),
+        clock=lambda: NOW,
+    )
+
+    market_fixtures, card_snapshots = runtime._collect_upcoming(NOW)
+
+    assert market_fixtures == 1
+    assert card_snapshots == 0
+    assert provider.calls == [7001, 7002]
+    assert len(repo.captures) == 1
+    assert repo.captures[0]["fixture_id"] == "api-football:good-upcoming"
