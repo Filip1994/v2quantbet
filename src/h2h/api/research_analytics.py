@@ -375,7 +375,7 @@ def _metrics_table(
     return (
         '<section class="panel"><h2>'
         + escape(title)
-        + "</h2><div class="scroll"><table><thead><tr>"
+        + '</h2><div class="scroll"><table><thead><tr>'
         + dimension_headers
         + "<th>N</th><th>W-L-V</th><th>Win%</th><th>Exp%</th><th>Cal gap</th>"
         + "<th>ROI</th><th>Avg CLV</th><th>Med CLV</th><th>+CLV%</th><th>Evidence</th>"
