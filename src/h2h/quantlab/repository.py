@@ -61,6 +61,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_card_feature_snapshots",
             "quantlab_corner_model_versions",
             "quantlab_corner_feature_snapshots",
+            "quantlab_team_history_captures",
         )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -545,6 +546,101 @@ class PostgreSQLQuantLabRepository:
         last = None if row is None else row[0]
         return last is None or last <= now - timedelta(seconds=refresh_seconds)
 
+    def team_history_due(
+        self,
+        team_id: int,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        if team_id <= 0:
+            raise ValueError("team_id must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(captured_at) FROM quantlab_team_history_captures "
+                "WHERE team_id = %s",
+                (team_id,),
+            )
+            row = cursor.fetchone()
+        last = None if row is None else row[0]
+        return last is None or last <= now - timedelta(seconds=refresh_seconds)
+
+    def save_team_history_capture(
+        self,
+        *,
+        team_id: int,
+        captured_at: datetime,
+        requested_last: int,
+        response_fixture_count: int,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        capture_id = _identifier(
+            "quantlab-team-history-v1:",
+            {
+                "team_id": team_id,
+                "captured_at": captured_at.isoformat(),
+                "requested_last": requested_last,
+                "response_fixture_count": response_fixture_count,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_team_history_captures ("
+                "team_history_capture_id, team_id, captured_at, requested_last, "
+                "response_fixture_count, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    team_id,
+                    captured_at,
+                    requested_last,
+                    response_fixture_count,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
+
+    def save_fixture_observations(self, observations: Iterable[Any]) -> int:
+        """Persist QuantLab fixture observations without creating a date-shard watermark."""
+        rows = tuple(observations)
+        with self.connect() as connection, connection.cursor() as cursor:
+            for item in rows:
+                fixture = item.fixture
+                provider_fixture_id = int(fixture.provider_fixture_id or "")
+                cursor.execute(
+                    "INSERT INTO quantlab_fixtures "
+                    "(fixture_id, provider_fixture_id, first_seen_at) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (fixture_id) DO NOTHING",
+                    (fixture.fixture_id, provider_fixture_id, item.captured_at),
+                )
+                cursor.execute(
+                    "INSERT INTO quantlab_fixture_observations ("
+                    "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+                    "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+                    "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                    "ON CONFLICT DO NOTHING",
+                    (
+                        item.fixture_observation_id,
+                        fixture.fixture_id,
+                        provider_fixture_id,
+                        fixture.competition_id,
+                        fixture.season,
+                        fixture.provider_home_team_id,
+                        fixture.provider_away_team_id,
+                        fixture.home_team,
+                        fixture.away_team,
+                        fixture.competition_name,
+                        fixture.country,
+                        fixture.competition_type,
+                        fixture.kickoff_at,
+                        fixture.status,
+                        item.captured_at,
+                        _json(item.raw_payload),
+                    ),
+                )
+        return len(rows)
+
     def save_fixture_discovery(
         self,
         *,
@@ -666,6 +762,40 @@ class PostgreSQLQuantLabRepository:
             reverse=True,
         )
         return tuple(ordered[:limit])
+
+    def completed_for_team_statistics(
+        self,
+        team_ids: Iterable[int],
+        *,
+        before: datetime,
+        limit: int = 6000,
+    ) -> tuple[dict[str, Any], ...]:
+        ids = tuple(sorted({int(team_id) for team_id in team_ids if int(team_id) > 0}))
+        if not ids or limit <= 0:
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT f.fixture_id, f.provider_fixture_id, latest.league_id, latest.season, "
+                "latest.home_team_id, latest.away_team_id, latest.home_team, latest.away_team, "
+                "latest.competition_name, latest.country, latest.competition_type, "
+                "latest.kickoff_at, latest.provider_status "
+                "FROM quantlab_fixtures f "
+                "JOIN LATERAL ("
+                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
+                "        competition_name, country, competition_type, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE latest.kickoff_at < %s "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures sc "
+                "                WHERE sc.fixture_id = f.fixture_id "
+                "                  AND sc.reason IS DISTINCT FROM 'legacy-statistics-observation') "
+                "ORDER BY latest.kickoff_at DESC, f.fixture_id LIMIT %s",
+                (before, list(ids), list(ids), limit),
+            )
+            return _row_dicts(cursor)
 
     def market_capture_due(
         self, fixture_id: str, *, now: datetime, refresh_seconds: int
