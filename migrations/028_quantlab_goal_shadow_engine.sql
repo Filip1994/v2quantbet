@@ -65,6 +65,16 @@ CREATE INDEX idx_quantlab_goal_decisions_outcome
 CREATE INDEX idx_quantlab_goal_decisions_market
     ON quantlab_goal_decisions (market_key, selection, bookmaker_id, decision_at DESC);
 
+CREATE UNIQUE INDEX uq_quantlab_goal_decisions_first_pick
+    ON quantlab_goal_decisions (
+        fixture_id,
+        market_key,
+        selection,
+        COALESCE(line, -1::numeric),
+        policy_version
+    )
+    WHERE decision = 'PICK';
+
 CREATE TRIGGER quantlab_goal_decisions_immutable
 BEFORE UPDATE OR DELETE ON quantlab_goal_decisions
 FOR EACH ROW EXECUTE FUNCTION quantlab_reject_mutation();
