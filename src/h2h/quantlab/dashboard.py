@@ -161,9 +161,9 @@ class QuantLabDashboardService:
                 return False
             if league and league not in str(row.get("competition_name") or "").casefold():
                 return False
-            if market and market not in str(row.get("market_key") or "").casefold():
-                return False
-            return True
+            return not (
+                market and market not in str(row.get("market_key") or "").casefold()
+            )
 
         return tuple(row for row in rows if keep(row))
 
