@@ -58,6 +58,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_injury_captures",
             "quantlab_goal_lineup_captures",
             "quantlab_goal_coach_captures",
+            "quantlab_goal_player_captures",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -845,6 +846,39 @@ class PostgreSQLQuantLabRepository:
             )
             return _row_dicts(cursor)
 
+    def completed_for_goal_player_backfill(
+        self,
+        team_ids: Iterable[int],
+        *,
+        before: datetime,
+        limit: int = 3000,
+    ) -> tuple[dict[str, Any], ...]:
+        ids = tuple(sorted({int(team_id) for team_id in team_ids if int(team_id) > 0}))
+        if not ids or limit <= 0:
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT f.fixture_id, f.provider_fixture_id, latest.league_id, latest.season, "
+                "latest.home_team_id, latest.away_team_id, latest.home_team, latest.away_team, "
+                "latest.competition_name, latest.country, latest.competition_type, "
+                "latest.kickoff_at, latest.provider_status "
+                "FROM quantlab_fixtures f "
+                "JOIN LATERAL ("
+                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
+                "        competition_name, country, competition_type, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE latest.kickoff_at < %s "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_goal_player_captures pc "
+                "                WHERE pc.fixture_id = f.fixture_id) "
+                "ORDER BY latest.kickoff_at DESC, f.fixture_id LIMIT %s",
+                (before, list(ids), list(ids), limit),
+            )
+            return _row_dicts(cursor)
+
     def market_capture_due(
         self, fixture_id: str, *, now: datetime, refresh_seconds: int
     ) -> bool:
@@ -1275,6 +1309,85 @@ class PostgreSQLQuantLabRepository:
             "source": "api-football:coachs",
             "raw_payload": payload,
         }
+
+    def save_goal_player_capture(
+        self,
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        available_at: datetime,
+        status: str,
+        response_team_count: int,
+        reason: str | None,
+        source: str,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
+            raise ValueError("player capture status must be AVAILABLE or UNAVAILABLE")
+        if source not in {"api-football:fixtures/players", "api-football:leagues"}:
+            raise ValueError("unsupported player capture source")
+        if provider_fixture_id <= 0 or response_team_count < 0:
+            raise ValueError("invalid player capture")
+        capture_id = _identifier(
+            "quantlab-goal-players-v1:",
+            {
+                "fixture_id": fixture_id,
+                "provider_fixture_id": provider_fixture_id,
+                "available_at": available_at.isoformat(),
+                "status": status,
+                "response_team_count": response_team_count,
+                "reason": reason,
+                "source": source,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_player_captures ("
+                "player_capture_id, fixture_id, provider_fixture_id, available_at, "
+                "status, response_team_count, reason, source, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    available_at,
+                    status,
+                    response_team_count,
+                    reason,
+                    source,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
+
+    def goal_player_history(
+        self,
+        team_ids: Iterable[int],
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> tuple[dict[str, Any], ...]:
+        ids = tuple(sorted({int(team_id) for team_id in team_ids if int(team_id) > 0}))
+        if not ids or limit <= 0:
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pc.player_capture_id, pc.fixture_id, pc.available_at, pc.raw_payload, "
+                "latest.kickoff_at, latest.home_team_id, latest.away_team_id "
+                "FROM quantlab_goal_player_captures pc "
+                "JOIN LATERAL ("
+                " SELECT kickoff_at, home_team_id, away_team_id "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = pc.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE pc.status = 'AVAILABLE' AND latest.kickoff_at < %s "
+                "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
+                "ORDER BY latest.kickoff_at DESC, pc.available_at DESC LIMIT %s",
+                (before, list(ids), list(ids), limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
 
     def statistics_exists(self, fixture_id: str) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
