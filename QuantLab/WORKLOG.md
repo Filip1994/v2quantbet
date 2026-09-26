@@ -620,3 +620,28 @@ that identify the latest migration. No production model, registration, pick, sta
 bankroll implementation file is changed.
 
 Railway verification follows after merge to main.
+
+
+## 2026-09-26 — Task 002 Railway verification
+
+**Owner:** QuantLab core + GoalLab
+
+Task 002 merged to main as `fdb2bfede455b34a47cc788ad67b38a1b0d2042e`.
+
+Railway production verification:
+
+- `quantbet-research` deployment `32c2cb15-8af0-4262-929d-104331095063` reached
+  **SUCCESS** and its pre-deploy migration step reported `applied 1 migration(s)`,
+  applying migration 028 to the shared PostgreSQL database.
+- `quantbet-quantlab` deployment `aafdd074-162e-4d24-a1b9-64e128027c5e` reached
+  **SUCCESS**. Its migration step reported `applied 0 migration(s)` because migration
+  028 had already been applied by the preceding shared-database migration step.
+- QuantLab runtime then logged the expected daily API hard-ceiling stop and still ran
+  the independent GoalLab evaluator:
+  `goal_decisions=0 goal_picks=0`.
+- Because `quantlab_goal_decisions` was new and empty at activation, the first-cycle
+  zero indicates there were no GOAL_SCOPE_V1 upcoming fixtures available to the
+  evaluator from the currently persisted QuantLab fixture universe. The evaluator itself
+  started successfully and did not bypass the 1,000/day API ceiling.
+
+Production impact remains **NONE**.
