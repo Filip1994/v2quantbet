@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from h2h.odds.budget import ApiBudgetExceededError
-from h2h.quantlab.budget import QUANTLAB_HARD_DAILY_LIMIT, QuantLabRequestBudget
+from h2h.quantlab.budget import DEFAULT_PROVIDER_DAILY_LIMIT, QuantLabRequestBudget
 from h2h.quantlab.card_lab.features import (
     MATCH_IMPORTANCE_VERSION,
     TABLE_PRESSURE_VERSION,
@@ -269,7 +269,7 @@ class _BudgetConnection:
 def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     connection = _BudgetConnection()
     budget = QuantLabRequestBudget(
-        daily_limit=1000,
+        shared_daily_limit=75_000,
         connect=lambda: connection,
         clock=lambda: NOW,
     )
@@ -282,57 +282,44 @@ def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     assert 'provider_request_category("quantlab_context")' in client_source
 
 
-def test_quantlab_budget_cannot_be_configured_above_hard_limit() -> None:
+def test_quantlab_budget_uses_shared_75k_provider_envelope_without_local_cap() -> None:
     budget = QuantLabRequestBudget(
-        daily_limit=5000,
         connect=lambda: _BudgetConnection(),
         clock=lambda: NOW,
     )
-    assert budget.daily_limit == QUANTLAB_HARD_DAILY_LIMIT == 1000
+    assert budget.daily_limit == DEFAULT_PROVIDER_DAILY_LIMIT == 75_000
+    assert budget.shared_daily_limit == 75_000
+    assert budget.production_reserve == 0
 
 
-def test_quantlab_budget_stops_at_reserved_production_capacity() -> None:
-    connection = _BudgetConnection({"discovery": 6000})
+def test_quantlab_budget_stops_only_at_shared_provider_capacity() -> None:
+    connection = _BudgetConnection({"discovery": 74_999})
     budget = QuantLabRequestBudget(
         connect=lambda: connection,
         clock=lambda: NOW,
-        shared_daily_limit=7500,
-        production_reserve=1500,
+        shared_daily_limit=75_000,
+        production_reserve=0,
     )
 
-    with pytest.raises(ApiBudgetExceededError, match="production provider capacity"):
+    budget.acquire()
+    connection.usage["discovery"] = 75_000
+    with pytest.raises(ApiBudgetExceededError, match="shared football API budget"):
         budget.acquire()
 
 
 def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
-    assert card_corner_scope(
-        country="England",
-        competition_name="Premier League",
-    ).allowed
-    assert card_corner_scope(
-        country="Belgium",
-        competition_name="Jupiler Pro League",
-    ).allowed
-    assert card_corner_scope(
-        country="USA",
-        competition_name="Major League Soccer",
-    ).allowed
-    assert not card_corner_scope(
-        country="Scotland",
-        competition_name="Premiership",
-    ).allowed
-    assert not card_corner_scope(
-        country="England",
-        competition_name="Championship",
-    ).allowed
-    assert not card_corner_scope(
-        country="Poland",
-        competition_name="Ekstraklasa",
-    ).allowed
-    assert not card_corner_scope(
-        country="World",
-        competition_name="UEFA Champions League",
-    ).allowed
+    for country, competition in (
+        ("England", "Premier League"),
+        ("Scotland", "Premiership"),
+        ("England", "Championship"),
+        ("Poland", "Ekstraklasa"),
+        ("World", "UEFA Champions League"),
+        ("Sweden", "Division 2 - Norrland"),
+        ("Japan", "J1 League"),
+    ):
+        decision = card_corner_scope(country=country, competition_name=competition)
+        assert decision.allowed
+        assert decision.reason == "market_driven_candidate"
 
     assert goal_scope(country="Poland", competition_name="III Liga").allowed
     assert not goal_scope(
@@ -682,9 +669,9 @@ def test_market_capture_watermark_is_persistent_even_without_market_rows() -> No
 
 def test_runtime_defaults_are_api_conservative() -> None:
     settings = QuantLabRuntimeSettings()
-    assert settings.market_refresh_seconds == 43200
+    assert settings.market_refresh_seconds == 3600
     assert settings.standings_refresh_seconds == 21600
-    assert settings.history_backfill_per_cycle == 0
+    assert settings.history_backfill_per_cycle == 25
 
 
 def test_goal_scope_rejects_broader_youth_aliases_and_far_east_aliases() -> None:
