@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 
@@ -120,7 +122,7 @@ def test_goal_engine_creates_only_best_price_shadow_pick_and_records_passes():
     assert pick.model_probability == 0.60
     assert pick.market_probability > 0.47
     assert pick.edge > 0.12
-    assert pick.expected_value == 0.20
+    assert pick.expected_value == pytest.approx(0.20)
     assert any(item.reason == "BETTER_PRICE_AVAILABLE" for item in repo.decisions)
     assert repo.shadows[0][1] == 10_000
 
