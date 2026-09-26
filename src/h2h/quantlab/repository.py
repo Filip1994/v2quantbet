@@ -56,8 +56,11 @@ class PostgreSQLQuantLabRepository:
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
+            "quantlab_statistics_captures",
             "quantlab_standings_snapshots",
             "quantlab_card_feature_snapshots",
+            "quantlab_corner_model_versions",
+            "quantlab_corner_feature_snapshots",
         )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -625,8 +628,8 @@ class PostgreSQLQuantLabRepository:
                 ") result ON TRUE "
                 "WHERE latest.kickoff_at < %s "
                 "AND result.result_classification = 'PLAYED_SETTLEABLE' "
-                "AND NOT EXISTS (SELECT 1 FROM quantlab_match_statistics_observations s "
-                "                WHERE s.fixture_id = f.fixture_id) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures sc "
+                "                WHERE sc.fixture_id = f.fixture_id) "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
                 (before, limit),
             )
@@ -645,8 +648,8 @@ class PostgreSQLQuantLabRepository:
                 ") latest ON TRUE "
                 "WHERE latest.kickoff_at < %s "
                 "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
-                "AND NOT EXISTS (SELECT 1 FROM quantlab_match_statistics_observations s "
-                "                WHERE s.fixture_id = f.fixture_id) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures sc "
+                "                WHERE sc.fixture_id = f.fixture_id) "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
                 (before, limit),
             )
@@ -711,6 +714,59 @@ class PostgreSQLQuantLabRepository:
                 (fixture_id,),
             )
             return bool(cursor.fetchone()[0])
+
+    def statistics_capture_exists(self, fixture_id: str) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM quantlab_statistics_captures "
+                "WHERE fixture_id = %s)",
+                (fixture_id,),
+            )
+            return bool(cursor.fetchone()[0])
+
+    def save_statistics_capture(
+        self,
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        captured_at: datetime,
+        status: str,
+        response_team_count: int,
+        reason: str | None,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
+            raise ValueError("statistics capture status must be AVAILABLE or UNAVAILABLE")
+        capture_id = _identifier(
+            "quantlab-stats-capture-v1:",
+            {
+                "fixture_id": fixture_id,
+                "provider_fixture_id": provider_fixture_id,
+                "captured_at": captured_at.isoformat(),
+                "status": status,
+                "response_team_count": response_team_count,
+                "reason": reason,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_statistics_captures ("
+                "statistics_capture_id, fixture_id, provider_fixture_id, captured_at, "
+                "status, response_team_count, reason, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    captured_at,
+                    status,
+                    response_team_count,
+                    reason,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
 
     def save_market_capture(
         self,
@@ -815,9 +871,20 @@ class PostgreSQLQuantLabRepository:
                 "statistics_observation_id, fixture_id, provider_fixture_id, home_fouls, "
                 "away_fouls, home_yellow_cards, away_yellow_cards, home_red_cards, "
                 "away_red_cards, home_second_yellow_cards, away_second_yellow_cards, "
-                "available_at, raw_payload"
-                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
-                "ON CONFLICT DO NOTHING",
+                "home_corner_kicks, away_corner_kicks, home_ball_possession, "
+                "away_ball_possession, home_shots_on_goal, away_shots_on_goal, "
+                "home_shots_off_goal, away_shots_off_goal, home_total_shots, "
+                "away_total_shots, home_blocked_shots, away_blocked_shots, "
+                "home_shots_insidebox, away_shots_insidebox, home_shots_outsidebox, "
+                "away_shots_outsidebox, home_offsides, away_offsides, "
+                "home_goalkeeper_saves, away_goalkeeper_saves, home_total_passes, "
+                "away_total_passes, home_passes_accurate, away_passes_accurate, "
+                "home_pass_accuracy, away_pass_accuracy, available_at, raw_payload"
+                ") VALUES ("
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb"
+                ") ON CONFLICT DO NOTHING",
                 (
                     item.statistics_observation_id,
                     item.fixture_id,
@@ -830,10 +897,141 @@ class PostgreSQLQuantLabRepository:
                     item.away_red_cards,
                     item.home_second_yellow_cards,
                     item.away_second_yellow_cards,
+                    item.home_corner_kicks,
+                    item.away_corner_kicks,
+                    item.home_ball_possession,
+                    item.away_ball_possession,
+                    item.home_shots_on_goal,
+                    item.away_shots_on_goal,
+                    item.home_shots_off_goal,
+                    item.away_shots_off_goal,
+                    item.home_total_shots,
+                    item.away_total_shots,
+                    item.home_blocked_shots,
+                    item.away_blocked_shots,
+                    item.home_shots_insidebox,
+                    item.away_shots_insidebox,
+                    item.home_shots_outsidebox,
+                    item.away_shots_outsidebox,
+                    item.home_offsides,
+                    item.away_offsides,
+                    item.home_goalkeeper_saves,
+                    item.away_goalkeeper_saves,
+                    item.home_total_passes,
+                    item.away_total_passes,
+                    item.home_passes_accurate,
+                    item.away_passes_accurate,
+                    item.home_pass_accuracy,
+                    item.away_pass_accuracy,
                     item.available_at,
                     _json(item.raw_payload),
                 ),
             )
+
+    def corner_model_history(
+        self,
+        *,
+        before: datetime,
+        limit: int = 6000,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.fixture_id, s.available_at, "
+                "COALESCE(q.latest_kickoff, p.latest_kickoff) AS kickoff_at, "
+                "COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) AS home_team_id, "
+                "COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) AS away_team_id, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM quantlab_match_statistics_observations s "
+                "LEFT JOIN fixtures f ON f.fixture_id = s.fixture_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff, o.home_team_id, o.away_team_id "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") q ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff "
+                " FROM fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.observed_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") p ON TRUE "
+                "WHERE COALESCE(q.latest_kickoff, p.latest_kickoff) < %s "
+                "AND s.available_at <= %s "
+                "AND s.home_corner_kicks IS NOT NULL "
+                "AND s.away_corner_kicks IS NOT NULL "
+                "AND COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) IS NOT NULL "
+                "AND COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) IS NOT NULL "
+                "ORDER BY COALESCE(q.latest_kickoff, p.latest_kickoff) DESC, s.available_at DESC "
+                "LIMIT %s",
+                (before, before, limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def save_corner_model_version(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_model_versions ("
+                "model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, ridge_penalty, coefficients, "
+                "feature_means, feature_scales, training_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, "
+                "%s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    item.model_version,
+                    item.trained_at,
+                    item.training_cutoff,
+                    item.feature_version,
+                    item.training_sample_size,
+                    item.history_match_count,
+                    item.ridge_penalty,
+                    _json(item.coefficients),
+                    _json(item.feature_means),
+                    _json(item.feature_scales),
+                    _json(item.training_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_corner_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-corner-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "model_version": item.model_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, model_version, "
+                "expected_total_corners, home_history_size, away_history_size, feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.model_version,
+                    item.expected_total_corners,
+                    item.home_history_size,
+                    item.away_history_size,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
 
     def save_standings_snapshot(
         self,
