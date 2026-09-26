@@ -256,8 +256,68 @@ class QuantLabDashboardService:
                 "</td></tr>"
             )
 
+        goal_contract_html = ""
         goal_pipeline_html = ""
         if lab_key == "goal":
+            contract = self._repository.goal_model_contract()
+            if contract is None:
+                goal_contract_html = (
+                    '<section class="table-shell context-table">'
+                    '<div class="table-title"><b>DC+ model contract</b><span>NO ARTIFACT</span></div>'
+                    '<div class="empty">No trained DC+ Structural artifact is stored yet.</div>'
+                    '</section>'
+                )
+            else:
+                training = contract.get("training_payload")
+                training = training if isinstance(training, dict) else {}
+                coverage = training.get("contract_coverage")
+                coverage = coverage if isinstance(coverage, dict) else {}
+                coverage_rows = ""
+                for block_name, coverage_item in coverage.items():
+                    if not isinstance(coverage_item, dict):
+                        continue
+                    status = str(coverage_item.get("status") or "UNKNOWN")
+                    implemented = coverage_item.get("implemented")
+                    pending = coverage_item.get("pending")
+                    coverage_rows += (
+                        "<tr>"
+                        f"<td><b>{escape(str(block_name))}</b></td>"
+                        f"<td>{escape(status)}</td>"
+                        f"<td>{len(implemented) if isinstance(implemented, list) else 0}</td>"
+                        f"<td>{len(pending) if isinstance(pending, list) else 0}</td>"
+                        f"<td>{escape(str(coverage_item.get('pending_reason') or '—'))}</td>"
+                        "</tr>"
+                    )
+                active_features = tuple(contract.get("active_feature_names") or ())
+                active_feature_text = " · ".join(
+                    escape(str(item)) for item in active_features
+                )
+                authority_raw = os.getenv(
+                    "QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false"
+                ).strip().casefold()
+                authority = authority_raw in {"1", "true", "yes", "on"}
+                authority_text = "ON" if authority else "OFF"
+                goal_contract_html = (
+                    '<section class="table-shell context-table">'
+                    '<div class="table-title"><b>DC+ model contract / active variables</b>'
+                    f'<span>{int(contract.get("active_feature_count") or 0)} active features · '
+                    f'pick authority {authority_text}</span></div>'
+                    '<div class="contract-summary">'
+                    f'<b>{escape(str(contract.get("model_version") or "—"))}</b>'
+                    f'<small>{escape(str(contract.get("feature_version") or "—"))} · '
+                    f'train n={int(contract.get("training_sample_size") or 0)} · '
+                    f'history n={int(contract.get("history_match_count") or 0)} · '
+                    f'ρ={_rate(contract.get("rho"))} · '
+                    f'policy={escape(PICK_POLICY_VERSION)}</small>'
+                    '</div>'
+                    '<div class="table"><table><thead><tr>'
+                    '<th>Contract block</th><th>Status</th><th>Implemented</th>'
+                    '<th>Pending</th><th>Reason</th>'
+                    f'</tr></thead><tbody>{coverage_rows}</tbody></table></div>'
+                    '<details class="feature-details"><summary>Exact active model features</summary>'
+                    f'<div class="feature-list">{active_feature_text or "—"}</div></details>'
+                    '</section>'
+                )
             pipeline_rows = self._repository.list_goal_fixture_status(now=datetime.now(UTC))
             rendered_pipeline = ""
             for item in pipeline_rows:
@@ -400,6 +460,9 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
 .context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
+.contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
+.feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
+.feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
 footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
