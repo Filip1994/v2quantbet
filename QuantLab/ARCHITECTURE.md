@@ -111,7 +111,6 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_standings_snapshots
 - quantlab_card_feature_snapshots
 - quantlab_goal_decisions
-- quantlab_goal_decisions
 
 ## Market collector contract
 
@@ -195,18 +194,14 @@ All labs report the same core metrics:
 QuantLab results never automatically promote a model into production.
 
 
-## GoalLab shadow decision contract
+## One-time fixture bootstrap
 
-Task 002 evaluates persisted QuantLab GOAL observations without making provider requests.
-It resolves the existing active Dixon-Coles artifact by exact API-Football
-league/season/team-ID namespace through the validated production model loader, but never
-writes model lifecycle state.
+Migration 029 seeds a bounded current snapshot from already-persisted production
+`fixtures` / `fixture_observations` only when a fixture has no QuantLab observation.
+This bridge makes pre-existing QuantLab market observations evaluable without spending
+provider calls during a daily API-ceiling event.
 
-Only complete two-sided O/U 2.5 and BTTS captures are canonicalized in V1. PICK/PASS
-decisions are append-only in quantlab_goal_decisions. Only PICK decisions may create a
-quantlab_shadow_bets row. Decision and shadow IDs are deterministic so repeated runtime
-cycles over unchanged evidence are idempotent.
-
-The GoalLab decision stage runs even when the QuantLab provider daily ceiling has already
-been reached, because it operates only on persisted observations and read-only model
-artifacts.
+The bootstrap is not an ongoing discovery source and does not replace the independent
+global QuantLab date-shard pipeline. Its rows are explicitly marked
+`production-fixture-bootstrap`; subsequent provider-discovered QuantLab observations
+remain authoritative for normal laboratory operation.
