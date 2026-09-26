@@ -604,6 +604,7 @@ def _build_training(
     np.ndarray,
     np.ndarray,
     np.ndarray,
+    np.ndarray,
     dict[int, list[TeamMatchSample]],
     list[PairMatchSample],
     int,
@@ -681,6 +682,7 @@ def _build_training(
         np.asarray(home_ids, dtype=np.int64),
         np.asarray(away_ids, dtype=np.int64),
         np.asarray(league_ids, dtype=np.int64),
+        np.asarray(dates, dtype=object),
         histories,
         pairs,
         usable_matches,
@@ -786,6 +788,7 @@ def _fit_dc_plus(
     away_ids: np.ndarray,
     league_ids: np.ndarray,
     dates: np.ndarray,
+    feature_names: tuple[str, ...],
     *,
     reference_time: datetime,
 ) -> tuple[dict[str, Any], float] | None:
@@ -828,7 +831,7 @@ def _fit_dc_plus(
         dtype=float,
     )
     weights = np.exp(-RECENCY_XI * ages)
-    feature_penalty = _feature_penalties(tuple(str(i) for i in range(nf)))
+    feature_penalty = _feature_penalties(feature_names)
 
     def objective(params: np.ndarray) -> tuple[float, np.ndarray]:
         attacks = params[attack_slice]
@@ -1023,6 +1026,7 @@ class GoalStructuralModelService:
             home_ids,
             away_ids,
             league_ids,
+            dates,
             histories,
             pairs,
             history_match_count,
@@ -1045,22 +1049,6 @@ class GoalStructuralModelService:
             }
             return
 
-        dates = np.asarray(
-            [
-                item
-                for item in sorted(
-                    [
-                        row.get("kickoff_at")
-                        for row in rows
-                        if isinstance(row.get("kickoff_at"), datetime)
-                    ]
-                )[-len(y_home) :]
-            ],
-            dtype=object,
-        )
-        if len(dates) != len(y_home):
-            dates = np.asarray([now] * len(y_home), dtype=object)
-
         fitted = _fit_dc_plus(
             x,
             y_home,
@@ -1069,6 +1057,7 @@ class GoalStructuralModelService:
             away_ids,
             league_ids,
             dates,
+            model_feature_names,
             reference_time=now,
         )
         if fitted is None:
