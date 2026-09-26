@@ -203,7 +203,7 @@ def main() -> None:
         research_main()
         return
     if process == "quantlab" or service_name == "quantbet-quantlab":
-        from h2h.quantlab_dashboard_entrypoint import main as quantlab_main
+        from h2h.quantlab.entrypoint import main as quantlab_main
 
         quantlab_main()
         return
