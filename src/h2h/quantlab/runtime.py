@@ -12,6 +12,7 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.coverage import fixture_statistics_coverage
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
 from h2h.quantlab.market_collector import QuantLabMarketCollector
 from h2h.quantlab.scope import card_corner_scope, goal_scope
@@ -35,6 +36,7 @@ class QuantLabRuntimeSettings:
     corner_team_history_teams_per_cycle: int = 120
     corner_team_statistics_per_cycle: int = 360
     corner_team_history_refresh_seconds: int = 21600
+    statistics_coverage_refresh_seconds: int = 604800
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -49,6 +51,7 @@ class QuantLabRuntimeSettings:
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
             ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
             ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
+            ("statistics_coverage_refresh_seconds", self.statistics_coverage_refresh_seconds),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
@@ -170,6 +173,53 @@ class QuantLabRuntime:
             day += timedelta(days=1)
         return discovered
 
+    def _statistics_coverage_allows(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        season_value = fixture.get("season")
+        if season_value is None:
+            return True
+        league_id = int(fixture["league_id"])
+        season = int(season_value)
+        if league_id <= 0 or season <= 0:
+            return True
+
+        cached = self._repository.latest_league_statistics_coverage(
+            league_id,
+            season,
+            before=now,
+        )
+        fresh_after = now - timedelta(
+            seconds=self._settings.statistics_coverage_refresh_seconds
+        )
+        if cached is not None and cached["captured_at"] > fresh_after:
+            return cached["statistics_fixtures_supported"] is not False
+
+        payload = self._provider.fetch_league_coverage(league_id, season)
+        supported, response_item_count = fixture_statistics_coverage(
+            payload,
+            league_id=league_id,
+            season=season,
+        )
+        self._repository.save_league_statistics_coverage(
+            league_id=league_id,
+            season=season,
+            captured_at=now,
+            statistics_fixtures_supported=supported,
+            response_item_count=response_item_count,
+            raw_payload=dict(payload),
+        )
+        if supported is False:
+            LOGGER.info(
+                "QuantLab fixture statistics coverage unsupported league_id=%s season=%s",
+                league_id,
+                season,
+            )
+            return False
+        return True
+
     def _capture_historical_statistics(
         self,
         fixture: dict[str, Any],
@@ -177,6 +227,8 @@ class QuantLabRuntime:
     ) -> bool:
         fixture_id = str(fixture["fixture_id"])
         if self._repository.statistics_capture_exists(fixture_id):
+            return False
+        if not self._statistics_coverage_allows(fixture, now):
             return False
         provider_fixture_id = int(fixture["provider_fixture_id"])
         home_team_id = int(fixture["home_team_id"])

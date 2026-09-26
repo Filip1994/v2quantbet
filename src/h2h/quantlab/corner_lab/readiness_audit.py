@@ -228,6 +228,25 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
         statistics_capture_status = _rows(cursor)
 
         cursor.execute(
+            "WITH latest AS ("
+            " SELECT DISTINCT ON (league_id, season) league_id, season, "
+            " statistics_fixtures_supported "
+            " FROM quantlab_league_coverage_captures "
+            " ORDER BY league_id, season, captured_at DESC, coverage_capture_id DESC"
+            ") "
+            "SELECT COUNT(*)::BIGINT AS league_seasons_cached, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS TRUE)::BIGINT "
+            "AS supported, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS FALSE)::BIGINT "
+            "AS unsupported, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS NULL)::BIGINT "
+            "AS unknown "
+            "FROM latest"
+        )
+        columns = tuple(item.name for item in cursor.description)
+        league_coverage = dict(zip(columns, cursor.fetchone(), strict=True))
+
+        cursor.execute(
             "SELECT COUNT(*)::BIGINT AS observation_count, "
             "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
             "COUNT(*) FILTER (WHERE home_corner_kicks IS NOT NULL "
@@ -260,6 +279,7 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
         raw_market_pairs,
         now=now,
     )
+    historical_team_sizes = [len(items) for items in histories.values()]
 
     return {
         "as_of": now,
@@ -271,6 +291,11 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
             "training_shortfall": max(0, MIN_TRAINING_EXAMPLES - len(y)),
             "model_fit_eligible": len(y) >= MIN_TRAINING_EXAMPLES,
             "history_limit": HISTORY_LIMIT,
+            "historical_team_count": len(historical_team_sizes),
+            "historical_teams_ge_minimum": sum(
+                size >= MIN_TEAM_HISTORY for size in historical_team_sizes
+            ),
+            "historical_team_history_size": _distribution(historical_team_sizes),
             "latest_insufficient_model_pass": latest_pass,
         },
         "upcoming_team_history": {
@@ -288,6 +313,7 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
             ),
         },
         "statistics_coverage": {
+            "league_season_cache": league_coverage,
             "capture_status": statistics_capture_status,
             "observations": statistics_observations,
         },
