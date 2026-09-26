@@ -84,6 +84,15 @@ def _log_latest_picks(
         )
 
 
+def _log_latest_goal_picks(
+    repository: PostgreSQLQuantLabRepository,
+    *,
+    limit: int = 20,
+) -> None:
+    """Backward-compatible GoalLab operational snapshot helper."""
+    _log_latest_picks(repository, "GOAL", limit=limit)
+
+
 def main() -> None:
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     stop = Event()
