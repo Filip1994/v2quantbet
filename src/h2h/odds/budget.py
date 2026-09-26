@@ -45,7 +45,7 @@ def provider_request_category(category: str) -> Iterator[None]:
 class DailyApiBudget:
     """Thread-safe UTC-day budget that counts every attempted request."""
 
-    daily_limit: int = 7500
+    daily_limit: int = 75_000
     reserve: int = 0
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     _day: date = field(init=False)
