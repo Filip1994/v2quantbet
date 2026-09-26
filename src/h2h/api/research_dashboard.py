@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -14,6 +15,11 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
+from h2h.api.research_analytics import (
+    build_research_analytics_snapshot,
+    market_fair_probability_bucket,
+    render_research_analytics_html,
+)
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 
@@ -290,6 +296,9 @@ class ResearchDashboardService:
         item["pnl_minor"] = counterfactual_pnl_minor(item, self._stake)
         item["clv_ppm"] = research_clv_ppm(item)
         item["probability_bucket"] = _probability_bucket(item["model_probability"])
+        item["market_fair_probability_bucket"] = market_fair_probability_bucket(
+            item["market_fair_probability"]
+        )
         item["ev_bucket"] = _ev_bucket(item["expected_value"])
         item["odds_bucket"] = _odds_bucket(item["odds"])
         return item
@@ -520,8 +529,14 @@ class ResearchDashboardService:
             for item in items
         )
 
+    def _all_signal_rows(self) -> tuple[dict[str, Any], ...]:
+        loader = getattr(self._repository, "list_all_signals", None)
+        if callable(loader):
+            return tuple(loader())
+        return tuple(self._repository.list_signals(limit=5000))
+
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
-        canonical = _one_signal_per_fixture(self._repository.list_signals(limit=5000))
+        canonical = _one_signal_per_fixture(self._all_signal_rows())
         rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
@@ -570,6 +585,15 @@ class ResearchDashboardService:
             return not (odds_max is not None and odds > odds_max)
 
         return tuple(row for row in rows if keep(row))
+
+    def analytics_snapshot(self) -> dict[str, Any]:
+        return build_research_analytics_snapshot(
+            self.signals({}),
+            fixed_stake_minor=self._stake,
+        )
+
+    def render_analytics_html(self) -> str:
+        return render_research_analytics_html(self.analytics_snapshot())
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
@@ -861,6 +885,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <nav class="tabs" aria-label="Research sections">
 <a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
+<a href="/research/analytics">Analytics V1</a>
 </nav>
 <section class="cards">
 <div class="card"><small>Active</small><b>{len(active_rows)}</b></div>
@@ -909,17 +934,35 @@ class ResearchDashboardHTTPService:
                 if parsed.path == "/livez":
                     service._text(self, 200, "ok\n", "text/plain; charset=utf-8")
                     return
-                if parsed.path not in {"/", "/research"}:
+                if parsed.path not in {
+                    "/",
+                    "/research",
+                    "/research/analytics",
+                    "/research/analytics.json",
+                }:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                     return
                 if not service._authorize(self):
                     return
                 try:
+                    if parsed.path == "/research/analytics.json":
+                        body = json.dumps(
+                            dashboard.analytics_snapshot(),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        content_type = "application/json; charset=utf-8"
+                    elif parsed.path == "/research/analytics":
+                        body = dashboard.render_analytics_html()
+                        content_type = "text/html; charset=utf-8"
+                    else:
+                        body = dashboard.render_html(parsed.query)
+                        content_type = "text/html; charset=utf-8"
                     service._text(
                         self,
                         200,
-                        dashboard.render_html(parsed.query),
-                        "text/html; charset=utf-8",
+                        body,
+                        content_type,
                     )
                 except (TypeError, ValueError):
                     service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")

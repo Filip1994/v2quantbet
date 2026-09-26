@@ -151,9 +151,16 @@ class PostgreSQLResearchSignalRepository:
                 raise LookupError(f"value evaluation {evaluation_id!r} does not exist")
             return str(row[0])
 
-    def list_signals(self, *, limit: int = 1000) -> tuple[dict[str, Any], ...]:
+    def list_signals(
+        self,
+        *,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0 or limit > 5000:
             raise ValueError("limit must be between 1 and 5000")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be a non-negative integer")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT rs.research_signal_id, rs.evaluation_id, rs.fixture_id, "
@@ -192,8 +199,8 @@ class PostgreSQLResearchSignalRepository:
                 "ON state.fixture_id = e.fixture_id "
                 "LEFT JOIN fixture_result_observations result "
                 "ON result.result_observation_id = state.current_observation_id "
-                "ORDER BY rs.qualified_at DESC, rs.evaluation_id DESC LIMIT %s",
-                (limit,),
+                "ORDER BY rs.qualified_at DESC, rs.evaluation_id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
             )
             columns = (
                 "research_signal_id", "evaluation_id", "fixture_id", "provider_fixture_id",
@@ -209,3 +216,20 @@ class PostgreSQLResearchSignalRepository:
                 "regulation_home_goals", "regulation_away_goals",
             )
             return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
+
+    def list_all_signals(self, *, batch_size: int = 5000) -> tuple[dict[str, Any], ...]:
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+            or batch_size > 5000
+        ):
+            raise ValueError("batch_size must be between 1 and 5000")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = self.list_signals(limit=batch_size, offset=offset)
+            rows.extend(batch)
+            if len(batch) < batch_size:
+                return tuple(rows)
+            offset += len(batch)
