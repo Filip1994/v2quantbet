@@ -23,15 +23,21 @@ and CornerLab.
 
 Eligible by default: professional senior competitions not explicitly excluded.
 
+GoalLab no longer inherits production Phase-I fixture discovery. QuantLab first captures
+global API-Football date shards into its own fixture inventory, then applies GOAL_SCOPE_V1
+locally. This is what allows GoalLab to retain lower professional leagues that production
+may intentionally ignore.
+
 Excluded locally before fixture-specific QuantLab requests:
 
-- youth competitions U13 through U23 and equivalent Under labels;
+- youth competitions U5 through U23 and equivalent Under labels;
 - academy, reserve/reserves and amateur/amateurs competitions;
 - reserve-team suffixes such as B and II where detected by the deterministic rule;
 - all African countries plus competitions explicitly identified as CAF/Africa;
 - Far East countries in the V1 region registry: Brunei, Cambodia, China, Chinese Taipei,
   Hong Kong, Indonesia, Japan, Laos, Macau/Macao, Malaysia, Mongolia, Myanmar, North
-  Korea, Philippines, Singapore, South Korea, Taiwan, Thailand, Timor-Leste and Vietnam.
+  Korea, Philippines, Singapore, South Korea/Korea Republic, Taiwan, Thailand,
+  Timor-Leste and Vietnam.
 
 The scope is versioned in src/h2h/quantlab/scope.py. Scope changes require documentation
 and a new/updated version rather than ad-hoc runtime inference.
