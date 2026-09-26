@@ -4,11 +4,16 @@ Status: implemented in Task 001. Definitions below are frozen for CARDLAB_FEATUR
 
 ## Scope
 
-CardLab v1 spends fixture-specific API budget only inside CARDCORNER_STRONG_LEAGUES_V1. The allowlist is implemented in src/h2h/quantlab/scope.py and is shared with CornerLab.
+CardLab v1 spends fixture-specific API budget only inside CARDCORNER_TOP10_LEAGUES_V2.
+The allowlist is implemented in src/h2h/quantlab/scope.py and is shared with CornerLab.
 
-The V1 allowlist covers major UEFA club competitions plus selected top/strong domestic leagues in England, Spain, Italy, Germany, France, Netherlands, Portugal, Belgium, Turkey, Scotland, Austria, Switzerland, Denmark, Norway, Sweden, Czechia, Poland, Greece, Croatia, Serbia, Romania, Brazil, Argentina, USA and Mexico.
+The eligible domestic top flights are Premier League, La Liga, Serie A, Bundesliga,
+Ligue 1, Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Major League
+Soccer (MLS).
 
-Youth, academy, reserve and amateur competitions are excluded before fixture-specific CardLab calls. Outside the allowlist, CardLab spends zero fixture-specific API requests.
+Lower divisions, cups, UEFA club competitions, youth, academy, reserve and amateur
+competitions are excluded before fixture-specific CardLab calls. Outside the allowlist,
+CardLab spends zero fixture-specific API requests.
 
 ## Immediate match-context features
 
