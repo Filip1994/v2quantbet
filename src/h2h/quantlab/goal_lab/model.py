@@ -655,6 +655,46 @@ def _feature_map(
     return features
 
 
+def _provenance_rows(samples: list[TeamMatchSample]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in samples:
+        key = item.fixture_id or f"{item.kickoff_at.isoformat()}:{item.opponent_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(
+            {
+                "fixture_id": item.fixture_id,
+                "fixture_endpoint": "api-football:fixtures",
+                "fixture_observation_id": item.fixture_observation_id,
+                "fixture_available_at": item.fixture_available_at,
+                "statistics_endpoint": "api-football:fixtures/statistics",
+                "statistics_observation_id": item.statistics_observation_id,
+                "statistics_available_at": item.statistics_available_at,
+                "kickoff_at": item.kickoff_at,
+                "season": item.season,
+                "league_id": item.league_id,
+            }
+        )
+    return result
+
+
+def _feature_provenance(
+    histories: dict[int, list[TeamMatchSample]],
+    *,
+    home_id: int,
+    away_id: int,
+) -> dict[str, Any]:
+    return {
+        "feature_version": FEATURE_VERSION,
+        "calculation_version": FEATURE_VERSION,
+        "sample_windows": ["L3", "L5", "L10", "SEASON_TO_DATE", "VENUE_L5"],
+        "home_sources": _provenance_rows(histories.get(home_id, [])),
+        "away_sources": _provenance_rows(histories.get(away_id, [])),
+    }
+
+
 def _build_training(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[
@@ -1328,6 +1368,9 @@ class GoalStructuralModelService:
                 "feature_version": FEATURE_VERSION,
                 "raw_features": raw_payload,
                 "model_feature_names": model_feature_names,
+                "source_provenance": _feature_provenance(
+                    self._histories, home_id=home_id, away_id=away_id
+                ),
                 "home_history_size": len(home_history),
                 "away_history_size": len(away_history),
                 "league_id": league_id,
@@ -1335,6 +1378,8 @@ class GoalStructuralModelService:
                 "contract_blocks_pending_acquisition": self._artifact.training_payload[
                     "contract_blocks_pending_acquisition"
                 ],
+                "imputation_strategy": "TRAINING_MEAN_PLUS_EXPLICIT_MISSING_INDICATOR",
+                "target_match_live_stats_used": False,
             },
         )
         self._repository.save_goal_feature_snapshot(snapshot)
