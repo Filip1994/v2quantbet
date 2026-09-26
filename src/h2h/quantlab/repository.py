@@ -53,6 +53,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_market_observations",
             "quantlab_market_captures",
             "quantlab_goal_decisions",
+            "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
             "quantlab_standings_snapshots",
@@ -174,6 +175,87 @@ class PostgreSQLQuantLabRepository:
             )
         )
 
+    def total_market_pairs(
+        self,
+        fixture_id: str,
+        *,
+        lab_owner: str,
+        decision_at: datetime,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return latest complete two-sided over/under totals for one lab."""
+        if lab_owner not in {"CORNER", "CARD"}:
+            raise ValueError("lab_owner must be CORNER or CARD")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
+                "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
+                "captured_at FROM quantlab_market_observations "
+                "WHERE fixture_id = %s AND lab_owner = %s AND parsed_line IS NOT NULL "
+                "AND captured_at <= %s "
+                "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, "
+                "parsed_line, market_observation_id",
+                (fixture_id, lab_owner, decision_at),
+            )
+            rows = _row_dicts(cursor)
+
+        grouped: dict[
+            tuple[int, int, str, datetime, float],
+            dict[str, dict[str, Any]],
+        ] = {}
+        metadata: dict[tuple[int, int, str, datetime, float], dict[str, Any]] = {}
+        for row in rows:
+            raw = str(row["raw_selection"] or "").strip().casefold()
+            if raw.startswith("over "):
+                selection = "OVER"
+            elif raw.startswith("under "):
+                selection = "UNDER"
+            else:
+                continue
+            line = float(row["parsed_line"])
+            bet_name = str(row["provider_bet_name"])
+            key = (
+                int(row["bookmaker_id"]),
+                int(row["provider_bet_id"]),
+                bet_name.casefold(),
+                row["captured_at"],
+                line,
+            )
+            grouped.setdefault(key, {})[selection] = row
+            metadata[key] = {
+                "bookmaker_id": int(row["bookmaker_id"]),
+                "bookmaker_name": str(row["bookmaker_name"]),
+                "provider_bet_id": int(row["provider_bet_id"]),
+                "provider_bet_name": bet_name,
+                "line": line,
+                "captured_at": row["captured_at"],
+            }
+
+        latest: dict[tuple[int, int, str, float], dict[str, Any]] = {}
+        for key, selections in grouped.items():
+            if set(selections) != {"OVER", "UNDER"}:
+                continue
+            meta = metadata[key]
+            logical = (
+                int(meta["bookmaker_id"]),
+                int(meta["provider_bet_id"]),
+                str(meta["provider_bet_name"]).casefold(),
+                float(meta["line"]),
+            )
+            pair = {**meta, "selections": dict(selections)}
+            current = latest.get(logical)
+            if current is None or pair["captured_at"] > current["captured_at"]:
+                latest[logical] = pair
+        return tuple(
+            sorted(
+                latest.values(),
+                key=lambda item: (
+                    int(item["provider_bet_id"]),
+                    float(item["line"]),
+                    int(item["bookmaker_id"]),
+                ),
+            )
+        )
+
     def save_goal_decision(self, item: Any) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -241,6 +323,111 @@ class PostgreSQLQuantLabRepository:
                 (
                     shadow_bet_id,
                     item.fixture_id,
+                    item.bookmaker_id,
+                    item.bookmaker_name,
+                    item.provider_bet_id,
+                    item.provider_bet_name,
+                    item.market_key,
+                    item.selection,
+                    item.line,
+                    item.model_name,
+                    item.model_version,
+                    item.model_probability,
+                    item.market_probability,
+                    item.edge,
+                    item.expected_value,
+                    item.odds,
+                    item.quote_observed_at,
+                    item.decision_at,
+                    stake_minor,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_context_market_decision(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_context_market_decisions ("
+                "decision_id, fixture_id, lab, decision_at, policy_version, model_name, "
+                "model_version, bookmaker_id, bookmaker_name, reference_bookmaker_id, "
+                "reference_bookmaker_name, provider_bet_id, provider_bet_name, market_key, "
+                "selection, line, selected_observation_id, companion_observation_id, "
+                "reference_observation_id, reference_companion_observation_id, "
+                "quote_observed_at, reference_quote_observed_at, odds, companion_odds, "
+                "reference_odds, reference_companion_odds, market_probability, "
+                "model_probability, edge, expected_value, decision, reason, "
+                "evidence_fingerprint, details"
+                ") VALUES ("
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    item.decision_id,
+                    item.fixture_id,
+                    item.lab,
+                    item.decision_at,
+                    item.policy_version,
+                    item.model_name,
+                    item.model_version,
+                    item.bookmaker_id,
+                    item.bookmaker_name,
+                    item.reference_bookmaker_id,
+                    item.reference_bookmaker_name,
+                    item.provider_bet_id,
+                    item.provider_bet_name,
+                    item.market_key,
+                    item.selection,
+                    item.line,
+                    item.selected_observation_id,
+                    item.companion_observation_id,
+                    item.reference_observation_id,
+                    item.reference_companion_observation_id,
+                    item.quote_observed_at,
+                    item.reference_quote_observed_at,
+                    item.odds,
+                    item.companion_odds,
+                    item.reference_odds,
+                    item.reference_companion_odds,
+                    item.market_probability,
+                    item.model_probability,
+                    item.edge,
+                    item.expected_value,
+                    item.decision,
+                    item.reason,
+                    item.evidence_fingerprint,
+                    _json(item.details),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_context_shadow_bet(self, item: Any, *, stake_minor: int) -> bool:
+        if item.lab not in {"CORNER", "CARD"}:
+            raise ValueError("context shadow bet lab must be CORNER or CARD")
+        if item.decision != "PICK":
+            raise ValueError("only PICK decisions may create shadow bets")
+        shadow_bet_id = _identifier(
+            "quantlab-shadow-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "lab": item.lab,
+                "market_key": item.market_key,
+                "selection": item.selection,
+                "line": item.line,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_shadow_bets ("
+                "shadow_bet_id, fixture_id, lab, bookmaker_id, bookmaker_name, provider_bet_id, "
+                "provider_bet_name, market_key, selection, line, model_name, model_version, "
+                "model_probability, market_probability, edge, expected_value, odds, "
+                "quote_observed_at, decision_at, stake_minor"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (
+                    shadow_bet_id,
+                    item.fixture_id,
+                    item.lab,
                     item.bookmaker_id,
                     item.bookmaker_name,
                     item.provider_bet_id,
@@ -778,6 +965,30 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
         return snapshot_id
+
+    def latest_card_feature_snapshot(
+        self, fixture_id: str, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload FROM quantlab_card_feature_snapshots "
+                "WHERE fixture_id = %s AND decision_at <= %s AND available_at <= %s "
+                "ORDER BY decision_at DESC, feature_snapshot_id DESC LIMIT 1",
+                (fixture_id, decision_at, decision_at),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        payload = result.get("feature_payload")
+        if isinstance(payload, str):
+            result["feature_payload"] = json.loads(payload)
+        return result
 
     def list_card_features(self, *, limit: int = 500) -> tuple[dict[str, Any], ...]:
         with self.connect() as connection, connection.cursor() as cursor:
