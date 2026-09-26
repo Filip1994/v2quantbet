@@ -700,3 +700,80 @@ makes **zero provider requests**, writes no database state, and does not expose 
 or raw provider payloads.
 
 Production impact: **NONE**.
+
+
+## 2026-09-26 — Task 003 implementation: CornerLab + CardLab shadow engines
+
+**Owner:** QuantLab core, CornerLab and CardLab
+
+### Scope
+
+Task 003 implements the requested next two moves without changing `GOAL_SCOPE_V1`:
+
+1. CornerLab shadow probability/pick engine.
+2. CardLab shadow probability/pick engine over the existing timestamp-safe referee/context
+   feature snapshot.
+
+### CornerLab
+
+- Added `CORNERLAB_SHADOW_POLICY_V1`.
+- Added `CORNER_POISSON_FORM_V1`.
+- Reads historical `Corner Kicks` only from already-persisted
+  `quantlab_match_statistics_observations.raw_payload`; the decision engine makes zero
+  provider calls.
+- Requires at least five complete historical corner observations per team.
+- Prefers home-team home history and away-team away history when at least three venue
+  observations exist, otherwise falls back to the full recent sample.
+- Expected home corners = mean(home corners-for, away corners-against).
+- Expected away corners = mean(away corners-for, home corners-against).
+- Total expected corners feed a Poisson count model.
+- Only complete two-sided half-count total-corner markets are eligible.
+- Team totals, handicaps, races, half markets and integer lines are rejected.
+- Default PICK gates: edge >= 4pp, EV >= 4%, odds 1.45-3.50, quote age <= 13h and at
+  least 15 minutes to kickoff.
+
+### CardLab
+
+- Added `CARDLAB_SHADOW_POLICY_V1`.
+- Added `CARD_REFEREE_POISSON_V1`.
+- Numeric count mean is the timestamp-safe `referee_card_rate`.
+- Probability eligibility requires at least five referee card observations, at least five
+  referee foul observations, table pressure and match importance.
+- Rivalry, foul rate, table pressure and match importance are persisted in decision
+  evidence.
+- V1 deliberately does not invent coefficients for context features before a
+  timestamp-safe labeled calibration sample exists; the non-referee features are
+  eligibility/audit context in this baseline.
+- Booking points, yellow-only, red-only, team-specific, handicap, half and integer-line
+  markets are rejected.
+- Default PICK gates: edge >= 5pp, EV >= 5%, odds 1.45-3.50, quote age <= 13h and at
+  least 15 minutes to kickoff.
+
+### Shared persistence/runtime
+
+- Added migration `030_quantlab_corner_card_shadow_engines.sql`.
+- Added append-only `quantlab_count_decisions` for CORNER/CARD PICK/PASS evidence.
+- Added a unique first-PICK guard by lab/fixture/market/selection/line/policy.
+- Only newly inserted PICK decisions may create `quantlab_shadow_bets`.
+- Bet365/1xBet complete two-sided quotes use proportional de-vig and best-price selection.
+- Corner/Card evaluation runs outside the provider-budget collection block, so already
+  persisted evidence can still be evaluated after the daily API ceiling.
+- Added CornerLab/CardLab upcoming decision pipelines to the read-only dashboard.
+- Automatic historical statistics backfill remains disabled by default; Task 003 does not
+  silently re-enable provider spend.
+
+### Safety/isolation
+
+- `GOAL_SCOPE_V1` is unchanged.
+- `CARDCORNER_TOP10_LEAGUES_V2` is unchanged.
+- No production prediction, pick registration, bankroll, staking or model-activation
+  write path was added.
+- Missing history/context/market evidence is an explicit PASS rather than a fabricated
+  probability.
+- CardLab `FEATURES_V1.md` stale scope prose was corrected to the already-active Top-10
+  allowlist.
+
+### Verification
+
+PR #89 and CI verification are recorded in the next work-log entry after the final
+verified head passes.
