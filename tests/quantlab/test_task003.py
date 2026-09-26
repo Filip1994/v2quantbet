@@ -303,3 +303,44 @@ def test_count_poisson_supports_half_lines_and_rejects_push_lines():
     assert 0.0 < poisson_over_probability(10.0, 9.5) < 1.0
     with pytest.raises(ValueError, match="half-count"):
         poisson_over_probability(10.0, 10.0)
+
+
+def test_corner_engine_is_idempotent_and_uses_best_qualifying_price():
+    rows = (
+        *_count_rows(
+            lab="CORNER",
+            market_name="Total Corners",
+            line=9.5,
+            over=2.10,
+            under=1.75,
+            bookmaker_id=8,
+            bookmaker_name="Bet365",
+            bet_id=120,
+        ),
+        *_count_rows(
+            lab="CORNER",
+            market_name="Total Corners",
+            line=9.5,
+            over=2.00,
+            under=1.82,
+            bookmaker_id=11,
+            bookmaker_name="1xBet",
+            bet_id=120,
+        ),
+    )
+    repo = Repo(rows)
+    repo.corner_history = {
+        1: _history(6, 4, was_home=True),
+        2: _history(4, 6, was_home=False),
+    }
+    engine = CornerLabShadowPickEngine(repo)
+
+    first = engine.run_fixture(_fixture(), decision_at=NOW)
+    second = engine.run_fixture(_fixture(), decision_at=NOW)
+
+    assert first.picks_inserted == 1
+    assert second.picks_inserted == 0
+    pick = next(item for item in repo.decisions if item.decision == "PICK")
+    assert pick.bookmaker_name == "Bet365"
+    assert pick.odds == pytest.approx(2.10)
+    assert any(item.reason == "BETTER_PRICE_AVAILABLE" for item in repo.decisions)
