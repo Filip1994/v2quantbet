@@ -5,6 +5,7 @@ import pytest
 
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.budget import DEFAULT_PROVIDER_DAILY_LIMIT, QuantLabRequestBudget
+from h2h.quantlab.card_lab.context import parse_fixture_statistics
 from h2h.quantlab.card_lab.features import (
     MATCH_IMPORTANCE_VERSION,
     TABLE_PRESSURE_VERSION,
@@ -86,6 +87,64 @@ def _odds_payload():
     }
 
 
+def _statistics_payload(home_id=10, away_id=11):
+    def team(team_id, values):
+        return {
+            "team": {"id": team_id, "name": f"Team {team_id}"},
+            "statistics": [
+                {"type": name, "value": value}
+                for name, value in values.items()
+            ],
+        }
+
+    return {
+        "response": [
+            team(
+                home_id,
+                {
+                    "Corner Kicks": 7,
+                    "Ball Possession": "61%",
+                    "Shots on Goal": 6,
+                    "Shots off Goal": 4,
+                    "Total Shots": 15,
+                    "Blocked Shots": 5,
+                    "Shots insidebox": 10,
+                    "Shots outsidebox": 5,
+                    "Offsides": 2,
+                    "Goalkeeper Saves": 3,
+                    "Total passes": 540,
+                    "Passes accurate": 472,
+                    "Passes %": "87%",
+                    "Fouls": 12,
+                    "Yellow Cards": 2,
+                    "Red Cards": 0,
+                },
+            ),
+            team(
+                away_id,
+                {
+                    "Corner Kicks": 3,
+                    "Ball Possession": "39%",
+                    "Shots on Goal": 3,
+                    "Shots off Goal": 5,
+                    "Total Shots": 10,
+                    "Blocked Shots": 2,
+                    "Shots insidebox": 6,
+                    "Shots outsidebox": 4,
+                    "Offsides": 1,
+                    "Goalkeeper Saves": 4,
+                    "Total passes": 355,
+                    "Passes accurate": 284,
+                    "Passes %": "80%",
+                    "Fouls": 15,
+                    "Yellow Cards": 4,
+                    "Red Cards": 1,
+                },
+            ),
+        ]
+    }
+
+
 def _fixture_payload(
     fixture_id,
     league_id,
@@ -113,6 +172,29 @@ def _fixture_payload(
             "away": {"id": fixture_id * 2 + 1, "name": f"Away {fixture_id}"},
         },
     }
+
+
+def test_statistics_parser_captures_corner_pressure_inputs() -> None:
+    item = parse_fixture_statistics(
+        _statistics_payload(),
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        home_team_id=10,
+        away_team_id=11,
+        captured_at=NOW,
+    )
+
+    assert item.home_corner_kicks == 7
+    assert item.away_corner_kicks == 3
+    assert item.home_ball_possession == 61.0
+    assert item.away_ball_possession == 39.0
+    assert item.home_shots_on_goal == 6
+    assert item.away_total_shots == 10
+    assert item.home_blocked_shots == 5
+    assert item.home_shots_insidebox == 10
+    assert item.home_passes_accurate == 472
+    assert item.home_pass_accuracy == 87.0
+    assert item.away_pass_accuracy == 80.0
 
 
 def test_all_market_parser_keeps_unknown_raw_market_and_only_target_books() -> None:
@@ -711,7 +793,7 @@ def test_history_backfill_skips_malformed_fixture_and_continues() -> None:
                 return {"referee": None}
             return None
 
-        def statistics_exists(self, fixture_id):
+        def statistics_capture_exists(self, fixture_id):
             return fixture_id == "api-football:good-history"
 
     class Provider:
@@ -802,3 +884,57 @@ def test_upcoming_collection_isolates_bad_fixture_and_scans_next_fixture() -> No
     assert provider.calls == [7001, 7002]
     assert len(repo.captures) == 1
     assert repo.captures[0]["fixture_id"] == "api-football:good-upcoming"
+
+
+def test_history_backfill_watermarks_statistics_without_both_teams() -> None:
+    fixture = {
+        "fixture_id": "api-football:no-stats",
+        "provider_fixture_id": 9100,
+        "home_team_id": 41,
+        "away_team_id": 42,
+    }
+
+    class Repo:
+        def __init__(self):
+            self.captures = []
+
+        def completed_for_context_backfill(self, **_kwargs):
+            return (fixture,)
+
+        def latest_context_before(self, *_args, **_kwargs):
+            return {"referee": None}
+
+        def statistics_capture_exists(self, _fixture_id):
+            return False
+
+        def save_statistics_capture(self, **kwargs):
+            self.captures.append(kwargs)
+
+        def save_match_statistics(self, _item):
+            raise AssertionError("incomplete statistics must not be stored as observations")
+
+    class Provider:
+        def fetch_statistics(self, fixture_id):
+            assert fixture_id == 9100
+            return {
+                "response": [
+                    {
+                        "team": {"id": 41},
+                        "statistics": [{"type": "Corner Kicks", "value": 5}],
+                    }
+                ]
+            }
+
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        Provider(),
+        settings=QuantLabRuntimeSettings(history_backfill_per_cycle=1),
+        clock=lambda: NOW,
+    )
+
+    assert runtime._backfill_history(NOW) == 1
+    assert len(repo.captures) == 1
+    assert repo.captures[0]["status"] == "UNAVAILABLE"
+    assert repo.captures[0]["response_team_count"] == 1
+    assert "both fixture teams" in repo.captures[0]["reason"]

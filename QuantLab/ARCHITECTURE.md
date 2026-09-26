@@ -110,8 +110,11 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_market_captures
 - quantlab_fixture_context_observations
 - quantlab_match_statistics_observations
+- quantlab_statistics_captures
 - quantlab_standings_snapshots
 - quantlab_card_feature_snapshots
+- quantlab_corner_model_versions
+- quantlab_corner_feature_snapshots
 - quantlab_goal_decisions
 
 ## Market collector contract
@@ -122,10 +125,10 @@ production canonical adapter that limits supported production markets.
 
 Raw provider bet ID/name, raw selection, deterministic parsed line, odds, provider update
 time, QuantLab capture time and classifier version are persisted only when the lab owner
-is eligible for that fixture. GOAL rows may be stored across GOAL_SCOPE_V1; CARD, CORNER
-and UNCLASSIFIED rows are stored only on CARDCORNER_TOP10_LEAGUES_V2 fixtures. Successful
-odds responses also create a quantlab_market_captures watermark even when zero rows are
-stored, so empty responses are not re-polled on every cycle or restart.
+is eligible for that fixture. GOAL rows follow GOAL_SCOPE_V1. CARD, CORNER and
+UNCLASSIFIED research follows CARDCORNER_MARKET_DRIVEN_V3 across the global discovered
+universe. Successful odds responses also create a quantlab_market_captures watermark even
+when zero rows are stored, so empty responses are not re-polled on every cycle or restart.
 
 ## GoalLab shadow decision contract
 
@@ -199,19 +202,34 @@ global QuantLab date-shard pipeline. Its rows are explicitly marked
 `production-fixture-bootstrap`; subsequent provider-discovered QuantLab observations
 remain authoritative for normal laboratory operation.
 
-### Task 003 context-market decision layer
+### Context-market decision layer
 
-CornerLab and CardLab now share a read-only cross-book reference evaluator over persisted
-market observations. Both remain restricted by `CARDCORNER_TOP10_LEAGUES_V2`.
+Migration 030 introduced the shared append-only
+`quantlab_context_market_decisions` ledger for CornerLab and CardLab.
 
-Task 003 adds:
+CardLab still uses `CROSS_BOOK_FAIR_REFERENCE_CARD_CONTEXT_V1` with its referee/context
+gate.
 
-- `quantlab_context_market_decisions` — append-only PICK/PASS evidence for CORNER/CARD;
-- CornerLab `CROSS_BOOK_FAIR_REFERENCE_V1`;
-- CardLab `CROSS_BOOK_FAIR_REFERENCE_CARD_CONTEXT_V1`, gated by the existing
-  `CARDLAB_FEATURES_V1` referee sample/rate;
-- shadow-bet writes only after a newly inserted PICK.
+CornerLab V1's `CROSS_BOOK_FAIR_REFERENCE_V1` is retained only as a historical baseline.
 
-The evaluator has no provider dependency. It can run after collection is halted by the
-daily API ceiling. Production model, registration, pick and bankroll tables remain
-read-only/out of scope.
+### CornerLab V2 structural model
+
+Task 004 replaces the active CornerLab probability source with
+`CORNER_PRESSURE_POISSON_V1`.
+
+- Historical fixture statistics now retain corner, possession, shot, territorial and
+  passing variables.
+- `quantlab_statistics_captures` watermarks AVAILABLE and UNAVAILABLE provider coverage.
+- A ridge-regularized Poisson GLM is trained once per decision cycle using only earlier
+  historical matches.
+- The model uses recent and venue-specific corner/pressure features.
+- Bookmaker odds are excluded from training.
+- `quantlab_corner_model_versions` stores coefficients, means/scales and training
+  provenance.
+- `quantlab_corner_feature_snapshots` stores the exact target feature vector and expected
+  total corners.
+- A complete one-bookmaker Over/Under corner pair is sufficient for value evaluation;
+  cross-book agreement is no longer a CornerLab PICK prerequisite.
+
+The evaluator remains shadow-only and has no production pick, bankroll or active-model
+write path.

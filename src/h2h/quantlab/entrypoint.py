@@ -85,7 +85,7 @@ def main() -> None:
     database_url = _database_url()
     repository = PostgreSQLQuantLabRepository(database_url)
     if not repository.check_database():
-        raise RuntimeError("QuantLab Task 003 schema is unavailable")
+        raise RuntimeError("QuantLab schema is unavailable")
 
     api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
     api_key = os.getenv("API_FOOTBALL_KEY", "").strip()

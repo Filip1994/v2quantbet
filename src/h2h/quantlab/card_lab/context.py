@@ -61,6 +61,32 @@ class MatchStatisticsObservation:
     away_red_cards: int | None
     home_second_yellow_cards: int | None
     away_second_yellow_cards: int | None
+    home_corner_kicks: int | None
+    away_corner_kicks: int | None
+    home_ball_possession: float | None
+    away_ball_possession: float | None
+    home_shots_on_goal: int | None
+    away_shots_on_goal: int | None
+    home_shots_off_goal: int | None
+    away_shots_off_goal: int | None
+    home_total_shots: int | None
+    away_total_shots: int | None
+    home_blocked_shots: int | None
+    away_blocked_shots: int | None
+    home_shots_insidebox: int | None
+    away_shots_insidebox: int | None
+    home_shots_outsidebox: int | None
+    away_shots_outsidebox: int | None
+    home_offsides: int | None
+    away_offsides: int | None
+    home_goalkeeper_saves: int | None
+    away_goalkeeper_saves: int | None
+    home_total_passes: int | None
+    away_total_passes: int | None
+    home_passes_accurate: int | None
+    away_passes_accurate: int | None
+    home_pass_accuracy: float | None
+    away_pass_accuracy: float | None
     available_at: datetime
     raw_payload: dict[str, Any]
 
@@ -173,6 +199,30 @@ def _stat_value(record: Mapping[str, Any], stat_name: str) -> int | None:
     return None
 
 
+def _stat_float(record: Mapping[str, Any], stat_name: str) -> float | None:
+    statistics = record.get("statistics")
+    if not isinstance(statistics, list):
+        return None
+    for stat in statistics:
+        if not isinstance(stat, Mapping):
+            continue
+        if str(stat.get("type") or "").strip().casefold() != stat_name.casefold():
+            continue
+        value = stat.get("value")
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            raw = value.strip().removesuffix("%").strip()
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+        return None
+    return None
+
+
 def parse_fixture_statistics(
     payload: Mapping[str, Any],
     *,
@@ -212,6 +262,32 @@ def parse_fixture_statistics(
         # separately. Null means unknown/unavailable; it is never coerced to zero.
         "home_second_yellow_cards": None,
         "away_second_yellow_cards": None,
+        "home_corner_kicks": _stat_value(home, "Corner Kicks"),
+        "away_corner_kicks": _stat_value(away, "Corner Kicks"),
+        "home_ball_possession": _stat_float(home, "Ball Possession"),
+        "away_ball_possession": _stat_float(away, "Ball Possession"),
+        "home_shots_on_goal": _stat_value(home, "Shots on Goal"),
+        "away_shots_on_goal": _stat_value(away, "Shots on Goal"),
+        "home_shots_off_goal": _stat_value(home, "Shots off Goal"),
+        "away_shots_off_goal": _stat_value(away, "Shots off Goal"),
+        "home_total_shots": _stat_value(home, "Total Shots"),
+        "away_total_shots": _stat_value(away, "Total Shots"),
+        "home_blocked_shots": _stat_value(home, "Blocked Shots"),
+        "away_blocked_shots": _stat_value(away, "Blocked Shots"),
+        "home_shots_insidebox": _stat_value(home, "Shots insidebox"),
+        "away_shots_insidebox": _stat_value(away, "Shots insidebox"),
+        "home_shots_outsidebox": _stat_value(home, "Shots outsidebox"),
+        "away_shots_outsidebox": _stat_value(away, "Shots outsidebox"),
+        "home_offsides": _stat_value(home, "Offsides"),
+        "away_offsides": _stat_value(away, "Offsides"),
+        "home_goalkeeper_saves": _stat_value(home, "Goalkeeper Saves"),
+        "away_goalkeeper_saves": _stat_value(away, "Goalkeeper Saves"),
+        "home_total_passes": _stat_value(home, "Total passes"),
+        "away_total_passes": _stat_value(away, "Total passes"),
+        "home_passes_accurate": _stat_value(home, "Passes accurate"),
+        "away_passes_accurate": _stat_value(away, "Passes accurate"),
+        "home_pass_accuracy": _stat_float(home, "Passes %"),
+        "away_pass_accuracy": _stat_float(away, "Passes %"),
     }
     identity = {
         "fixture_id": fixture_id,
