@@ -100,8 +100,14 @@ def _statistics_payload(home_id: int, away_id: int) -> dict[str, object]:
 
 
 class Repo:
-    def __init__(self, *, has_corner_market: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        has_corner_market: bool = True,
+        opponents: dict[int, tuple[int, ...]] | None = None,
+    ) -> None:
         self.has_corner_market = has_corner_market
+        self.opponents = opponents or {}
         self.team_captures: list[dict[str, object]] = []
         self.fixture_observations = []
         self.statistics_captures: dict[str, dict[str, object]] = {}
@@ -131,6 +137,9 @@ class Repo:
     def save_team_history_capture(self, **kwargs):
         self.team_captures.append(kwargs)
         return "capture"
+
+    def recent_team_opponent_ids(self, team_id, **_kwargs):
+        return self.opponents.get(team_id, ())
 
     def completed_for_team_statistics(self, _team_ids, **_kwargs):
         return self.historical
@@ -193,6 +202,40 @@ def test_corner_team_history_bootstrap_targets_only_corner_market_teams() -> Non
     assert len(repo.statistics) == 4
 
 
+def test_corner_team_history_bootstrap_expands_one_hop_opponents() -> None:
+    repo = Repo(
+        opponents={
+            10: (101, 102),
+            11: (111,),
+            101: (999,),
+        }
+    )
+    provider = Provider(repo)
+    runtime = QuantLabRuntime(
+        repo,
+        provider,
+        settings=QuantLabRuntimeSettings(
+            corner_team_history_last=12,
+            corner_team_history_teams_per_cycle=5,
+            corner_team_statistics_per_cycle=1,
+        ),
+        clock=lambda: NOW,
+    )
+
+    discoveries, stats = runtime._bootstrap_corner_team_history(NOW)
+
+    assert discoveries == 5
+    assert provider.team_calls == [
+        (10, 12),
+        (101, 12),
+        (102, 12),
+        (11, 12),
+        (111, 12),
+    ]
+    assert all(team_id != 999 for team_id, _last in provider.team_calls)
+    assert stats == 1
+
+
 def test_corner_team_history_bootstrap_makes_zero_calls_without_corner_market() -> None:
     repo = Repo(has_corner_market=False)
     provider = Provider(repo)
@@ -207,6 +250,6 @@ def test_corner_team_history_defaults_are_bounded() -> None:
     settings = QuantLabRuntimeSettings()
 
     assert settings.corner_team_history_last == 12
-    assert settings.corner_team_history_teams_per_cycle == 40
-    assert settings.corner_team_statistics_per_cycle == 120
+    assert settings.corner_team_history_teams_per_cycle == 120
+    assert settings.corner_team_statistics_per_cycle == 360
     assert settings.corner_team_history_refresh_seconds == 21600
