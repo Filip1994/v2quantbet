@@ -154,6 +154,9 @@ def main() -> None:
             feature_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_FEATURE_REFRESH_SECONDS", "1800"
             ),
+            goal_injury_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_INJURY_REFRESH_SECONDS", "14400"
+            ),
             history_backfill_per_cycle=_integer(
                 "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
             ),
