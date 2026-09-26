@@ -12,7 +12,10 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
-from h2h.quantlab.coverage import parse_fixture_statistics_coverage
+from h2h.quantlab.coverage import (
+    parse_fixture_statistics_coverage,
+    parse_league_coverage_flags,
+)
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
 from h2h.quantlab.market_collector import QuantLabMarketCollector
 from h2h.quantlab.scope import card_corner_scope, goal_scope
@@ -31,6 +34,7 @@ class QuantLabRuntimeSettings:
     context_refresh_seconds: int = 21600
     standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
+    goal_injury_refresh_seconds: int = 14400
     history_backfill_per_cycle: int = 25
     goal_team_history_last: int = 15
     goal_team_history_teams_per_cycle: int = 120
@@ -51,6 +55,7 @@ class QuantLabRuntimeSettings:
             ("context_refresh_seconds", self.context_refresh_seconds),
             ("standings_refresh_seconds", self.standings_refresh_seconds),
             ("feature_refresh_seconds", self.feature_refresh_seconds),
+            ("goal_injury_refresh_seconds", self.goal_injury_refresh_seconds),
             ("goal_team_history_last", self.goal_team_history_last),
             ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
             ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
@@ -208,6 +213,11 @@ class QuantLabRuntime:
             return cached
 
         payload = self._provider.fetch_league_coverage(league_id, season)
+        coverage_flags = parse_league_coverage_flags(
+            payload,
+            league_id=league_id,
+            season=season,
+        )
         statistics_fixtures = parse_fixture_statistics_coverage(
             payload,
             league_id=league_id,
@@ -220,15 +230,73 @@ class QuantLabRuntime:
             season=season,
             captured_at=now,
             statistics_fixtures=statistics_fixtures,
+            statistics_players=coverage_flags["statistics_players"],
+            lineups=coverage_flags["lineups"],
+            standings=coverage_flags["standings"],
+            players=coverage_flags["players"],
+            injuries=coverage_flags["injuries"],
+            predictions=coverage_flags["predictions"],
+            odds=coverage_flags["odds"],
             response_item_count=response_item_count,
             raw_payload=dict(payload),
         )
         return {
             "captured_at": now,
+            **coverage_flags,
             "statistics_fixtures": statistics_fixtures,
             "response_item_count": response_item_count,
             "raw_payload": dict(payload),
         }
+
+    def _capture_goal_injuries(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        fixture_id = str(fixture["fixture_id"])
+        provider_fixture_id = int(fixture["provider_fixture_id"])
+        if provider_fixture_id <= 0:
+            raise ValueError("provider_fixture_id must be positive")
+        if not self._repository.goal_injury_capture_due(
+            fixture_id,
+            now=now,
+            refresh_seconds=self._settings.goal_injury_refresh_seconds,
+        ):
+            return False
+
+        coverage = self._fixture_statistics_coverage(fixture, now)
+        if coverage is not None and coverage.get("injuries") is False:
+            raw_coverage = coverage.get("raw_payload")
+            self._repository.save_goal_injury_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                available_at=now,
+                status="UNAVAILABLE",
+                response_item_count=0,
+                reason="league-season-injuries-false",
+                source="api-football:leagues",
+                raw_payload=(
+                    dict(raw_coverage)
+                    if isinstance(raw_coverage, dict)
+                    else {"coverage": raw_coverage}
+                ),
+            )
+            return False
+
+        payload = self._provider.fetch_injuries(provider_fixture_id)
+        response = payload.get("response") if isinstance(payload, dict) else None
+        response_item_count = len(response) if isinstance(response, list) else 0
+        self._repository.save_goal_injury_capture(
+            fixture_id=fixture_id,
+            provider_fixture_id=provider_fixture_id,
+            available_at=now,
+            status="AVAILABLE",
+            response_item_count=response_item_count,
+            reason=None,
+            source="api-football:injuries",
+            raw_payload=dict(payload),
+        )
+        return True
 
     def _capture_historical_statistics(
         self,
@@ -693,6 +761,7 @@ class QuantLabRuntime:
                 standings = None
                 if goal_allowed and "GOAL" in market_labs:
                     standings = self._standings(fixture, now)
+                    self._capture_goal_injuries(fixture, now)
 
                 if not context_allowed:
                     continue
