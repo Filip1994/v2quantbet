@@ -91,10 +91,10 @@ def is_womens_football(
     home_team: object = "",
     away_team: object = "",
 ) -> bool:
-    """Return True when provider metadata identifies women\'s football.
+    """Return True when provider metadata identifies women's football.
 
     Generic single-letter W markers are accepted only as trailing team/competition
-    suffixes, avoiding false positives for senior men\'s clubs whose names begin with W.
+    suffixes, avoiding false positives for senior men's clubs whose names begin with W.
     """
     competition = _normalise(str(competition_name or ""))
     competition_kind = _normalise(str(competition_type or ""))
