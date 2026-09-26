@@ -97,6 +97,22 @@ class QuantLabApiFootballClient:
             cache_ttl_seconds=21600.0,
         )
 
+    def fetch_league_coverage(
+        self,
+        league_id: int,
+        season: int,
+    ) -> Mapping[str, Any]:
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in (league_id, season)
+        ):
+            raise ValueError("league_id and season must be positive integers")
+        return self._get(
+            "leagues",
+            {"id": league_id, "season": season},
+            cache_ttl_seconds=21600.0,
+        )
+
     def fetch_standings(self, league_id: int, season: int) -> Mapping[str, Any]:
         if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in (league_id, season)):
             raise ValueError("league_id and season must be positive integers")
