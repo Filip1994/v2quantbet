@@ -302,16 +302,29 @@ def log_cornerlab_v2_readiness(repository: Any, logger: logging.Logger) -> None:
     )
 
 
-def log_cornerlab_v2_training_readiness(repository: Any, logger: logging.Logger) -> None:
-    """Emit the exact current training-sample readiness after an acquisition cycle."""
+def log_cornerlab_v2_training_readiness(
+    repository: Any,
+    logger: logging.Logger,
+) -> dict[str, int | bool]:
+    """Emit and return exact training-sample readiness after an acquisition cycle."""
     now = datetime.now(UTC)
     history_rows = repository.corner_model_history(before=now, limit=HISTORY_LIMIT)
     _x, y, _histories, history_match_count = _build_training(history_rows)
+    training_sample_size = len(y)
+    training_shortfall = max(0, MIN_TRAINING_EXAMPLES - training_sample_size)
+    model_fit_eligible = training_sample_size >= MIN_TRAINING_EXAMPLES
     logger.info(
         "QuantLab CornerLab V2 cycle readiness history_match_count=%d "
         "training_sample_size=%d minimum_training_examples=%d training_shortfall=%d",
         history_match_count,
-        len(y),
+        training_sample_size,
         MIN_TRAINING_EXAMPLES,
-        max(0, MIN_TRAINING_EXAMPLES - len(y)),
+        training_shortfall,
     )
+    return {
+        "history_match_count": history_match_count,
+        "training_sample_size": training_sample_size,
+        "minimum_training_examples": MIN_TRAINING_EXAMPLES,
+        "training_shortfall": training_shortfall,
+        "model_fit_eligible": model_fit_eligible,
+    }
