@@ -70,13 +70,13 @@ exclusions.
 ### CornerLab
 
 Owns corner probabilities and corner-market experiments. Fixture-specific spend is
-restricted by CARDCORNER_STRONG_LEAGUES_V1.
+restricted by CARDCORNER_TOP10_LEAGUES_V2.
 
 ### CardLab
 
 Owns card/foul probabilities and card-market experiments. Referee and match-context
 variables belong here unless a later experiment explicitly demonstrates a justified
-cross-lab use. Fixture-specific spend is restricted by CARDCORNER_STRONG_LEAGUES_V1.
+cross-lab use. Fixture-specific spend is restricted by CARDCORNER_TOP10_LEAGUES_V2.
 
 ## Data contract
 
@@ -104,6 +104,7 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_fixture_observations
 - quantlab_fixture_discovery_shards
 - quantlab_market_observations
+- quantlab_market_captures
 - quantlab_fixture_context_observations
 - quantlab_match_statistics_observations
 - quantlab_standings_snapshots
@@ -116,8 +117,11 @@ for both Bet365 (8), 1xBet (11) and all laboratory classifiers. It does not use 
 production canonical adapter that limits supported production markets.
 
 Raw provider bet ID/name, raw selection, deterministic parsed line, odds, provider update
-time, QuantLab capture time and classifier version are persisted. Unknown markets are
-retained as UNCLASSIFIED.
+time, QuantLab capture time and classifier version are persisted only when the lab owner
+is eligible for that fixture. GOAL rows may be stored across GOAL_SCOPE_V1; CARD, CORNER
+and UNCLASSIFIED rows are stored only on CARDCORNER_TOP10_LEAGUES_V2 fixtures. Successful
+odds responses also create a quantlab_market_captures watermark even when zero rows are
+stored, so empty responses are not re-polled on every cycle or restart.
 
 ## API policy
 
@@ -140,11 +144,15 @@ Priority order:
 3. Reject out-of-scope competitions locally before any fixture-specific odds/context call.
 4. Reuse already persisted production facts only as read-only historical fallback.
 5. Derive zero-API features locally.
-6. Reuse one all-market odds response across Bet365 and 1xBet.
-7. Cache league/team/reference data.
-8. Spend fixture-specific calls only when the hypothesis requires them.
-9. Do not fetch completed-match statistics when referee coverage is absent.
-10. Stop QuantLab before production operational capacity is endangered.
+6. Reuse one all-market odds response across Bet365 and 1xBet, then persist only lab-
+   eligible ownership classes.
+7. Treat a successful empty/filtered odds response as a real capture for refresh gating.
+8. Default odds refresh to 12 hours and standings refresh to 6 hours; automatic historical
+   statistics backfill is disabled by default until a separately budgeted backfill is run.
+9. Cache league/team/reference data.
+10. Spend fixture-specific calls only when the hypothesis requires them.
+11. Do not fetch completed-match statistics when referee coverage is absent.
+12. Stop QuantLab before production operational capacity is endangered.
 
 ## Evaluation contract
 

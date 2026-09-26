@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 
 GOAL_SCOPE_VERSION = "GOAL_SCOPE_V1"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_STRONG_LEAGUES_V1"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_TOP10_LEAGUES_V2"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -114,46 +114,22 @@ _TEAM_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Deliberately narrow: these are the competitions for which CardLab/CornerLab
-# are allowed to spend fixture-specific provider requests in V1.
-_STRONG_LEAGUE_RULES: dict[str, tuple[str, ...]] = {
-    "england": ("premier league", "championship"),
-    "spain": ("la liga", "segunda division"),
-    "italy": ("serie a", "serie b"),
-    "germany": ("bundesliga", "2 bundesliga"),
+# CardLab/CornerLab V2: one domestic top-flight competition in each of ten
+# data-rich leagues. Exact normalized-name matching is intentional: lower divisions,
+# cups, reserve competitions and similarly named leagues must not inherit eligibility.
+_TOP10_LEAGUE_RULES: dict[str, tuple[str, ...]] = {
+    "england": ("premier league",),
+    "spain": ("la liga",),
+    "italy": ("serie a",),
+    "germany": ("bundesliga",),
     "france": ("ligue 1",),
     "netherlands": ("eredivisie",),
     "portugal": ("primeira liga",),
-    "belgium": ("pro league", "jupiler pro league"),
+    "belgium": ("jupiler pro league", "pro league"),
     "turkey": ("super lig", "super league"),
+    "turkiye": ("super lig", "super league"),
     "scotland": ("premiership",),
-    "austria": ("bundesliga",),
-    "switzerland": ("super league",),
-    "denmark": ("superliga",),
-    "norway": ("eliteserien",),
-    "sweden": ("allsvenskan",),
-    "czech republic": ("czech liga", "first league", "chance liga"),
-    "czechia": ("czech liga", "first league", "chance liga"),
-    "poland": ("ekstraklasa",),
-    "greece": ("super league 1", "super league"),
-    "croatia": ("hnl",),
-    "serbia": ("super liga",),
-    "romania": ("liga i", "liga 1"),
-    "brazil": ("serie a",),
-    "argentina": ("liga profesional", "primera division"),
-    "usa": ("major league soccer", "mls"),
-    "united states": ("major league soccer", "mls"),
-    "mexico": ("liga mx",),
 }
-
-_STRONG_WORLD_COMPETITIONS = (
-    "uefa champions league",
-    "uefa europa league",
-    "uefa conference league",
-    "champions league",
-    "europa league",
-    "conference league",
-)
 
 
 def _ascii(value: object) -> str:
@@ -215,7 +191,7 @@ def card_corner_scope(
     home_team: object = "",
     away_team: object = "",
 ) -> ScopeDecision:
-    """Restrict CardLab/CornerLab provider spend to a deterministic strong-league set."""
+    """Restrict CardLab/CornerLab provider spend to the deterministic Top-10 set."""
     if _is_youth_or_amateur(
         competition_name,
         competition_type,
@@ -225,19 +201,12 @@ def card_corner_scope(
         return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "youth_or_amateur")
     country_key = _ascii(country)
     competition_key = _ascii(competition_name)
-    if any(token in competition_key for token in _STRONG_WORLD_COMPETITIONS):
-        return ScopeDecision(
-            True,
-            CONTEXT_SCOPE_VERSION,
-            "strong_world_competition",
-        )
-    for token in _STRONG_LEAGUE_RULES.get(country_key, ()):
-        if token in competition_key:
-            return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "strong_league")
+    if competition_key in _TOP10_LEAGUE_RULES.get(country_key, ()):
+        return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "top10_league")
     return ScopeDecision(
         False,
         CONTEXT_SCOPE_VERSION,
-        "outside_strong_league_allowlist",
+        "outside_top10_league_allowlist",
     )
 
 

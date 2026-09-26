@@ -89,19 +89,19 @@ def main() -> None:
                 "QUANTBET_QUANTLAB_FIXTURE_DISCOVERY_REFRESH_SECONDS", "21600"
             ),
             market_refresh_seconds=_positive_integer(
-                "QUANTBET_QUANTLAB_MARKET_REFRESH_SECONDS", "900"
+                "QUANTBET_QUANTLAB_MARKET_REFRESH_SECONDS", "43200"
             ),
             context_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CONTEXT_REFRESH_SECONDS", "21600"
             ),
             standings_refresh_seconds=_positive_integer(
-                "QUANTBET_QUANTLAB_STANDINGS_REFRESH_SECONDS", "1800"
+                "QUANTBET_QUANTLAB_STANDINGS_REFRESH_SECONDS", "21600"
             ),
             feature_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_FEATURE_REFRESH_SECONDS", "1800"
             ),
             history_backfill_per_cycle=_integer(
-                "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "2"
+                "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "0"
             ),
         ),
     )

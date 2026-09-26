@@ -51,6 +51,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_fixture_observations",
             "quantlab_fixture_discovery_shards",
             "quantlab_market_observations",
+            "quantlab_market_captures",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
             "quantlab_standings_snapshots",
@@ -266,8 +267,12 @@ class PostgreSQLQuantLabRepository:
     ) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT MAX(captured_at) FROM quantlab_market_observations WHERE fixture_id = %s",
-                (fixture_id,),
+                "SELECT MAX(captured_at) FROM ("
+                " SELECT captured_at FROM quantlab_market_captures WHERE fixture_id = %s"
+                " UNION ALL "
+                " SELECT captured_at FROM quantlab_market_observations WHERE fixture_id = %s"
+                ") captures",
+                (fixture_id, fixture_id),
             )
             row = cursor.fetchone()
         last = None if row is None else row[0]
@@ -306,6 +311,46 @@ class PostgreSQLQuantLabRepository:
                 (fixture_id,),
             )
             return bool(cursor.fetchone()[0])
+
+    def save_market_capture(
+        self,
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        captured_at: datetime,
+        raw_observation_count: int,
+        stored_observation_count: int,
+        allowed_labs: Iterable[str],
+    ) -> str:
+        labs = tuple(sorted({str(lab) for lab in allowed_labs}))
+        capture_id = _identifier(
+            "quantlab-market-capture-v1:",
+            {
+                "fixture_id": fixture_id,
+                "provider_fixture_id": provider_fixture_id,
+                "captured_at": captured_at.isoformat(),
+                "raw_observation_count": raw_observation_count,
+                "stored_observation_count": stored_observation_count,
+                "allowed_labs": labs,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_market_captures ("
+                "market_capture_id, fixture_id, provider_fixture_id, captured_at, "
+                "raw_observation_count, stored_observation_count, allowed_labs"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    captured_at,
+                    raw_observation_count,
+                    stored_observation_count,
+                    _json(labs),
+                ),
+            )
+        return capture_id
 
     def save_market_observations(self, observations: Iterable[Any]) -> int:
         rows = tuple(observations)

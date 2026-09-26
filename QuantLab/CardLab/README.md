@@ -17,16 +17,24 @@ The exact V1 formulas, provenance requirements and leakage rules are frozen in
 
 ## League scope
 
-CardLab v1 uses CARDCORNER_STRONG_LEAGUES_V1. Fixture-specific provider calls are
-allowed only for the strong-league allowlist implemented in src/h2h/quantlab/scope.py.
+CardLab v1 uses CARDCORNER_TOP10_LEAGUES_V2. Fixture-specific provider calls are
+allowed only for ten domestic top flights implemented in src/h2h/quantlab/scope.py:
 
-This intentionally excludes lower leagues such as Poland III Liga, youth/academy,
-reserve and amateur competitions before any CardLab context/statistics request is made.
-The V1 allowlist includes major UEFA club competitions and selected strong domestic
-leagues across Europe plus Brazil, Argentina, MLS and Liga MX.
+- England — Premier League
+- Spain — La Liga
+- Italy — Serie A
+- Germany — Bundesliga
+- France — Ligue 1
+- Netherlands — Eredivisie
+- Portugal — Primeira Liga
+- Belgium — Jupiler Pro League / Pro League
+- Turkey/Türkiye — Süper Lig
+- Scotland — Premiership
 
-The purpose is API discipline: card/referee data quality and market availability are
-not assumed outside leagues where the laboratory has explicitly chosen to spend budget.
+Lower divisions, cups, UEFA club competitions, youth/academy, reserve and amateur
+competitions are rejected locally before CardLab context/statistics spend. The purpose
+is API discipline and predictable referee/card-data coverage, not a claim that card
+markets cannot exist elsewhere.
 
 ## Separation
 
@@ -35,9 +43,10 @@ or CornerLab unless a later separately-versioned experiment explicitly tests tha
 
 ## Market ingestion
 
-The shared QuantLab collector still preserves all returned Bet365/1xBet raw markets for
-an eligible fixture. CardLab ownership is assigned only by the versioned market
-classifier. Unknown provider markets are retained as UNCLASSIFIED rather than discarded.
+The shared QuantLab collector parses one returned Bet365/1xBet all-market payload, but
+CARD rows are persisted only when the fixture passes CARDCORNER_TOP10_LEAGUES_V2.
+UNCLASSIFIED rows are retained only on Top-10 fixtures so unknown card/corner-like
+markets cannot leak into broad GoalLab-only storage.
 
 ## Settlement warning
 

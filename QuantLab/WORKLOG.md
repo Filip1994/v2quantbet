@@ -360,3 +360,67 @@ is no longer authoritative for the QuantLab upcoming universe.
 ### Production impact
 
 **NONE.**
+
+
+## 2026-09-26 — Card/Corner Top-10 and API-spend correction
+
+**Owner:** QuantLab core
+
+### Trigger
+
+Live review showed two operational problems:
+
+1. broad GoalLab-eligible fixtures could persist CARD/CORNER rows because the fixture
+   scope gate happened before one all-market odds response, while persistence did not
+   re-apply lab ownership eligibility;
+2. the 1,000/day QuantLab budget was exhausted before useful shadow output existed.
+
+### Historical API diagnosis
+
+Railway runtime evidence for 2026-09-26 UTC shows completed QuantLab cycles at
+01:59:12, 01:59:40, 02:01:06, 02:03:19, 02:08:51 and 02:14:53, followed by the first
+`QuantLab API hard ceiling reached` at 02:19:46.
+
+The old runtime allowed up to 250 upcoming fixtures per cycle and refreshed odds every
+900 seconds. Several code deploys also started replacement containers during the first
+minutes. A successful odds response that produced zero stored market observations did
+not leave any persistent refresh watermark, so such fixtures could become due again on
+the next cycle/restart. Together, these mechanics explain the rapid budget burn.
+
+Historical `provider_request_usage` stores only the aggregate
+`quantlab_context` category, not endpoint-level counts. Therefore an exact retrospective
+split of the 1,000 calls into odds/context/statistics/standings cannot be recovered from
+the existing telemetry and must not be fabricated.
+
+### Correction
+
+- Replaced CARDCORNER_STRONG_LEAGUES_V1 with
+  **CARDCORNER_TOP10_LEAGUES_V2**.
+- CardLab/CornerLab are now limited to exactly:
+  Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Primeira Liga,
+  Belgian Pro League, Süper Lig and Scottish Premiership.
+- Lower divisions, cups and UEFA club competitions are excluded from Card/Corner spend.
+- Market persistence now receives an explicit allowed-lab set. Broad GoalLab-only
+  fixtures store GOAL rows only; CARD/CORNER/UNCLASSIFIED rows require Top-10 eligibility.
+- Added migration `027_quantlab_market_capture_watermark.sql` and
+  `quantlab_market_captures`. Successful odds responses are watermarked even when they
+  store zero rows, preventing empty-response re-poll loops across restarts.
+- Default odds refresh changed from 15 minutes to 12 hours.
+- Default standings refresh changed from 30 minutes to 6 hours.
+- Automatic historical CardLab statistics backfill changed from 2/cycle to 0/cycle;
+  future backfill must be separately budgeted.
+- Runtime cycle logs now print discovered/backfilled/market/card counts directly in the
+  visible message.
+
+### Shadow-pick status
+
+Task 001 created the shared `quantlab_shadow_bets` schema and dashboard reader but did
+not implement any writer/decision engine for that table. Repository search confirms
+there is no `INSERT INTO quantlab_shadow_bets` write path. Therefore the absence of
+QuantLab picks is a missing next-stage strategy/pick-generation capability, not a
+dashboard rendering failure.
+
+### Production impact
+
+**NONE.** Changes remain inside QuantLab runtime, QuantLab migrations, QuantLab tests and
+QuantLab documentation. Production models, picks, bankroll and discovery are unchanged.
