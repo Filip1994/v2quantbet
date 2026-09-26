@@ -44,12 +44,10 @@ and a new/updated version rather than ad-hoc runtime inference.
 
 ## Markets
 
-For every GOAL_SCOPE_V1 fixture, the shared collector parses the provider response but
-persists only markets classified as GOAL unless the fixture also passes
-CARDCORNER_TOP10_LEAGUES_V2. UNCLASSIFIED markets are therefore not retained on broad
-GoalLab-only fixtures; this prevents unknown card/corner markets from bypassing the
-Top-10 storage gate. Canonical modeling and settlement support remain explicit and
-versioned.
+The shared collector requests one all-market Bet365/1xBet payload for globally discovered
+upcoming fixtures. GOAL persistence still follows GOAL_SCOPE_V1, while CARD/CORNER
+research follows the broader CARDCORNER_MARKET_DRIVEN_V3 universe. Canonical modeling
+and settlement support remain explicit and versioned.
 
 ## Shadow Pick Engine V1
 
@@ -131,3 +129,12 @@ Policy `GOALLAB_CONTROL_POLICY_V2` records qualifying plain-DC value observation
 from `quantlab_shadow_bets` while preserving the immutable Task 002 decision audit.
 
 Future GoalLab shadow PICK generation belongs to a separately versioned DC+ model.
+
+
+## DC+ Pro references
+
+- [API-Football Research Catalog](./API_FOOTBALL_RESEARCH_CATALOG.md)
+- [DC+ Pro V1 specification](./DC_PLUS_PRO_V1.md)
+
+These documents define the broad provider feature universe and the large candidate feature
+registry for the next GoalLab model.
