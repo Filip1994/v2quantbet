@@ -61,6 +61,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_player_captures",
             "quantlab_goal_picks",
             "quantlab_goal_pick_settlements",
+            "quantlab_goal_model_validations",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -541,6 +542,7 @@ class PostgreSQLQuantLabRepository:
         result["active_feature_names"] = tuple(params.get("model_feature_names") or ())
         result["base_feature_names"] = tuple(params.get("base_feature_names") or ())
         result["active_feature_count"] = len(result["active_feature_names"])
+        result["validation"] = self.goal_model_validation(str(result["model_version"]))
         return result
 
     def save_goal_shadow_bet(self, item: Any, *, stake_minor: int) -> bool:
@@ -2030,6 +2032,77 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
         return snapshot_id
+
+    def save_goal_model_validation(self, item: Any) -> bool:
+        validation_id = _identifier(
+            "quantlab-goal-validation-v1:",
+            {
+                "model_version": item.model_version,
+                "method_version": item.method_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_model_validations ("
+                "validation_id, model_version, evaluated_at, method_version, status, "
+                "train_start_at, train_end_at, holdout_start_at, holdout_end_at, "
+                "train_sample_size, holdout_sample_size, common_evaluation_size, "
+                "dc_plus_metrics, control_metrics, comparison, leakage_audit, "
+                "contract_snapshot, authority_review_status"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    validation_id,
+                    item.model_version,
+                    item.evaluated_at,
+                    item.method_version,
+                    item.status,
+                    item.train_start_at,
+                    item.train_end_at,
+                    item.holdout_start_at,
+                    item.holdout_end_at,
+                    item.train_sample_size,
+                    item.holdout_sample_size,
+                    item.common_evaluation_size,
+                    _json(item.dc_plus_metrics),
+                    _json(item.control_metrics),
+                    _json(item.comparison),
+                    _json(item.leakage_audit),
+                    _json(item.contract_snapshot),
+                    item.authority_review_status,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def goal_model_validation(self, model_version: str) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT validation_id, model_version, evaluated_at, method_version, status, "
+                "train_start_at, train_end_at, holdout_start_at, holdout_end_at, "
+                "train_sample_size, holdout_sample_size, common_evaluation_size, "
+                "dc_plus_metrics, control_metrics, comparison, leakage_audit, "
+                "contract_snapshot, authority_review_status "
+                "FROM quantlab_goal_model_validations WHERE model_version = %s "
+                "ORDER BY evaluated_at DESC, validation_id DESC LIMIT 1",
+                (model_version,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        for key in (
+            "dc_plus_metrics",
+            "control_metrics",
+            "comparison",
+            "leakage_audit",
+            "contract_snapshot",
+        ):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        return result
 
     def corner_model_history(
         self,
