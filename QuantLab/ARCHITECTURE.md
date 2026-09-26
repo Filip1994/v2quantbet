@@ -205,3 +205,20 @@ The bootstrap is not an ongoing discovery source and does not replace the indepe
 global QuantLab date-shard pipeline. Its rows are explicitly marked
 `production-fixture-bootstrap`; subsequent provider-discovered QuantLab observations
 remain authoritative for normal laboratory operation.
+
+### Task 003 context-market decision layer
+
+CornerLab and CardLab now share a read-only cross-book reference evaluator over persisted
+market observations. Both remain restricted by `CARDCORNER_TOP10_LEAGUES_V2`.
+
+Task 003 adds:
+
+- `quantlab_context_market_decisions` — append-only PICK/PASS evidence for CORNER/CARD;
+- CornerLab `CROSS_BOOK_FAIR_REFERENCE_V1`;
+- CardLab `CROSS_BOOK_FAIR_REFERENCE_CARD_CONTEXT_V1`, gated by the existing
+  `CARDLAB_FEATURES_V1` referee sample/rate;
+- shadow-bet writes only after a newly inserted PICK.
+
+The evaluator has no provider dependency. It can run after collection is halted by the
+daily API ceiling. Production model, registration, pick and bankroll tables remain
+read-only/out of scope.
