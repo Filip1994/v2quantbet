@@ -10,20 +10,40 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 
 
+QUANTLAB_HARD_DAILY_LIMIT = 1000
+
+
 class QuantLabRequestBudget:
-    """Atomically cap only the quantlab_context category, independent of production usage."""
+    """Atomically cap QuantLab and preserve provider capacity for production."""
 
     def __init__(
         self,
         *,
-        daily_limit: int = 1000,
+        daily_limit: int = QUANTLAB_HARD_DAILY_LIMIT,
+        shared_daily_limit: int = 7500,
+        production_reserve: int = 1500,
         database_url: str | None = None,
         connect: Callable[[], Any] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        if isinstance(daily_limit, bool) or not isinstance(daily_limit, int) or daily_limit < 1:
-            raise ValueError("daily_limit must be a positive integer")
-        self.daily_limit = daily_limit
+        for name, value in (
+            ("daily_limit", daily_limit),
+            ("shared_daily_limit", shared_daily_limit),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if (
+            isinstance(production_reserve, bool)
+            or not isinstance(production_reserve, int)
+            or production_reserve < 0
+            or production_reserve >= shared_daily_limit
+        ):
+            raise ValueError("production_reserve must fit inside shared_daily_limit")
+
+        # Configuration may reduce QuantLab capacity but can never raise the hard ceiling.
+        self.daily_limit = min(daily_limit, QUANTLAB_HARD_DAILY_LIMIT)
+        self.shared_daily_limit = shared_daily_limit
+        self.production_reserve = production_reserve
         self._database_url = database_url or os.environ.get("DATABASE_URL")
         if not self._database_url and connect is None:
             raise ValueError("DATABASE_URL is required")
@@ -47,19 +67,27 @@ class QuantLabRequestBudget:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (f"quantlab-context-budget:{day.isoformat()}",),
+                (f"quantbet-provider-budget:{day.isoformat()}",),
             )
             cursor.execute(
-                "SELECT COALESCE(request_count, 0) FROM provider_request_usage "
-                "WHERE request_day = %s AND category = 'quantlab_context'",
+                "SELECT category, request_count FROM provider_request_usage "
+                "WHERE request_day = %s",
                 (day,),
             )
-            row = cursor.fetchone()
-            used = 0 if row is None else int(row[0])
+            usage = {row[0]: int(row[1]) for row in cursor.fetchall()}
+            used = usage.get("quantlab_context", 0)
+            total = sum(usage.values())
+
             if used >= self.daily_limit:
                 raise ApiBudgetExceededError(
                     f"QuantLab daily API budget exhausted: {self.daily_limit} calls"
                 )
+            shared_quantlab_stop = self.shared_daily_limit - self.production_reserve
+            if total >= shared_quantlab_stop:
+                raise ApiBudgetExceededError(
+                    "QuantLab stopped at reserved production provider capacity"
+                )
+
             cursor.execute(
                 "INSERT INTO provider_request_usage "
                 "(request_day, category, request_count, updated_at) "
