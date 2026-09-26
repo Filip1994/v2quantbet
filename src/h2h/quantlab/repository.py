@@ -1211,6 +1211,17 @@ class PostgreSQLQuantLabRepository:
                 " FROM quantlab_match_statistics_observations s "
                 " WHERE s.available_at <= %s "
                 " ORDER BY s.fixture_id, s.available_at DESC, s.statistics_observation_id DESC"
+                "), standings AS ("
+                " SELECT f.fixture_id, ss.standings_snapshot_id, "
+                " ss.available_at AS standings_available_at, ss.raw_payload AS standings_payload "
+                " FROM fixture_rows f "
+                " LEFT JOIN LATERAL ("
+                "  SELECT s.standings_snapshot_id, s.available_at, s.raw_payload "
+                "  FROM quantlab_standings_snapshots s "
+                "  WHERE s.league_id = f.league_id AND s.season = f.season "
+                "  AND s.available_at <= f.kickoff_at "
+                "  ORDER BY s.available_at DESC, s.standings_snapshot_id DESC LIMIT 1"
+                " ) ss ON TRUE"
                 ") "
                 "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
                 "f.home_team_id, f.away_team_id, f.kickoff_at, "
@@ -1224,6 +1235,7 @@ class PostgreSQLQuantLabRepository:
                 " (f.raw_payload->'goals'->>'away')::INTEGER"
                 ") AS away_goals, "
                 "s.statistics_observation_id, s.available_at AS statistics_available_at, "
+                "st.standings_snapshot_id, st.standings_available_at, st.standings_payload, "
                 "s.home_fouls, s.away_fouls, "
                 "s.home_yellow_cards, s.away_yellow_cards, "
                 "s.home_red_cards, s.away_red_cards, "
@@ -1241,6 +1253,7 @@ class PostgreSQLQuantLabRepository:
                 "s.home_passes_accurate, s.away_passes_accurate, "
                 "s.home_pass_accuracy, s.away_pass_accuracy "
                 "FROM fixture_rows f LEFT JOIN stats s USING (fixture_id) "
+                "LEFT JOIN standings st USING (fixture_id) "
                 "WHERE f.league_id IS NOT NULL AND f.home_team_id IS NOT NULL "
                 "AND f.away_team_id IS NOT NULL "
                 "ORDER BY f.kickoff_at DESC, f.fixture_id DESC LIMIT %s",
@@ -1455,7 +1468,8 @@ class PostgreSQLQuantLabRepository:
     ) -> dict[str, Any] | None:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT available_at, raw_payload FROM quantlab_standings_snapshots "
+                "SELECT standings_snapshot_id, available_at, raw_payload "
+                "FROM quantlab_standings_snapshots "
                 "WHERE league_id = %s AND season = %s AND available_at <= %s "
                 "ORDER BY available_at DESC, standings_snapshot_id DESC LIMIT 1",
                 (league_id, season, decision_at),
@@ -1463,8 +1477,12 @@ class PostgreSQLQuantLabRepository:
             row = cursor.fetchone()
         if row is None:
             return None
-        payload = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-        return {"available_at": row[0], "raw_payload": payload}
+        payload = json.loads(row[2]) if isinstance(row[2], str) else row[2]
+        return {
+            "standings_snapshot_id": row[0],
+            "available_at": row[1],
+            "raw_payload": payload,
+        }
 
     def latest_context_before(
         self, fixture_id: str, *, decision_at: datetime
