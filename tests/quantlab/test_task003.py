@@ -6,6 +6,7 @@ import pytest
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
+from h2h.quantlab.count_shadow import poisson_over_probability
 from h2h.quantlab.runtime import QuantLabRuntime
 
 
@@ -296,3 +297,9 @@ def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
     assert result["card_picks"] == 1
     assert corner.calls == [("api-football:9100", NOW)]
     assert card.calls == [("api-football:9100", NOW)]
+
+
+def test_count_poisson_supports_half_lines_and_rejects_push_lines():
+    assert 0.0 < poisson_over_probability(10.0, 9.5) < 1.0
+    with pytest.raises(ValueError, match="half-count"):
+        poisson_over_probability(10.0, 10.0)
