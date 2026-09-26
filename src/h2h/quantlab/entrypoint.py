@@ -182,10 +182,11 @@ def main() -> None:
             try:
                 runtime.run_once()
             except Exception as exc:
-                LOGGER.exception(
+                LOGGER.error(
                     "QuantLab cycle failed error_class=%s error=%s",
                     type(exc).__name__,
                     str(exc),
+                    exc_info=True,
                 )
             stop.wait(cycle_seconds)
     finally:
