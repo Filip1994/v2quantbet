@@ -250,9 +250,14 @@ class QuantLabDashboardService:
                 "</tr>"
             )
         if not rows_html:
+            empty_text = (
+                "No GoalLab canonical picks yet. Pick authority may still be OFF."
+                if lab_key == "goal"
+                else f"No {escape(title)} shadow bets yet. The ledger is ready for QuantLab ingestion."
+            )
             rows_html = (
                 '<tr><td class="empty" colspan="14">'
-                f'No {escape(title)} shadow bets yet. The ledger is ready for QuantLab ingestion.'
+                f"{empty_text}"
                 "</td></tr>"
             )
 
@@ -421,7 +426,7 @@ class QuantLabDashboardService:
 
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
-            ("Shadow bets", str(len(rows))),
+            ("Canonical picks" if lab_key == "goal" else "Shadow bets", str(len(rows))),
             ("Settled", str(len(settled))),
             ("P&L", _money(pnl, self._currency)),
             ("ROI", "—" if roi is None else f"{roi * 100:+.2f}%"),
@@ -433,6 +438,21 @@ class QuantLabDashboardService:
         cards_html = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
             for label, value in cards
+        )
+
+        lab_note = (
+            "GoalLab DC+ · one canonical research pick per fixture/policy · flat stake · "
+            "immutable settlement ledger · pick authority is explicit."
+            if lab_key == "goal"
+            else (
+                "Bet365 + 1xBet universe · flat shadow ledger · identical P&L / ROI / "
+                "CLV definitions."
+            )
+        )
+        ledger_title = (
+            "GoalLab canonical picks"
+            if lab_key == "goal"
+            else f"{title} shadow ledger"
         )
 
         return f"""<!doctype html>
@@ -468,15 +488,16 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 </style></head><body><main>
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
-<p class="lab-note">Bet365 + 1xBet universe · flat shadow ledger · identical P&amp;L / ROI / CLV definitions across all three labs.</p>
+<p class="lab-note">{escape(lab_note)}</p>
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
 <section class="toolbar"><form method="get"><input type="hidden" name="lab" value="{escape(lab_key, quote=True)}">
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
+{goal_contract_html}
 {goal_pipeline_html}
 {card_context_html}
-<section class="table-shell"><div class="table-title"><b>{escape(title)} shadow ledger</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
+<section class="table-shell"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
 <th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
 <footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; CardLab = card/referee models. Times are Europe/Belgrade.</footer>
