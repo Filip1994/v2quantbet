@@ -1,6 +1,6 @@
 # Task 002 — GoalLab Shadow Pick Engine + Fixture Decision View
 
-Status: implementation in progress.
+Status: implemented; CI/Railway verification is recorded in QuantLab/WORKLOG.md.
 
 ## Objective
 
