@@ -39,9 +39,9 @@ Exclude all youth/junior competitions, including but not limited to:
 
 The exclusion must use competition metadata and robust name classification where metadata is incomplete.
 
-### 3. Women\'s football
+### 3. Women's football
 
-Exclude women\'s football from the entire QuantBet football universe, including production and QuantLab research. The classifier uses normalized competition and team metadata and recognizes common localized women\'s-football markers plus women-only competition names such as NWSL, WSL, Liga F, WE League, Damallsvenskan, Toppserien and Kvindeliga.
+Exclude women's football from the entire QuantBet football universe, including production and QuantLab research. The classifier uses normalized competition and team metadata and recognizes common localized women's-football markers plus women-only competition names such as NWSL, WSL, Liga F, WE League, Damallsvenskan, Toppserien and Kvindeliga.
 
 The exclusion is a hard gate before fixture-specific odds, context, standings or statistics acquisition. Global date-shard fixture discovery remains provider-wide and is filtered locally.
 
