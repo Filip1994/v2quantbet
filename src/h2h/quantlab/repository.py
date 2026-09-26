@@ -175,6 +175,16 @@ class PostgreSQLQuantLabRepository:
             )
         )
 
+    def market_labs_for_fixture(self, fixture_id: str) -> frozenset[str]:
+        """Return lab owners for persisted markets on one fixture."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT lab_owner FROM quantlab_market_observations "
+                "WHERE fixture_id = %s",
+                (fixture_id,),
+            )
+            return frozenset(str(row[0]) for row in cursor.fetchall())
+
     def total_market_pairs(
         self,
         fixture_id: str,
