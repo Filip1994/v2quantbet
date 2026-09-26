@@ -301,7 +301,30 @@ class QuantLabDashboardService:
                     "QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false"
                 ).strip().casefold()
                 authority = authority_raw in {"1", "true", "yes", "on"}
-                authority_text = "ON" if authority else "OFF"
+                authority_text = "REQUESTED" if authority else "OFF"
+                validation = contract.get("validation")
+                validation = validation if isinstance(validation, dict) else {}
+                validation_status = str(validation.get("status") or "PENDING")
+                review_status = str(
+                    validation.get("authority_review_status") or "NOT_READY"
+                )
+                common_n = int(validation.get("common_evaluation_size") or 0)
+                comparison = validation.get("comparison")
+                comparison = comparison if isinstance(comparison, dict) else {}
+                ll_delta = comparison.get(
+                    "dc_plus_minus_control_exact_score_mean_log_likelihood"
+                )
+                rmse_delta = comparison.get(
+                    "dc_plus_minus_control_total_goals_rmse"
+                )
+                over_delta = comparison.get("dc_plus_minus_control_over25_brier")
+                btts_delta = comparison.get("dc_plus_minus_control_btts_brier")
+                validation_text = (
+                    f"validation={validation_status} · review={review_status} · "
+                    f"common n={common_n} · "
+                    f"ΔLL={_rate(ll_delta)} · ΔRMSE={_rate(rmse_delta)} · "
+                    f"ΔO2.5 Brier={_rate(over_delta)} · ΔBTTS Brier={_rate(btts_delta)}"
+                )
                 goal_contract_html = (
                     '<section class="table-shell context-table">'
                     '<div class="table-title"><b>DC+ model contract / active variables</b>'
@@ -314,6 +337,7 @@ class QuantLabDashboardService:
                     f'history n={int(contract.get("history_match_count") or 0)} · '
                     f'ρ={_rate(contract.get("rho"))} · '
                     f'policy={escape(PICK_POLICY_VERSION)}</small>'
+                    f'<small>{escape(validation_text)}</small>'
                     '</div>'
                     '<div class="table"><table><thead><tr>'
                     '<th>Contract block</th><th>Status</th><th>Implemented</th>'
@@ -334,7 +358,6 @@ class QuantLabDashboardService:
                     "away_team": item.get("away_team"),
                 }
                 goal_allowed = goal_scope(**scope).allowed
-                context_allowed = card_corner_scope(**scope).allowed
                 decision = str(item.get("decision") or "WAITING")
                 reason = str(item.get("reason") or "NO_DECISION_YET")
                 decision_class = (
@@ -357,7 +380,6 @@ class QuantLabDashboardService:
                     "<tr>"
                     f'<td class="match"><b>{match}</b><small>{escape(str(item.get("competition_name") or "—"))} · {_time(item.get("kickoff_at"))}</small></td>'
                     f'<td>{"YES" if goal_allowed else "NO"}</td>'
-                    f'<td>{"YES" if context_allowed else "NO"}</td>'
                     f'<td>{_time(item.get("market_captured_at"))}</td>'
                     f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
                     f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
@@ -367,7 +389,7 @@ class QuantLabDashboardService:
                 )
             if not rendered_pipeline:
                 rendered_pipeline = (
-                    '<tr><td class="empty" colspan="8">'
+                    '<tr><td class="empty" colspan="7">'
                     'No upcoming QuantLab fixtures are stored in the current lookahead window.'
                     "</td></tr>"
                 )
@@ -376,9 +398,8 @@ class QuantLabDashboardService:
                 '<div class="table-title"><b>Upcoming fixture / GoalLab decision pipeline</b>'
                 f'<span>{len(pipeline_rows)} fixtures</span></div>'
                 '<div class="table"><table><thead><tr>'
-                '<th>Match</th><th>Goal scope</th><th>Card/Corner scope</th>'
-                '<th>Last odds capture</th><th>Decision</th><th>Model</th>'
-                '<th>Candidate</th><th>Edge / EV</th>'
+                '<th>Match</th><th>Goal scope</th><th>Last odds capture</th>'
+                '<th>Decision</th><th>Model</th><th>Candidate</th><th>Edge / EV</th>'
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
