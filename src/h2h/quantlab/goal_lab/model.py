@@ -26,6 +26,7 @@ from scipy.special import gammaln
 from scipy.stats import poisson
 
 from h2h.quant.dixon_coles import dixon_coles_tau
+from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
 
 FEATURE_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1"
@@ -86,9 +87,9 @@ CONTRACT_COVERAGE_V1 = {
         "pending": [],
     },
     "K_STANDINGS_HISTORICAL": {
-        "status": "PENDING_ACQUISITION",
-        "implemented": [],
-        "pending": list(range(151, 172)),
+        "status": "FULL",
+        "implemented": list(range(151, 172)),
+        "pending": [],
     },
     "L_INJURY_SUSPENSION": {
         "status": "PENDING_ACQUISITION",
@@ -118,9 +119,9 @@ CONTRACT_COVERAGE_V1 = {
     },
     "R_MATCHUP_INTERACTIONS": {
         "status": "PARTIAL",
-        "implemented": list(range(260, 270)),
-        "pending": list(range(270, 275)),
-        "pending_reason": "availability/table-pressure interactions require pending blocks",
+        "implemented": [*range(260, 270), 274],
+        "pending": list(range(270, 274)),
+        "pending_reason": "availability interactions require injury/lineup blocks",
     },
     "OPTIONAL_MARKET_AWARE": {
         "status": "SEPARATE_MODEL_ONLY",
@@ -133,10 +134,9 @@ CONTRACT_COVERAGE_V1 = {
         "pending": list(range(287, 298)),
     },
     "MISSINGNESS": {
-        "status": "PARTIAL",
-        "implemented": [298, 299, 300, 301, 302, 303, 305],
-        "pending": [304],
-        "pending_reason": "source ages are retained in provenance rather than one scalar feature",
+        "status": "FULL",
+        "implemented": list(range(298, 306)),
+        "pending": [],
     },
 }
 
@@ -874,6 +874,7 @@ def _feature_map(
     target_kickoff: datetime,
     target_season: int,
     target_league_id: int,
+    standings_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     home = _team_feature_map(
         histories.get(home_id, []),
@@ -890,6 +891,11 @@ def _feature_map(
         target_season=target_season,
     )
     features = {**home, **away, **_h2h_features(pairs, home_id, away_id, target_kickoff)}
+    if standings_features:
+        features.update(standings_features)
+    else:
+        features["standings_coverage_flag"] = 0.0
+        features["standings_snapshot_age_days"] = float("nan")
     league = _league_season_context(
         histories, league_id=target_league_id, season=target_season
     )
@@ -1105,7 +1111,6 @@ def _feature_map(
     features["lineup_coverage_flag"] = 0.0
     features["injury_coverage_flag"] = 0.0
     features["player_stats_coverage_flag"] = 0.0
-    features["standings_coverage_flag"] = 0.0
     return features
 
 
@@ -1206,6 +1211,21 @@ def _build_training(
         away_history = histories.setdefault(away_id, [])
 
         if len(home_history) >= MIN_TEAM_HISTORY and len(away_history) >= MIN_TEAM_HISTORY:
+            standings_payload = row.get("standings_payload")
+            if isinstance(standings_payload, str):
+                standings_payload = json.loads(standings_payload)
+            standings_features, _standings_meta = build_goal_standings_features(
+                standings_payload if isinstance(standings_payload, dict) else None,
+                home_team_id=home_id,
+                away_team_id=away_id,
+                competition_name=str(row.get("competition_name") or ""),
+                available_at=(
+                    row.get("standings_available_at")
+                    if isinstance(row.get("standings_available_at"), datetime)
+                    else None
+                ),
+                decision_at=kickoff,
+            )
             feature_rows.append(
                 _feature_map(
                     histories,
@@ -1215,6 +1235,7 @@ def _build_training(
                     target_kickoff=kickoff,
                     target_season=int(row["season"]),
                     target_league_id=league_id,
+                    standings_features=standings_features,
                 )
             )
             home_targets.append(float(home_goals))
@@ -1757,6 +1778,19 @@ class GoalStructuralModelService:
             )
 
         kickoff = kickoff.astimezone(UTC)
+        standings = self._repository.latest_standings_before(
+            league_id,
+            int(fixture["season"]),
+            decision_at=decision_at.astimezone(UTC),
+        )
+        standings_features, standings_meta = build_goal_standings_features(
+            None if standings is None else standings.get("raw_payload"),
+            home_team_id=home_id,
+            away_team_id=away_id,
+            competition_name=str(fixture.get("competition_name") or ""),
+            available_at=None if standings is None else standings.get("available_at"),
+            decision_at=decision_at.astimezone(UTC),
+        )
         raw_map = _feature_map(
             self._histories,
             self._pairs,
@@ -1765,6 +1799,7 @@ class GoalStructuralModelService:
             target_kickoff=kickoff,
             target_season=int(fixture["season"]),
             target_league_id=league_id,
+            standings_features=standings_features,
         )
         model_feature_names = tuple(params["model_feature_names"])
         base_feature_names = tuple(params["base_feature_names"])
@@ -1816,6 +1851,14 @@ class GoalStructuralModelService:
                 "source_provenance": _feature_provenance(
                     self._histories, home_id=home_id, away_id=away_id
                 ),
+                "standings_provenance": {
+                    **standings_meta,
+                    "standings_snapshot_id": (
+                        None
+                        if standings is None
+                        else standings.get("standings_snapshot_id")
+                    ),
+                },
                 "home_history_size": len(home_history),
                 "away_history_size": len(away_history),
                 "league_id": league_id,
