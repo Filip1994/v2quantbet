@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from statistics import fmean
-from typing import Any, Iterable
+from typing import Any
 
 from h2h.quantlab.scope import card_corner_scope
 
