@@ -301,6 +301,67 @@ class QuantLabDashboardService:
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
+        count_pipeline_html = ""
+        if lab_key in {"corner", "card"}:
+            pipeline_rows = self._repository.list_count_fixture_status(
+                lab,
+                now=datetime.now(UTC),
+            )
+            rendered_pipeline = ""
+            for item in pipeline_rows:
+                scope = {
+                    "country": item.get("country"),
+                    "competition_name": item.get("competition_name"),
+                    "competition_type": item.get("competition_type"),
+                    "home_team": item.get("home_team"),
+                    "away_team": item.get("away_team"),
+                }
+                allowed = card_corner_scope(**scope).allowed
+                decision = str(item.get("decision") or "WAITING")
+                reason = str(item.get("reason") or "NO_DECISION_YET")
+                decision_class = (
+                    "result-win" if decision == "PICK"
+                    else "result-pending" if decision == "WAITING"
+                    else "result-void"
+                )
+                match = (
+                    f'{escape(str(item.get("home_team") or "?"))} – '
+                    f'{escape(str(item.get("away_team") or "?"))}'
+                )
+                candidate = "—"
+                if item.get("market_key"):
+                    candidate = (
+                        f'{escape(str(item.get("market_key")))} '
+                        f'{escape(str(item.get("selection") or ""))} '
+                        f'@ {_odd(item.get("odds"))}'
+                    )
+                rendered_pipeline += (
+                    "<tr>"
+                    f'<td class="match"><b>{match}</b><small>{escape(str(item.get("competition_name") or "—"))} · {_time(item.get("kickoff_at"))}</small></td>'
+                    f'<td>{"YES" if allowed else "NO"}</td>'
+                    f'<td>{_time(item.get("market_captured_at"))}</td>'
+                    f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
+                    f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
+                    f'<td>{candidate}</td>'
+                    f'<td>{_pct(item.get("edge"))}<small>{_pct(item.get("expected_value"))} EV</small></td>'
+                    "</tr>"
+                )
+            if not rendered_pipeline:
+                rendered_pipeline = (
+                    '<tr><td class="empty" colspan="7">'
+                    f'No upcoming {escape(title)} fixtures are stored in the current lookahead window.'
+                    "</td></tr>"
+                )
+            count_pipeline_html = (
+                '<section class="table-shell context-table">'
+                f'<div class="table-title"><b>Upcoming fixture / {escape(title)} decision pipeline</b>'
+                f'<span>{len(pipeline_rows)} fixtures</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Match</th><th>Top-10 scope</th><th>Last odds capture</th>'
+                '<th>Decision</th><th>Model</th><th>Candidate</th><th>Edge / EV</th>'
+                f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
+            )
+
         card_context_html = ""
         if lab_key == "card":
             context_rows = self._repository.list_card_features()
@@ -396,6 +457,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
 {goal_pipeline_html}
+{count_pipeline_html}
 {card_context_html}
 <section class="table-shell"><div class="table-title"><b>{escape(title)} shadow ledger</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
 <th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
