@@ -274,7 +274,7 @@ def build_goal_model_validation(
     ) = _build_training(history)
 
     n = len(feature_rows)
-    holdout_n = max(1, int(round(n * HOLDOUT_FRACTION))) if n else 0
+    holdout_n = max(1, round(n * HOLDOUT_FRACTION)) if n else 0
     train_n = max(0, n - holdout_n)
     contract_snapshot = {
         "feature_version": contract.get("feature_version"),
