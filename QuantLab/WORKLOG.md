@@ -2,11 +2,11 @@
 
 This is the canonical chronological record of QuantLab implementation work.
 
-## 2026-09-26 — Global women\'s football hard stop
+## 2026-09-26 — Global women's football hard stop
 
 **Owner:** QuantBet core + QuantLab
 
-- Added canonical women\'s-football detection from normalized competition/team metadata.
+- Added canonical women's-football detection from normalized competition/team metadata.
 - Production Phase-I scope rejects identified women fixtures with `EXCLUDED_WOMENS_FOOTBALL`.
 - QuantLab date-shard parsing drops women fixtures before research persistence.
 - GoalLab moved to `GOAL_SCOPE_V2`; CardLab/CornerLab moved to `CARDCORNER_MARKET_DRIVEN_V4`.
