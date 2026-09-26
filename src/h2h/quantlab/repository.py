@@ -56,6 +56,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
+            "quantlab_statistics_captures",
             "quantlab_standings_snapshots",
             "quantlab_card_feature_snapshots",
         )
@@ -603,8 +604,15 @@ class PostgreSQLQuantLabRepository:
         return len(rows)
 
     def completed_for_context_backfill(
-        self, *, before: datetime, limit: int = 80
+        self,
+        *,
+        before: datetime,
+        limit: int = 80,
+        statistics_retry_seconds: int = 7 * 24 * 60 * 60,
     ) -> tuple[dict[str, Any], ...]:
+        if statistics_retry_seconds <= 0:
+            raise ValueError("statistics_retry_seconds must be positive")
+        capture_cutoff = before - timedelta(seconds=statistics_retry_seconds)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT f.fixture_id, f.provider_fixture_id::BIGINT AS provider_fixture_id, "
@@ -627,8 +635,10 @@ class PostgreSQLQuantLabRepository:
                 "AND result.result_classification = 'PLAYED_SETTLEABLE' "
                 "AND NOT EXISTS (SELECT 1 FROM quantlab_match_statistics_observations s "
                 "                WHERE s.fixture_id = f.fixture_id) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures c "
+                "                WHERE c.fixture_id = f.fixture_id AND c.captured_at > %s) "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
-                (before, limit),
+                (before, capture_cutoff, limit),
             )
             production = _row_dicts(cursor)
             cursor.execute(
@@ -647,8 +657,10 @@ class PostgreSQLQuantLabRepository:
                 "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
                 "AND NOT EXISTS (SELECT 1 FROM quantlab_match_statistics_observations s "
                 "                WHERE s.fixture_id = f.fixture_id) "
+                "AND NOT EXISTS (SELECT 1 FROM quantlab_statistics_captures c "
+                "                WHERE c.fixture_id = f.fixture_id AND c.captured_at > %s) "
                 "ORDER BY latest.kickoff_at DESC LIMIT %s",
-                (before, limit),
+                (before, capture_cutoff, limit),
             )
             discovered = _row_dicts(cursor)
 
@@ -711,6 +723,50 @@ class PostgreSQLQuantLabRepository:
                 (fixture_id,),
             )
             return bool(cursor.fetchone()[0])
+
+    def save_statistics_capture(
+        self,
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        captured_at: datetime,
+        status: str,
+        response_count: int,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
+            raise ValueError("statistics capture status must be AVAILABLE or UNAVAILABLE")
+        if response_count < 0:
+            raise ValueError("response_count must be non-negative")
+        capture_id = _identifier(
+            "quantlab-stats-capture-v1:",
+            {
+                "fixture_id": fixture_id,
+                "provider_fixture_id": provider_fixture_id,
+                "captured_at": captured_at.isoformat(),
+                "status": status,
+                "response_count": response_count,
+                "raw_payload": raw_payload,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_statistics_captures ("
+                "statistics_capture_id, fixture_id, provider_fixture_id, captured_at, "
+                "status, response_count, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    captured_at,
+                    status,
+                    response_count,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
 
     def save_market_capture(
         self,
