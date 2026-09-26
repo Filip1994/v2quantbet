@@ -142,13 +142,20 @@ def main() -> None:
     )
     goal_control_engine = GoalLabShadowPickEngine(repository, model_loader)
     goal_pick_authority = _boolean("QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false")
+    approved_goal_model_version = (
+        os.getenv("QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION", "").strip() or None
+    )
     goal_structural_engine = GoalLabStructuralShadowEngine(
         repository,
-        policy=StructuralGoalPolicy(pick_authority=goal_pick_authority),
+        policy=StructuralGoalPolicy(
+            pick_authority=goal_pick_authority,
+            approved_model_version=approved_goal_model_version,
+        ),
     )
     LOGGER.info(
-        "GoalLab DC+ pick authority=%s policy=%s",
+        "GoalLab DC+ pick authority=%s approved_model=%s policy=%s",
         goal_pick_authority,
+        approved_goal_model_version,
         PICK_POLICY_VERSION,
     )
     goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
