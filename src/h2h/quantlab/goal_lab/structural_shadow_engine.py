@@ -182,6 +182,14 @@ class GoalLabStructuralShadowEngine:
             and validation["leakage_audit"].get("status") == "PASS"
         )
         effective_pick_authority = self._policy.pick_authority and validation_ready
+        canonical_pick_frozen = (
+            self._repository.goal_pick_exists(
+                str(fixture["fixture_id"]),
+                pick_policy_version=self._policy.pick_policy_version,
+            )
+            if effective_pick_authority
+            else False
+        )
         probabilities = estimate.market_probabilities()
         pairs = tuple(
             self._repository.goal_market_pairs(str(fixture["fixture_id"]), decision_at=now)
@@ -321,9 +329,11 @@ class GoalLabStructuralShadowEngine:
                 if winners.get(key) is not item:
                     reason = "BETTER_PRICE_AVAILABLE"
                 elif item is canonical:
-                    if effective_pick_authority:
+                    if effective_pick_authority and not canonical_pick_frozen:
                         reason = "CANONICAL_FIXTURE_VALUE_PICK"
                         decision_outcome = "PICK"
+                    elif canonical_pick_frozen:
+                        reason = "CANONICAL_PICK_ALREADY_FROZEN"
                     elif self._policy.pick_authority:
                         reason = "CANONICAL_FIXTURE_AWAITING_VALIDATION"
                     else:
@@ -395,6 +405,7 @@ class GoalLabStructuralShadowEngine:
                     "pick_authority_requested": self._policy.pick_authority,
                     "shadow_pick_authority": effective_pick_authority,
                     "validation_ready": validation_ready,
+                    "canonical_pick_frozen": canonical_pick_frozen,
                     "validation_status": (
                         None if validation is None else validation.get("status")
                     ),
