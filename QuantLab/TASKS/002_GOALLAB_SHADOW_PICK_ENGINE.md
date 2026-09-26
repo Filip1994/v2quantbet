@@ -55,7 +55,8 @@ Default controls:
 
 When more than one bookmaker qualifies for the same market/selection/evidence cycle,
 only the highest-odds quote is written as a PICK. Other qualifying books are PASS with
-reason BETTER_PRICE_AVAILABLE.
+reason BETTER_PRICE_AVAILABLE. The shadow-bet identity is locked to one
+fixture/market/selection/line position so later evidence refreshes cannot duplicate stake.
 
 These are experiment thresholds, not production registration thresholds.
 
