@@ -48,10 +48,30 @@ CARD rows are persisted only when the fixture passes CARDCORNER_TOP10_LEAGUES_V2
 UNCLASSIFIED rows are retained only on Top-10 fixtures so unknown card/corner-like
 markets cannot leak into broad GoalLab-only storage.
 
+## Shadow Pick Engine V1
+
+Task 003 adds `CARDLAB_SHADOW_POLICY_V1` and `CARD_REFEREE_POISSON_V1`.
+
+The numeric Poisson mean is the timestamp-safe `referee_card_rate`. A fixture is
+eligible for a probability only when the frozen CardLab feature snapshot has at least
+five referee card observations, at least five referee foul observations, table pressure
+and match importance.
+
+Rivalry, foul rate, pressure and importance are persisted in the decision evidence.
+V1 deliberately does not invent unvalidated coefficients that multiply these context
+features into the referee mean; they are context-quality gates/audit inputs until a
+timestamp-safe labeled calibration sample exists.
+
+Only complete two-sided half-count total-card markets are considered. Booking points,
+yellow-only, red-only, team-specific, handicap and half markets are rejected.
+
+Default value gates are edge >= 5 percentage points, EV >= 5%, odds 1.45-3.50, quote
+age <= 13 hours and at least 15 minutes to kickoff.
+
 ## Settlement warning
 
 Provider markets such as cards, bookings and booking points can have different settlement
-semantics. Raw provider bet ID/name/selection and line are preserved. No generic cards
-settlement rule is assumed.
+semantics. Raw provider bet ID/name/selection and line are preserved. Task 003 therefore
+uses a conservative total-card market-name gate and keeps the engine shadow-only.
 
 QuantLab is shadow-only and does not write production picks, bankroll or model state.
