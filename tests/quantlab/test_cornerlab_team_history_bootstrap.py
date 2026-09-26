@@ -132,6 +132,9 @@ class Repo:
         self.team_captures.append(kwargs)
         return "capture"
 
+    def recent_opponents_for_teams(self, _team_ids, **_kwargs):
+        return (101, 102, 111, 112)
+
     def completed_for_team_statistics(self, _team_ids, **_kwargs):
         return self.historical
 
@@ -176,17 +179,19 @@ def test_corner_team_history_bootstrap_targets_only_corner_market_teams() -> Non
         settings=QuantLabRuntimeSettings(
             corner_team_history_last=12,
             corner_team_history_teams_per_cycle=40,
+            corner_opponent_history_teams_per_cycle=2,
             corner_team_statistics_per_cycle=4,
         ),
         clock=lambda: NOW,
     )
 
-    discoveries, stats = runtime._bootstrap_corner_team_history(NOW)
+    discoveries, opponent_discoveries, stats = runtime._bootstrap_corner_team_history(NOW)
 
     assert discoveries == 2
-    assert provider.team_calls == [(10, 12), (11, 12)]
-    assert len(repo.team_captures) == 2
-    assert len(repo.fixture_observations) == 6
+    assert opponent_discoveries == 2
+    assert provider.team_calls == [(10, 12), (11, 12), (101, 12), (102, 12)]
+    assert len(repo.team_captures) == 4
+    assert len(repo.fixture_observations) == 12
     assert stats == 4
     assert len(provider.stats_calls) == 4
     assert len(repo.statistics_captures) == 4
@@ -198,7 +203,7 @@ def test_corner_team_history_bootstrap_makes_zero_calls_without_corner_market() 
     provider = Provider(repo)
     runtime = QuantLabRuntime(repo, provider, clock=lambda: NOW)
 
-    assert runtime._bootstrap_corner_team_history(NOW) == (0, 0)
+    assert runtime._bootstrap_corner_team_history(NOW) == (0, 0, 0)
     assert provider.team_calls == []
     assert provider.stats_calls == []
 
@@ -207,6 +212,7 @@ def test_corner_team_history_defaults_are_bounded() -> None:
     settings = QuantLabRuntimeSettings()
 
     assert settings.corner_team_history_last == 12
-    assert settings.corner_team_history_teams_per_cycle == 40
-    assert settings.corner_team_statistics_per_cycle == 120
+    assert settings.corner_team_history_teams_per_cycle == 20
+    assert settings.corner_opponent_history_teams_per_cycle == 100
+    assert settings.corner_team_statistics_per_cycle == 500
     assert settings.corner_team_history_refresh_seconds == 21600
