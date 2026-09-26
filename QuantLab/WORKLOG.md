@@ -246,3 +246,69 @@ logs, variables and metrics reads.
 No production Dixon-Coles implementation, production thresholds, production market
 support, pick registration, bankroll/staking logic or Research Board runtime was changed
 for Task 001.
+
+
+## 2026-09-26 — Scope coverage correction: independent fixture discovery
+
+**Owner:** QuantLab core
+
+### Problem found after initial verification
+
+The original Task 001 runtime correctly applied GOAL_SCOPE_V1 and
+CARDCORNER_STRONG_LEAGUES_V1 before fixture-specific QuantLab calls, but it sourced the
+upcoming fixture list from production `fixtures` / `fixture_observations`.
+
+Production discovery intentionally applies a narrower Phase-I universe, including Asia,
+cup and lower-tier exclusions. Therefore GoalLab could not actually observe some fixtures
+that its own broader scope intended to admit. The local scope policy was correct, but the
+upstream candidate inventory was too narrow.
+
+### Correction
+
+1. Added migration `026_quantlab_fixture_universe.sql`.
+2. Added QuantLab-owned fixture identity table `quantlab_fixtures`.
+3. Added append-only `quantlab_fixture_observations`.
+4. Added append-only `quantlab_fixture_discovery_shards` so successful empty shards are
+   cached and do not trigger repeated provider calls.
+5. Existing QuantLab fixture foreign keys, including the shadow ledger, now target
+   `quantlab_fixtures` rather than production `fixtures`.
+6. Migration 026 seeds QuantLab fixture identity from existing API-Football production
+   fixtures so previously collected QuantLab rows keep valid referential integrity.
+7. Added global QuantLab date-shard acquisition through
+   `/fixtures?date=<YYYY-MM-DD>&timezone=UTC`.
+8. Date shards refresh every six hours by default and include one previous UTC day so
+   recently completed fixtures can acquire final provider status for CardLab history.
+9. The global shard is stored before lab filtering. GOAL_SCOPE_V1 and
+   CARDCORNER_STRONG_LEAGUES_V1 are then applied locally before any fixture-specific
+   `/odds`, `/fixtures?id`, `/fixtures/statistics` or `/standings` request.
+10. Production fixture/result tables remain read-only historical fallback for legacy
+    CardLab backfill; they no longer define the QuantLab upcoming universe.
+11. Goal youth matching was hardened to U5-U23 plus youth/academy/reserve/amateur/
+    junior/olympic aliases. Korea Republic / Republic of Korea were added to the explicit
+    Far East aliases.
+
+### API-cost impact
+
+Global discovery is one API-Football call per UTC date shard, not one call per league.
+With the default 36-hour lookahead, one-day lookback and six-hour refresh, the steady-state
+discovery cost is bounded to only a few date-shard calls per refresh cycle. Fixture-specific
+calls still occur only after the local lab scope gate.
+
+The existing hard QuantLab ceiling of 1,000/day and shared-provider production reserve
+remain unchanged.
+
+### Tests added
+
+- global fixture parser retains fixtures before scope filtering;
+- runtime proves Poland III Liga can enter GoalLab while Japan and youth fixtures consume
+  zero fixture-specific odds calls;
+- fixture discovery persistence writes only `quantlab_*` tables;
+- broader youth aliases and Korea Republic are rejected by GOAL_SCOPE_V1;
+- integration latest-migration expectations now include migration 026.
+
+### Production impact
+
+**NONE.**
+
+No production fixture discovery, model, odds adapter, pick registration, bankroll,
+staking, Research Board or scheduler runtime was changed by this correction.
