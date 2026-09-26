@@ -271,7 +271,10 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
     repo = Repo()
     engine = GoalLabStructuralShadowEngine(
         repo,
-        policy=StructuralGoalPolicy(pick_authority=True),
+        policy=StructuralGoalPolicy(
+            pick_authority=True,
+            approved_model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "c" * 64,
+        ),
     )
     engine._model = Model()
 
