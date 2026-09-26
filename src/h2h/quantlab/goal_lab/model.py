@@ -26,6 +26,7 @@ from scipy.special import gammaln
 from scipy.stats import poisson
 
 from h2h.quant.dixon_coles import dixon_coles_tau
+from h2h.quantlab.goal_lab.coaches import build_goal_manager_features
 from h2h.quantlab.goal_lab.injuries import build_goal_injury_features
 from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
@@ -109,9 +110,9 @@ CONTRACT_COVERAGE_V1 = {
         "pending": list(range(216, 233)),
     },
     "O_MANAGER_CONTEXT": {
-        "status": "PENDING_ACQUISITION",
-        "implemented": [],
-        "pending": list(range(233, 241)),
+        "status": "FULL",
+        "implemented": list(range(233, 241)),
+        "pending": [],
     },
     "P_H2H": {"status": "FULL", "implemented": list(range(241, 251)), "pending": []},
     "Q_OPPONENT_ADJUSTED_FORM": {
@@ -878,6 +879,7 @@ def _feature_map(
     target_league_id: int,
     standings_features: dict[str, float] | None = None,
     injury_features: dict[str, float] | None = None,
+    manager_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     home = _team_feature_map(
         histories.get(home_id, []),
@@ -902,7 +904,12 @@ def _feature_map(
     if injury_features:
         features.update(injury_features)
     else:
-            features["injury_snapshot_age_days"] = float("nan")
+        features["injury_coverage_flag"] = 0.0
+        features["injury_snapshot_age_days"] = float("nan")
+    if manager_features:
+        features.update(manager_features)
+    else:
+        features["manager_coverage_flag"] = 0.0
     league = _league_season_context(
         histories, league_id=target_league_id, season=target_season
     )
@@ -1256,6 +1263,32 @@ def _build_training(
                 away_team_id=away_id,
                 decision_at=kickoff,
             )
+
+            def coach_capture(side: str) -> dict[str, Any] | None:
+                capture_id = row.get(f"{side}_coach_capture_id")
+                if capture_id is None:
+                    return None
+                payload = row.get(f"{side}_coach_payload")
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                return {
+                    "coach_capture_id": capture_id,
+                    "available_at": row.get(f"{side}_coach_available_at"),
+                    "status": row.get(f"{side}_coach_status"),
+                    "reason": row.get(f"{side}_coach_reason"),
+                    "source": "api-football:coachs",
+                    "raw_payload": payload if isinstance(payload, dict) else {},
+                }
+
+            manager_features, _manager_meta = build_goal_manager_features(
+                coach_capture("home"),
+                coach_capture("away"),
+                home_team_id=home_id,
+                away_team_id=away_id,
+                home_match_dates=[item.kickoff_at for item in home_history],
+                away_match_dates=[item.kickoff_at for item in away_history],
+                decision_at=kickoff,
+            )
             feature_rows.append(
                 _feature_map(
                     histories,
@@ -1267,6 +1300,7 @@ def _build_training(
                     target_league_id=league_id,
                     standings_features=standings_features,
                     injury_features=injury_features,
+                    manager_features=manager_features,
                 )
             )
             home_targets.append(float(home_goals))
@@ -1832,6 +1866,23 @@ class GoalStructuralModelService:
             away_team_id=away_id,
             decision_at=decision_at.astimezone(UTC),
         )
+        home_coach_capture = self._repository.latest_goal_coach_capture(
+            home_id,
+            decision_at=decision_at.astimezone(UTC),
+        )
+        away_coach_capture = self._repository.latest_goal_coach_capture(
+            away_id,
+            decision_at=decision_at.astimezone(UTC),
+        )
+        manager_features, manager_meta = build_goal_manager_features(
+            home_coach_capture,
+            away_coach_capture,
+            home_team_id=home_id,
+            away_team_id=away_id,
+            home_match_dates=[item.kickoff_at for item in home_history],
+            away_match_dates=[item.kickoff_at for item in away_history],
+            decision_at=decision_at.astimezone(UTC),
+        )
         raw_map = _feature_map(
             self._histories,
             self._pairs,
@@ -1842,6 +1893,7 @@ class GoalStructuralModelService:
             target_league_id=league_id,
             standings_features=standings_features,
             injury_features=injury_features,
+            manager_features=manager_features,
         )
         model_feature_names = tuple(params["model_feature_names"])
         base_feature_names = tuple(params["base_feature_names"])
@@ -1907,6 +1959,19 @@ class GoalStructuralModelService:
                         None
                         if injury_capture is None
                         else injury_capture.get("injury_capture_id")
+                    ),
+                },
+                "manager_provenance": {
+                    **manager_meta,
+                    "home_coach_capture_id": (
+                        None
+                        if home_coach_capture is None
+                        else home_coach_capture.get("coach_capture_id")
+                    ),
+                    "away_coach_capture_id": (
+                        None
+                        if away_coach_capture is None
+                        else away_coach_capture.get("coach_capture_id")
                     ),
                 },
                 "home_history_size": len(home_history),
