@@ -56,6 +56,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_model_versions",
             "quantlab_goal_feature_snapshots",
             "quantlab_goal_injury_captures",
+            "quantlab_goal_lineup_captures",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -1079,6 +1080,105 @@ class PostgreSQLQuantLabRepository:
             "available_at": row[1],
             "status": row[2],
             "response_item_count": int(row[3]),
+            "reason": row[4],
+            "source": row[5],
+            "raw_payload": payload,
+        }
+
+    def goal_lineup_capture_due(
+        self,
+        fixture_id: str,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        if refresh_seconds <= 0:
+            raise ValueError("refresh_seconds must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(available_at) FROM quantlab_goal_lineup_captures "
+                "WHERE fixture_id = %s",
+                (fixture_id,),
+            )
+            row = cursor.fetchone()
+        last = None if row is None else row[0]
+        return last is None or last <= now - timedelta(seconds=refresh_seconds)
+
+    def save_goal_lineup_capture(
+        self,
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        available_at: datetime,
+        status: str,
+        response_team_count: int,
+        reason: str | None,
+        source: str,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
+            raise ValueError("lineup capture status must be AVAILABLE or UNAVAILABLE")
+        if source not in {"api-football:fixtures/lineups", "api-football:leagues"}:
+            raise ValueError("unsupported lineup capture source")
+        if provider_fixture_id <= 0 or response_team_count < 0:
+            raise ValueError("invalid lineup capture")
+        capture_id = _identifier(
+            "quantlab-goal-lineups-v1:",
+            {
+                "fixture_id": fixture_id,
+                "provider_fixture_id": provider_fixture_id,
+                "available_at": available_at.isoformat(),
+                "status": status,
+                "response_team_count": response_team_count,
+                "reason": reason,
+                "source": source,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_lineup_captures ("
+                "lineup_capture_id, fixture_id, provider_fixture_id, available_at, "
+                "status, response_team_count, reason, source, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    available_at,
+                    status,
+                    response_team_count,
+                    reason,
+                    source,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
+
+    def latest_goal_lineup_capture(
+        self,
+        fixture_id: str,
+        *,
+        decision_at: datetime,
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT lineup_capture_id, available_at, status, response_team_count, "
+                "reason, source, raw_payload "
+                "FROM quantlab_goal_lineup_captures "
+                "WHERE fixture_id = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, lineup_capture_id DESC LIMIT 1",
+                (fixture_id, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[6]) if isinstance(row[6], str) else row[6]
+        return {
+            "lineup_capture_id": row[0],
+            "available_at": row[1],
+            "status": row[2],
+            "response_team_count": int(row[3]),
             "reason": row[4],
             "source": row[5],
             "raw_payload": payload,
