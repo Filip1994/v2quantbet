@@ -11,6 +11,7 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
 from h2h.quantlab.market_collector import QuantLabMarketCollector
 from h2h.quantlab.scope import card_corner_scope, goal_scope
 
@@ -21,7 +22,9 @@ LOGGER = logging.getLogger("quantbet.quantlab")
 @dataclass(frozen=True, slots=True)
 class QuantLabRuntimeSettings:
     lookahead_hours: int = 36
+    discovery_lookback_days: int = 1
     fixture_limit: int = 250
+    fixture_discovery_refresh_seconds: int = 21600
     market_refresh_seconds: int = 900
     context_refresh_seconds: int = 21600
     standings_refresh_seconds: int = 1800
@@ -32,6 +35,7 @@ class QuantLabRuntimeSettings:
         for name, value in (
             ("lookahead_hours", self.lookahead_hours),
             ("fixture_limit", self.fixture_limit),
+            ("fixture_discovery_refresh_seconds", self.fixture_discovery_refresh_seconds),
             ("market_refresh_seconds", self.market_refresh_seconds),
             ("context_refresh_seconds", self.context_refresh_seconds),
             ("standings_refresh_seconds", self.standings_refresh_seconds),
@@ -39,12 +43,12 @@ class QuantLabRuntimeSettings:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
-        if (
-            isinstance(self.history_backfill_per_cycle, bool)
-            or not isinstance(self.history_backfill_per_cycle, int)
-            or self.history_backfill_per_cycle < 0
+        for name, value in (
+            ("discovery_lookback_days", self.discovery_lookback_days),
+            ("history_backfill_per_cycle", self.history_backfill_per_cycle),
         ):
-            raise ValueError("history_backfill_per_cycle must be non-negative")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be non-negative")
 
 
 class QuantLabRuntime:
@@ -90,6 +94,8 @@ class QuantLabRuntime:
         return self._repository.latest_context_before(fixture_id, decision_at=now)
 
     def _standings(self, fixture: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+        if fixture.get("season") is None:
+            return None
         league_id = int(fixture["league_id"])
         season = int(fixture["season"])
         latest = self._repository.latest_standings_before(
@@ -116,6 +122,38 @@ class QuantLabRuntime:
                 decision_at=now,
             )
         return latest
+
+    def _discover_fixtures(self, now: datetime) -> int:
+        first_day = now.date() - timedelta(days=self._settings.discovery_lookback_days)
+        last_day = (now + timedelta(hours=self._settings.lookahead_hours)).date()
+        day = first_day
+        discovered = 0
+        while day <= last_day:
+            if self._repository.fixture_discovery_due(
+                day,
+                now=now,
+                refresh_seconds=self._settings.fixture_discovery_refresh_seconds,
+            ):
+                try:
+                    payload = self._provider.fetch_fixtures_for_date(day)
+                    observations = parse_fixture_discovery_response(
+                        payload,
+                        captured_at=now,
+                    )
+                    discovered += self._repository.save_fixture_discovery(
+                        fixture_date=day,
+                        captured_at=now,
+                        observations=observations,
+                    )
+                except ApiBudgetExceededError:
+                    raise
+                except Exception:
+                    LOGGER.exception(
+                        "QuantLab fixture date-shard discovery failed",
+                        extra={"fixture_date": day.isoformat()},
+                    )
+            day += timedelta(days=1)
+        return discovered
 
     def _backfill_history(self, now: datetime) -> int:
         target = self._settings.history_backfill_per_cycle
@@ -230,8 +268,14 @@ class QuantLabRuntime:
 
     def run_once(self) -> dict[str, int]:
         now = self._clock().astimezone(UTC)
-        result = {"history_backfilled": 0, "market_fixtures": 0, "card_snapshots": 0}
+        result = {
+            "fixtures_discovered": 0,
+            "history_backfilled": 0,
+            "market_fixtures": 0,
+            "card_snapshots": 0,
+        }
         try:
+            result["fixtures_discovered"] = self._discover_fixtures(now)
             result["history_backfilled"] = self._backfill_history(now)
             market_fixtures, card_snapshots = self._collect_upcoming(now)
             result["market_fixtures"] = market_fixtures
