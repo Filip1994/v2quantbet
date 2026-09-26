@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import card_corner_scope, goal_scope
 
@@ -119,7 +120,10 @@ def _clv_text(ppm: int | None) -> str:
 def _drawdown(rows: tuple[dict[str, Any], ...]) -> int:
     chronological = sorted(
         (row for row in rows if row.get("pnl_minor") is not None),
-        key=lambda row: (row.get("settled_at") or row["decision_at"], row["shadow_bet_id"]),
+        key=lambda row: (
+            row.get("settled_at") or row["decision_at"],
+            row.get("goal_pick_id") or row.get("shadow_bet_id") or row["fixture_id"],
+        ),
     )
     equity = peak = 0
     max_drawdown = 0
@@ -149,7 +153,11 @@ class QuantLabDashboardService:
         lab: str,
         params: dict[str, list[str]],
     ) -> tuple[dict[str, Any], ...]:
-        rows = self._repository.list_bets(lab)
+        rows = (
+            self._repository.list_goal_picks()
+            if lab == "GOAL"
+            else self._repository.list_bets(lab)
+        )
         bookmaker = params.get("bookmaker", [""])[0].strip().casefold()
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
@@ -222,7 +230,15 @@ class QuantLabDashboardService:
                 f'<small>{escape(str(row.get("provider_bet_name") or "—"))}</small></td>'
                 f'<td>{escape(str(row.get("selection") or "—"))}</td>'
                 f"<td>{line}</td>"
-                f'<td>{escape(str(row.get("model_name") or "—"))}<small>{escape(str(row.get("model_version") or "—"))}</small></td>'
+                f'<td>{escape(str(row.get("model_name") or "—"))}'
+                f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                + (
+                    f'<small>λH {_rate(row.get("expected_home_goals"))} · '
+                    f'λA {_rate(row.get("expected_away_goals"))}</small>'
+                    if lab_key == "goal"
+                    else ""
+                )
+                + "</td>"
                 f"<td>{_pct(row.get('model_probability'))}</td>"
                 f"<td>{_odd(row.get('odds'))}</td>"
                 f"<td>{_pct(row.get('edge'))}</td>"
