@@ -87,6 +87,19 @@ def test_historical_holdout_is_chronological_and_scores_future_rows() -> None:
     assert all(0 <= item["brier"] <= 1 for item in lines)
     assert all(item["log_loss"] >= 0 for item in lines)
 
+    comparison = result["poisson_vs_nb2"]
+    assert comparison["status"] == "OK"
+    assert comparison["nb2_alpha"] > 0
+    assert comparison["nb2_size"] > 0
+    assert comparison["research_signal"] in {
+        "NB2_DISTRIBUTION_PROMISING",
+        "POISSON_DISTRIBUTION_PREFERRED",
+        "MIXED_DISTRIBUTION_SIGNAL",
+    }
+    assert len(comparison["line_comparison"]) == len(STANDARD_HALF_LINES)
+    assert isfinite(comparison["count_log_likelihood"]["poisson_mean"])
+    assert isfinite(comparison["count_log_likelihood"]["nb2_mean"])
+
 
 def test_historical_holdout_rejects_small_history() -> None:
     result = run_cornerlab_historical_holdout(_history_rows(70))
