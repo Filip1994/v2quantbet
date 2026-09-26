@@ -1177,6 +1177,14 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
+                "WITH stats AS ("
+                " SELECT DISTINCT ON (fixture_id) * "
+                " FROM quantlab_match_statistics_observations "
+                " WHERE available_at <= %s "
+                " AND home_corner_kicks IS NOT NULL "
+                " AND away_corner_kicks IS NOT NULL "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
                 "SELECT s.fixture_id, s.available_at, "
                 "COALESCE(q.latest_kickoff, p.latest_kickoff) AS kickoff_at, "
                 "COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) AS home_team_id, "
@@ -1192,7 +1200,7 @@ class PostgreSQLQuantLabRepository:
                 "s.home_total_passes, s.away_total_passes, "
                 "s.home_passes_accurate, s.away_passes_accurate, "
                 "s.home_pass_accuracy, s.away_pass_accuracy "
-                "FROM quantlab_match_statistics_observations s "
+                "FROM stats s "
                 "LEFT JOIN fixtures f ON f.fixture_id = s.fixture_id "
                 "LEFT JOIN LATERAL ("
                 " SELECT o.kickoff_at AS latest_kickoff, o.home_team_id, o.away_team_id, "
@@ -1208,9 +1216,6 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY o.observed_at DESC, o.fixture_observation_id DESC LIMIT 1"
                 ") p ON TRUE "
                 "WHERE COALESCE(q.latest_kickoff, p.latest_kickoff) < %s "
-                "AND s.available_at <= %s "
-                "AND s.home_corner_kicks IS NOT NULL "
-                "AND s.away_corner_kicks IS NOT NULL "
                 "AND COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) IS NOT NULL "
                 "AND COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) IS NOT NULL "
                 "ORDER BY COALESCE(q.latest_kickoff, p.latest_kickoff) DESC, s.available_at DESC "
