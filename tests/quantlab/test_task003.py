@@ -332,18 +332,6 @@ def test_collection_allows_lower_league_and_only_fetches_card_context_when_marke
         "country": "Sweden",
         "competition_name": "Division 2 - Norrland",
     }
-    top = {
-        **fixture(),
-        "fixture_id": "api-football:top",
-        "provider_fixture_id": 4002,
-        "league_id": 39,
-        "season": 2026,
-        "home_team_id": 12,
-        "away_team_id": 13,
-        "country": "England",
-        "competition_name": "Premier League",
-    }
-
     class QueueRepo:
         def __init__(self):
             self.limits = []
