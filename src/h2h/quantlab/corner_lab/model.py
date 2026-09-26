@@ -354,7 +354,7 @@ class CornerPressureModelService:
             self._fit_reason = "INSUFFICIENT_CORNER_MODEL_HISTORY"
             self._fit_details = {
                 "history_match_count": history_match_count,
-                "training_sample_size": int(len(y)),
+                "training_sample_size": len(y),
                 "minimum_training_examples": MIN_TRAINING_EXAMPLES,
             }
             return
@@ -378,7 +378,7 @@ class CornerPressureModelService:
         identity = {
             "feature_version": FEATURE_VERSION,
             "training_cutoff": now.isoformat(),
-            "training_sample_size": int(len(y)),
+            "training_sample_size": len(y),
             "history_match_count": history_match_count,
             "ridge_penalty": RIDGE_PENALTY,
             "coefficients": coefficients,
@@ -391,7 +391,7 @@ class CornerPressureModelService:
             trained_at=now,
             training_cutoff=now,
             feature_version=FEATURE_VERSION,
-            training_sample_size=int(len(y)),
+            training_sample_size=len(y),
             history_match_count=history_match_count,
             ridge_penalty=RIDGE_PENALTY,
             coefficients=coefficients,
@@ -412,7 +412,7 @@ class CornerPressureModelService:
         self._fit_reason = "MODEL_READY"
         self._fit_details = {
             "history_match_count": history_match_count,
-            "training_sample_size": int(len(y)),
+            "training_sample_size": len(y),
         }
 
     def estimate(
