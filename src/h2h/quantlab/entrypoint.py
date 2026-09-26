@@ -63,6 +63,12 @@ def main() -> None:
 
     budget = QuantLabRequestBudget(
         daily_limit=api_daily_limit,
+        shared_daily_limit=_positive_integer(
+            "QUANTBET_QUANTLAB_SHARED_PROVIDER_LIMIT", "7500"
+        ),
+        production_reserve=_integer(
+            "QUANTBET_QUANTLAB_PRODUCTION_RESERVE", "1500"
+        ),
         database_url=database_url,
     )
     provider = QuantLabApiFootballClient(
