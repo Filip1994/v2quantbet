@@ -21,7 +21,9 @@ from h2h.quantlab.corner_lab.readiness_audit import (
 from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_holdout
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
+from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
+from h2h.quantlab.goal_lab.structural_shadow_engine import GoalLabStructuralShadowEngine
 from h2h.quantlab.provider import QuantLabApiFootballClient
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -119,7 +121,9 @@ def main() -> None:
         PostgreSQLDixonColesModelVersionRepository(database_url),
         PostgreSQLActiveDixonColesModelRepository(database_url),
     )
-    goal_engine = GoalLabShadowPickEngine(repository, model_loader)
+    goal_control_engine = GoalLabShadowPickEngine(repository, model_loader)
+    goal_structural_engine = GoalLabStructuralShadowEngine(repository)
+    goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
 
@@ -152,6 +156,18 @@ def main() -> None:
             ),
             history_backfill_per_cycle=_integer(
                 "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
+            ),
+            goal_team_history_last=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_LAST", "15"
+            ),
+            goal_team_history_teams_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_TEAMS_PER_CYCLE", "120"
+            ),
+            goal_team_statistics_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_STATS_PER_CYCLE", "360"
+            ),
+            goal_team_history_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_REFRESH_SECONDS", "21600"
             ),
             corner_team_history_last=_positive_integer(
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_LAST", "12"
