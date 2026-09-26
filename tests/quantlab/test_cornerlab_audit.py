@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from h2h.quantlab.corner_lab import audit as cornerlab_audit
 from h2h.quantlab.corner_lab.audit import _calibration, _quality
 from h2h.quantlab.corner_lab.readiness_audit import (
     log_cornerlab_v2_training_readiness,
@@ -87,3 +88,55 @@ def test_cycle_readiness_returns_machine_readable_state() -> None:
         "model_fit_eligible": False,
     }
     assert len(logger.calls) == 1
+
+
+def test_cornerlab_audit_logs_active_model_pick_rows_in_bounded_batches(monkeypatch) -> None:
+    rows = tuple({"fixture_id": f"fixture-{index}"} for index in range(26))
+    report = {
+        "reason_distribution": (),
+        "models": {},
+        "snapshots": {},
+        "market_coverage": {},
+        "value_filter": {},
+        "quality": {},
+        "calibration": {},
+        "active_model_picks": {
+            "summary": {
+                "model_version": "model-v2",
+                "row_count": 26,
+                "fixture_count": 26,
+                "fixture_line_count": 26,
+                "returned_rows": 26,
+                "truncated": False,
+            },
+            "by_fixture": (),
+            "rows": rows,
+        },
+    }
+
+    class Logger:
+        def __init__(self):
+            self.calls = []
+
+        def info(self, message, *args):
+            self.calls.append((message, args))
+
+    monkeypatch.setattr(
+        cornerlab_audit,
+        "collect_cornerlab_v2_audit",
+        lambda repository: report,
+    )
+    logger = Logger()
+
+    cornerlab_audit.log_cornerlab_v2_audit(object(), logger)
+
+    active_summary = [
+        call for call in logger.calls if "active_model_pick_summary" in call[0]
+    ]
+    active_rows = [
+        call for call in logger.calls if "active_model_pick_rows" in call[0]
+    ]
+    assert len(active_summary) == 1
+    assert len(active_rows) == 2
+    assert active_rows[0][1][0] == 1
+    assert active_rows[1][1][0] == 2
