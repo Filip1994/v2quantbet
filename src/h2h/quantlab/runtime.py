@@ -207,12 +207,34 @@ class QuantLabRuntime:
             completed += 1
         return completed
 
-    def _collect_upcoming(self, now: datetime) -> tuple[int, int]:
+    def _context_upcoming(self, now: datetime) -> tuple[dict[str, Any], ...]:
+        """Return Top-10 fixtures from a wider DB-only scan so broad GoalLab cannot starve them."""
+        scan_limit = max(self._settings.fixture_limit * 10, 2500)
         fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=scan_limit,
+        )
+        eligible = tuple(
+            fixture
+            for fixture in fixtures
+            if card_corner_scope(**self._scope_kwargs(fixture)).allowed
+        )
+        return eligible[: self._settings.fixture_limit]
+
+    def _collect_upcoming(self, now: datetime) -> tuple[int, int]:
+        goal_queue = self._repository.upcoming_fixtures(
             start_at=now,
             end_at=now + timedelta(hours=self._settings.lookahead_hours),
             limit=self._settings.fixture_limit,
         )
+        context_queue = self._context_upcoming(now)
+        prioritized: dict[str, dict[str, Any]] = {}
+        for fixture in (*context_queue, *goal_queue):
+            prioritized.setdefault(str(fixture["fixture_id"]), fixture)
+            if len(prioritized) >= self._settings.fixture_limit:
+                break
+        fixtures = tuple(prioritized.values())
         market_fixtures = 0
         card_snapshots = 0
         for fixture in fixtures:
@@ -297,11 +319,7 @@ class QuantLabRuntime:
     def _evaluate_context_picks(self, engine: Any | None, now: datetime) -> tuple[int, int]:
         if engine is None:
             return 0, 0
-        fixtures = self._repository.upcoming_fixtures(
-            start_at=now,
-            end_at=now + timedelta(hours=self._settings.lookahead_hours),
-            limit=self._settings.fixture_limit,
-        )
+        fixtures = self._context_upcoming(now)
         decisions = 0
         picks = 0
         for fixture in fixtures:

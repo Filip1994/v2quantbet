@@ -725,3 +725,15 @@ Implemented the next two shadow-only pick paths without changing GoalLab scope.
    state.
 
 GoalLab scope and GoalLab Task 002 logic are unchanged.
+
+### Task 003 follow-up — Top-10 queue starvation fix
+
+The first Task 003 production cycle exposed a scheduling issue rather than an engine error:
+the runtime selected the first `fixture_limit` global upcoming fixtures and only then
+applied the CardLab/CornerLab Top-10 filter. Broad GoalLab fixtures could therefore fill
+the queue before any Top-10 fixture was seen.
+
+The runtime now performs a wider **database-only** scan for Top-10 fixtures, prioritizes
+those fixtures inside the existing per-cycle fixture limit, and uses the same dedicated
+Top-10 queue for CornerLab/CardLab evaluation. This adds no provider requests by itself
+and does not change `GOAL_SCOPE_V1`.

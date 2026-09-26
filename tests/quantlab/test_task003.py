@@ -265,3 +265,132 @@ def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
     assert result["card_picks"] == 1
     assert corner.calls == [("api-football:3001", NOW)]
     assert card.calls == [("api-football:3001", NOW)]
+
+def test_context_queue_scans_beyond_global_fixture_limit_before_filtering():
+    from types import SimpleNamespace
+
+    from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+
+    lower = {
+        **fixture(),
+        "fixture_id": "api-football:low",
+        "country": "Sweden",
+        "competition_name": "Division 2 - Norrland",
+    }
+    top = {
+        **fixture(),
+        "fixture_id": "api-football:top",
+        "country": "England",
+        "competition_name": "Premier League",
+    }
+
+    class QueueRepo:
+        def __init__(self):
+            self.limits = []
+
+        def upcoming_fixtures(self, *, limit, **_kwargs):
+            self.limits.append(limit)
+            if limit <= 1:
+                return (lower,)
+            return (lower, top)
+
+    class Engine:
+        def __init__(self):
+            self.calls = []
+
+        def run_fixture(self, item, *, decision_at):
+            self.calls.append(item["fixture_id"])
+            return SimpleNamespace(decisions_inserted=1, picks_inserted=0)
+
+    repo = QueueRepo()
+    engine = Engine()
+    runtime = QuantLabRuntime(
+        repo,
+        object(),
+        settings=QuantLabRuntimeSettings(fixture_limit=1),
+        clock=lambda: NOW,
+    )
+
+    decisions, picks = runtime._evaluate_context_picks(engine, NOW)
+
+    assert decisions == 1
+    assert picks == 0
+    assert engine.calls == ["api-football:top"]
+    assert repo.limits == [2500]
+
+
+def test_collection_prioritizes_top10_queue_without_increasing_cycle_fixture_limit():
+    from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+
+    lower = {
+        **fixture(),
+        "fixture_id": "api-football:low",
+        "provider_fixture_id": 4001,
+        "league_id": 100,
+        "season": 2026,
+        "home_team_id": 10,
+        "away_team_id": 11,
+        "country": "Sweden",
+        "competition_name": "Division 2 - Norrland",
+    }
+    top = {
+        **fixture(),
+        "fixture_id": "api-football:top",
+        "provider_fixture_id": 4002,
+        "league_id": 39,
+        "season": 2026,
+        "home_team_id": 12,
+        "away_team_id": 13,
+        "country": "England",
+        "competition_name": "Premier League",
+    }
+
+    class QueueRepo:
+        def __init__(self):
+            self.limits = []
+            self.context_checked = []
+
+        def upcoming_fixtures(self, *, limit, **_kwargs):
+            self.limits.append(limit)
+            if limit <= 1:
+                return (lower,)
+            return (lower, top)
+
+        def market_capture_due(self, *_args, **_kwargs):
+            return False
+
+        def context_due(self, fixture_id, **_kwargs):
+            self.context_checked.append(fixture_id)
+            return False
+
+        def latest_context_before(self, fixture_id, **_kwargs):
+            assert fixture_id == "api-football:top"
+            return {
+                "referee": "Ref",
+                "kickoff_at": top["kickoff_at"],
+                "available_at": NOW - timedelta(minutes=1),
+            }
+
+        def latest_standings_before(self, *_args, **_kwargs):
+            return {
+                "available_at": NOW - timedelta(minutes=1),
+                "raw_payload": {},
+            }
+
+        def feature_snapshot_due(self, *_args, **_kwargs):
+            return False
+
+    repo = QueueRepo()
+    runtime = QuantLabRuntime(
+        repo,
+        object(),
+        settings=QuantLabRuntimeSettings(fixture_limit=1),
+        clock=lambda: NOW,
+    )
+
+    market_fixtures, card_snapshots = runtime._collect_upcoming(NOW)
+
+    assert market_fixtures == 0
+    assert card_snapshots == 0
+    assert repo.context_checked == ["api-football:top"]
+    assert repo.limits == [1, 2500]
