@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
