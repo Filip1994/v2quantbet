@@ -6,6 +6,7 @@ import base64
 import hmac
 import json
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
@@ -269,11 +270,13 @@ class ResearchDashboardService:
         fixed_stake_minor: int = 30_000,
         strict_quote_age_seconds: int = 300,
         provider_snapshot_max_age_seconds: int = 28_800,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository
         self._stake = fixed_stake_minor
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
+        self._clock = clock
 
     def _derived(self, row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
@@ -598,7 +601,7 @@ class ResearchDashboardService:
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
         tab = params.get("tab", ["active"])[0].strip().casefold()
-        if tab not in {"active", "history"}:
+        if tab not in {"active", "awaiting", "history"}:
             tab = "active"
 
         metric_params = {
@@ -612,9 +615,33 @@ class ResearchDashboardService:
             kickoff = row.get("kickoff_at")
             return kickoff.timestamp() if isinstance(kickoff, datetime) else float("inf")
 
+        now = self._clock()
+        if not isinstance(now, datetime):
+            raise TypeError("clock must return a datetime")
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("clock must return a timezone-aware datetime")
+        now = now.astimezone(UTC)
+
+        pending_rows = tuple(row for row in filtered if row["outcome"] == "PENDING")
         active_rows = tuple(
             sorted(
-                (row for row in filtered if row["outcome"] == "PENDING"),
+                (
+                    row
+                    for row in pending_rows
+                    if not isinstance(row.get("kickoff_at"), datetime)
+                    or row["kickoff_at"].astimezone(UTC) > now
+                ),
+                key=kickoff_timestamp,
+            )
+        )
+        awaiting_rows = tuple(
+            sorted(
+                (
+                    row
+                    for row in pending_rows
+                    if isinstance(row.get("kickoff_at"), datetime)
+                    and row["kickoff_at"].astimezone(UTC) <= now
+                ),
                 key=kickoff_timestamp,
             )
         )
@@ -626,15 +653,16 @@ class ResearchDashboardService:
             )
         )
         result_filter = params.get("result", [""])[0].strip().upper()
-        rows = (
-            tuple(
+        if tab == "history":
+            rows = tuple(
                 row
                 for row in history_rows
                 if not result_filter or row["outcome"] == result_filter
             )
-            if tab == "history"
-            else active_rows
-        )
+        elif tab == "awaiting":
+            rows = awaiting_rows
+        else:
+            rows = active_rows
 
         settled = history_rows
         wins = sum(row["outcome"] == "WIN" for row in settled)
@@ -698,7 +726,7 @@ class ResearchDashboardService:
             return f'<span class="mini-badge freshness-{css}">{escape(label)}</span>'
 
         body_rows: list[str] = []
-        if tab == "active":
+        if tab in {"active", "awaiting"}:
             for row in rows:
                 exposure = (
                     "—"
@@ -730,15 +758,25 @@ class ResearchDashboardService:
                     f'<td><b>{exposure}</b><small>'
                     f'{"blocked ×" + str(row["blocked_count"]) if row["blocked_count"] is not None else "production candidate"}'
                     f'</small></td>'
-                    f'<td>{result_badge(row["outcome"])}</td>'
-                    "</tr>"
+                    f'<td>{result_badge(row["outcome"])}'
+                    + (
+                        f'<small>{escape(row.get("result_phase") or "WAITING")} · '
+                        f'{escape(row.get("result_provider_status") or row.get("fixture_status") or "unknown")}</small>'
+                        if tab == "awaiting"
+                        else ""
+                    )
+                    + "</td></tr>"
                 )
             headers = (
                 "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
                 "<th>Odds</th><th>Route</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
                 "<th>Qualified</th><th>Exposure</th><th>Status</th>"
             )
-            empty_text = "No active research picks match these filters."
+            empty_text = (
+                "No awaiting-result research picks match these filters."
+                if tab == "awaiting"
+                else "No active research picks match these filters."
+            )
             colspan = 12
         else:
             for row in rows:
@@ -829,8 +867,10 @@ class ResearchDashboardService:
             )
 
         active_class = "active" if tab == "active" else ""
+        awaiting_class = "active" if tab == "awaiting" else ""
         history_class = "active" if tab == "history" else ""
         active_href = escape(tab_href("active"), quote=True)
+        awaiting_href = escape(tab_href("awaiting"), quote=True)
         history_href = escape(tab_href("history"), quote=True)
         clear_href = f"/research?tab={tab}"
 
@@ -884,11 +924,13 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <section class="health-strip" aria-label="System status"><span class="health-label">System status</span>{health_html}</section>
 <nav class="tabs" aria-label="Research sections">
 <a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
+<a class="{awaiting_class}" href="{awaiting_href}">Awaiting result <span>({len(awaiting_rows)})</span></a>
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
 <a href="/research/analytics">Analytics V1</a>
 </nav>
 <section class="cards">
 <div class="card"><small>Active</small><b>{len(active_rows)}</b></div>
+<div class="card"><small>Awaiting result</small><b>{len(awaiting_rows)}</b></div>
 <div class="card"><small>Settled</small><b>{len(history_rows)}</b></div>
 <div class="card"><small>Played</small><b>{played_count}</b></div>
 <div class="card"><small>Skipped</small><b>{skipped_count}</b></div>
@@ -917,7 +959,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 </form>
 </div>
 <section class="table-shell">
-<div class="table-title"><b>{"Active research board" if tab == "active" else "Settled research history"}</b><span>{len(rows)} shown</span></div>
+<div class="table-title"><b>{("Active research board" if tab == "active" else "Awaiting result" if tab == "awaiting" else "Settled research history")}</b><span>{len(rows)} shown</span></div>
 <div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
 </section>
 <footer><span>Universe = every canonical candidate that reached production eligibility: PLAYED/SKIPPED production picks plus exposure-blocked candidates. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
