@@ -50,6 +50,7 @@ _RESULT_METRICS = (
     "failed_to_score",
     "btts",
     "over25",
+    "goal_difference",
 )
 _PRESSURE_METRICS = (
     "shots_for",
@@ -78,6 +79,17 @@ _PRESSURE_METRICS = (
     "possession_adjusted_sot",
     "territorial_proxy",
     "set_piece_pressure",
+    "blocked_rate",
+    "inside_box_share",
+    "shots_per_goal",
+    "defensive_conversion_allowed",
+    "shot_quality_proxy",
+    "corner_share",
+    "corner_differential",
+    "offsides_against",
+    "fouls_drawn",
+    "opponent_cards",
+    "red_card_match",
 )
 _VENUE_METRICS = (
     "goals_for",
@@ -248,13 +260,17 @@ def _sample_values(
     corners_against: float | None,
     possession: float | None,
     offsides_for: float | None,
+    offsides_against: float | None,
     saves: float | None,
     passes: float | None,
     accurate_passes: float | None,
     pass_accuracy: float | None,
     fouls: float | None,
+    fouls_drawn: float | None,
     yellow_cards: float | None,
     red_cards: float | None,
+    opponent_yellow_cards: float | None,
+    opponent_red_cards: float | None,
 ) -> dict[str, float | None]:
     total_goals = goals_for + goals_against
     points = 3.0 if goals_for > goals_against else 1.0 if goals_for == goals_against else 0.0
@@ -287,15 +303,49 @@ def _sample_values(
         if sot_for is None or possession_fraction is None or possession_fraction <= 0
         else sot_for / possession_fraction
     )
+    blocked_rate = _ratio(blocked_for, shots_for)
+    inside_box_share = _ratio(inside_box_for, shots_for)
+    shots_per_goal = (
+        None if shots_for is None or goals_for <= 0 else shots_for / float(goals_for)
+    )
+    defensive_conversion_allowed = _ratio(float(goals_against), sot_against)
+    sot_per_shot = _ratio(sot_for, shots_for)
+    shot_quality_proxy = (
+        None
+        if sot_per_shot is None or inside_box_share is None
+        else sot_per_shot * inside_box_share
+    )
+    corner_share = (
+        None
+        if corners_for is None
+        or corners_against is None
+        or corners_for + corners_against <= 0
+        else corners_for / (corners_for + corners_against)
+    )
+    corner_differential = (
+        None
+        if corners_for is None or corners_against is None
+        else corners_for - corners_against
+    )
+    opponent_cards = (
+        None
+        if opponent_yellow_cards is None and opponent_red_cards is None
+        else float(opponent_yellow_cards or 0.0) + float(opponent_red_cards or 0.0)
+    )
+    red_card_match = (
+        None
+        if red_cards is None and opponent_red_cards is None
+        else float(float(red_cards or 0.0) > 0 or float(opponent_red_cards or 0.0) > 0)
+    )
     territorial = (
         None
         if shot_share is None or possession_fraction is None
-        else 0.5 * shot_share + 0.5 * possession_fraction
+        else shot_share * possession_fraction
     )
     set_piece_pressure = (
         None
-        if corners_for is None and inside_box_for is None
-        else float(corners_for or 0.0) + float(inside_box_for or 0.0)
+        if corners_for is None or inside_box_for is None
+        else corners_for * inside_box_for
     )
     return {
         "goals_for": float(goals_for),
@@ -307,6 +357,7 @@ def _sample_values(
         "failed_to_score": float(goals_for == 0),
         "btts": float(goals_for > 0 and goals_against > 0),
         "over25": float(total_goals >= 3),
+        "goal_difference": float(goals_for - goals_against),
         "shots_for": shots_for,
         "shots_against": shots_against,
         "sot_for": sot_for,
@@ -318,11 +369,13 @@ def _sample_values(
         "corners_against": corners_against,
         "possession": possession_fraction,
         "offsides_for": offsides_for,
+        "offsides_against": offsides_against,
         "saves": saves,
         "passes": passes,
         "accurate_passes": accurate_passes,
         "pass_accuracy": pass_accuracy,
         "fouls": fouls,
+        "fouls_drawn": fouls_drawn,
         "yellow_cards": yellow_cards,
         "red_cards": red_cards,
         "shot_share": shot_share,
@@ -333,6 +386,15 @@ def _sample_values(
         "possession_adjusted_sot": poss_adj_sot,
         "territorial_proxy": territorial,
         "set_piece_pressure": set_piece_pressure,
+        "blocked_rate": blocked_rate,
+        "inside_box_share": inside_box_share,
+        "shots_per_goal": shots_per_goal,
+        "defensive_conversion_allowed": defensive_conversion_allowed,
+        "shot_quality_proxy": shot_quality_proxy,
+        "corner_share": corner_share,
+        "corner_differential": corner_differential,
+        "opponent_cards": opponent_cards,
+        "red_card_match": red_card_match,
     }
 
 
@@ -370,13 +432,17 @@ def _team_samples(row: dict[str, Any]) -> tuple[TeamMatchSample, TeamMatchSample
         corners_against=_number(row.get("away_corner_kicks")),
         possession=_number(row.get("home_ball_possession")),
         offsides_for=_number(row.get("home_offsides")),
+        offsides_against=_number(row.get("away_offsides")),
         saves=_number(row.get("home_goalkeeper_saves")),
         passes=_number(row.get("home_total_passes")),
         accurate_passes=_number(row.get("home_passes_accurate")),
         pass_accuracy=_number(row.get("home_pass_accuracy")),
         fouls=_number(row.get("home_fouls")),
+        fouls_drawn=_number(row.get("away_fouls")),
         yellow_cards=_number(row.get("home_yellow_cards")),
         red_cards=_number(row.get("home_red_cards")),
+        opponent_yellow_cards=_number(row.get("away_yellow_cards")),
+        opponent_red_cards=_number(row.get("away_red_cards")),
     )
     away_values = _sample_values(
         goals_for=away_goals,
@@ -392,13 +458,17 @@ def _team_samples(row: dict[str, Any]) -> tuple[TeamMatchSample, TeamMatchSample
         corners_against=_number(row.get("home_corner_kicks")),
         possession=_number(row.get("away_ball_possession")),
         offsides_for=_number(row.get("away_offsides")),
+        offsides_against=_number(row.get("home_offsides")),
         saves=_number(row.get("away_goalkeeper_saves")),
         passes=_number(row.get("away_total_passes")),
         accurate_passes=_number(row.get("away_passes_accurate")),
         pass_accuracy=_number(row.get("away_pass_accuracy")),
         fouls=_number(row.get("away_fouls")),
+        fouls_drawn=_number(row.get("home_fouls")),
         yellow_cards=_number(row.get("away_yellow_cards")),
         red_cards=_number(row.get("away_red_cards")),
+        opponent_yellow_cards=_number(row.get("home_yellow_cards")),
+        opponent_red_cards=_number(row.get("home_red_cards")),
     )
     fixture_id = str(row.get("fixture_id") or "")
     fixture_observation_id = (
