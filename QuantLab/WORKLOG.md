@@ -162,3 +162,87 @@ next work-log entry after completion.
 
 Production Dixon-Coles math, production market support, thresholds, pick registration,
 bankroll/staking and Research Board behavior were not modified.
+
+
+## 2026-09-26 — Task 001 verification and Railway activation
+
+**Owner:** QuantLab core
+
+### Verification steps completed
+
+1. Ran GitHub CI repeatedly while implementing Task 001.
+2. Fixed QuantLab lint issues without changing runtime semantics.
+3. Updated stale integration expectations that directly followed from the previously-added
+   quantlab_context category and the new latest migration
+   025_quantlab_market_collector_cardlab_v1.sql.
+4. The first full pytest run after QuantLab changes reached 991 passed / 7 failed. The
+   remaining failures were stale production test fixtures/assertions, not changes in
+   production runtime behavior. They were refreshed to match the already-current
+   production contracts:
+   - dashboard money formatting/current quote-age fixture;
+   - entrypoint risk-exposure repository test double;
+   - opportunity quote-object count;
+   - existing Phase I Asia exclusion (J1 League);
+   - bounded-worker monotonic-clock fixture/cursor expectation;
+   - monitoring refresh-result test double.
+5. No production application/runtime code was changed to make those tests pass.
+6. Final GitHub Actions CI run 36210705470 passed lint and the complete pytest suite:
+   **998 passed in 40.26s**.
+7. Compared frozen Task 001 baseline commit 12ef71abc33931447be0fd448a6b6a7b11ec469e
+   to the verified implementation head. Runtime changes are confined to
+   src/h2h/quantlab/, migration 025, and the QuantLab compatibility shim; other changes
+   are QuantLab documentation and test maintenance.
+
+### Railway deployment verification
+
+Service: quantbet-quantlab
+Environment: production
+
+Initial Task 001 deployments built and migrated successfully but failed health checks
+because the QuantLab service did not yet have API_FOOTBALL_KEY.
+
+Resolution:
+
+- Added API_FOOTBALL_KEY to quantbet-quantlab as a Railway reference to the existing
+  quantbet-engine API_FOOTBALL_KEY secret; the secret value was not copied into source
+  code or documentation.
+- Added QUANTBET_QUANTLAB_SHARED_PROVIDER_LIMIT=7500.
+- Added QUANTBET_QUANTLAB_PRODUCTION_RESERVE=1500.
+
+Verified runtime deployment:
+
+- commit: e263026c93bf72f68692ff7908bf812cfd5785f7
+- deployment: ae5c48c0-75de-420a-abd7-7162096899f7
+- Railway status: SUCCESS
+- production environment reports quantbet-engine, quantbet-dashboard,
+  quantbet-research, quantbet-quantlab and PostgreSQL deployments as SUCCESS.
+- deploy log shows QuantLab container startup and "QuantLab cycle completed" at
+  2026-09-26T02:03:18.928618+00:00.
+- latest pre-deploy reported 0 pending migrations, confirming migration 025 had already
+  been applied by an earlier Task 001 deployment.
+- one-hour QuantLab service metrics during verification were low and stable
+  (CPU average about 0.021; memory average about 0.071 GB).
+
+A read-only Railway Agent cross-check was attempted but the agent call timed out; no
+mutation occurred. Final verification therefore uses direct Railway deployment, status,
+logs, variables and metrics reads.
+
+### API / safety verification
+
+- QuantLab provider key is present only through Railway secret/reference configuration.
+- All QuantLab provider calls remain quantlab_context.
+- QuantLab hard ceiling remains 1,000 requests/day and cannot be raised by configuration.
+- Shared-provider guard preserves the configured production reserve before allowing a
+  QuantLab request.
+- CardLab/CornerLab scope filtering occurs before fixture-specific provider calls.
+- GoalLab scope filtering occurs before fixture-specific provider calls.
+- Latest successful runtime cycle produced no logged exception.
+- QuantLab remains shadow-only.
+
+### Production impact
+
+**NONE.**
+
+No production Dixon-Coles implementation, production thresholds, production market
+support, pick registration, bankroll/staking logic or Research Board runtime was changed
+for Task 001.
