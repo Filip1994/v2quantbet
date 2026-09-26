@@ -1382,9 +1382,10 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE "
                 "WHERE pc.status = 'AVAILABLE' AND latest.kickoff_at < %s "
+                "AND pc.available_at <= %s "
                 "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
                 "ORDER BY latest.kickoff_at DESC, pc.available_at DESC LIMIT %s",
-                (before, list(ids), list(ids), limit),
+                (before, before, list(ids), list(ids), limit),
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
