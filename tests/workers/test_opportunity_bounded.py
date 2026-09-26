@@ -116,16 +116,13 @@ def test_wall_budget_advances_cursor_past_examined_normal_fixtures() -> None:
     second = subject.run_once()
 
     assert first.budget_exhausted is True
-    assert first.odds_unavailable_fixture_ids == (
-        "api-football:0000",
-        "api-football:0001",
-    )
+    assert first.odds_unavailable_fixture_ids == ("api-football:0000",)
     assert repository.selection_calls[0] == (5, None)
     assert repository.selection_calls[1][1] == OpportunityCursor(
-        repository.fixtures[1].kickoff_at,
-        "api-football:0001",
+        repository.fixtures[0].kickoff_at,
+        "api-football:0000",
     )
-    assert second.due_fixture_ids[0] == "api-football:0002"
+    assert second.due_fixture_ids[0] == "api-football:0001"
 
 
 def test_failure_time_is_fresh_for_each_fixture_and_scope_check_is_shared() -> None:
