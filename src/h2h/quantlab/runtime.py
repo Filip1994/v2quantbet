@@ -62,6 +62,8 @@ class QuantLabRuntimeSettings:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be non-negative")
+        if not 3 <= self.corner_team_history_last <= 50:
+            raise ValueError("corner_team_history_last must be between 3 and 50")
 
 
 class QuantLabRuntime:
