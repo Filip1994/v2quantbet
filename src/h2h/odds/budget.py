@@ -23,6 +23,7 @@ PROVIDER_REQUEST_CATEGORIES = (
     "model_training",
     "opportunity_odds",
     "results_monitoring",
+    "quantlab_context",
 )
 _REQUEST_CATEGORY: ContextVar[str] = ContextVar(
     "provider_request_category", default="opportunity_odds"
