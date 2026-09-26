@@ -2,6 +2,11 @@
 -- One canonical GoalLab research pick per fixture/policy. This is separate from the
 -- generic QuantLab shadow ledger and never touches production registered picks/bankroll.
 
+CREATE UNIQUE INDEX uq_quantlab_goal_structural_one_pick_decision
+    ON quantlab_goal_decisions (fixture_id, policy_version)
+    WHERE decision = 'PICK'
+      AND policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%';
+
 CREATE TABLE quantlab_goal_picks (
     goal_pick_id TEXT PRIMARY KEY
         CHECK (goal_pick_id ~ '^quantlab-goal-pick-v1:[0-9a-f]{64}$'),
