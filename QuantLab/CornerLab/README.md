@@ -105,9 +105,15 @@ CornerLab uses `CARDCORNER_MARKET_DRIVEN_V4`.
 There is no domestic league allowlist. Women's football is globally hard-blocked; the
 remaining discovered universe retains CORNER markets wherever the provider publishes them.
 
-Historical `/fixtures/statistics` acquisition is also broad. A provider response that
-does not contain both fixture teams is stored as an append-only
-`UNAVAILABLE` statistics-capture watermark so the same unsupported fixture is not
+Historical `/fixtures/statistics` acquisition is also broad. Before spending a
+fixture-statistics request, CornerLab caches API-Football's league/season
+`coverage.fixtures.statistics_fixtures` capability. A provider-declared `false`
+temporarily blocks fixture-statistics spend for that league/season; `true` is only a
+capability signal and never guarantees that every match has statistics. Missing coverage
+remains UNKNOWN and does not fabricate an unsupported result.
+
+A fixture response that does not contain both teams is still stored as an append-only
+`UNAVAILABLE` statistics-capture watermark so the same fixture-level miss is not
 re-requested every cycle.
 
 ## Supported betting market
