@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from h2h.quantlab.goal_lab.coaches import build_goal_manager_features
 from h2h.quantlab.goal_lab.injuries import build_goal_injury_features
 from h2h.quantlab.goal_lab.lineups import parse_goal_lineup_context
 from h2h.quantlab.goal_lab.standings import build_goal_standings_features
@@ -248,5 +249,96 @@ def test_goal_lineup_parser_rejects_future_capture() -> None:
             capture,
             home_team_id=10,
             away_team_id=11,
+            decision_at=NOW,
+        )
+
+
+def _coach_capture(
+    *,
+    coach_id: int,
+    team_id: int,
+    start: str,
+    available_at: datetime = NOW - timedelta(hours=1),
+) -> dict[str, object]:
+    return {
+        "coach_capture_id": f"coach-{coach_id}",
+        "available_at": available_at,
+        "status": "AVAILABLE",
+        "response_item_count": 1,
+        "reason": None,
+        "source": "api-football:coachs",
+        "raw_payload": {
+            "response": [
+                {
+                    "id": coach_id,
+                    "name": f"Coach {coach_id}",
+                    "team": {"id": team_id},
+                    "career": [
+                        {
+                            "team": {"id": team_id},
+                            "start": start,
+                            "end": None,
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+
+def test_goal_manager_features_use_tenure_and_prior_matches_only() -> None:
+    home_capture = _coach_capture(coach_id=1, team_id=10, start="2026-09-01")
+    away_capture = _coach_capture(coach_id=2, team_id=11, start="2026-01-01")
+    home_dates = [
+        NOW - timedelta(days=20),
+        NOW - timedelta(days=12),
+        NOW - timedelta(days=5),
+    ]
+    away_dates = [
+        NOW - timedelta(days=200),
+        NOW - timedelta(days=150),
+        NOW - timedelta(days=100),
+        NOW - timedelta(days=50),
+        NOW - timedelta(days=10),
+        NOW - timedelta(days=2),
+    ]
+
+    features, meta = build_goal_manager_features(
+        home_capture,
+        away_capture,
+        home_team_id=10,
+        away_team_id=11,
+        home_match_dates=home_dates,
+        away_match_dates=away_dates,
+        decision_at=NOW,
+    )
+
+    assert features["manager_coverage_flag"] == 1.0
+    assert features["home_manager_tenure_days"] == 25.0
+    assert features["home_matches_under_manager"] == 3.0
+    assert features["home_recent_manager_change_flag"] == 1.0
+    assert features["away_matches_under_manager"] == 6.0
+    assert features["away_recent_manager_change_flag"] == 0.0
+    assert features["both_new_manager_interaction"] == 0.0
+    assert meta["home"]["coach_id"] == 1
+    assert meta["away"]["coach_id"] == 2
+
+
+def test_goal_manager_features_reject_future_capture() -> None:
+    home_capture = _coach_capture(
+        coach_id=1,
+        team_id=10,
+        start="2026-09-01",
+        available_at=NOW + timedelta(seconds=1),
+    )
+
+    with pytest.raises(ValueError, match="after decision_at"):
+        build_goal_manager_features(
+            home_capture,
+            None,
+            home_team_id=10,
+            away_team_id=11,
+            home_match_dates=[],
+            away_match_dates=[],
             decision_at=NOW,
         )
