@@ -555,18 +555,30 @@ class PostgreSQLQuantLabRepository:
         *,
         now: datetime,
         refresh_seconds: int,
+        minimum_requested_last: int | None = None,
     ) -> bool:
         if team_id <= 0:
             raise ValueError("team_id must be positive")
+        if minimum_requested_last is not None and minimum_requested_last <= 0:
+            raise ValueError("minimum_requested_last must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT MAX(captured_at) FROM quantlab_team_history_captures "
-                "WHERE team_id = %s",
+                "SELECT captured_at, requested_last "
+                "FROM quantlab_team_history_captures "
+                "WHERE team_id = %s "
+                "ORDER BY captured_at DESC, team_history_capture_id DESC LIMIT 1",
                 (team_id,),
             )
             row = cursor.fetchone()
-        last = None if row is None else row[0]
-        return last is None or last <= now - timedelta(seconds=refresh_seconds)
+        if row is None:
+            return True
+        captured_at, requested_last = row
+        if (
+            minimum_requested_last is not None
+            and int(requested_last) < minimum_requested_last
+        ):
+            return True
+        return captured_at <= now - timedelta(seconds=refresh_seconds)
 
     def save_team_history_capture(
         self,
