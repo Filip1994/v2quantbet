@@ -35,7 +35,7 @@ _FAR_EAST_COUNTRIES = frozenset(
     }
 )
 
-_YOUTH_RE = re.compile(r"\b(?:u|under)[ -]?(?:17|18|19|20|21|22|23)\b", re.IGNORECASE)
+_YOUTH_RE = re.compile(r"\b(?:u|under)[ -]?(?:1[3-9]|2[0-3])\b", re.IGNORECASE)
 _RESERVE_RE = re.compile(r"\b(?:youth|academy|reserve|reserves|amateur|amateurs)\b", re.IGNORECASE)
 _TEAM_SUFFIX_RE = re.compile(r"(?:\s|[-])(?:u17|u18|u19|u20|u21|u23|ii|b)$", re.IGNORECASE)
 
