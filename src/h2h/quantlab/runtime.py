@@ -173,34 +173,66 @@ class QuantLabRuntime:
         for fixture in candidates:
             if completed >= target:
                 break
-            fixture_id = str(fixture["fixture_id"])
-            context = self._repository.latest_context_before(fixture_id, decision_at=now)
-            if context is None:
-                payload = self._provider.fetch_fixture(int(fixture["provider_fixture_id"]))
-                parsed = parse_fixture_context(
-                    payload,
-                    fixture_id=fixture_id,
-                    provider_fixture_id=int(fixture["provider_fixture_id"]),
-                    captured_at=now,
+            fixture_id = str(fixture.get("fixture_id") or "")
+            try:
+                provider_fixture_id = int(fixture["provider_fixture_id"])
+                home_team_id = int(fixture["home_team_id"])
+                away_team_id = int(fixture["away_team_id"])
+                if provider_fixture_id <= 0 or home_team_id <= 0 or away_team_id <= 0:
+                    raise ValueError("fixture/provider team IDs must be positive")
+                if home_team_id == away_team_id:
+                    raise ValueError("home and away team IDs must differ")
+
+                # Referee/context is useful for CardLab, but historical match statistics
+                # also feed CornerLab and GoalLab DC+. Do not make the stats backfill
+                # depend on referee/context availability.
+                context = self._repository.latest_context_before(
+                    fixture_id, decision_at=now
                 )
-                self._repository.save_fixture_context(parsed)
-                context = {
-                    "referee": parsed.referee,
-                    "kickoff_at": parsed.kickoff_at,
-                    "available_at": parsed.available_at,
-                }
-            if not self._repository.statistics_exists(fixture_id):
-                payload = self._provider.fetch_statistics(int(fixture["provider_fixture_id"]))
-                parsed_stats = parse_fixture_statistics(
-                    payload,
-                    fixture_id=fixture_id,
-                    provider_fixture_id=int(fixture["provider_fixture_id"]),
-                    home_team_id=int(fixture["home_team_id"]),
-                    away_team_id=int(fixture["away_team_id"]),
-                    captured_at=now,
+                if context is None:
+                    try:
+                        payload = self._provider.fetch_fixture(provider_fixture_id)
+                        parsed = parse_fixture_context(
+                            payload,
+                            fixture_id=fixture_id,
+                            provider_fixture_id=provider_fixture_id,
+                            captured_at=now,
+                        )
+                        self._repository.save_fixture_context(parsed)
+                    except ApiBudgetExceededError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        LOGGER.warning(
+                            "QuantLab history context unavailable fixture=%s "
+                            "error_class=%s error=%s",
+                            fixture_id,
+                            type(exc).__name__,
+                            str(exc),
+                        )
+
+                if not self._repository.statistics_exists(fixture_id):
+                    payload = self._provider.fetch_statistics(provider_fixture_id)
+                    parsed_stats = parse_fixture_statistics(
+                        payload,
+                        fixture_id=fixture_id,
+                        provider_fixture_id=provider_fixture_id,
+                        home_team_id=home_team_id,
+                        away_team_id=away_team_id,
+                        captured_at=now,
+                    )
+                    self._repository.save_match_statistics(parsed_stats)
+                completed += 1
+            except ApiBudgetExceededError:
+                raise
+            except Exception as exc:
+                error_text = str(exc)
+                LOGGER.exception(
+                    "QuantLab history backfill fixture failed fixture=%s "
+                    "error_class=%s error=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                    error_text,
                 )
-                self._repository.save_match_statistics(parsed_stats)
-            completed += 1
         return completed
 
     def _context_upcoming(self, now: datetime) -> tuple[dict[str, Any], ...]:
@@ -227,67 +259,94 @@ class QuantLabRuntime:
         market_fixtures = 0
         card_snapshots = 0
         for fixture in fixtures:
-            scope = self._scope_kwargs(fixture)
-            goal_allowed = goal_scope(**scope).allowed
-            context_allowed = card_corner_scope(**scope).allowed
-            if not goal_allowed and not context_allowed:
-                continue
+            fixture_id = str(fixture.get("fixture_id") or "")
+            try:
+                scope = self._scope_kwargs(fixture)
+                goal_allowed = goal_scope(**scope).allowed
+                context_allowed = card_corner_scope(**scope).allowed
+                if not goal_allowed and not context_allowed:
+                    continue
 
-            fixture_id = str(fixture["fixture_id"])
-            allowed_labs = {"GOAL"} if goal_allowed else set()
-            if context_allowed:
-                allowed_labs.update({"CORNER", "CARD", "UNCLASSIFIED"})
-            if self._repository.market_capture_due(
-                fixture_id,
-                now=now,
-                refresh_seconds=self._settings.market_refresh_seconds,
-            ):
-                self._collector.collect_fixture(
-                    fixture_id=fixture_id,
-                    provider_fixture_id=int(fixture["provider_fixture_id"]),
-                    captured_at=now,
-                    allowed_labs=allowed_labs,
+                provider_fixture_id = int(fixture["provider_fixture_id"])
+                if provider_fixture_id <= 0:
+                    raise ValueError("provider_fixture_id must be positive")
+                allowed_labs = {"GOAL"} if goal_allowed else set()
+                if context_allowed:
+                    allowed_labs.update({"CORNER", "CARD", "UNCLASSIFIED"})
+                if self._repository.market_capture_due(
+                    fixture_id,
+                    now=now,
+                    refresh_seconds=self._settings.market_refresh_seconds,
+                ):
+                    self._collector.collect_fixture(
+                        fixture_id=fixture_id,
+                        provider_fixture_id=provider_fixture_id,
+                        captured_at=now,
+                        allowed_labs=allowed_labs,
+                    )
+                    market_fixtures += 1
+
+                if not context_allowed:
+                    continue
+                market_labs = self._repository.market_labs_for_fixture(fixture_id)
+                if "CARD" not in market_labs:
+                    continue
+                context = self._capture_context(fixture, now)
+                standings = self._standings(fixture, now)
+                if context is None:
+                    continue
+                if not self._repository.feature_snapshot_due(
+                    fixture_id,
+                    now=now,
+                    refresh_seconds=self._settings.feature_refresh_seconds,
+                ):
+                    continue
+                referee = context.get("referee")
+                history = (
+                    self._repository.referee_history(str(referee), decision_at=now)
+                    if referee
+                    else ()
                 )
-                market_fixtures += 1
-
-            if not context_allowed:
-                continue
-            market_labs = self._repository.market_labs_for_fixture(fixture_id)
-            if "CARD" not in market_labs:
-                continue
-            context = self._capture_context(fixture, now)
-            standings = self._standings(fixture, now)
-            if context is None:
-                continue
-            if not self._repository.feature_snapshot_due(
-                fixture_id,
-                now=now,
-                refresh_seconds=self._settings.feature_refresh_seconds,
-            ):
-                continue
-            referee = context.get("referee")
-            history = (
-                self._repository.referee_history(str(referee), decision_at=now)
-                if referee
-                else ()
-            )
-            snapshot = build_cardlab_snapshot(
-                fixture_id=fixture_id,
-                decision_at=now,
-                kickoff_at=context.get("kickoff_at") or fixture["kickoff_at"],
-                referee=None if referee is None else str(referee),
-                referee_available_at=context.get("available_at"),
-                referee_history=history,
-                home_team=str(fixture["home_team"]),
-                away_team=str(fixture["away_team"]),
-                home_team_id=int(fixture["home_team_id"]),
-                away_team_id=int(fixture["away_team_id"]),
-                competition_name=str(fixture["competition_name"]),
-                standings_payload=None if standings is None else standings["raw_payload"],
-                standings_available_at=None if standings is None else standings["available_at"],
-            )
-            self._repository.save_card_feature_snapshot(snapshot)
-            card_snapshots += 1
+                home_team_id = int(fixture["home_team_id"])
+                away_team_id = int(fixture["away_team_id"])
+                if home_team_id <= 0 or away_team_id <= 0 or home_team_id == away_team_id:
+                    raise ValueError("invalid home/away team IDs for CardLab feature snapshot")
+                snapshot = build_cardlab_snapshot(
+                    fixture_id=fixture_id,
+                    decision_at=now,
+                    kickoff_at=context.get("kickoff_at") or fixture["kickoff_at"],
+                    referee=None if referee is None else str(referee),
+                    referee_available_at=context.get("available_at"),
+                    referee_history=history,
+                    home_team=str(fixture["home_team"]),
+                    away_team=str(fixture["away_team"]),
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    competition_name=str(fixture["competition_name"]),
+                    standings_payload=None if standings is None else standings["raw_payload"],
+                    standings_available_at=(
+                        None if standings is None else standings["available_at"]
+                    ),
+                )
+                self._repository.save_card_feature_snapshot(snapshot)
+                card_snapshots += 1
+            except ApiBudgetExceededError:
+                raise
+            except FeatureLeakageError as exc:
+                LOGGER.warning(
+                    "QuantLab feature snapshot rejected fixture=%s error=%s",
+                    fixture_id,
+                    str(exc),
+                )
+            except Exception as exc:
+                error_text = str(exc)
+                LOGGER.exception(
+                    "QuantLab upcoming fixture collection failed fixture=%s "
+                    "error_class=%s error=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                    error_text,
+                )
         return market_fixtures, card_snapshots
 
     def _evaluate_goal_picks(self, now: datetime) -> tuple[int, int]:
