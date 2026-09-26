@@ -602,3 +602,21 @@ registration/staking/model behavior is unchanged.
 
 Unit, integration, full CI and Railway verification are recorded after the implementation
 branch is validated and deployed.
+
+
+## 2026-09-26 — Task 002 CI verification
+
+**Owner:** QuantLab core + GoalLab
+
+GitHub Actions run `36223824735` passed:
+
+- lint: **PASS**
+- full pytest suite: **1009 passed in 26.58s**
+- migration chain includes `028_quantlab_goal_shadow_engine.sql`
+
+Isolation diff from Task 002 baseline `c0f3f897a8807f18dd05196335fd53119418be57`
+contains QuantLab runtime/docs/migration/tests plus only the two integration assertions
+that identify the latest migration. No production model, registration, pick, staking or
+bankroll implementation file is changed.
+
+Railway verification follows after merge to main.
