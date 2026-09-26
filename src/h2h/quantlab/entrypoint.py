@@ -90,7 +90,7 @@ def main() -> None:
 
     try:
         log_cornerlab_v2_audit(repository, LOGGER)
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
 
     api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
