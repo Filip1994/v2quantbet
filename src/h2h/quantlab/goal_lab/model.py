@@ -689,12 +689,14 @@ def _h2h_features(
     ][-5:]
     if not relevant:
         return {
+            "h2h_goals_per_match_l3": float("nan"),
             "h2h_goals_per_match_l5": float("nan"),
             "h2h_btts_rate_l5": float("nan"),
             "h2h_over25_rate_l5": float("nan"),
             "h2h_target_home_goals_l5": float("nan"),
             "h2h_target_away_goals_l5": float("nan"),
             "h2h_goal_difference_l5": float("nan"),
+            "h2h_recency_weighted_result_score": float("nan"),
             "h2h_sample_size": 0.0,
             "h2h_age_days": float("nan"),
         }
@@ -704,6 +706,8 @@ def _h2h_features(
     totals: list[float] = []
     btts: list[float] = []
     over25: list[float] = []
+    result_scores: list[float] = []
+    ages: list[float] = []
     for item in relevant:
         if item.home_id == home_id:
             hg, ag = item.home_goals, item.away_goals
@@ -714,16 +718,27 @@ def _h2h_features(
         totals.append(float(hg + ag))
         btts.append(float(hg > 0 and ag > 0))
         over25.append(float(hg + ag >= 3))
-    age_days = max(
-        0.0, (target_kickoff - relevant[-1].kickoff_at).total_seconds() / 86_400.0
+        result_scores.append(1.0 if hg > ag else (1.0 / 3.0 if hg == ag else 0.0))
+        ages.append(
+            max(0.0, (target_kickoff - item.kickoff_at).total_seconds() / 86_400.0)
+        )
+
+    weights = np.exp(-RECENCY_XI * np.asarray(ages, dtype=float))
+    weighted_score = float(
+        np.dot(weights, np.asarray(result_scores, dtype=float)) / np.sum(weights)
     )
+    age_days = ages[-1]
     return {
+        "h2h_goals_per_match_l3": float(np.mean(totals[-3:])),
         "h2h_goals_per_match_l5": float(np.mean(totals)),
         "h2h_btts_rate_l5": float(np.mean(btts)),
         "h2h_over25_rate_l5": float(np.mean(over25)),
         "h2h_target_home_goals_l5": float(np.mean(home_scored)),
         "h2h_target_away_goals_l5": float(np.mean(away_scored)),
-        "h2h_goal_difference_l5": float(np.mean(np.asarray(home_scored) - np.asarray(away_scored))),
+        "h2h_goal_difference_l5": float(
+            np.mean(np.asarray(home_scored) - np.asarray(away_scored))
+        ),
+        "h2h_recency_weighted_result_score": weighted_score,
         "h2h_sample_size": float(len(relevant)),
         "h2h_age_days": age_days,
     }
