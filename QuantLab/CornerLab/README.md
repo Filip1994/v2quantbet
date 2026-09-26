@@ -32,6 +32,23 @@ UNCLASSIFIED rows are persisted only for Top-10 fixtures; broad GoalLab-only fix
 do not store corner-owned or unknown market rows. Canonical settlement support is added
 market by market.
 
+## Shadow Pick Engine V1
+
+Task 003 adds `CORNERLAB_SHADOW_POLICY_V1` and `CORNER_POISSON_FORM_V1`.
+
+The engine uses only already-stored completed-match `Corner Kicks` observations. It
+requires at least five complete historical matches per team, prefers home/away venue
+splits when at least three are available, derives expected home/away corner counts from
+corners-for and corners-against means, and evaluates a Poisson total-count distribution.
+
+Only complete two-sided half-count total-corner markets are eligible. Team totals,
+handicaps, races, half markets and ambiguous integer lines are rejected. Default value
+gates are edge >= 4 percentage points, EV >= 4%, odds 1.45-3.50, quote age <= 13 hours
+and at least 15 minutes to kickoff.
+
+No provider request is made by the decision engine itself. Missing history produces an
+auditable PASS rather than a fabricated probability.
+
 ## Referee variables
 
 Referee card/foul variables do not belong to CornerLab v1.
