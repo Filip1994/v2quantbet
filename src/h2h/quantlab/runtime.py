@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,8 +32,8 @@ class QuantLabRuntimeSettings:
     feature_refresh_seconds: int = 1800
     history_backfill_per_cycle: int = 25
     corner_team_history_last: int = 12
-    corner_team_history_teams_per_cycle: int = 40
-    corner_team_statistics_per_cycle: int = 120
+    corner_team_history_teams_per_cycle: int = 120
+    corner_team_statistics_per_cycle: int = 360
     corner_team_history_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
@@ -320,43 +321,72 @@ class QuantLabRuntime:
         return tuple(teams)
 
     def _bootstrap_corner_team_history(self, now: datetime) -> tuple[int, int]:
-        team_ids = self._corner_target_team_ids(now)
-        if not team_ids:
+        root_team_ids = self._corner_target_team_ids(now)
+        if not root_team_ids:
             return 0, 0
 
+        discovery_limit = self._settings.corner_team_history_teams_per_cycle
+        queue: deque[tuple[int, int]] = deque((team_id, 0) for team_id in root_team_ids)
+        queued = set(root_team_ids)
+        processed: set[int] = set()
+        expanded_team_ids: list[int] = []
         discoveries = 0
-        for team_id in team_ids:
-            if discoveries >= self._settings.corner_team_history_teams_per_cycle:
-                break
-            if not self._repository.team_history_due(
-                team_id,
-                now=now,
-                refresh_seconds=self._settings.corner_team_history_refresh_seconds,
-            ):
+
+        while queue:
+            team_id, depth = queue.popleft()
+            if team_id in processed:
                 continue
-            payload = self._provider.fetch_team_recent_fixtures(
+            processed.add(team_id)
+            expanded_team_ids.append(team_id)
+
+            if (
+                discoveries < discovery_limit
+                and self._repository.team_history_due(
+                    team_id,
+                    now=now,
+                    refresh_seconds=self._settings.corner_team_history_refresh_seconds,
+                )
+            ):
+                payload = self._provider.fetch_team_recent_fixtures(
+                    team_id,
+                    last=self._settings.corner_team_history_last,
+                )
+                observations = parse_fixture_discovery_response(payload, captured_at=now)
+                self._repository.save_fixture_observations(observations)
+                self._repository.save_team_history_capture(
+                    team_id=team_id,
+                    captured_at=now,
+                    requested_last=self._settings.corner_team_history_last,
+                    response_fixture_count=len(observations),
+                    raw_payload=dict(payload),
+                )
+                discoveries += 1
+
+            # One-hop opponent expansion creates a connected historical graph so
+            # _build_training can satisfy MIN_TEAM_HISTORY for both sides.
+            if depth >= 1:
+                continue
+            opponents = self._repository.recent_team_opponent_ids(
                 team_id,
-                last=self._settings.corner_team_history_last,
+                before=now,
+                limit=self._settings.corner_team_history_last,
             )
-            observations = parse_fixture_discovery_response(payload, captured_at=now)
-            self._repository.save_fixture_observations(observations)
-            self._repository.save_team_history_capture(
-                team_id=team_id,
-                captured_at=now,
-                requested_last=self._settings.corner_team_history_last,
-                response_fixture_count=len(observations),
-                raw_payload=dict(payload),
-            )
-            discoveries += 1
+            for opponent_id in reversed(opponents):
+                if opponent_id <= 0 or opponent_id in queued or opponent_id in processed:
+                    continue
+                queued.add(opponent_id)
+                queue.appendleft((opponent_id, depth + 1))
 
         stats_target = self._settings.corner_team_statistics_per_cycle
         candidates = self._repository.completed_for_team_statistics(
-            team_ids,
+            expanded_team_ids,
             before=now,
             limit=max(6000, stats_target * 50),
         )
-        by_team: dict[int, list[dict[str, Any]]] = {team_id: [] for team_id in team_ids}
-        target_set = set(team_ids)
+        by_team: dict[int, list[dict[str, Any]]] = {
+            team_id: [] for team_id in expanded_team_ids
+        }
+        target_set = set(expanded_team_ids)
         for fixture in candidates:
             home_id = int(fixture["home_team_id"])
             away_id = int(fixture["away_team_id"])
@@ -367,7 +397,7 @@ class QuantLabRuntime:
 
         stats_backfilled = 0
         attempted_fixtures: set[str] = set()
-        for team_id in team_ids:
+        for team_id in expanded_team_ids:
             for fixture in by_team[team_id]:
                 if stats_backfilled >= stats_target:
                     return discoveries, stats_backfilled
