@@ -5,6 +5,7 @@ import pytest
 from h2h.api.research_analytics import (
     build_research_analytics_snapshot,
     cohort_metrics,
+    diagnostic_bucket,
     market_fair_probability_bucket,
 )
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
@@ -51,6 +52,32 @@ def row(
         "freshness": "FRESH",
         "kickoff_at": AS_OF,
     }
+
+
+def test_diagnostic_bucket_contract_is_reusable_for_drilldown() -> None:
+    other_extreme = row(
+        fixture="extreme",
+        market="BTTS",
+        selection="YES",
+        outcome="WIN",
+        model_probability=0.62,
+        market_fair_probability=0.48,
+        odds=2.20,
+        edge=0.14,
+        ev=0.30,
+        pnl_minor=36_000,
+        clv_ppm=100_000,
+    )
+    low_scoring_extreme = {
+        **other_extreme,
+        "market": "OU_25",
+        "selection": "UNDER",
+        "edge": 0.20,
+        "expected_value": 0.10,
+    }
+
+    assert diagnostic_bucket(other_extreme) == "OTHER_EXTREME"
+    assert diagnostic_bucket(low_scoring_extreme) == "LOW_SCORING_EXTREME"
 
 
 def test_market_fair_probability_bucket_contract_is_stable() -> None:
