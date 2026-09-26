@@ -26,6 +26,7 @@ from scipy.special import gammaln
 from scipy.stats import poisson
 
 from h2h.quant.dixon_coles import dixon_coles_tau
+from h2h.quantlab.goal_lab.injuries import build_goal_injury_features
 from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
 
@@ -92,9 +93,10 @@ CONTRACT_COVERAGE_V1 = {
         "pending": [],
     },
     "L_INJURY_SUSPENSION": {
-        "status": "PENDING_ACQUISITION",
-        "implemented": [],
-        "pending": list(range(172, 194)),
+        "status": "PARTIAL",
+        "implemented": list(range(172, 179)),
+        "pending": list(range(179, 194)),
+        "pending_reason": "starter/minutes/goals/assists/position contribution requires player-history layer",
     },
     "M_TARGET_LINEUP_FORMATION": {
         "status": "SEPARATE_LATE_LAYER",
@@ -875,6 +877,7 @@ def _feature_map(
     target_season: int,
     target_league_id: int,
     standings_features: dict[str, float] | None = None,
+    injury_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     home = _team_feature_map(
         histories.get(home_id, []),
@@ -896,6 +899,10 @@ def _feature_map(
     else:
         features["standings_coverage_flag"] = 0.0
         features["standings_snapshot_age_days"] = float("nan")
+    if injury_features:
+        features.update(injury_features)
+    else:
+            features["injury_snapshot_age_days"] = float("nan")
     league = _league_season_context(
         histories, league_id=target_league_id, season=target_season
     )
@@ -1226,6 +1233,29 @@ def _build_training(
                 ),
                 decision_at=kickoff,
             )
+            injury_payload = row.get("injury_payload")
+            if isinstance(injury_payload, str):
+                injury_payload = json.loads(injury_payload)
+            injury_capture = (
+                None
+                if row.get("injury_capture_id") is None
+                else {
+                    "injury_capture_id": row.get("injury_capture_id"),
+                    "available_at": row.get("injury_available_at"),
+                    "status": row.get("injury_status"),
+                    "reason": row.get("injury_reason"),
+                    "source": row.get("injury_source"),
+                    "raw_payload": (
+                        injury_payload if isinstance(injury_payload, dict) else {}
+                    ),
+                }
+            )
+            injury_features, _injury_meta = build_goal_injury_features(
+                injury_capture,
+                home_team_id=home_id,
+                away_team_id=away_id,
+                decision_at=kickoff,
+            )
             feature_rows.append(
                 _feature_map(
                     histories,
@@ -1236,6 +1266,7 @@ def _build_training(
                     target_season=int(row["season"]),
                     target_league_id=league_id,
                     standings_features=standings_features,
+                    injury_features=injury_features,
                 )
             )
             home_targets.append(float(home_goals))
@@ -1791,6 +1822,16 @@ class GoalStructuralModelService:
             available_at=None if standings is None else standings.get("available_at"),
             decision_at=decision_at.astimezone(UTC),
         )
+        injury_capture = self._repository.latest_goal_injury_capture(
+            str(fixture["fixture_id"]),
+            decision_at=decision_at.astimezone(UTC),
+        )
+        injury_features, injury_meta = build_goal_injury_features(
+            injury_capture,
+            home_team_id=home_id,
+            away_team_id=away_id,
+            decision_at=decision_at.astimezone(UTC),
+        )
         raw_map = _feature_map(
             self._histories,
             self._pairs,
@@ -1800,6 +1841,7 @@ class GoalStructuralModelService:
             target_season=int(fixture["season"]),
             target_league_id=league_id,
             standings_features=standings_features,
+            injury_features=injury_features,
         )
         model_feature_names = tuple(params["model_feature_names"])
         base_feature_names = tuple(params["base_feature_names"])
@@ -1857,6 +1899,14 @@ class GoalStructuralModelService:
                         None
                         if standings is None
                         else standings.get("standings_snapshot_id")
+                    ),
+                },
+                "injury_provenance": {
+                    **injury_meta,
+                    "injury_capture_id": (
+                        None
+                        if injury_capture is None
+                        else injury_capture.get("injury_capture_id")
                     ),
                 },
                 "home_history_size": len(home_history),
