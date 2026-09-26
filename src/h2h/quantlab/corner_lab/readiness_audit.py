@@ -300,3 +300,18 @@ def log_cornerlab_v2_readiness(repository: Any, logger: logging.Logger) -> None:
         "QuantLab CornerLab V2 readiness payload=%s",
         json.dumps(report, sort_keys=True, default=str, separators=(",", ":")),
     )
+
+
+def log_cornerlab_v2_training_readiness(repository: Any, logger: logging.Logger) -> None:
+    """Emit the exact current training-sample readiness after an acquisition cycle."""
+    now = datetime.now(UTC)
+    history_rows = repository.corner_model_history(before=now, limit=HISTORY_LIMIT)
+    _x, y, _histories, history_match_count = _build_training(history_rows)
+    logger.info(
+        "QuantLab CornerLab V2 cycle readiness history_match_count=%d "
+        "training_sample_size=%d minimum_training_examples=%d training_shortfall=%d",
+        history_match_count,
+        len(y),
+        MIN_TRAINING_EXAMPLES,
+        max(0, MIN_TRAINING_EXAMPLES - len(y)),
+    )
