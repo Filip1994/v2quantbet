@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from time import monotonic
 from typing import Any
 from urllib.parse import urlencode
@@ -70,6 +71,15 @@ class QuantLabApiFootballClient:
         if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
             raise ValueError("fixture_id must be a positive integer")
         return self._get("fixtures", {"id": fixture_id, "timezone": "UTC"}, cache_ttl_seconds=3600.0)
+
+    def fetch_fixtures_for_date(self, fixture_date: date) -> Mapping[str, Any]:
+        if isinstance(fixture_date, datetime) or not isinstance(fixture_date, date):
+            raise TypeError("fixture_date must be a date")
+        return self._get(
+            "fixtures",
+            {"date": fixture_date.isoformat(), "timezone": "UTC"},
+            cache_ttl_seconds=21600.0,
+        )
 
     def fetch_standings(self, league_id: int, season: int) -> Mapping[str, Any]:
         if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in (league_id, season)):
