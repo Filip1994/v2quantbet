@@ -201,7 +201,7 @@ class QuantLabRuntime:
                         self._repository.save_fixture_context(parsed)
                     except ApiBudgetExceededError:
                         raise
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001
                         LOGGER.warning(
                             "QuantLab history context unavailable fixture=%s "
                             "error_class=%s error=%s",
@@ -225,12 +225,13 @@ class QuantLabRuntime:
             except ApiBudgetExceededError:
                 raise
             except Exception as exc:
-                LOGGER.exception(
+                LOGGER.error(
                     "QuantLab history backfill fixture failed fixture=%s "
                     "error_class=%s error=%s",
                     fixture_id,
                     type(exc).__name__,
                     str(exc),
+                    exc_info=True,
                 )
         return completed
 
@@ -338,12 +339,13 @@ class QuantLabRuntime:
                     str(exc),
                 )
             except Exception as exc:
-                LOGGER.exception(
+                LOGGER.error(
                     "QuantLab upcoming fixture collection failed fixture=%s "
                     "error_class=%s error=%s",
                     fixture_id,
                     type(exc).__name__,
                     str(exc),
+                    exc_info=True,
                 )
         return market_fixtures, card_snapshots
 
