@@ -22,6 +22,7 @@ from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_hold
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
+from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 from h2h.quantlab.goal_lab.structural_shadow_engine import (
     GoalLabStructuralShadowEngine,
@@ -147,7 +148,7 @@ def main() -> None:
     LOGGER.info(
         "GoalLab DC+ pick authority=%s policy=%s",
         goal_pick_authority,
-        goal_structural_engine._policy.pick_policy_version,
+        PICK_POLICY_VERSION,
     )
     goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
     corner_engine = CornerLabShadowPickEngine(repository)
