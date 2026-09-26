@@ -1168,6 +1168,26 @@ def _feature_provenance(
     }
 
 
+def _history_coach_capture(
+    row: dict[str, Any],
+    side: str,
+) -> dict[str, Any] | None:
+    capture_id = row.get(f"{side}_coach_capture_id")
+    if capture_id is None:
+        return None
+    payload = row.get(f"{side}_coach_payload")
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return {
+        "coach_capture_id": capture_id,
+        "available_at": row.get(f"{side}_coach_available_at"),
+        "status": row.get(f"{side}_coach_status"),
+        "reason": row.get(f"{side}_coach_reason"),
+        "source": "api-football:coachs",
+        "raw_payload": payload if isinstance(payload, dict) else {},
+    }
+
+
 def _build_training(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[
@@ -1264,25 +1284,9 @@ def _build_training(
                 decision_at=kickoff,
             )
 
-            def coach_capture(side: str) -> dict[str, Any] | None:
-                capture_id = row.get(f"{side}_coach_capture_id")
-                if capture_id is None:
-                    return None
-                payload = row.get(f"{side}_coach_payload")
-                if isinstance(payload, str):
-                    payload = json.loads(payload)
-                return {
-                    "coach_capture_id": capture_id,
-                    "available_at": row.get(f"{side}_coach_available_at"),
-                    "status": row.get(f"{side}_coach_status"),
-                    "reason": row.get(f"{side}_coach_reason"),
-                    "source": "api-football:coachs",
-                    "raw_payload": payload if isinstance(payload, dict) else {},
-                }
-
             manager_features, _manager_meta = build_goal_manager_features(
-                coach_capture("home"),
-                coach_capture("away"),
+                _history_coach_capture(row, "home"),
+                _history_coach_capture(row, "away"),
                 home_team_id=home_id,
                 away_team_id=away_id,
                 home_match_dates=[item.kickoff_at for item in home_history],
