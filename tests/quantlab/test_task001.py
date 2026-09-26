@@ -938,3 +938,12 @@ def test_history_backfill_watermarks_statistics_without_both_teams() -> None:
     assert repo.captures[0]["status"] == "UNAVAILABLE"
     assert repo.captures[0]["response_team_count"] == 1
     assert "both fixture teams" in repo.captures[0]["reason"]
+
+
+def test_corner_v2_legacy_statistics_capture_does_not_block_enrichment() -> None:
+    capture_source = inspect.getsource(PostgreSQLQuantLabRepository.statistics_capture_exists)
+    queue_source = inspect.getsource(PostgreSQLQuantLabRepository.completed_for_context_backfill)
+
+    assert "legacy-statistics-observation" in capture_source
+    assert "IS DISTINCT FROM" in capture_source
+    assert queue_source.count("legacy-statistics-observation") == 2
