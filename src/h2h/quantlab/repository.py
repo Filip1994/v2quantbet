@@ -59,6 +59,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_lineup_captures",
             "quantlab_goal_coach_captures",
             "quantlab_goal_player_captures",
+            "quantlab_goal_picks",
+            "quantlab_goal_pick_settlements",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -318,6 +320,228 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
             return cursor.rowcount > 0
+
+    def save_goal_pick(self, item: Any) -> bool:
+        if item.pick_policy_version != "GOALLAB_DC_PLUS_PICK_POLICY_V1":
+            raise ValueError("unsupported GoalLab pick policy")
+        if item.qualifying_candidate_count <= 0 or item.stake_minor <= 0:
+            raise ValueError("invalid GoalLab canonical pick")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT decision FROM quantlab_goal_decisions WHERE decision_id = %s",
+                (item.source_decision_id,),
+            )
+            decision_row = cursor.fetchone()
+            if decision_row is None or decision_row[0] != "PICK":
+                raise ValueError("GoalLab pick source decision must be persisted PICK")
+
+            cursor.execute(
+                "SELECT feature_snapshot_id FROM quantlab_goal_feature_snapshots "
+                "WHERE fixture_id = %s AND decision_at = %s AND model_version = %s "
+                "ORDER BY feature_snapshot_id DESC LIMIT 1",
+                (item.fixture_id, item.decision_at, item.model_version),
+            )
+            feature_row = cursor.fetchone()
+            if feature_row is None:
+                raise ValueError("GoalLab pick requires exact model feature snapshot")
+            feature_snapshot_id = str(feature_row[0])
+
+            goal_pick_id = _identifier(
+                "quantlab-goal-pick-v1:",
+                {
+                    "fixture_id": item.fixture_id,
+                    "pick_policy_version": item.pick_policy_version,
+                    "source_decision_id": item.source_decision_id,
+                },
+            )
+            cursor.execute(
+                "INSERT INTO quantlab_goal_picks ("
+                "goal_pick_id, fixture_id, source_decision_id, feature_snapshot_id, "
+                "pick_policy_version, model_name, model_version, bookmaker_id, bookmaker_name, "
+                "provider_bet_id, provider_bet_name, market_key, selection, line, "
+                "selected_observation_id, companion_observation_id, quote_observed_at, "
+                "decision_at, kickoff_at, odds, companion_odds, market_probability, "
+                "model_probability, edge, expected_value, expected_home_goals, "
+                "expected_away_goals, rho, stake_minor, qualifying_candidate_count, "
+                "selection_rank_payload"
+                ") VALUES ("
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb"
+                ") ON CONFLICT DO NOTHING",
+                (
+                    goal_pick_id,
+                    item.fixture_id,
+                    item.source_decision_id,
+                    feature_snapshot_id,
+                    item.pick_policy_version,
+                    item.model_name,
+                    item.model_version,
+                    item.bookmaker_id,
+                    item.bookmaker_name,
+                    item.provider_bet_id,
+                    item.provider_bet_name,
+                    item.market_key,
+                    item.selection,
+                    item.line,
+                    item.selected_observation_id,
+                    item.companion_observation_id,
+                    item.quote_observed_at,
+                    item.decision_at,
+                    item.kickoff_at,
+                    item.odds,
+                    item.companion_odds,
+                    item.market_probability,
+                    item.model_probability,
+                    item.edge,
+                    item.expected_value,
+                    item.expected_home_goals,
+                    item.expected_away_goals,
+                    item.rho,
+                    item.stake_minor,
+                    item.qualifying_candidate_count,
+                    _json(item.selection_rank_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def goal_pick_settlement_candidates(
+        self,
+        *,
+        limit: int = 500,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT p.goal_pick_id, p.fixture_id, p.market_key, p.selection, p.line, "
+                "p.odds, p.stake_minor, p.model_version, p.decision_at, p.kickoff_at, "
+                "r.result_observation_id, r.provider_status, r.result_classification, "
+                "r.regulation_home_goals, r.regulation_away_goals, r.first_acquired_at "
+                "FROM quantlab_goal_picks p "
+                "JOIN fixture_result_acquisition_states state "
+                "  ON state.fixture_id = p.fixture_id AND state.phase = 'COMPLETE' "
+                "JOIN fixture_result_observations r "
+                "  ON r.result_observation_id = state.current_observation_id "
+                " AND r.fixture_id = p.fixture_id "
+                "LEFT JOIN quantlab_goal_pick_settlements s "
+                "  ON s.goal_pick_id = p.goal_pick_id "
+                "WHERE s.goal_pick_id IS NULL "
+                "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
+                "ORDER BY p.kickoff_at ASC, p.goal_pick_id ASC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def save_goal_pick_settlement(self, item: Any) -> bool:
+        settlement_id = _identifier(
+            "quantlab-goal-settlement-v1:",
+            {
+                "goal_pick_id": item.goal_pick_id,
+                "result_observation_id": item.result_observation_id,
+                "settlement_rule_version": item.settlement_rule_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_pick_settlements ("
+                "goal_pick_settlement_id, goal_pick_id, fixture_id, result_observation_id, "
+                "result_classification, regulation_home_goals, regulation_away_goals, "
+                "outcome, pnl_minor, settled_at, settlement_rule_version, result_detail"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    settlement_id,
+                    item.goal_pick_id,
+                    item.fixture_id,
+                    item.result_observation_id,
+                    item.result_classification,
+                    item.regulation_home_goals,
+                    item.regulation_away_goals,
+                    item.outcome,
+                    item.pnl_minor,
+                    item.settled_at,
+                    item.settlement_rule_version,
+                    _json(item.result_detail),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def list_goal_picks(self, *, limit: int = 5000) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT p.goal_pick_id, p.fixture_id, p.source_decision_id, "
+                "p.feature_snapshot_id, p.pick_policy_version, p.model_name, p.model_version, "
+                "p.bookmaker_id, p.bookmaker_name, p.provider_bet_id, p.provider_bet_name, "
+                "p.market_key, p.selection, p.line, p.quote_observed_at, p.decision_at, "
+                "p.kickoff_at, p.odds, p.companion_odds, p.market_probability, "
+                "p.model_probability, p.edge, p.expected_value, p.expected_home_goals, "
+                "p.expected_away_goals, p.rho, p.stake_minor, p.qualifying_candidate_count, "
+                "p.selection_rank_payload, fs.feature_payload, "
+                "s.outcome, s.pnl_minor, s.settled_at, s.result_classification, "
+                "s.regulation_home_goals, s.regulation_away_goals, s.result_detail, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country "
+                "FROM quantlab_goal_picks p "
+                "JOIN quantlab_goal_feature_snapshots fs "
+                "  ON fs.feature_snapshot_id = p.feature_snapshot_id "
+                "LEFT JOIN quantlab_goal_pick_settlements s ON s.goal_pick_id = p.goal_pick_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country "
+                " FROM fixture_observations o WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
+                "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s",
+                (limit,),
+            )
+            rows = _row_dicts(cursor)
+        for row in rows:
+            for key in ("selection_rank_payload", "feature_payload", "result_detail"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    row[key] = json.loads(value)
+        return rows
+
+    def goal_model_contract(self, model_version: str | None = None) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            if model_version is None:
+                cursor.execute(
+                    "SELECT model_version, trained_at, training_cutoff, feature_version, "
+                    "training_sample_size, history_match_count, team_count, league_count, "
+                    "rho, intercept, home_advantage, parameters, training_payload "
+                    "FROM quantlab_goal_model_versions "
+                    "ORDER BY trained_at DESC, model_version DESC LIMIT 1"
+                )
+            else:
+                cursor.execute(
+                    "SELECT model_version, trained_at, training_cutoff, feature_version, "
+                    "training_sample_size, history_match_count, team_count, league_count, "
+                    "rho, intercept, home_advantage, parameters, training_payload "
+                    "FROM quantlab_goal_model_versions WHERE model_version = %s",
+                    (model_version,),
+                )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        for key in ("parameters", "training_payload"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        params = result.get("parameters") or {}
+        result["active_feature_names"] = tuple(params.get("model_feature_names") or ())
+        result["base_feature_names"] = tuple(params.get("base_feature_names") or ())
+        result["active_feature_count"] = len(result["active_feature_names"])
+        return result
 
     def save_goal_shadow_bet(self, item: Any, *, stake_minor: int) -> bool:
         if item.decision != "PICK":
