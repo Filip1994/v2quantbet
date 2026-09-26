@@ -14,7 +14,10 @@ from h2h.persistence.postgres_model_lifecycle import (
 from h2h.quantlab.budget import QuantLabRequestBudget
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
 from h2h.quantlab.corner_lab.audit import log_cornerlab_v2_audit
-from h2h.quantlab.corner_lab.readiness_audit import log_cornerlab_v2_readiness
+from h2h.quantlab.corner_lab.readiness_audit import (
+    log_cornerlab_v2_readiness,
+    log_cornerlab_v2_training_readiness,
+)
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
@@ -201,6 +204,7 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
+                log_cornerlab_v2_training_readiness(repository, LOGGER)
             except Exception as exc:
                 error_text = str(exc)
                 LOGGER.exception(
