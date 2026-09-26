@@ -9,6 +9,7 @@ class RejectionReason:
     AFRICA = "EXCLUDED_AFRICAN_COMPETITION"
     ASIA = "EXCLUDED_ASIAN_COMPETITION"
     YOUTH = "EXCLUDED_YOUTH_COMPETITION"
+    WOMEN = "EXCLUDED_WOMENS_FOOTBALL"
     ENGLISH_TIER = "EXCLUDED_ENGLISH_TIER_4_OR_LOWER"
     GERMAN_TIER = "EXCLUDED_GERMAN_TIER_4_OR_LOWER"
     CUP = "EXCLUDED_CUP_COMPETITION"
@@ -24,6 +25,8 @@ class CompetitionMetadata:
     name: str | None = None
     type: str | None = None
     level: int | None = None
+    home_team: str | None = None
+    away_team: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +47,84 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
     return any(f" {phrase} " in padded for phrase in phrases)
 
 
+_WOMEN_MARKERS = (
+    "women",
+    "womens",
+    "woman",
+    "ladies",
+    "female",
+    "feminine",
+    "feminin",
+    "femenina",
+    "femenino",
+    "femenil",
+    "feminino",
+    "femminile",
+    "frauen",
+    "vrouwen",
+    "kvinner",
+    "kvinnor",
+    "kvinde",
+    "kobiet",
+    "zeny",
+    "zene",
+    "damer",
+    "dames",
+)
+
+_WOMEN_ONLY_COMPETITIONS = {
+    "nwsl",
+    "wsl",
+    "liga f",
+    "we league",
+    "nadeshiko league",
+    "damallsvenskan",
+    "toppserien",
+    "kvindeliga",
+}
+
+
+def is_womens_football(
+    *,
+    competition_name: object,
+    competition_type: object = "",
+    home_team: object = "",
+    away_team: object = "",
+) -> bool:
+    """Return True when provider metadata identifies women's football.
+
+    Generic single-letter W markers are accepted only as trailing team/competition
+    suffixes, avoiding false positives for senior men's clubs whose names begin with W.
+    """
+    competition = _normalise(str(competition_name or ""))
+    competition_kind = _normalise(str(competition_type or ""))
+    if (
+        competition in _WOMEN_ONLY_COMPETITIONS
+        or _contains_phrase(competition, _WOMEN_MARKERS)
+        or _contains_phrase(competition_kind, _WOMEN_MARKERS)
+        or competition.endswith(" w")
+    ):
+        return True
+
+    for team in (home_team, away_team):
+        team_key = _normalise(str(team or ""))
+        if _contains_phrase(team_key, _WOMEN_MARKERS) or team_key.endswith(" w"):
+            return True
+    return False
+
 def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     """Return a fail-closed Phase I inclusion decision."""
     country = _normalise(metadata.country)
     name = _normalise(metadata.name)
     competition_type = _normalise(metadata.type)
+
+    if is_womens_football(
+        competition_name=metadata.name,
+        competition_type=metadata.type,
+        home_team=metadata.home_team,
+        away_team=metadata.away_team,
+    ):
+        return ScopeDecision(False, RejectionReason.WOMEN)
 
     if not country or not name or not competition_type:
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
+from h2h.domain.competition_scope import is_womens_football
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
 
@@ -44,7 +45,7 @@ def parse_fixture_discovery_response(
     *,
     captured_at: datetime,
 ) -> tuple[QuantLabFixtureObservation, ...]:
-    """Parse one global date-shard response without applying a league scope."""
+    """Parse one global date shard, dropping globally prohibited women fixtures."""
     captured = _aware_utc(captured_at, "captured_at")
     if not isinstance(payload, Mapping):
         raise TypeError("fixture discovery payload must be a mapping")
@@ -61,6 +62,13 @@ def parse_fixture_discovery_response(
         if not isinstance(raw, Mapping):
             continue
         fixture = adapter.adapt(raw)
+        if is_womens_football(
+            competition_name=fixture.competition_name,
+            competition_type=fixture.competition_type,
+            home_team=fixture.home_team,
+            away_team=fixture.away_team,
+        ):
+            continue
         raw_payload = dict(raw)
         observation_id = _identifier(
             {

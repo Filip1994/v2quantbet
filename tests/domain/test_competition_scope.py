@@ -116,3 +116,25 @@ def test_fails_closed_on_ambiguous_metadata(metadata: CompetitionMetadata) -> No
 
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.AMBIGUOUS
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        CompetitionMetadata("England", "Women's Super League", "league", 1),
+        CompetitionMetadata("USA", "NWSL", "league", 1),
+        CompetitionMetadata("Spain", "Liga F", "league", 1),
+        CompetitionMetadata("Germany", "Frauen Bundesliga", "league", 1),
+        CompetitionMetadata("Italy", "Serie A Femminile", "league", 1),
+        CompetitionMetadata("Mexico", "Liga MX Femenil", "league", 1),
+        CompetitionMetadata("Sweden", "Damallsvenskan", "league", 1),
+        CompetitionMetadata("Norway", "Toppserien", "league", 1),
+        CompetitionMetadata("Denmark", "Kvindeliga", "league", 1),
+        CompetitionMetadata("World", "Senior League", "league", 1, "Arsenal W", "Chelsea W"),
+    ],
+)
+def test_rejects_womens_football_globally(metadata: CompetitionMetadata) -> None:
+    decision = classify_phase_i(metadata)
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.WOMEN

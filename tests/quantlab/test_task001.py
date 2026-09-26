@@ -947,3 +947,35 @@ def test_corner_v2_legacy_statistics_capture_does_not_block_enrichment() -> None
     assert "legacy-statistics-observation" in capture_source
     assert "IS DISTINCT FROM" in capture_source
     assert queue_source.count("legacy-statistics-observation") == 2
+
+
+def test_quantlab_scopes_hard_block_womens_football() -> None:
+    cases = (
+        {"country": "England", "competition_name": "Women's Super League"},
+        {"country": "USA", "competition_name": "NWSL"},
+        {"country": "Spain", "competition_name": "Liga F"},
+        {"country": "Germany", "competition_name": "Frauen Bundesliga"},
+        {"country": "World", "competition_name": "Senior League", "home_team": "Arsenal W", "away_team": "Chelsea W"},
+    )
+    for fixture in cases:
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == "womens_football"
+        assert context.reason == "womens_football"
+
+
+def test_quantlab_discovery_drops_womens_fixtures_before_persistence() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(1001, 39, "Premier League", "England"),
+            _fixture_payload(1002, 44, "Women's Super League", "England"),
+            _fixture_payload(1003, 253, "NWSL", "USA"),
+            _fixture_payload(1004, 140, "Liga F", "Spain"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.provider_fixture_id for row in rows] == ["1001"]

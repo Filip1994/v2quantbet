@@ -39,7 +39,13 @@ Exclude all youth/junior competitions, including but not limited to:
 
 The exclusion must use competition metadata and robust name classification where metadata is incomplete.
 
-### 3. English fourth tier and below
+### 3. Women's football
+
+Exclude women's football from the entire QuantBet football universe, including production and QuantLab research. The classifier uses normalized competition and team metadata and recognizes common localized women's-football markers plus women-only competition names such as NWSL, WSL, Liga F, WE League, Damallsvenskan, Toppserien and Kvindeliga.
+
+The exclusion is a hard gate before fixture-specific odds, context, standings or statistics acquisition. Global date-shard fixture discovery remains provider-wide and is filtered locally.
+
+### 4. English fourth tier and below
 
 Exclude:
 
@@ -48,7 +54,7 @@ Exclude:
 
 The initial scope may retain the English Premier League, Championship and League One, subject to normal data-quality checks.
 
-### 4. German fourth tier and below
+### 5. German fourth tier and below
 
 Exclude:
 
@@ -58,7 +64,7 @@ Exclude:
 
 The initial scope may retain the German Bundesliga, 2. Bundesliga and 3. Liga, subject to normal data-quality checks.
 
-### 5. Explicit competition blocklist
+### 6. Explicit competition blocklist
 
 Exclude specifically blocked competitions whose production behavior is not accepted even when
 the provider classifies them as senior leagues.
@@ -67,7 +73,7 @@ Current explicit exclusion:
 
 - Czech-Republic `3. liga - MSFL`.
 
-### 6. Cup competitions
+### 7. Cup competitions
 
 Exclude all cup and knockout competitions from Phase I, including but not limited to:
 
@@ -98,6 +104,7 @@ Rejected fixtures should expose a stable reason code, for example:
 
 - `EXCLUDED_AFRICAN_COMPETITION`;
 - `EXCLUDED_YOUTH_COMPETITION`;
+- `EXCLUDED_WOMENS_FOOTBALL`;
 - `EXCLUDED_ENGLISH_TIER_4_OR_LOWER`;
 - `EXCLUDED_GERMAN_TIER_4_OR_LOWER`;
 - `EXCLUDED_CUP_COMPETITION`;

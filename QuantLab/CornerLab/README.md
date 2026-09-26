@@ -100,10 +100,10 @@ Target fixture snapshots persist the exact input feature vector and expected tot
 
 ## Research scope
 
-CornerLab uses `CARDCORNER_MARKET_DRIVEN_V3`.
+CornerLab uses `CARDCORNER_MARKET_DRIVEN_V4`.
 
-There is no domestic league allowlist. QuantLab scans the globally discovered upcoming
-universe and retains CORNER markets wherever the provider publishes them.
+There is no domestic league allowlist. Women's football is globally hard-blocked; the
+remaining discovered universe retains CORNER markets wherever the provider publishes them.
 
 Historical `/fixtures/statistics` acquisition is also broad. A provider response that
 does not contain both fixture teams is stored as an append-only
