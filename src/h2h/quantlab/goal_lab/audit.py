@@ -341,7 +341,7 @@ def build_goal_model_validation(
 
     controls: dict[int, DixonColesModel] = {}
     control_fit_errors: dict[str, str] = {}
-    training_leagues = sorted(set(int(value) for value in train_leagues.tolist()))
+    training_leagues = sorted({int(value) for value in train_leagues.tolist()})
     for league_id in training_leagues:
         indices = [
             index
