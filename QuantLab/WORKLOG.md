@@ -684,3 +684,19 @@ QuantLab observation.
 
 **NONE.** Production fixture rows are read as immutable seed facts only; no production
 fixture, model, pick, registration or bankroll state is changed.
+
+
+## 2026-09-26 — GoalLab pick observability snapshot
+
+**Owner:** QuantLab core
+
+Added a bounded, read-only startup log of the latest 20 GoalLab shadow bets so operators
+can inspect concrete fixture/league/bookmaker/market/odds/model-probability/market-
+probability/edge/EV values through Railway logs when direct SQL/dashboard reads are not
+available to the operator tooling.
+
+The snapshot reads only `quantlab_shadow_bets` through the existing repository reader,
+makes **zero provider requests**, writes no database state, and does not expose credentials
+or raw provider payloads.
+
+Production impact: **NONE**.

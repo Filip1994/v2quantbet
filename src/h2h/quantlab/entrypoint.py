@@ -51,6 +51,30 @@ def _positive_integer(name: str, default: str) -> int:
     return value
 
 
+def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: int = 20) -> None:
+    """Emit a bounded read-only snapshot for operational inspection."""
+    for row in repository.list_bets("GOAL", limit=limit):
+        LOGGER.info(
+            "QuantLab GoalLab shadow pick fixture=%s match=%s vs %s league=%s "
+            "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
+            "model_p=%s market_p=%s edge=%s ev=%s",
+            row.get("fixture_id"),
+            row.get("home_team"),
+            row.get("away_team"),
+            row.get("competition_name"),
+            row.get("kickoff_at"),
+            row.get("bookmaker_name"),
+            row.get("market_key"),
+            row.get("selection"),
+            row.get("line"),
+            row.get("odds"),
+            row.get("model_probability"),
+            row.get("market_probability"),
+            row.get("edge"),
+            row.get("expected_value"),
+        )
+
+
 def main() -> None:
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     stop = Event()
@@ -128,6 +152,7 @@ def main() -> None:
         dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
     )
     cycle_seconds = _positive_integer("QUANTBET_QUANTLAB_CYCLE_SECONDS", "300")
+    _log_latest_goal_picks(repository)
 
     try:
         server.start()
