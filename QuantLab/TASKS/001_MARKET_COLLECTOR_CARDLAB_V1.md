@@ -31,13 +31,17 @@ Contract:
 2. The production canonical odds adapter is not used.
 3. Provider fixture ID, bookmaker ID/name, provider bet ID/name, raw selection,
    deterministic parsed line, odds, provider update timestamp and capture timestamp are
-   preserved.
-4. Observations are stored in append-only QuantLab-owned tables.
-5. The collector has no write path to quote_series, value_evaluations, pick_decisions,
+   preserved for lab-eligible rows.
+4. GOAL rows may be persisted across GOAL_SCOPE_V1. CARD, CORNER and UNCLASSIFIED rows
+   are persisted only for CARDCORNER_TOP10_LEAGUES_V2 fixtures.
+5. Every successful odds response writes an append-only market-capture watermark even
+   when zero rows are stored, preventing empty-result re-poll loops across cycles/restarts.
+6. Observations and capture watermarks are stored in QuantLab-owned tables.
+7. The collector has no write path to quote_series, value_evaluations, pick_decisions,
    registered_picks or bankroll.
-6. Provider calls execute as quantlab_context.
-7. QuantLab cannot exceed 1,000 calls/day.
-8. Shared-provider reserve stops QuantLab before production capacity is endangered.
+8. Provider calls execute as quantlab_context.
+9. QuantLab cannot exceed 1,000 calls/day.
+10. Shared-provider reserve stops QuantLab before production capacity is endangered.
 
 ## Part B — Market classification
 
@@ -72,9 +76,10 @@ that universe in `quantlab_fixtures`, `quantlab_fixture_observations` and
 `quantlab_fixture_discovery_shards`. Production fixture/result tables are read-only
 historical fallback and do not define QuantLab eligibility.
 
-CARDCORNER_STRONG_LEAGUES_V1 gates CardLab/CornerLab fixture-specific spend to selected
-strong competitions. Lower leagues such as Poland III Liga are rejected locally for those
-labs.
+CARDCORNER_TOP10_LEAGUES_V2 gates CardLab/CornerLab fixture-specific spend to exactly
+ten domestic top flights: Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
+Eredivisie, Primeira Liga, Belgian Pro League, Süper Lig and Scottish Premiership.
+Lower divisions, cups and UEFA club competitions are rejected locally for those labs.
 
 GOAL_SCOPE_V1 remains broad but excludes:
 
@@ -118,8 +123,9 @@ Task tests cover:
 Hard limit: 1,000/day.
 
 Design target: materially below the hard limit through global date-shard discovery cached
-for six hours, local zero-request scope filtering, fixture-response reuse, standings
-caching and bounded referee-history backfill.
+for six hours, local zero-request scope filtering, fixture-response reuse, persistent
+capture watermarks, a 12-hour default odds refresh, a 6-hour default standings refresh
+and no automatic historical statistics backfill by default.
 
 ## Production safety
 
@@ -136,7 +142,9 @@ This task does not change:
 
 - QuantLab collector runs independently in quantbet-quantlab.
 - QuantLab fixture discovery is independent from production Phase-I scope.
-- Bet365/1xBet all-market observations are durably stored.
+- Bet365/1xBet market observations are durably stored only for fixture-eligible lab owners.
+- Successful empty odds responses are durably watermarked and do not trigger 5-minute
+  re-poll loops.
 - Goal/Corner/Card ownership classification is versioned.
 - CardLab v1 snapshots contain the five requested context variables with provenance.
 - Dashboard surfaces those variables.
