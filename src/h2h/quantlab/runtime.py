@@ -42,6 +42,7 @@ class QuantLabRuntimeSettings:
     goal_team_history_last: int = 15
     goal_team_history_teams_per_cycle: int = 120
     goal_team_statistics_per_cycle: int = 360
+    goal_player_history_per_cycle: int = 60
     goal_team_history_refresh_seconds: int = 21600
     corner_team_history_last: int = 12
     corner_team_history_teams_per_cycle: int = 120
@@ -65,6 +66,7 @@ class QuantLabRuntimeSettings:
             ("goal_team_history_last", self.goal_team_history_last),
             ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
             ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
+            ("goal_player_history_per_cycle", self.goal_player_history_per_cycle),
             ("goal_team_history_refresh_seconds", self.goal_team_history_refresh_seconds),
             ("corner_team_history_last", self.corner_team_history_last),
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
@@ -392,6 +394,50 @@ class QuantLabRuntime:
             captured += 1
         return captured
 
+    def _capture_historical_players(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        fixture_id = str(fixture["fixture_id"])
+        provider_fixture_id = int(fixture["provider_fixture_id"])
+        if provider_fixture_id <= 0:
+            raise ValueError("provider_fixture_id must be positive")
+
+        coverage = self._fixture_statistics_coverage(fixture, now)
+        if coverage is not None and coverage.get("statistics_players") is False:
+            raw_coverage = coverage.get("raw_payload")
+            self._repository.save_goal_player_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                available_at=now,
+                status="UNAVAILABLE",
+                response_team_count=0,
+                reason="league-season-statistics-players-false",
+                source="api-football:leagues",
+                raw_payload=(
+                    dict(raw_coverage)
+                    if isinstance(raw_coverage, dict)
+                    else {"coverage": raw_coverage}
+                ),
+            )
+            return True
+
+        payload = self._provider.fetch_fixture_players(provider_fixture_id)
+        response = payload.get("response") if isinstance(payload, dict) else None
+        response_team_count = len(response) if isinstance(response, list) else 0
+        self._repository.save_goal_player_capture(
+            fixture_id=fixture_id,
+            provider_fixture_id=provider_fixture_id,
+            available_at=now,
+            status="AVAILABLE",
+            response_team_count=response_team_count,
+            reason=None,
+            source="api-football:fixtures/players",
+            raw_payload=dict(payload),
+        )
+        return True
+
     def _capture_historical_statistics(
         self,
         fixture: dict[str, Any],
@@ -678,6 +724,38 @@ class QuantLabRuntime:
                         str(exc),
                     )
         return discoveries, stats_backfilled
+
+    def _bootstrap_goal_player_history(self, now: datetime) -> int:
+        team_ids = self._goal_target_team_ids(now)
+        if not team_ids:
+            return 0
+        target = self._settings.goal_player_history_per_cycle
+        candidates = self._repository.completed_for_goal_player_backfill(
+            team_ids,
+            before=now,
+            limit=max(3000, target * 30),
+        )
+        processed = 0
+        for fixture in candidates:
+            if processed >= target:
+                break
+            fixture_id = str(fixture.get("fixture_id") or "")
+            try:
+                if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                    continue
+                if self._capture_historical_players(fixture, now):
+                    processed += 1
+            except ApiBudgetExceededError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "QuantLab targeted GoalLab player history failed fixture=%s "
+                    "error_class=%s error=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                    str(exc),
+                )
+        return processed
 
     def _corner_target_team_ids(self, now: datetime) -> tuple[int, ...]:
         teams: list[int] = []
@@ -971,6 +1049,7 @@ class QuantLabRuntime:
             "history_backfilled": 0,
             "goal_team_history_discovered": 0,
             "goal_team_statistics_backfilled": 0,
+            "goal_player_history_backfilled": 0,
             "corner_team_history_discovered": 0,
             "corner_team_statistics_backfilled": 0,
             "market_fixtures": 0,
@@ -991,6 +1070,7 @@ class QuantLabRuntime:
             goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
             result["goal_team_history_discovered"] = goal_discoveries
             result["goal_team_statistics_backfilled"] = goal_stats
+            result["goal_player_history_backfilled"] = self._bootstrap_goal_player_history(now)
             team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
             result["corner_team_history_discovered"] = team_discoveries
             result["corner_team_statistics_backfilled"] = team_stats
@@ -1030,6 +1110,7 @@ class QuantLabRuntime:
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
             "goal_team_history_discovered=%d goal_team_statistics_backfilled=%d "
+            "goal_player_history_backfilled=%d "
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "corner_decisions=%d corner_picks=%d card_decisions=%d card_picks=%d",
@@ -1037,6 +1118,7 @@ class QuantLabRuntime:
             result["history_backfilled"],
             result["goal_team_history_discovered"],
             result["goal_team_statistics_backfilled"],
+            result["goal_player_history_backfilled"],
             result["corner_team_history_discovered"],
             result["corner_team_statistics_backfilled"],
             result["market_fixtures"],
