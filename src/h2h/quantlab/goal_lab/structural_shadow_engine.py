@@ -60,6 +60,7 @@ class StructuralGoalPolicy:
     min_seconds_to_kickoff: int = MIN_SECONDS_TO_KICKOFF
     flat_stake_minor: int = FLAT_STAKE_MINOR
     pick_authority: bool = False
+    approved_model_version: str | None = None
     pick_policy_version: str = PICK_POLICY_VERSION
     version: str = POLICY_VERSION
 
@@ -181,7 +182,12 @@ class GoalLabStructuralShadowEngine:
             and isinstance(validation.get("leakage_audit"), dict)
             and validation["leakage_audit"].get("status") == "PASS"
         )
-        effective_pick_authority = self._policy.pick_authority and validation_ready
+        model_approved = (
+            self._policy.approved_model_version == estimate.model.model_version
+        )
+        effective_pick_authority = (
+            self._policy.pick_authority and validation_ready and model_approved
+        )
         canonical_pick_frozen = (
             self._repository.goal_pick_exists(
                 str(fixture["fixture_id"]),
@@ -334,8 +340,10 @@ class GoalLabStructuralShadowEngine:
                         decision_outcome = "PICK"
                     elif canonical_pick_frozen:
                         reason = "CANONICAL_PICK_ALREADY_FROZEN"
-                    elif self._policy.pick_authority:
+                    elif self._policy.pick_authority and not validation_ready:
                         reason = "CANONICAL_FIXTURE_AWAITING_VALIDATION"
+                    elif self._policy.pick_authority and not model_approved:
+                        reason = "CANONICAL_FIXTURE_AWAITING_MODEL_APPROVAL"
                     else:
                         reason = "CANONICAL_FIXTURE_SIGNAL_ONLY"
                 else:
@@ -405,6 +413,8 @@ class GoalLabStructuralShadowEngine:
                     "pick_authority_requested": self._policy.pick_authority,
                     "shadow_pick_authority": effective_pick_authority,
                     "validation_ready": validation_ready,
+                    "approved_model_version": self._policy.approved_model_version,
+                    "model_approved": model_approved,
                     "canonical_pick_frozen": canonical_pick_frozen,
                     "validation_status": (
                         None if validation is None else validation.get("status")
@@ -418,7 +428,11 @@ class GoalLabStructuralShadowEngine:
                         "GRANTED"
                         if effective_pick_authority
                         else (
-                            "VALIDATION_REQUIRED"
+                            (
+                                "VALIDATION_REQUIRED"
+                                if not validation_ready
+                                else "MODEL_VERSION_APPROVAL_REQUIRED"
+                            )
                             if self._policy.pick_authority
                             else "MANUAL_AUTHORITY_OFF"
                         )
