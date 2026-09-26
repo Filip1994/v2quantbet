@@ -6,9 +6,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from h2h.domain.competition_scope import is_womens_football
 
-GOAL_SCOPE_VERSION = "GOAL_SCOPE_V1"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V3"
+
+GOAL_SCOPE_VERSION = "GOAL_SCOPE_V2"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V4"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -145,6 +147,13 @@ def goal_scope(
     away_team: object = "",
 ) -> ScopeDecision:
     """Return GoalLab eligibility without making a provider request."""
+    if is_womens_football(
+        competition_name=competition_name,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+    ):
+        return ScopeDecision(False, GOAL_SCOPE_VERSION, "womens_football")
     if _is_youth_or_amateur(
         competition_name,
         competition_type,
@@ -179,7 +188,14 @@ def card_corner_scope(
     settlement support, not a league allowlist, determine whether a CARD/CORNER
     candidate can become an actionable shadow decision.
     """
-    del country, competition_name, competition_type, home_team, away_team
+    if is_womens_football(
+        competition_name=competition_name,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+    ):
+        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "womens_football")
+    del country
     return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "market_driven_candidate")
 
 
