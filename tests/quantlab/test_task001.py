@@ -495,6 +495,9 @@ class _DashboardRepo:
     def api_usage_today(self):
         return 12
 
+    def list_count_fixture_status(self, *_args, **_kwargs):
+        return ()
+
     def list_card_features(self):
         return (
             {
