@@ -1695,6 +1695,7 @@ class GoalStructuralModelService:
             }
             return
 
+        training_reference = max(dates).astimezone(UTC)
         fitted = _fit_dc_plus(
             x,
             y_home,
@@ -1704,7 +1705,7 @@ class GoalStructuralModelService:
             league_ids,
             dates,
             model_feature_names,
-            reference_time=now,
+            reference_time=training_reference,
         )
         if fitted is None:
             self._artifact = None
@@ -1721,7 +1722,7 @@ class GoalStructuralModelService:
         params["base_feature_names"] = base_feature_names
         identity = {
             "feature_version": FEATURE_VERSION,
-            "training_cutoff": now.isoformat(),
+            "training_reference": training_reference.isoformat(),
             "training_sample_size": len(y_home),
             "history_match_count": history_match_count,
             "ridge_team": RIDGE_TEAM,
@@ -1757,6 +1758,8 @@ class GoalStructuralModelService:
                 "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
                 "history_limit": HISTORY_LIMIT,
                 "recency_xi": RECENCY_XI,
+                "training_reference": training_reference.isoformat(),
+                "artifact_identity_uses_wall_clock": False,
                 "structural_only": True,
                 "bookmaker_features_used": False,
                 "provider_predictions_used": False,
