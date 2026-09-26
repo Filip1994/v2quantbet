@@ -44,10 +44,12 @@ and a new/updated version rather than ad-hoc runtime inference.
 
 ## Markets
 
-For eligible fixtures, GoalLab can ingest every returned Bet365/1xBet market. Goal
-ownership is assigned by the shared versioned classifier; unsupported/unknown markets
-are retained as UNCLASSIFIED. Canonical modeling and settlement support remain explicit
-and versioned.
+For every GOAL_SCOPE_V1 fixture, the shared collector parses the provider response but
+persists only markets classified as GOAL unless the fixture also passes
+CARDCORNER_TOP10_LEAGUES_V2. UNCLASSIFIED markets are therefore not retained on broad
+GoalLab-only fixtures; this prevents unknown card/corner markets from bypassing the
+Top-10 storage gate. Canonical modeling and settlement support remain explicit and
+versioned.
 
 ## Referee variables
 
