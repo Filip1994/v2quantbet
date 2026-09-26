@@ -30,7 +30,7 @@ may intentionally ignore.
 
 Excluded locally before fixture-specific QuantLab requests:
 
-- all women\'s football, detected from normalized competition/team metadata;
+- all women's football, detected from normalized competition/team metadata;
 - youth competitions U5 through U23 and equivalent Under labels;
 - academy, reserve/reserves and amateur/amateurs competitions;
 - reserve-team suffixes such as B and II where detected by the deterministic rule;
