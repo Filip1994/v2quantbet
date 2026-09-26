@@ -64,14 +64,14 @@ The QuantLab core owns:
 
 ### GoalLab
 
-Owns goal probabilities and goal-market experiments, including DC+. GOAL_SCOPE_V1 uses a
+Owns goal probabilities and goal-market experiments, including DC+. GOAL_SCOPE_V2 uses a
 broad professional-senior universe with explicit youth/amateur, Africa and Far East
 exclusions.
 
 ### CornerLab
 
 Owns corner probabilities and corner-market experiments. Card/Corner discovery is
-market-driven under CARDCORNER_MARKET_DRIVEN_V3: competition name no longer gates
+market-driven under CARDCORNER_MARKET_DRIVEN_V4: competition name no longer gates
 eligibility; persisted market presence and canonical settlement support do.
 
 ### CardLab
@@ -96,6 +96,8 @@ Every feature snapshot carries or can be audited back to:
 - quality/coverage where applicable
 
 No feature may use information that became available after the shadow decision timestamp.
+
+Women\'s football is a global hard exclusion shared with production. QuantLab drops identified women fixtures at date-shard parsing and all lab scopes reject them, including legacy rows already present in the research inventory.
 
 QuantLab owns its fixture universe independently from production Phase-I discovery.
 `quantlab_fixtures` stores provider fixture identity; date-shard captures are append-only in
@@ -125,8 +127,8 @@ production canonical adapter that limits supported production markets.
 
 Raw provider bet ID/name, raw selection, deterministic parsed line, odds, provider update
 time, QuantLab capture time and classifier version are persisted only when the lab owner
-is eligible for that fixture. GOAL rows follow GOAL_SCOPE_V1. CARD, CORNER and
-UNCLASSIFIED research follows CARDCORNER_MARKET_DRIVEN_V3 across the global discovered
+is eligible for that fixture. GOAL rows follow GOAL_SCOPE_V2. CARD, CORNER and
+UNCLASSIFIED research follows CARDCORNER_MARKET_DRIVEN_V4 across the global discovered
 universe. Successful odds responses also create a quantlab_market_captures watermark even
 when zero rows are stored, so empty responses are not re-polled on every cycle or restart.
 
