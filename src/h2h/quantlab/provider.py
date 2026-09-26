@@ -118,6 +118,15 @@ class QuantLabApiFootballClient:
             cache_ttl_seconds=1800.0,
         )
 
+    def fetch_injuries(self, fixture_id: int) -> Mapping[str, Any]:
+        if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
+            raise ValueError("fixture_id must be a positive integer")
+        return self._get(
+            "injuries",
+            {"fixture": fixture_id},
+            cache_ttl_seconds=3600.0,
+        )
+
     def fetch_statistics(self, fixture_id: int) -> Mapping[str, Any]:
         if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
             raise ValueError("fixture_id must be a positive integer")
