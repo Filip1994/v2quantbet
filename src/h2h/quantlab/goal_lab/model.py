@@ -114,6 +114,8 @@ class TeamMatchSample:
     kickoff_at: datetime
     venue: str
     opponent_id: int
+    season: int
+    league_id: int
     values: dict[str, float | None]
 
 
@@ -334,10 +336,14 @@ def _team_samples(row: dict[str, Any]) -> tuple[TeamMatchSample, TeamMatchSample
     away_id = _safe_id(row.get("away_team_id"))
     home_goals = _safe_nonnegative_int(row.get("home_goals"))
     away_goals = _safe_nonnegative_int(row.get("away_goals"))
+    season = _safe_id(row.get("season"))
+    league_id = _safe_id(row.get("league_id"))
     kickoff = row.get("kickoff_at")
     if (
         home_id is None
         or away_id is None
+        or season is None
+        or league_id is None
         or home_id == away_id
         or home_goals is None
         or away_goals is None
@@ -390,8 +396,12 @@ def _team_samples(row: dict[str, Any]) -> tuple[TeamMatchSample, TeamMatchSample
         red_cards=_number(row.get("away_red_cards")),
     )
     return (
-        TeamMatchSample(kickoff.astimezone(UTC), "HOME", away_id, home_values),
-        TeamMatchSample(kickoff.astimezone(UTC), "AWAY", home_id, away_values),
+        TeamMatchSample(
+            kickoff.astimezone(UTC), "HOME", away_id, season, league_id, home_values
+        ),
+        TeamMatchSample(
+            kickoff.astimezone(UTC), "AWAY", home_id, season, league_id, away_values
+        ),
     )
 
 
@@ -425,6 +435,7 @@ def _team_feature_map(
     prefix: str,
     venue: str,
     target_kickoff: datetime,
+    target_season: int,
 ) -> dict[str, float]:
     result: dict[str, float] = {}
     for window in (3, 5, 10):
@@ -437,8 +448,12 @@ def _team_feature_map(
         result[f"{prefix}_venue_l5_{metric}"] = _mean(
             samples, metric, count=5, venue=venue
         )
+    season_samples = [item for item in samples if item.season == target_season]
     for metric in _SEASON_METRICS:
-        result[f"{prefix}_season_{metric}"] = _mean(samples, metric)
+        result[f"{prefix}_season_{metric}"] = _mean(season_samples, metric)
+
+    result[f"{prefix}_history_match_count"] = float(len(samples))
+    result[f"{prefix}_season_match_count"] = float(len(season_samples))
 
     if samples:
         last_kickoff = samples[-1].kickoff_at
@@ -527,18 +542,21 @@ def _feature_map(
     home_id: int,
     away_id: int,
     target_kickoff: datetime,
+    target_season: int,
 ) -> dict[str, float]:
     home = _team_feature_map(
         histories.get(home_id, []),
         prefix="home",
         venue="HOME",
         target_kickoff=target_kickoff,
+        target_season=target_season,
     )
     away = _team_feature_map(
         histories.get(away_id, []),
         prefix="away",
         venue="AWAY",
         target_kickoff=target_kickoff,
+        target_season=target_season,
     )
     features = {**home, **away, **_h2h_features(pairs, home_id, away_id, target_kickoff)}
 
@@ -659,6 +677,7 @@ def _build_training(
                     home_id=home_id,
                     away_id=away_id,
                     target_kickoff=kickoff,
+                    target_season=int(row["season"]),
                 )
             )
             home_targets.append(float(home_goals))
@@ -1218,6 +1237,7 @@ class GoalStructuralModelService:
             home_id=home_id,
             away_id=away_id,
             target_kickoff=kickoff,
+            target_season=int(fixture["season"]),
         )
         model_feature_names = tuple(params["model_feature_names"])
         base_feature_names = tuple(params["base_feature_names"])
