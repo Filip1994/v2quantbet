@@ -171,6 +171,17 @@ class GoalLabStructuralShadowEngine:
                 details=model_result.details,
             )
         estimate = model_result.estimate
+        validation = self._repository.goal_model_validation(
+            estimate.model.model_version
+        )
+        validation_ready = bool(
+            validation is not None
+            and validation.get("status") == "OK"
+            and validation.get("authority_review_status") == "READY_FOR_MANUAL_REVIEW"
+            and isinstance(validation.get("leakage_audit"), dict)
+            and validation["leakage_audit"].get("status") == "PASS"
+        )
+        effective_pick_authority = self._policy.pick_authority and validation_ready
         probabilities = estimate.market_probabilities()
         pairs = tuple(
             self._repository.goal_market_pairs(str(fixture["fixture_id"]), decision_at=now)
@@ -310,9 +321,11 @@ class GoalLabStructuralShadowEngine:
                 if winners.get(key) is not item:
                     reason = "BETTER_PRICE_AVAILABLE"
                 elif item is canonical:
-                    if self._policy.pick_authority:
+                    if effective_pick_authority:
                         reason = "CANONICAL_FIXTURE_VALUE_PICK"
                         decision_outcome = "PICK"
+                    elif self._policy.pick_authority:
+                        reason = "CANONICAL_FIXTURE_AWAITING_VALIDATION"
                     else:
                         reason = "CANONICAL_FIXTURE_SIGNAL_ONLY"
                 else:
@@ -379,11 +392,25 @@ class GoalLabStructuralShadowEngine:
                     "companion_selection": item["companion_selection"],
                     "quote_age_seconds": item["quote_age_seconds"],
                     "seconds_to_kickoff": item["seconds_to_kickoff"],
-                    "shadow_pick_authority": self._policy.pick_authority,
+                    "pick_authority_requested": self._policy.pick_authority,
+                    "shadow_pick_authority": effective_pick_authority,
+                    "validation_ready": validation_ready,
+                    "validation_status": (
+                        None if validation is None else validation.get("status")
+                    ),
+                    "authority_review_status": (
+                        None
+                        if validation is None
+                        else validation.get("authority_review_status")
+                    ),
                     "authority_gate": (
                         "GRANTED"
-                        if self._policy.pick_authority
-                        else "HOLDOUT_AND_LEAKAGE_AUDIT_REQUIRED"
+                        if effective_pick_authority
+                        else (
+                            "VALIDATION_REQUIRED"
+                            if self._policy.pick_authority
+                            else "MANUAL_AUTHORITY_OFF"
+                        )
                     ),
                     "pick_policy_version": self._policy.pick_policy_version,
                     "qualifying_candidate_count": len(qualifying),
