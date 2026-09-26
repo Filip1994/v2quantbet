@@ -111,6 +111,23 @@ class SegmentedRepository:
         pending["production_pick_id"] = "registered-pick-v1:" + "c" * 64
         pending["disposition"] = "PLAYED"
 
+        awaiting = signal_row()
+        awaiting["research_signal_id"] = "research-signal-v1:" + "e" * 64
+        awaiting["evaluation_id"] = "value-evaluation-v1:" + "e" * 64
+        awaiting["fixture_id"] = "api-football:126"
+        awaiting["provider_fixture_id"] = "126"
+        awaiting["home_team"] = "Awaiting Home"
+        awaiting["away_team"] = "Awaiting Away"
+        awaiting["kickoff_at"] = NOW - timedelta(hours=4)
+        awaiting["result_phase"] = "POLLING"
+        awaiting["result_classification"] = "NON_TERMINAL"
+        awaiting["result_provider_status"] = "NS"
+        awaiting["regulation_home_goals"] = None
+        awaiting["regulation_away_goals"] = None
+        awaiting["closing_odds"] = None
+        awaiting["closing_observed_at"] = None
+        awaiting["closing_captured_at"] = None
+
         loss = signal_row()
         loss["research_signal_id"] = "research-signal-v1:" + "d" * 64
         loss["evaluation_id"] = "value-evaluation-v1:" + "d" * 64
@@ -131,7 +148,7 @@ class SegmentedRepository:
         loss["production_pick_id"] = "registered-pick-v1:" + "d" * 64
         loss["disposition"] = "SKIPPED"
 
-        return (pending, win, loss)
+        return (pending, awaiting, win, loss)
 
 
 def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
@@ -182,11 +199,12 @@ def test_research_dashboard_projects_one_canonical_pick_per_fixture() -> None:
 
 
 def test_research_dashboard_separates_active_and_history_tabs() -> None:
-    dashboard = ResearchDashboardService(SegmentedRepository())
+    dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
 
     active_html = dashboard.render_html("tab=active")
     assert "Active research board" in active_html
     assert "Pending Home – Pending Away" in active_html
+    assert "Awaiting Home – Awaiting Away" not in active_html
     assert "Home – Away" not in active_html
     assert "Loss Home – Loss Away" not in active_html
     assert 'class="active" href=' in active_html
@@ -203,9 +221,18 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert "Research" in active_html
     assert "health-unknown" in active_html
 
+    awaiting_html = dashboard.render_html("tab=awaiting")
+    assert "Awaiting result" in awaiting_html
+    assert "Awaiting Home – Awaiting Away" in awaiting_html
+    assert "Pending Home – Pending Away" not in awaiting_html
+    assert "POLLING" in awaiting_html
+    assert "NS" in awaiting_html
+    assert "History" in awaiting_html
+
     history_html = dashboard.render_html("tab=history")
     assert "Settled research history" in history_html
     assert "Pending Home – Pending Away" not in history_html
+    assert "Awaiting Home – Awaiting Away" not in history_html
     assert "Home – Away" in history_html
     assert "Loss Home – Loss Away" in history_html
     assert 'class="badge result-win"' in history_html
@@ -228,7 +255,7 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
 
 
 def test_research_history_result_filter_and_sportsbook_palette() -> None:
-    dashboard = ResearchDashboardService(SegmentedRepository())
+    dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
 
     html = dashboard.render_html("tab=history&result=LOSS")
 
@@ -246,7 +273,7 @@ def test_research_history_result_filter_and_sportsbook_palette() -> None:
 
 
 def test_research_dashboard_can_filter_by_production_route() -> None:
-    dashboard = ResearchDashboardService(SegmentedRepository())
+    dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
 
     played = dashboard.signals({"disposition": ["PLAYED"]})
     skipped = dashboard.signals({"disposition": ["SKIPPED"]})
@@ -254,7 +281,10 @@ def test_research_dashboard_can_filter_by_production_route() -> None:
 
     assert [row["fixture_id"] for row in played] == ["api-football:124"]
     assert [row["fixture_id"] for row in skipped] == ["api-football:125"]
-    assert [row["fixture_id"] for row in blocked] == ["api-football:123"]
+    assert [row["fixture_id"] for row in blocked] == [
+        "api-football:126",
+        "api-football:123",
+    ]
 
 
 def test_clv_is_unavailable_without_a_later_stored_quote() -> None:
