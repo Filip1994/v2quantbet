@@ -301,7 +301,21 @@ class QuantLabDashboardService:
                     "QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false"
                 ).strip().casefold()
                 authority = authority_raw in {"1", "true", "yes", "on"}
-                authority_text = "REQUESTED" if authority else "OFF"
+                approved_model_version = (
+                    os.getenv(
+                        "QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION", ""
+                    ).strip()
+                    or None
+                )
+                current_model_version = str(contract.get("model_version") or "")
+                model_approved = approved_model_version == current_model_version
+                authority_text = (
+                    "APPROVED"
+                    if authority and model_approved
+                    else "REQUESTED / MODEL NOT APPROVED"
+                    if authority
+                    else "OFF"
+                )
                 validation = contract.get("validation")
                 validation = validation if isinstance(validation, dict) else {}
                 validation_status = str(validation.get("status") or "PENDING")
@@ -321,6 +335,7 @@ class QuantLabDashboardService:
                 btts_delta = comparison.get("dc_plus_minus_control_btts_brier")
                 validation_text = (
                     f"validation={validation_status} · review={review_status} · "
+                    f"model approved={'YES' if model_approved else 'NO'} · "
                     f"common n={common_n} · "
                     f"ΔLL={_rate(ll_delta)} · ΔRMSE={_rate(rmse_delta)} · "
                     f"ΔO2.5 Brier={_rate(over_delta)} · ΔBTTS Brier={_rate(btts_delta)}"
