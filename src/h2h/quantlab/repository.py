@@ -728,6 +728,7 @@ class PostgreSQLQuantLabRepository:
                 " SELECT decision_at, decision, reason, model_version, market_key, selection, "
                 "        bookmaker_name, odds, edge, expected_value "
                 " FROM quantlab_goal_decisions d WHERE d.fixture_id = f.fixture_id "
+                " AND d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
                 " ORDER BY decision_at DESC, (decision = 'PICK') DESC, decision_id DESC LIMIT 1"
                 ") decision ON TRUE "
                 "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
