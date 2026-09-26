@@ -772,7 +772,7 @@ def _feature_penalties(names: tuple[str, ...]) -> np.ndarray:
     return np.asarray(
         [
             RIDGE_INTERACTION
-            if name.startswith("matchup_") or name.startswith("h2h_")
+            if name.startswith(("matchup_", "h2h_"))
             else RIDGE_FEATURE
             for name in names
         ],
