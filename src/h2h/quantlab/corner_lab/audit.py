@@ -258,6 +258,9 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             "ORDER BY trained_at DESC, model_version DESC LIMIT 12"
         )
         latest_models = _rows(cursor)
+        active_model_version = (
+            None if not latest_models else str(latest_models[0]["model_version"])
+        )
 
         cursor.execute(
             "SELECT COUNT(*)::BIGINT AS snapshot_count, "
@@ -356,8 +359,9 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             "percentile_cont(0.95) WITHIN GROUP (ORDER BY expected_value) AS ev_p95, "
             "MAX(expected_value) AS ev_max "
             "FROM quantlab_context_market_decisions "
-            "WHERE policy_version = %s AND model_probability IS NOT NULL",
-            (POLICY_VERSION,),
+            "WHERE policy_version = %s AND model_version = %s "
+            "AND model_probability IS NOT NULL",
+            (POLICY_VERSION, active_model_version),
         )
         value_summary = _one(cursor)
 
@@ -365,9 +369,10 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             "SELECT selection, COUNT(*)::BIGINT AS row_count, "
             "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count "
             "FROM quantlab_context_market_decisions "
-            "WHERE policy_version = %s AND model_probability IS NOT NULL "
+            "WHERE policy_version = %s AND model_version = %s "
+            "AND model_probability IS NOT NULL "
             "GROUP BY selection ORDER BY selection",
-            (POLICY_VERSION,),
+            (POLICY_VERSION, active_model_version),
         )
         value_by_selection = _rows(cursor)
 
@@ -398,9 +403,10 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             "percentile_cont(0.95) WITHIN GROUP (ORDER BY expected_value) AS ev_p95, "
             "MAX(expected_value) AS ev_max "
             "FROM quantlab_context_market_decisions "
-            "WHERE policy_version = %s AND line IS NOT NULL AND model_probability IS NOT NULL "
+            "WHERE policy_version = %s AND model_version = %s "
+            "AND line IS NOT NULL AND model_probability IS NOT NULL "
             "GROUP BY line, selection ORDER BY line, selection LIMIT 80",
-            (POLICY_VERSION,),
+            (POLICY_VERSION, active_model_version),
         )
         value_by_line_and_selection = _rows(cursor)
 
@@ -415,11 +421,11 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
             "AVG(model_probability) AS mean_model_probability, "
             "AVG(edge) AS mean_edge, AVG(expected_value) AS mean_ev "
             "FROM quantlab_context_market_decisions "
-            "WHERE policy_version = %s AND bookmaker_name IS NOT NULL "
-            "AND model_probability IS NOT NULL "
+            "WHERE policy_version = %s AND model_version = %s "
+            "AND bookmaker_name IS NOT NULL AND model_probability IS NOT NULL "
             "GROUP BY bookmaker_name, selection "
             "ORDER BY bookmaker_name, selection",
-            (POLICY_VERSION,),
+            (POLICY_VERSION, active_model_version),
         )
         value_by_bookmaker_and_selection = _rows(cursor)
 
@@ -627,6 +633,7 @@ def collect_cornerlab_v2_audit(repository: Any) -> dict[str, Any]:
         "snapshots": snapshots,
         "market_coverage": coverage,
         "value_filter": {
+            "model_version": active_model_version,
             "summary": value_summary,
             "by_selection": value_by_selection,
             "by_line_and_selection": value_by_line_and_selection,
