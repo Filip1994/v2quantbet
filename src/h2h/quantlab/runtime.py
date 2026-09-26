@@ -25,11 +25,11 @@ class QuantLabRuntimeSettings:
     discovery_lookback_days: int = 1
     fixture_limit: int = 250
     fixture_discovery_refresh_seconds: int = 21600
-    market_refresh_seconds: int = 900
+    market_refresh_seconds: int = 43200
     context_refresh_seconds: int = 21600
-    standings_refresh_seconds: int = 1800
+    standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
-    history_backfill_per_cycle: int = 2
+    history_backfill_per_cycle: int = 0
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -217,6 +217,9 @@ class QuantLabRuntime:
                 continue
 
             fixture_id = str(fixture["fixture_id"])
+            allowed_labs = {"GOAL"} if goal_allowed else set()
+            if context_allowed:
+                allowed_labs.update({"CORNER", "CARD", "UNCLASSIFIED"})
             if self._repository.market_capture_due(
                 fixture_id,
                 now=now,
@@ -226,6 +229,7 @@ class QuantLabRuntime:
                     fixture_id=fixture_id,
                     provider_fixture_id=int(fixture["provider_fixture_id"]),
                     captured_at=now,
+                    allowed_labs=allowed_labs,
                 )
                 market_fixtures += 1
 
@@ -284,5 +288,12 @@ class QuantLabRuntime:
             LOGGER.warning("QuantLab API hard ceiling reached; collection stopped for UTC day")
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
-        LOGGER.info("QuantLab cycle completed", extra=result)
+        LOGGER.info(
+            "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
+            "market_fixtures=%d card_snapshots=%d",
+            result["fixtures_discovered"],
+            result["history_backfilled"],
+            result["market_fixtures"],
+            result["card_snapshots"],
+        )
         return result
