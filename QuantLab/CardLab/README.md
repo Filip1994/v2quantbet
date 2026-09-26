@@ -19,7 +19,7 @@ The exact V1 formulas, provenance requirements and leakage rules are frozen in
 
 CardLab now uses `CARDCORNER_MARKET_DRIVEN_V4`.
 
-There is no Top-10 competition gate. Women\'s football is a global hard exclusion. For
+There is no Top-10 competition gate. Women's football is a global hard exclusion. For
 remaining fixtures, QuantLab discovers the broad universe and CARD markets are retained
 wherever the provider publishes them.
 
@@ -39,8 +39,8 @@ or CornerLab unless a later separately-versioned experiment explicitly tests tha
 
 The shared QuantLab collector parses one returned Bet365/1xBet all-market payload, but
 CARD and UNCLASSIFIED rows are persisted only when the fixture passes
-CARDCORNER_MARKET_DRIVEN_V4. That scope is market-driven for senior men\'s football but
-hard-rejects women\'s football before fixture-specific provider spend.
+CARDCORNER_MARKET_DRIVEN_V4. That scope is market-driven for senior men's football but
+hard-rejects women's football before fixture-specific provider spend.
 
 ## Settlement warning
 
