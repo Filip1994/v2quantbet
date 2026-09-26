@@ -51,6 +51,36 @@ GoalLab-only fixtures; this prevents unknown card/corner markets from bypassing 
 Top-10 storage gate. Canonical modeling and settlement support remain explicit and
 versioned.
 
+## Shadow Pick Engine V1
+
+Task 002 introduces `GOALLAB_SHADOW_POLICY_V1` as the first end-to-end shadow decision
+engine.
+
+The control probability source is the existing validated active Dixon-Coles artifact for
+the exact league/season. QuantLab reads that artifact but cannot activate, retrain or
+mutate production model state.
+
+V1 evaluates only complete two-sided:
+
+- O/U 2.5 — OVER / UNDER;
+- BTTS — YES / NO.
+
+Market fair probability is proportional two-way de-vig. Default shadow gates are:
+
+- edge >= 3 percentage points;
+- expected value >= 3%;
+- odds 1.40 through 4.00;
+- quote age <= 13 hours;
+- kickoff at least 15 minutes away;
+- flat shadow stake 10,000 minor units.
+
+If model coverage or a complete market is absent, the engine records PASS rather than
+inventing data. The GoalLab dashboard includes an upcoming-fixture decision pipeline with
+scope, odds-capture, model, candidate and PASS/PICK reason.
+
+This evaluator makes no provider requests. It can run on persisted quotes even when the
+daily QuantLab API ceiling is already exhausted.
+
 ## Referee variables
 
 Referee card/foul variables do not belong to GoalLab v1.
