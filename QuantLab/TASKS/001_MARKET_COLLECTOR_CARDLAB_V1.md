@@ -1,169 +1,117 @@
 # Task 001 — QuantLab Market Collector + CardLab v1 Context
 
+Status: implemented on main; verification record is maintained in QuantLab/WORKLOG.md.
+
 ## Objective
 
-Build the first working QuantLab data/feature pipeline without changing production prediction, registration, bankroll or existing Research Board behavior.
+Build the first working QuantLab data/feature pipeline without changing production
+prediction, registration, bankroll or existing Research Board behavior.
 
 QuantLab is shadow-only.
 
 ## Repository boundary
 
-All new QuantLab runtime code must live under:
+All new QuantLab runtime code lives under src/h2h/quantlab/. Lab-specific code remains
+physically separated under goal_lab/, corner_lab/ and card_lab/.
 
-```text
-src/h2h/quantlab/
-```
-
-Lab-specific code must live under one of:
-
-```text
-src/h2h/quantlab/goal_lab/
-src/h2h/quantlab/corner_lab/
-src/h2h/quantlab/card_lab/
-```
-
-Architecture/work records must be updated under:
-
-```text
-QuantLab/
-```
-
-Every implementation step must append a concise record to `QuantLab/WORKLOG.md`.
+Architecture/work records are maintained under QuantLab/. Every implementation change
+must be recorded in QuantLab/WORKLOG.md.
 
 ## Part A — All-market collector
 
-Implement a QuantLab-only pre-match odds collector for:
+Implemented QuantLab-only pre-match odds collection for:
 
 - Bet365 — API-Football bookmaker ID 8
-- 1xBet — API-Football bookmaker ID 11
+- 1xBet — bookmaker ID 11
 
-Requirements:
+Contract:
 
-1. Fetch one fixture-level `/odds?fixture=<id>` response where practical and reuse it for both bookmakers and all returned markets.
-2. Do not reuse the production canonical odds adapter that intentionally keeps only bet IDs 5 and 8.
-3. Preserve raw provider semantics:
-   - provider fixture ID
-   - bookmaker ID/name
-   - provider bet ID/name
-   - raw selection
-   - parsed line when deterministic
-   - odds
-   - provider update timestamp
-   - QuantLab capture timestamp
-4. Store immutable raw/normalized QuantLab market observations in QuantLab-owned tables.
-5. Do not create production `quote_series`, `value_evaluations`, `pick_decisions` or `registered_picks` from this collector.
-6. All provider calls must execute under `quantlab_context`.
-7. QuantLab daily API hard ceiling remains 1,000 calls.
-8. Cache/reuse data aggressively; one fixture request should feed GoalLab, CornerLab and CardLab where possible.
+1. One fixture-level /odds?fixture=<id> response is reused across both bookmakers and all
+   laboratory ownership classification.
+2. The production canonical odds adapter is not used.
+3. Provider fixture ID, bookmaker ID/name, provider bet ID/name, raw selection,
+   deterministic parsed line, odds, provider update timestamp and capture timestamp are
+   preserved.
+4. Observations are stored in append-only QuantLab-owned tables.
+5. The collector has no write path to quote_series, value_evaluations, pick_decisions,
+   registered_picks or bankroll.
+6. Provider calls execute as quantlab_context.
+7. QuantLab cannot exceed 1,000 calls/day.
+8. Shared-provider reserve stops QuantLab before production capacity is endangered.
 
 ## Part B — Market classification
 
-Create a versioned market classifier that maps raw provider markets into laboratory ownership:
-
-- GoalLab
-- CornerLab
-- CardLab
-- UNCLASSIFIED
-
-Do not discard unknown markets. Preserve them as raw observations with `UNCLASSIFIED` ownership until explicitly supported.
-
-Do not invent settlement semantics from provider names.
+MARKET_CLASSIFIER_V1 maps raw provider names to GOAL, CORNER, CARD or UNCLASSIFIED.
+Unknown markets are preserved, not discarded. Classification is ownership only and does
+not invent settlement semantics.
 
 ## Part C — CardLab v1 feature snapshot
 
-Create a timestamp-safe CardLab feature snapshot for a target fixture/decision time.
+Implemented CARDLAB_FEATURES_V1 with:
 
-CardLab v1 must include the five immediate context variables:
+1. referee_card_rate
+2. referee_foul_rate
+3. derby_rivalry_indicator
+4. table_pressure
+5. match_importance
 
-1. `referee_card_rate`
-2. `referee_foul_rate`
-3. `derby_rivalry_indicator`
-4. `table_pressure`
-5. `match_importance`
+Exact definitions, provenance, quality fields and formulas are frozen in
+QuantLab/CardLab/FEATURES_V1.md.
 
-Also persist companion provenance/quality fields needed to interpret them, including referee sample size.
+All inputs must have available_at not later than decision_at, and decision_at must be
+before kickoff. Referee history excludes target/future matches and historical facts
+backfilled after an old decision do not become retroactively eligible.
 
-### Referee rules
+## Part D — League/API scope refinement
 
-- Referee identity should come from API-Football fixture data when available.
-- Referee rates use only matches completed before the target feature `available_at`.
-- No target-match stats may leak into the snapshot.
-- Define and version how yellow/red/second-yellow cards are counted.
-- Small referee samples must be visible; if shrinkage is implemented, version the formula.
+Added after implementation review to reduce waste.
 
-### Derby/rivalry rules
+CARDCORNER_STRONG_LEAGUES_V1 gates CardLab/CornerLab fixture-specific spend to selected
+strong competitions. Lower leagues such as Poland III Liga are rejected locally.
 
-- Use a deterministic, versioned rivalry registry.
-- No LLM inference at prediction time.
-- Initial value is boolean 0/1.
-- Unknown is distinct from confirmed false if source coverage cannot establish the relationship.
+GOAL_SCOPE_V1 remains broad but excludes:
 
-### Table pressure rules
+- youth U13-U23 and equivalent Under competitions;
+- academy/reserve/amateur competitions;
+- Africa;
+- the V1 Far East country registry.
 
-Implement a deterministic versioned formula based on pre-kickoff league-table facts.
+The scope gate runs before fixture-specific provider calls.
 
-It must measure distance to relevant competitive thresholds rather than raw rank alone, where applicable:
+## Part E — Dashboard
 
-- title
-- promotion/playoff
-- continental qualification
-- relegation
+CardLab exposes referee, cards/match, fouls/match, both sample sizes, rivalry state,
+home/away table pressure, match importance, feature timestamp/version and provenance.
+Unavailable/unknown values are rendered explicitly rather than fabricated.
 
-Persist intermediate components so the score is auditable.
+## Part F — Tests
 
-### Match importance rules
+Task tests cover:
 
-Implement a deterministic `MATCH_IMPORTANCE_V1` score using documented inputs such as:
-
-- home table pressure
-- away table pressure
-- stage of season
-- points gap to target
-- derby/rivalry indicator
-- competition context
-
-Persist intermediate components and version.
-
-## Part D — Dashboard
-
-Extend CardLab dashboard rows/details to expose at minimum:
-
-- referee
-- referee cards/match
-- referee fouls/match
-- referee sample size
-- derby/rivalry
-- home table pressure
-- away table pressure
-- match importance
-- feature snapshot timestamp/version
-
-Do not fake unavailable values; render missing/unknown explicitly.
-
-## Part E — Tests
-
-Add tests for:
-
-- all-market parser retaining unsupported/raw markets
-- Bet365 + 1xBet filtering
-- `quantlab_context` budget category
-- no production-table writes from QuantLab collector
-- timestamp leakage rejection
-- referee rates excluding target/future matches
-- deterministic rivalry registry
-- table-pressure boundary cases
-- match-importance determinism/version
-- CardLab dashboard displaying feature provenance
+- unsupported/raw market retention;
+- Bet365 + 1xBet filtering;
+- one-response fixture reuse;
+- quantlab_context categorization;
+- hard 1,000-call ceiling and production reserve;
+- no production-table write path from the collector;
+- league-scope API gating;
+- timestamp leakage rejection;
+- referee history exclusion;
+- deterministic rivalry registry;
+- table-pressure boundaries;
+- match-importance determinism/version;
+- CardLab dashboard provenance.
 
 ## API budget target
 
-Hard limit: **1,000/day**.
+Hard limit: 1,000/day.
 
-Design target: materially below the hard limit on normal days by reusing fixture-level odds payloads and deriving/caching context locally.
+Design target: materially below the hard limit through fixture-response reuse, zero-cost
+scope filtering, standings caching and bounded referee-history backfill.
 
 ## Production safety
 
-This task must not change:
+This task does not change:
 
 - production Dixon-Coles math
 - production pick thresholds
@@ -174,11 +122,11 @@ This task must not change:
 
 ## Definition of done
 
-- QuantLab collector runs independently in `quantbet-quantlab`.
+- QuantLab collector runs independently in quantbet-quantlab.
 - Bet365/1xBet all-market observations are durably stored.
 - Goal/Corner/Card ownership classification is versioned.
 - CardLab v1 snapshots contain the five requested context variables with provenance.
 - Dashboard surfaces those variables.
 - Tests pass.
-- `QuantLab/WORKLOG.md` and affected lab docs are updated.
+- QuantLab/WORKLOG.md and affected lab docs are updated.
 - Railway QuantLab deploy is healthy.
