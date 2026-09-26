@@ -449,6 +449,49 @@ class PostgreSQLQuantLabRepository:
             )
             return _row_dicts(cursor)
 
+    def list_count_fixture_status(
+        self,
+        lab: str,
+        *,
+        now: datetime,
+        lookahead_hours: int = 36,
+        limit: int = 250,
+    ) -> tuple[dict[str, Any], ...]:
+        if lab not in {"CORNER", "CARD"}:
+            raise ValueError("count fixture status lab must be CORNER or CARD")
+        end_at = now + timedelta(hours=lookahead_hours)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT f.fixture_id, latest.league_id, latest.season, latest.home_team_id, "
+                "latest.away_team_id, latest.home_team, latest.away_team, latest.competition_name, "
+                "latest.country, latest.competition_type, latest.kickoff_at, latest.provider_status, "
+                "capture.captured_at AS market_captured_at, decision.decision_at, "
+                "decision.decision, decision.reason, decision.model_version, decision.market_key, "
+                "decision.selection, decision.bookmaker_name, decision.odds, decision.edge, "
+                "decision.expected_value "
+                "FROM quantlab_fixtures f "
+                "JOIN LATERAL ("
+                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
+                "        competition_name, country, competition_type, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT captured_at FROM quantlab_market_captures c WHERE c.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, market_capture_id DESC LIMIT 1"
+                ") capture ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT decision_at, decision, reason, model_version, market_key, selection, "
+                "        bookmaker_name, odds, edge, expected_value "
+                " FROM quantlab_count_decisions d WHERE d.fixture_id = f.fixture_id AND d.lab = %s "
+                " ORDER BY decision_at DESC, (decision = 'PICK') DESC, decision_id DESC LIMIT 1"
+                ") decision ON TRUE "
+                "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
+                "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
+                (lab, now, end_at, limit),
+            )
+            return _row_dicts(cursor)
+
     def upcoming_fixtures(
         self,
         *,
