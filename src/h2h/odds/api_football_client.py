@@ -162,7 +162,11 @@ class ApiFootballClient:
                 headers={"x-apisports-key": self.api_key},
                 timeout=self.timeout,
             )
-        self._log_request("fixture-results", payload)
+        self._log_request(
+            "fixture-results",
+            payload,
+            provider_fixture_id=fixture_ids[0] if len(fixture_ids) == 1 else None,
+        )
         return payload
 
     def fetch_completed_fixtures(
