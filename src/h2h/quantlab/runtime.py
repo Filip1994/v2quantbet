@@ -382,7 +382,7 @@ class QuantLabRuntime:
                         stats_backfilled += 1
                 except ApiBudgetExceededError:
                     raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     LOGGER.warning(
                         "QuantLab targeted CornerLab statistics failed fixture=%s "
                         "team_id=%s error_class=%s error=%s",
