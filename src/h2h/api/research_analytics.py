@@ -13,6 +13,29 @@ from typing import Any
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V1"
 
+DIAGNOSTIC_BUCKETS = (
+    "LOW_SCORING_EXTREME",
+    "OTHER_EXTREME",
+    "LOW_SCORING_NON_EXTREME",
+    "OTHER_NON_EXTREME",
+)
+
+
+def diagnostic_bucket(row: dict[str, Any]) -> str:
+    """Return the stable Research Analytics V1 diagnostic bucket for one row."""
+    extreme = (
+        float(row["expected_value"]) >= 0.30
+        or float(row["edge"]) >= 0.20
+    )
+    low_scoring = (
+        row.get("market") == "OU_25" and row.get("selection") == "UNDER"
+    ) or (
+        row.get("market") == "BTTS" and row.get("selection") == "NO"
+    )
+    if low_scoring:
+        return "LOW_SCORING_EXTREME" if extreme else "LOW_SCORING_NON_EXTREME"
+    return "OTHER_EXTREME" if extreme else "OTHER_NON_EXTREME"
+
 
 def market_fair_probability_bucket(value: Any) -> str:
     if value is None:
@@ -184,37 +207,9 @@ def _diagnostic_rows(
     *,
     fixed_stake_minor: int,
 ) -> list[dict[str, Any]]:
-    def extreme(row: dict[str, Any]) -> bool:
-        return float(row["expected_value"]) >= 0.30 or float(row["edge"]) >= 0.20
-
-    def low_scoring(row: dict[str, Any]) -> bool:
-        return (
-            row.get("market") == "OU_25" and row.get("selection") == "UNDER"
-        ) or (
-            row.get("market") == "BTTS" and row.get("selection") == "NO"
-        )
-
-    definitions = (
-        (
-            "LOW_SCORING_EXTREME",
-            lambda row: low_scoring(row) and extreme(row),
-        ),
-        (
-            "OTHER_EXTREME",
-            lambda row: not low_scoring(row) and extreme(row),
-        ),
-        (
-            "LOW_SCORING_NON_EXTREME",
-            lambda row: low_scoring(row) and not extreme(row),
-        ),
-        (
-            "OTHER_NON_EXTREME",
-            lambda row: not low_scoring(row) and not extreme(row),
-        ),
-    )
     output = []
-    for name, predicate in definitions:
-        cohort = tuple(row for row in rows if predicate(row))
+    for name in DIAGNOSTIC_BUCKETS:
+        cohort = tuple(row for row in rows if diagnostic_bucket(row) == name)
         item = {"diagnostic": name}
         item.update(cohort_metrics(cohort, fixed_stake_minor=fixed_stake_minor))
         output.append(item)
