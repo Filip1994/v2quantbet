@@ -152,6 +152,7 @@ def _calibration(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
         outcome = 1.0 if total > line else 0.0
         samples.append(
             {
+                "fixture_id": str(row.get("fixture_id") or "UNKNOWN"),
                 "p": probability,
                 "y": outcome,
                 "line": line,
@@ -177,13 +178,18 @@ def _calibration(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
             "log_loss": _rounded(log_loss),
         }
 
-    by_line: dict[float, list[dict[str, Any]]] = defaultdict(list)
+    canonical: dict[tuple[str, float], dict[str, Any]] = {}
     by_book: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in samples:
+        canonical.setdefault((item["fixture_id"], item["line"]), item)
+        by_book[item["bookmaker_name"]].append(item)
+
+    canonical_samples = list(canonical.values())
+    by_line: dict[float, list[dict[str, Any]]] = defaultdict(list)
     by_league: dict[str, list[dict[str, Any]]] = defaultdict(list)
     by_bin: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in samples:
+    for item in canonical_samples:
         by_line[item["line"]].append(item)
-        by_book[item["bookmaker_name"]].append(item)
         by_league[item["competition_name"]].append(item)
         low = min(9, max(0, int(item["p"] * 10)))
         key = f"{low / 10:.1f}-{(low + 1) / 10:.1f}"
@@ -208,7 +214,11 @@ def _calibration(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
             "UNDER is the exact complement on half-lines; its Brier/log-loss is "
             "mathematically identical to the OVER representation used here."
         ),
-        "overall": summarize(samples),
+        "canonical_note": (
+            "Overall/line/league/bin calibration uses one model probability per "
+            "fixture+line; bookmaker split keeps one row per bookmaker."
+        ),
+        "overall": summarize(canonical_samples),
         "line_split_n_ge_10": grouped(by_line, "line", 10, 30),
         "bookmaker_split_n_ge_10": grouped(by_book, "bookmaker", 10, 10),
         "league_split_n_ge_10": grouped(by_league, "league", 10, 25),
