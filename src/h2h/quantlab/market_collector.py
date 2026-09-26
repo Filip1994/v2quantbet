@@ -149,7 +149,7 @@ def parse_market_response(
                         continue
                     try:
                         odds = _decimal_odd(value.get("odd"))
-                    except ValueError:
+                    except (TypeError, ValueError):
                         continue
                     provider_updated_at = _parse_datetime(
                         value.get("update") or bookmaker.get("update") or record.get("update")
