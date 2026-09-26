@@ -152,10 +152,13 @@ def main() -> None:
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_LAST", "12"
             ),
             corner_team_history_teams_per_cycle=_positive_integer(
-                "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_TEAMS_PER_CYCLE", "40"
+                "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_TEAMS_PER_CYCLE", "20"
+            ),
+            corner_opponent_history_teams_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_CORNER_OPPONENT_HISTORY_TEAMS_PER_CYCLE", "100"
             ),
             corner_team_statistics_per_cycle=_positive_integer(
-                "QUANTBET_QUANTLAB_CORNER_TEAM_STATS_PER_CYCLE", "120"
+                "QUANTBET_QUANTLAB_CORNER_TEAM_STATS_PER_CYCLE", "500"
             ),
             corner_team_history_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_REFRESH_SECONDS", "21600"
