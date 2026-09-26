@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hmac
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+from h2h.quantlab.scope import card_corner_scope, goal_scope
 
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
@@ -239,6 +240,67 @@ class QuantLabDashboardService:
                 "</td></tr>"
             )
 
+        goal_pipeline_html = ""
+        if lab_key == "goal":
+            pipeline_rows = self._repository.list_goal_fixture_status(now=datetime.now(UTC))
+            rendered_pipeline = ""
+            for item in pipeline_rows:
+                scope = {
+                    "country": item.get("country"),
+                    "competition_name": item.get("competition_name"),
+                    "competition_type": item.get("competition_type"),
+                    "home_team": item.get("home_team"),
+                    "away_team": item.get("away_team"),
+                }
+                goal_allowed = goal_scope(**scope).allowed
+                context_allowed = card_corner_scope(**scope).allowed
+                decision = str(item.get("decision") or "WAITING")
+                reason = str(item.get("reason") or "NO_DECISION_YET")
+                decision_class = (
+                    "result-win" if decision == "PICK"
+                    else "result-pending" if decision == "WAITING"
+                    else "result-void"
+                )
+                match = (
+                    f'{escape(str(item.get("home_team") or "?"))} – '
+                    f'{escape(str(item.get("away_team") or "?"))}'
+                )
+                latest_pick = "—"
+                if item.get("market_key"):
+                    latest_pick = (
+                        f'{escape(str(item.get("market_key")))} '
+                        f'{escape(str(item.get("selection") or ""))} '
+                        f'@ {_odd(item.get("odds"))}'
+                    )
+                rendered_pipeline += (
+                    "<tr>"
+                    f'<td class="match"><b>{match}</b><small>{escape(str(item.get("competition_name") or "—"))} · {_time(item.get("kickoff_at"))}</small></td>'
+                    f'<td>{"YES" if goal_allowed else "NO"}</td>'
+                    f'<td>{"YES" if context_allowed else "NO"}</td>'
+                    f'<td>{_time(item.get("market_captured_at"))}</td>'
+                    f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
+                    f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
+                    f'<td>{latest_pick}</td>'
+                    f'<td>{_pct(item.get("edge"))}<small>{_pct(item.get("expected_value"))} EV</small></td>'
+                    "</tr>"
+                )
+            if not rendered_pipeline:
+                rendered_pipeline = (
+                    '<tr><td class="empty" colspan="8">'
+                    'No upcoming QuantLab fixtures are stored in the current lookahead window.'
+                    "</td></tr>"
+                )
+            goal_pipeline_html = (
+                '<section class="table-shell context-table">'
+                '<div class="table-title"><b>Upcoming fixture / GoalLab decision pipeline</b>'
+                f'<span>{len(pipeline_rows)} fixtures</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Match</th><th>Goal scope</th><th>Card/Corner scope</th>'
+                '<th>Last odds capture</th><th>Decision</th><th>Model</th>'
+                '<th>Candidate</th><th>Edge / EV</th>'
+                f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
+            )
+
         card_context_html = ""
         if lab_key == "card":
             context_rows = self._repository.list_card_features()
@@ -333,6 +395,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
+{goal_pipeline_html}
 {card_context_html}
 <section class="table-shell"><div class="table-title"><b>{escape(title)} shadow ledger</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
 <th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
