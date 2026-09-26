@@ -30,3 +30,9 @@ No production-model or bankroll/pick-registration behavior is changed by this re
 ### Next implementation target
 
 All-market Bet365 + 1xBet QuantLab ingestion, followed by CardLab v1 feature acquisition/derivation.
+
+## 2026-09-26 — Next task frozen
+
+**Owner:** QuantLab core
+
+Created `QuantLab/TASKS/001_MARKET_COLLECTOR_CARDLAB_V1.md` as the canonical next implementation task. It covers Bet365/1xBet all-market ingestion, lab classification and CardLab v1 context features while preserving production isolation.
