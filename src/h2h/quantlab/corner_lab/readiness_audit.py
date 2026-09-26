@@ -228,6 +228,25 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
         statistics_capture_status = _rows(cursor)
 
         cursor.execute(
+            "WITH latest AS ("
+            " SELECT DISTINCT ON (league_id, season) league_id, season, "
+            " statistics_fixtures_supported "
+            " FROM quantlab_league_coverage_captures "
+            " ORDER BY league_id, season, captured_at DESC, coverage_capture_id DESC"
+            ") "
+            "SELECT COUNT(*)::BIGINT AS league_seasons_cached, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS TRUE)::BIGINT "
+            "AS supported, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS FALSE)::BIGINT "
+            "AS unsupported, "
+            "COUNT(*) FILTER (WHERE statistics_fixtures_supported IS NULL)::BIGINT "
+            "AS unknown "
+            "FROM latest"
+        )
+        columns = tuple(item.name for item in cursor.description)
+        league_coverage = dict(zip(columns, cursor.fetchone(), strict=True))
+
+        cursor.execute(
             "SELECT COUNT(*)::BIGINT AS observation_count, "
             "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
             "COUNT(*) FILTER (WHERE home_corner_kicks IS NOT NULL "
@@ -288,6 +307,7 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
             ),
         },
         "statistics_coverage": {
+            "league_season_cache": league_coverage,
             "capture_status": statistics_capture_status,
             "observations": statistics_observations,
         },
