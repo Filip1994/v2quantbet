@@ -884,3 +884,57 @@ def test_upcoming_collection_isolates_bad_fixture_and_scans_next_fixture() -> No
     assert provider.calls == [7001, 7002]
     assert len(repo.captures) == 1
     assert repo.captures[0]["fixture_id"] == "api-football:good-upcoming"
+
+
+def test_history_backfill_watermarks_statistics_without_both_teams() -> None:
+    fixture = {
+        "fixture_id": "api-football:no-stats",
+        "provider_fixture_id": 9100,
+        "home_team_id": 41,
+        "away_team_id": 42,
+    }
+
+    class Repo:
+        def __init__(self):
+            self.captures = []
+
+        def completed_for_context_backfill(self, **_kwargs):
+            return (fixture,)
+
+        def latest_context_before(self, *_args, **_kwargs):
+            return {"referee": None}
+
+        def statistics_capture_exists(self, _fixture_id):
+            return False
+
+        def save_statistics_capture(self, **kwargs):
+            self.captures.append(kwargs)
+
+        def save_match_statistics(self, _item):
+            raise AssertionError("incomplete statistics must not be stored as observations")
+
+    class Provider:
+        def fetch_statistics(self, fixture_id):
+            assert fixture_id == 9100
+            return {
+                "response": [
+                    {
+                        "team": {"id": 41},
+                        "statistics": [{"type": "Corner Kicks", "value": 5}],
+                    }
+                ]
+            }
+
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        Provider(),
+        settings=QuantLabRuntimeSettings(history_backfill_per_cycle=1),
+        clock=lambda: NOW,
+    )
+
+    assert runtime._backfill_history(NOW) == 1
+    assert len(repo.captures) == 1
+    assert repo.captures[0]["status"] == "UNAVAILABLE"
+    assert repo.captures[0]["response_team_count"] == 1
+    assert "both fixture teams" in repo.captures[0]["reason"]
