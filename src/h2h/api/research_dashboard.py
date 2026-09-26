@@ -17,7 +17,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.api.research_analytics import (
+    DIAGNOSTIC_BUCKETS,
     build_research_analytics_snapshot,
+    diagnostic_bucket,
     market_fair_probability_bucket,
     render_research_analytics_html,
 )
@@ -595,6 +597,101 @@ class ResearchDashboardService:
             fixed_stake_minor=self._stake,
         )
 
+    def diagnostic_details(self, bucket: str = "OTHER_EXTREME") -> dict[str, Any]:
+        """Return exact settled Research rows behind one analytics diagnostic bucket."""
+        name = bucket.strip().upper()
+        if name not in DIAGNOSTIC_BUCKETS:
+            raise ValueError("invalid diagnostic bucket")
+
+        settled = tuple(
+            row
+            for row in self.signals({})
+            if row.get("outcome") in {"WIN", "LOSS", "VOID"}
+            and diagnostic_bucket(row) == name
+        )
+        rows = sorted(
+            settled,
+            key=lambda row: (
+                row.get("kickoff_at")
+                if isinstance(row.get("kickoff_at"), datetime)
+                else datetime.min.replace(tzinfo=UTC),
+                str(row.get("evaluation_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        def iso(value: Any) -> str | None:
+            if not isinstance(value, datetime):
+                return None
+            if value.tzinfo is None or value.utcoffset() is None:
+                value = value.replace(tzinfo=UTC)
+            return value.astimezone(UTC).isoformat()
+
+        def integer(value: Any) -> int | None:
+            return None if value is None else int(value)
+
+        items = []
+        for row in rows:
+            home_goals = integer(row.get("regulation_home_goals"))
+            away_goals = integer(row.get("regulation_away_goals"))
+            clv_ppm = integer(row.get("clv_ppm"))
+            items.append(
+                {
+                    "research_signal_id": str(row.get("research_signal_id") or ""),
+                    "evaluation_id": str(row.get("evaluation_id") or ""),
+                    "fixture_id": str(row.get("fixture_id") or ""),
+                    "provider_fixture_id": str(row.get("provider_fixture_id") or ""),
+                    "home_team": row.get("home_team"),
+                    "away_team": row.get("away_team"),
+                    "competition_name": row.get("competition_name"),
+                    "country": row.get("country"),
+                    "kickoff_at": iso(row.get("kickoff_at")),
+                    "market": row.get("market"),
+                    "selection": row.get("selection"),
+                    "bookmaker": row.get("bookmaker"),
+                    "odds": float(row["odds"]),
+                    "model_probability": float(row["model_probability"]),
+                    "market_fair_probability": float(row["market_fair_probability"]),
+                    "edge": float(row["edge"]),
+                    "expected_value": float(row["expected_value"]),
+                    "outcome": row.get("outcome"),
+                    "score": (
+                        None
+                        if home_goals is None or away_goals is None
+                        else {"home": home_goals, "away": away_goals}
+                    ),
+                    "result_provider_status": row.get("result_provider_status"),
+                    "pnl_minor": integer(row.get("pnl_minor")),
+                    "clv_ppm": clv_ppm,
+                    "clv_pct": None if clv_ppm is None else clv_ppm / 10_000,
+                    "disposition": row.get("disposition"),
+                    "production_pick_id": row.get("production_pick_id"),
+                    "freshness": row.get("freshness"),
+                    "quote_observed_at": iso(row.get("quote_observed_at")),
+                    "closing_odds": (
+                        None
+                        if row.get("closing_odds") is None
+                        else float(row["closing_odds"])
+                    ),
+                    "closing_observed_at": iso(row.get("closing_observed_at")),
+                }
+            )
+
+        return {
+            "contract_version": "RESEARCH_DIAGNOSTIC_DRILLDOWN_V1",
+            "bucket": name,
+            "definition": (
+                "not low-scoring and (expected_value >= 0.30 or edge >= 0.20)"
+                if name == "OTHER_EXTREME"
+                else "See RESEARCH_ANALYTICS_V1 diagnostic bucket classifier."
+            ),
+            "count": len(items),
+            "wins": sum(item["outcome"] == "WIN" for item in items),
+            "losses": sum(item["outcome"] == "LOSS" for item in items),
+            "voids": sum(item["outcome"] == "VOID" for item in items),
+            "rows": items,
+        }
+
     def render_analytics_html(self) -> str:
         return render_research_analytics_html(self.analytics_snapshot())
 
@@ -981,13 +1078,23 @@ class ResearchDashboardHTTPService:
                     "/research",
                     "/research/analytics",
                     "/research/analytics.json",
+                    "/research/analytics/diagnostic.json",
                 }:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                     return
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/research/analytics.json":
+                    if parsed.path == "/research/analytics/diagnostic.json":
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        bucket = params.get("bucket", ["OTHER_EXTREME"])[0]
+                        body = json.dumps(
+                            dashboard.diagnostic_details(bucket),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        content_type = "application/json; charset=utf-8"
+                    elif parsed.path == "/research/analytics.json":
                         body = json.dumps(
                             dashboard.analytics_snapshot(),
                             ensure_ascii=False,
