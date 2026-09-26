@@ -55,3 +55,22 @@ semantics. Raw provider bet ID/name/selection and line are preserved. No generic
 settlement rule is assumed.
 
 QuantLab is shadow-only and does not write production picks, bankroll or model state.
+
+## Shadow Pick Engine V1
+
+Task 003 adds `CARDLAB_REFERENCE_CONTEXT_POLICY_V1`.
+
+The CardLab evaluator uses the same conservative cross-book fair-reference mechanism as
+CornerLab for supported full-match total-card half-lines, then requires timestamp-safe
+CardLab context before a PICK is possible.
+
+V1 requires `referee_card_rate` with at least five historical matches. OVER is admitted
+only when the referee rate is above the offered line; UNDER only when it is below. Foul
+rate, derby, table pressure and match importance are preserved in decision evidence but
+are not assigned invented probability weights.
+
+Yellow-only, red-only, bookings and booking-points markets are rejected in V1 because
+their settlement semantics are not interchangeable with the aggregate referee card-rate
+feature.
+
+The evaluator adds zero provider requests and writes only QuantLab decision/shadow tables.
