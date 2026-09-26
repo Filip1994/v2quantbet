@@ -269,3 +269,20 @@ def test_research_dashboard_can_be_explicitly_public(monkeypatch) -> None:
     monkeypatch.delenv("QUANTBET_RESEARCH_PASSWORD", raising=False)
 
     assert ResearchDashboardHTTPService._authorize(object()) is True
+
+
+def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
+    dashboard = ResearchDashboardService(Repository())
+
+    signal = dashboard.signals({})[0]
+    assert signal["market_fair_probability_bucket"] == "45–50%"
+
+    snapshot = dashboard.analytics_snapshot()
+    assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V1"
+    assert snapshot["windows"]["lifetime"]["n"] == 1
+    assert snapshot["cohorts"]["market_selection"][0]["market"] == "BTTS"
+
+    html = dashboard.render_analytics_html()
+    assert "Research Analytics V1" in html
+    assert "Production-filter evidence cube" in html
+    assert "Low-scoring extreme-value diagnostic" in html
