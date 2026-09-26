@@ -52,6 +52,9 @@ class StubRepository:
     def api_usage_today(self) -> int:
         return 42
 
+    def list_count_fixture_status(self, *_args, **_kwargs):
+        return ()
+
     def list_goal_fixture_status(self, **_kwargs):
         return (
             {
