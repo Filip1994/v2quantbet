@@ -47,6 +47,9 @@ class PostgreSQLQuantLabRepository:
     def check_database(self) -> bool:
         required = (
             "quantlab_shadow_bets",
+            "quantlab_fixtures",
+            "quantlab_fixture_observations",
+            "quantlab_fixture_discovery_shards",
             "quantlab_market_observations",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
