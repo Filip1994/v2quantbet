@@ -645,3 +645,42 @@ Railway production verification:
   started successfully and did not bypass the 1,000/day API ceiling.
 
 Production impact remains **NONE**.
+
+
+## 2026-09-26 — Task 002 operational bootstrap: current fixture observations
+
+**Owner:** QuantLab core
+
+### Trigger
+
+The first deployed Task 002 runtime was healthy and the shadow engine executed after the
+daily API ceiling, but logged `goal_decisions=0 goal_picks=0`.
+
+The reason was structural: migration 026 seeded QuantLab fixture identities from existing
+production fixtures but intentionally did not copy fixture observations. Because the
+independent global date-shard collector was already blocked by today's exhausted 1,000-call
+QuantLab budget, `quantlab_fixture_observations` did not yet contain upcoming rows for the
+shadow engine to evaluate.
+
+### Correction
+
+Migration `029_quantlab_fixture_bootstrap.sql` performs a one-time, bounded seed of the
+latest already-persisted production fixture observation for current fixtures that have no
+QuantLab observation.
+
+- window: one day back through three days forward at migration time;
+- no API-Football request is made;
+- production tables are read only;
+- QuantLab writes only its own fixture identity/observation tables;
+- bootstrap rows are explicitly tagged `production-fixture-bootstrap`;
+- existing QuantLab observations are never overwritten or supplemented by the bootstrap;
+- ongoing fixture discovery remains the independent global date-shard pipeline.
+
+### API-cost impact
+
+**0 provider requests.**
+
+### Production impact
+
+**NONE.** Production fixture rows are read as immutable seed facts only; no production
+fixture, model, pick, registration or bankroll state is changed.
