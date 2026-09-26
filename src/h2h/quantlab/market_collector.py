@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -15,6 +15,7 @@ from h2h.quantlab.market_classifier import CLASSIFIER_VERSION, classify_market
 
 
 BOOKMAKERS = {8: "Bet365", 11: "1xBet"}
+LAB_OWNERS = frozenset({"GOAL", "CORNER", "CARD", "UNCLASSIFIED"})
 _LINE_PATTERNS = (
     re.compile(r"^(?:over|under)\s+([+-]?\d+(?:\.\d+)?)$", re.IGNORECASE),
     re.compile(r"^(?:home|away|1|2)\s*([+-]\d+(?:\.\d+)?)$", re.IGNORECASE),
@@ -208,7 +209,13 @@ class QuantLabMarketCollector:
         fixture_id: str,
         provider_fixture_id: int,
         captured_at: datetime,
+        allowed_labs: Collection[str] | None = None,
     ) -> tuple[MarketObservation, ...]:
+        allowed = LAB_OWNERS if allowed_labs is None else frozenset(allowed_labs)
+        unsupported = allowed - LAB_OWNERS
+        if unsupported:
+            raise ValueError(f"unsupported QuantLab lab owners: {sorted(unsupported)!r}")
+
         payload = self._provider.fetch_odds(provider_fixture_id)
         observations = parse_market_response(
             payload,
@@ -216,5 +223,14 @@ class QuantLabMarketCollector:
             provider_fixture_id=provider_fixture_id,
             captured_at=captured_at,
         )
-        self._repository.save_market_observations(observations)
-        return observations
+        selected = tuple(row for row in observations if row.lab_owner in allowed)
+        self._repository.save_market_observations(selected)
+        self._repository.save_market_capture(
+            fixture_id=fixture_id,
+            provider_fixture_id=provider_fixture_id,
+            captured_at=captured_at,
+            raw_observation_count=len(observations),
+            stored_observation_count=len(selected),
+            allowed_labs=allowed,
+        )
+        return selected
