@@ -62,21 +62,29 @@ All inputs must have available_at not later than decision_at, and decision_at mu
 before kickoff. Referee history excludes target/future matches and historical facts
 backfilled after an old decision do not become retroactively eligible.
 
-## Part D — League/API scope refinement
+## Part D — Fixture universe and League/API scope refinement
 
-Added after implementation review to reduce waste.
+Added after implementation review to reduce waste without inheriting production's narrower
+fixture universe.
+
+QuantLab owns global date-shard discovery through `/fixtures?date=<UTC date>` and persists
+that universe in `quantlab_fixtures`, `quantlab_fixture_observations` and
+`quantlab_fixture_discovery_shards`. Production fixture/result tables are read-only
+historical fallback and do not define QuantLab eligibility.
 
 CARDCORNER_STRONG_LEAGUES_V1 gates CardLab/CornerLab fixture-specific spend to selected
-strong competitions. Lower leagues such as Poland III Liga are rejected locally.
+strong competitions. Lower leagues such as Poland III Liga are rejected locally for those
+labs.
 
 GOAL_SCOPE_V1 remains broad but excludes:
 
-- youth U13-U23 and equivalent Under competitions;
-- academy/reserve/amateur competitions;
+- youth U5-U23 and equivalent Under labels;
+- academy/reserve/amateur/junior/olympic competitions;
 - Africa;
 - the V1 Far East country registry.
 
-The scope gate runs before fixture-specific provider calls.
+The scope gate runs after zero/low-cost date-shard discovery and before fixture-specific
+odds/context/statistics calls.
 
 ## Part E — Dashboard
 
@@ -88,6 +96,9 @@ Unavailable/unknown values are rendered explicitly rather than fabricated.
 
 Task tests cover:
 
+- independent global fixture discovery before lab scope;
+- zero fixture-specific calls for locally excluded fixtures;
+- QuantLab-only fixture persistence with no production fixture writes;
 - unsupported/raw market retention;
 - Bet365 + 1xBet filtering;
 - one-response fixture reuse;
@@ -106,8 +117,9 @@ Task tests cover:
 
 Hard limit: 1,000/day.
 
-Design target: materially below the hard limit through fixture-response reuse, zero-cost
-scope filtering, standings caching and bounded referee-history backfill.
+Design target: materially below the hard limit through global date-shard discovery cached
+for six hours, local zero-request scope filtering, fixture-response reuse, standings
+caching and bounded referee-history backfill.
 
 ## Production safety
 
@@ -123,6 +135,7 @@ This task does not change:
 ## Definition of done
 
 - QuantLab collector runs independently in quantbet-quantlab.
+- QuantLab fixture discovery is independent from production Phase-I scope.
 - Bet365/1xBet all-market observations are durably stored.
 - Goal/Corner/Card ownership classification is versioned.
 - CardLab v1 snapshots contain the five requested context variables with provenance.
