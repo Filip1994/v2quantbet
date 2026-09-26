@@ -339,26 +339,43 @@ def build_goal_model_validation(
         )
     dc_plus_params, _objective = fitted
 
-    control_records = [
-        SimpleNamespace(
-            date=dates[index],
-            home_id=int(home_ids[index]),
-            away_id=int(away_ids[index]),
-            home_goals=int(y_home[index]),
-            away_goals=int(y_away[index]),
-        )
-        for index in range(train_n)
-    ]
-    try:
-        control = DixonColesModel.fit(
-            control_records,
-            team_id_namespace="api-football",
-            reference_time=dates[train_n],
-            xi=RECENCY_XI,
-            ridge=CONTROL_RIDGE,
-            min_matches=80,
-        )
-    except DixonColesFitError as exc:
+    controls: dict[int, DixonColesModel] = {}
+    control_fit_errors: dict[str, str] = {}
+    training_leagues = sorted(set(int(value) for value in train_leagues.tolist()))
+    for league_id in training_leagues:
+        indices = [
+            index
+            for index in range(train_n)
+            if int(train_leagues[index]) == league_id
+        ]
+        if len(indices) < 80:
+            control_fit_errors[str(league_id)] = (
+                f"insufficient league training sample {len(indices)} < 80"
+            )
+            continue
+        control_records = [
+            SimpleNamespace(
+                date=dates[index],
+                home_id=int(home_ids[index]),
+                away_id=int(away_ids[index]),
+                home_goals=int(y_home[index]),
+                away_goals=int(y_away[index]),
+            )
+            for index in indices
+        ]
+        try:
+            controls[league_id] = DixonColesModel.fit(
+                control_records,
+                team_id_namespace="api-football",
+                reference_time=dates[train_n],
+                xi=RECENCY_XI,
+                ridge=CONTROL_RIDGE,
+                min_matches=80,
+            )
+        except DixonColesFitError as exc:
+            control_fit_errors[str(league_id)] = str(exc)
+
+    if not controls:
         return _empty_validation(
             model_version=model_version,
             evaluated_at=evaluated_at,
@@ -366,18 +383,24 @@ def build_goal_model_validation(
             train_n=train_n,
             holdout_n=holdout_n,
             dates=dates,
-            contract_snapshot=contract_snapshot,
-            reason=str(exc),
+            contract_snapshot={
+                **contract_snapshot,
+                "control_fit_errors": control_fit_errors,
+            },
+            reason="no league-specific Dixon-Coles control could be fitted",
         )
 
     dc_plus_rows: list[dict[str, float]] = []
     control_rows: list[dict[str, float]] = []
-    control_teams = set(control.team_ids)
     for offset, raw_features in enumerate(holdout_features):
         index = train_n + offset
         home_id = int(home_ids[index])
         away_id = int(away_ids[index])
         league_id = int(league_ids[index])
+        control = controls.get(league_id)
+        if control is None:
+            continue
+        control_teams = set(control.team_ids)
         if home_id not in control_teams or away_id not in control_teams:
             continue
         vector, _raw_payload = _transform_feature_row(
@@ -463,6 +486,8 @@ def build_goal_model_validation(
             "btts_brier": "lower_is_better",
         },
         "automatic_promotion_rule": None,
+        "control_leagues_fitted": sorted(controls),
+        "control_league_fit_errors": control_fit_errors,
         "note": "comparison is evidence for manual GoalLab pick-authority review",
     }
     leakage = _leakage_audit()
