@@ -147,6 +147,12 @@ class Repo:
     def statistics_capture_exists(self, fixture_id):
         return fixture_id in self.statistics_captures
 
+    def latest_league_statistics_coverage(self, *_args, **_kwargs):
+        return {
+            "statistics_fixtures": True,
+            "raw_payload": {"response": []},
+        }
+
     def save_statistics_capture(self, **kwargs):
         self.statistics_captures[str(kwargs["fixture_id"])] = kwargs
 
