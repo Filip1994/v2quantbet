@@ -10,6 +10,10 @@ from hashlib import sha256
 from typing import Any
 
 
+class StatisticsUnavailableError(ValueError):
+    """Provider returned no usable two-team statistics for a completed fixture."""
+
+
 def _utc(value: datetime, field: str) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError(f"{field} must be a datetime")
@@ -199,7 +203,9 @@ def parse_fixture_statistics(
     home = by_team.get(home_team_id)
     away = by_team.get(away_team_id)
     if home is None or away is None:
-        raise ValueError("statistics response does not contain both fixture teams")
+        raise StatisticsUnavailableError(
+            "statistics response does not contain both fixture teams"
+        )
 
     values = {
         "home_fouls": _stat_value(home, "Fouls"),
