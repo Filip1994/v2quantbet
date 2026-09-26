@@ -737,3 +737,49 @@ The runtime now performs a wider **database-only** scan for Top-10 fixtures, pri
 those fixtures inside the existing per-cycle fixture limit, and uses the same dedicated
 Top-10 queue for CornerLab/CardLab evaluation. This adds no provider requests by itself
 and does not change `GOAL_SCOPE_V1`.
+
+
+## 2026-09-26 — Task 003 CI + Railway verification
+
+**Owner:** QuantLab core, CornerLab and CardLab
+
+Task 003 merged through PR #88 as
+`abc6a4e15494b1bef1bb49505eeeeb589129924e`.
+
+GitHub Actions verification for the PR head:
+
+- run `36225883511` / run number 897;
+- Ruff lint: **PASS**;
+- full pytest suite: **1016 passed in 26.58s**.
+
+The first production cycle exposed Top-10 queue starvation: broad GoalLab fixtures could
+fill the global upcoming-fixture limit before CardLab/CornerLab filtering. PR #90 fixed
+that scheduling issue without changing GoalLab scope or adding provider calls.
+
+PR #90 merged as
+`1fee72fe88a96cf8eb7304cfc01a3863940a0ea5`.
+
+GitHub Actions verification for the queue-fix PR head:
+
+- run `36226253818` / run number 902;
+- Ruff lint: **PASS**;
+- full pytest suite: **1018 passed in 37.94s**.
+
+Railway production verification:
+
+- Research deployment `ad8890da-adbe-4a96-bbf5-f7e0e3a1c2e8` reached **SUCCESS**
+  for the Task 003 merge and applied **1 migration**, which installed migration 030 on
+  the shared PostgreSQL database.
+- The subsequent QuantLab Task 003 deployment saw `applied 0 migration(s)`, because the
+  shared migration had already been applied.
+- Latest QuantLab queue-fix deployment
+  `5fc9df79-e35c-4404-af36-1df602bb1d24` is **SUCCESS**.
+- Under the already-exhausted daily API ceiling, the runtime still executed both
+  zero-request shadow engines from persisted evidence.
+- Verified live cycle at 2026-09-26T07:19:13Z:
+  `corner_decisions=14 corner_picks=0 card_decisions=14 card_picks=0`.
+- Therefore both engines are live and auditing candidates; no current candidate passed all
+  cross-book/value/context gates in that observed cycle.
+
+Task 003 adds zero provider calls in the decision engines and changes no production
+prediction, registration, bankroll, staking or active-model state.
