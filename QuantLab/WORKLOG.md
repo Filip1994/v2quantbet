@@ -700,3 +700,28 @@ makes **zero provider requests**, writes no database state, and does not expose 
 or raw provider payloads.
 
 Production impact: **NONE**.
+
+## 2026-09-26 — Task 003 CornerLab + CardLab shadow engines
+
+**Owner:** QuantLab core
+
+Implemented the next two shadow-only pick paths without changing GoalLab scope.
+
+1. Added a shared cross-book de-vig reference evaluator for conservative full-match
+   CORNER/CARD Over/Under half-lines.
+2. CornerLab uses the other bookmaker's fair probability as
+   `CROSS_BOOK_FAIR_REFERENCE_V1`.
+3. CardLab adds the existing `CARDLAB_FEATURES_V1` referee gate: minimum five-match
+   sample and referee-card-rate directional agreement.
+4. No untrained weights were assigned to foul rate, derby, table pressure or match
+   importance; those features remain audit evidence for later calibration.
+5. Added append-only `quantlab_context_market_decisions` in migration 030 with a
+   first-PICK guard per lab/fixture/market/line/policy.
+6. Only newly inserted PICK decisions may create CORNER/CARD rows in
+   `quantlab_shadow_bets`.
+7. Runtime evaluates CornerLab/CardLab outside the provider budget block, so persisted
+   evidence remains evaluable after the QuantLab daily ceiling is reached.
+8. Task 003 adds zero provider requests and changes no production model/pick/bankroll
+   state.
+
+GoalLab scope and GoalLab Task 002 logic are unchanged.
