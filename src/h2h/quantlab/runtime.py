@@ -31,8 +31,9 @@ class QuantLabRuntimeSettings:
     feature_refresh_seconds: int = 1800
     history_backfill_per_cycle: int = 25
     corner_team_history_last: int = 12
-    corner_team_history_teams_per_cycle: int = 40
-    corner_team_statistics_per_cycle: int = 120
+    corner_team_history_teams_per_cycle: int = 20
+    corner_opponent_history_teams_per_cycle: int = 100
+    corner_team_statistics_per_cycle: int = 500
     corner_team_history_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
@@ -46,6 +47,10 @@ class QuantLabRuntimeSettings:
             ("feature_refresh_seconds", self.feature_refresh_seconds),
             ("corner_team_history_last", self.corner_team_history_last),
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
+            (
+                "corner_opponent_history_teams_per_cycle",
+                self.corner_opponent_history_teams_per_cycle,
+            ),
             ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
             ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
         ):
@@ -319,14 +324,16 @@ class QuantLabRuntime:
                 teams.append(team_id)
         return tuple(teams)
 
-    def _bootstrap_corner_team_history(self, now: datetime) -> tuple[int, int]:
-        team_ids = self._corner_target_team_ids(now)
-        if not team_ids:
-            return 0, 0
-
+    def _discover_recent_team_history(
+        self,
+        team_ids: tuple[int, ...],
+        *,
+        now: datetime,
+        limit: int,
+    ) -> int:
         discoveries = 0
         for team_id in team_ids:
-            if discoveries >= self._settings.corner_team_history_teams_per_cycle:
+            if discoveries >= limit:
                 break
             if not self._repository.team_history_due(
                 team_id,
@@ -348,15 +355,42 @@ class QuantLabRuntime:
                 raw_payload=dict(payload),
             )
             discoveries += 1
+        return discoveries
 
-        stats_target = self._settings.corner_team_statistics_per_cycle
-        candidates = self._repository.completed_for_team_statistics(
+    def _bootstrap_corner_team_history(self, now: datetime) -> tuple[int, int, int]:
+        team_ids = self._corner_target_team_ids(now)
+        if not team_ids:
+            return 0, 0, 0
+
+        direct_discoveries = self._discover_recent_team_history(
+            team_ids,
+            now=now,
+            limit=self._settings.corner_team_history_teams_per_cycle,
+        )
+
+        opponent_ids = self._repository.recent_opponents_for_teams(
             team_ids,
             before=now,
-            limit=max(6000, stats_target * 50),
+            matches_per_team=self._settings.corner_team_history_last,
+            limit=max(6000, len(team_ids) * self._settings.corner_team_history_last * 2),
         )
-        by_team: dict[int, list[dict[str, Any]]] = {team_id: [] for team_id in team_ids}
-        target_set = set(team_ids)
+        opponent_discoveries = self._discover_recent_team_history(
+            opponent_ids,
+            now=now,
+            limit=self._settings.corner_opponent_history_teams_per_cycle,
+        )
+
+        expanded_team_ids = tuple(dict.fromkeys((*team_ids, *opponent_ids)))
+        stats_target = self._settings.corner_team_statistics_per_cycle
+        candidates = self._repository.completed_for_team_statistics(
+            expanded_team_ids,
+            before=now,
+            limit=max(12000, stats_target * 50),
+        )
+        by_team: dict[int, list[dict[str, Any]]] = {
+            team_id: [] for team_id in expanded_team_ids
+        }
+        target_set = set(expanded_team_ids)
         for fixture in candidates:
             home_id = int(fixture["home_team_id"])
             away_id = int(fixture["away_team_id"])
@@ -367,10 +401,10 @@ class QuantLabRuntime:
 
         stats_backfilled = 0
         attempted_fixtures: set[str] = set()
-        for team_id in team_ids:
+        for team_id in expanded_team_ids:
             for fixture in by_team[team_id]:
                 if stats_backfilled >= stats_target:
-                    return discoveries, stats_backfilled
+                    return direct_discoveries, opponent_discoveries, stats_backfilled
                 fixture_id = str(fixture["fixture_id"])
                 if fixture_id in attempted_fixtures:
                     continue
@@ -391,7 +425,7 @@ class QuantLabRuntime:
                         type(exc).__name__,
                         str(exc),
                     )
-        return discoveries, stats_backfilled
+        return direct_discoveries, opponent_discoveries, stats_backfilled
 
     def _context_upcoming(self, now: datetime) -> tuple[dict[str, Any], ...]:
         """Return the broad market-driven CardLab/CornerLab upcoming queue."""
@@ -555,6 +589,7 @@ class QuantLabRuntime:
             "fixtures_discovered": 0,
             "history_backfilled": 0,
             "corner_team_history_discovered": 0,
+            "corner_opponent_history_discovered": 0,
             "corner_team_statistics_backfilled": 0,
             "market_fixtures": 0,
             "card_snapshots": 0,
@@ -571,8 +606,11 @@ class QuantLabRuntime:
             market_fixtures, card_snapshots = self._collect_upcoming(now)
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
-            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
+            team_discoveries, opponent_discoveries, team_stats = (
+                self._bootstrap_corner_team_history(now)
+            )
             result["corner_team_history_discovered"] = team_discoveries
+            result["corner_opponent_history_discovered"] = opponent_discoveries
             result["corner_team_statistics_backfilled"] = team_stats
         except ApiBudgetExceededError:
             LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
@@ -609,12 +647,14 @@ class QuantLabRuntime:
 
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
-            "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
-            "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
+            "corner_team_history_discovered=%d corner_opponent_history_discovered=%d "
+            "corner_team_statistics_backfilled=%d market_fixtures=%d card_snapshots=%d "
+            "goal_decisions=%d goal_picks=%d "
             "corner_decisions=%d corner_picks=%d card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
             result["corner_team_history_discovered"],
+            result["corner_opponent_history_discovered"],
             result["corner_team_statistics_backfilled"],
             result["market_fixtures"],
             result["card_snapshots"],
