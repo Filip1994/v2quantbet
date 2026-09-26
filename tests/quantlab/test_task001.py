@@ -1,0 +1,353 @@
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+
+from h2h.quantlab.budget import QuantLabRequestBudget
+from h2h.quantlab.card_lab.features import (
+    MATCH_IMPORTANCE_VERSION,
+    TABLE_PRESSURE_VERSION,
+    FeatureDatum,
+    FeatureLeakageError,
+    match_importance,
+    referee_rates,
+    table_pressure,
+)
+from h2h.quantlab.card_lab.rivalry import RIVALRY_REGISTRY_VERSION, rivalry_indicator
+from h2h.quantlab.dashboard import QuantLabDashboardService
+from h2h.quantlab.market_collector import QuantLabMarketCollector, parse_market_response
+from h2h.quantlab.scope import card_corner_scope, goal_scope
+
+
+NOW = datetime(2026, 9, 26, 2, 0, tzinfo=UTC)
+
+
+def _odds_payload():
+    return {
+        "response": [
+            {
+                "fixture": {"id": 42},
+                "update": "2026-09-26T01:55:00+00:00",
+                "bookmakers": [
+                    {
+                        "id": 8,
+                        "name": "Bet365",
+                        "bets": [
+                            {
+                                "id": 5,
+                                "name": "Goals Over/Under",
+                                "values": [
+                                    {"value": "Over 2.5", "odd": "1.91"},
+                                    {"value": "Under 2.5", "odd": "1.95"},
+                                ],
+                            },
+                            {
+                                "id": 999,
+                                "name": "Exotic Provider Market",
+                                "values": [{"value": "Some Raw Selection", "odd": "3.40"}],
+                            },
+                        ],
+                    },
+                    {
+                        "id": 11,
+                        "name": "1xBet",
+                        "bets": [
+                            {
+                                "id": 120,
+                                "name": "Total Cards",
+                                "values": [{"value": "Over 4.5", "odd": 2.05}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": 6,
+                        "name": "Ignored Book",
+                        "bets": [
+                            {
+                                "id": 5,
+                                "name": "Goals Over/Under",
+                                "values": [{"value": "Over 2.5", "odd": 1.8}],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+
+def test_all_market_parser_keeps_unknown_raw_market_and_only_target_books() -> None:
+    rows = parse_market_response(
+        _odds_payload(),
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+    )
+
+    assert {row.bookmaker_id for row in rows} == {8, 11}
+    exotic = next(row for row in rows if row.provider_bet_id == 999)
+    assert exotic.lab_owner == "UNCLASSIFIED"
+    assert exotic.raw_selection == "Some Raw Selection"
+    assert exotic.raw_payload["bet"]["name"] == "Exotic Provider Market"
+    over = next(row for row in rows if row.provider_bet_id == 5 and row.raw_selection == "Over 2.5")
+    assert float(over.parsed_line) == 2.5
+    cards = next(row for row in rows if row.provider_bet_id == 120)
+    assert cards.lab_owner == "CARD"
+
+
+def test_collector_reuses_one_fixture_response_for_both_books_and_all_markets() -> None:
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_odds(self, fixture_id):
+            self.calls.append(fixture_id)
+            return _odds_payload()
+
+    class Repo:
+        def __init__(self):
+            self.saved = ()
+
+        def save_market_observations(self, rows):
+            self.saved = tuple(rows)
+
+    provider = Provider()
+    repo = Repo()
+    rows = QuantLabMarketCollector(repo, provider).collect_fixture(
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+    )
+
+    assert provider.calls == [42]
+    assert repo.saved == rows
+    assert {row.bookmaker_id for row in rows} == {8, 11}
+
+
+class _BudgetCursor:
+    def __init__(self, connection):
+        self.connection = connection
+        self._one = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def execute(self, sql, params=None):
+        self.connection.sql.append(sql)
+        if "SELECT COALESCE(request_count, 0)" in sql:
+            self._one = (self.connection.used,)
+
+    def fetchone(self):
+        return self._one
+
+
+class _BudgetConnection:
+    def __init__(self, used=0):
+        self.used = used
+        self.sql = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def cursor(self):
+        return _BudgetCursor(self)
+
+
+def test_quantlab_budget_records_only_quantlab_context_category() -> None:
+    connection = _BudgetConnection()
+    budget = QuantLabRequestBudget(daily_limit=1000, connect=lambda: connection, clock=lambda: NOW)
+
+    budget.acquire()
+
+    rendered = "\n".join(connection.sql)
+    assert "category = 'quantlab_context'" in rendered
+    assert "VALUES (%s, 'quantlab_context', 1, %s)" in rendered
+
+
+def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
+    assert card_corner_scope(country="Poland", competition_name="Ekstraklasa").allowed
+    assert not card_corner_scope(country="Poland", competition_name="III Liga").allowed
+
+    assert goal_scope(country="Poland", competition_name="III Liga").allowed
+    assert not goal_scope(country="England", competition_name="Premier League U20").allowed
+    assert not goal_scope(country="Egypt", competition_name="Premier League").allowed
+    assert not goal_scope(country="Japan", competition_name="J1 League").allowed
+
+
+def test_referee_rates_exclude_target_and_future_rows() -> None:
+    history = (
+        {
+            "referee": "Ref A",
+            "kickoff_at": NOW - timedelta(days=7),
+            "available_at": NOW - timedelta(days=6),
+            "yellow_cards": 4,
+            "red_cards": 0,
+            "second_yellow_cards": None,
+            "fouls": 23,
+        },
+        {
+            "referee": "Ref A",
+            "kickoff_at": NOW,
+            "available_at": NOW,
+            "yellow_cards": 8,
+            "red_cards": 1,
+            "second_yellow_cards": 1,
+            "fouls": 40,
+        },
+        {
+            "referee": "Ref A",
+            "kickoff_at": NOW - timedelta(days=10),
+            "available_at": NOW + timedelta(seconds=1),
+            "yellow_cards": 9,
+            "red_cards": 1,
+            "second_yellow_cards": None,
+            "fouls": 50,
+        },
+    )
+
+    cards, fouls, card_n, foul_n = referee_rates(history, referee="Ref A", decision_at=NOW)
+
+    assert cards.value == 4
+    assert fouls.value == 23
+    assert card_n == 1
+    assert foul_n == 1
+    assert cards.quality == "SMALL_SAMPLE"
+
+
+def _standings_payload(team1_points=70):
+    rows = []
+    points = [80, 75, 72, 70, 65, 60, 55, 50, 45, 40]
+    points[3] = team1_points
+    for rank, value in enumerate(points, start=1):
+        rows.append(
+            {
+                "rank": rank,
+                "points": value,
+                "team": {"id": 100 + rank},
+                "all": {"played": 25},
+            }
+        )
+    return {"response": [{"league": {"standings": [rows]}}]}
+
+
+def test_table_pressure_uses_distance_to_threshold_and_rejects_future_snapshot() -> None:
+    payload = _standings_payload(team1_points=70)
+    pressure = table_pressure(
+        payload,
+        team_id=104,
+        competition_name="Premier League",
+        available_at=NOW - timedelta(minutes=2),
+        decision_at=NOW,
+    )
+
+    assert pressure.version == TABLE_PRESSURE_VERSION
+    assert pressure.value == 1.0
+    assert pressure.components["continental"]["points_gap"] == 0
+
+    with pytest.raises(FeatureLeakageError):
+        table_pressure(
+            payload,
+            team_id=104,
+            competition_name="Premier League",
+            available_at=NOW + timedelta(seconds=1),
+            decision_at=NOW,
+        )
+
+
+def test_rivalry_registry_is_deterministic_and_unknown_is_not_false() -> None:
+    first = rivalry_indicator("Arsenal", "Tottenham")
+    second = rivalry_indicator("Tottenham", "Arsenal")
+    unknown = rivalry_indicator("Example FC", "Another FC")
+
+    assert first == second
+    assert first.value == 1
+    assert first.version == RIVALRY_REGISTRY_VERSION
+    assert unknown.value is None
+    assert unknown.quality == "UNKNOWN_COVERAGE"
+
+
+def test_match_importance_is_deterministic_and_versioned() -> None:
+    home = FeatureDatum(0.8, "test", NOW - timedelta(minutes=5), "P", "OBSERVED", {})
+    away = FeatureDatum(0.5, "test", NOW - timedelta(minutes=5), "P", "OBSERVED", {})
+    derby = FeatureDatum(1, "test", NOW - timedelta(minutes=5), "R", "OBSERVED", {})
+
+    a = match_importance(
+        home_pressure=home,
+        away_pressure=away,
+        derby=derby,
+        stage=0.75,
+        competition_name="Premier League",
+        decision_at=NOW,
+    )
+    b = match_importance(
+        home_pressure=home,
+        away_pressure=away,
+        derby=derby,
+        stage=0.75,
+        competition_name="Premier League",
+        decision_at=NOW,
+    )
+
+    assert a == b
+    assert a.version == MATCH_IMPORTANCE_VERSION
+    assert 0 <= float(a.value) <= 1
+
+
+class _DashboardRepo:
+    def list_bets(self, lab):
+        return ()
+
+    def api_usage_today(self):
+        return 12
+
+    def list_card_features(self):
+        return (
+            {
+                "fixture_id": "api-football:42",
+                "home_team": "Arsenal",
+                "away_team": "Tottenham",
+                "competition_name": "Premier League",
+                "kickoff_at": NOW + timedelta(hours=3),
+                "referee": "Ref A",
+                "referee_card_rate": 4.25,
+                "referee_sample_size": 8,
+                "referee_foul_rate": 22.5,
+                "referee_foul_sample_size": 8,
+                "derby_rivalry_indicator": 1,
+                "home_table_pressure": 0.8,
+                "away_table_pressure": 0.7,
+                "match_importance": 0.81,
+                "available_at": NOW,
+                "feature_version": "CARDLAB_FEATURES_V1",
+                "feature_payload": {
+                    "referee_card_rate": {
+                        "source": "quantlab_completed_fixture_statistics",
+                        "version": "CARD_COUNT_RULE_V1",
+                        "available_at": NOW.isoformat(),
+                    },
+                    "match_importance": {
+                        "source": "derived:cardlab_context",
+                        "version": "MATCH_IMPORTANCE_V1",
+                        "available_at": NOW.isoformat(),
+                    },
+                },
+            },
+        )
+
+
+def test_cardlab_dashboard_displays_feature_values_and_provenance() -> None:
+    html = QuantLabDashboardService(_DashboardRepo()).render_html("lab=card")
+
+    assert "CardLab v1 context snapshots" in html
+    assert "Ref A" in html
+    assert "4.25" in html
+    assert "n=8" in html
+    assert "MATCH_IMPORTANCE_V1" in html
+    assert "quantlab_completed_fixture_statistics" in html
+    assert "CARDLAB_FEATURES_V1" in html
