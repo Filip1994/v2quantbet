@@ -763,6 +763,54 @@ class PostgreSQLQuantLabRepository:
         )
         return tuple(ordered[:limit])
 
+    def recent_opponents_for_teams(
+        self,
+        team_ids: Iterable[int],
+        *,
+        before: datetime,
+        matches_per_team: int = 12,
+        limit: int = 6000,
+    ) -> tuple[int, ...]:
+        ids = tuple(sorted({int(team_id) for team_id in team_ids if int(team_id) > 0}))
+        if not ids:
+            return ()
+        if matches_per_team <= 0 or limit <= 0:
+            raise ValueError("matches_per_team and limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT f.fixture_id, latest.home_team_id, latest.away_team_id, "
+                "latest.kickoff_at "
+                "FROM quantlab_fixtures f "
+                "JOIN LATERAL ("
+                " SELECT home_team_id, away_team_id, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE latest.kickoff_at < %s "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND (latest.home_team_id = ANY(%s) OR latest.away_team_id = ANY(%s)) "
+                "ORDER BY latest.kickoff_at DESC, f.fixture_id LIMIT %s",
+                (before, list(ids), list(ids), limit),
+            )
+            rows = _row_dicts(cursor)
+
+        source_set = set(ids)
+        counts = {team_id: 0 for team_id in ids}
+        opponents: list[int] = []
+        seen_opponents: set[int] = set()
+        for row in rows:
+            home_id = int(row["home_team_id"])
+            away_id = int(row["away_team_id"])
+            for team_id, opponent_id in ((home_id, away_id), (away_id, home_id)):
+                if team_id not in source_set or counts[team_id] >= matches_per_team:
+                    continue
+                counts[team_id] += 1
+                if opponent_id <= 0 or opponent_id in source_set or opponent_id in seen_opponents:
+                    continue
+                seen_opponents.add(opponent_id)
+                opponents.append(opponent_id)
+        return tuple(opponents)
+
     def completed_for_team_statistics(
         self,
         team_ids: Iterable[int],
