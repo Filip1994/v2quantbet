@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 class RejectionReason:
     AFRICA = "EXCLUDED_AFRICAN_COMPETITION"
+    ASIA = "EXCLUDED_ASIAN_COMPETITION"
     YOUTH = "EXCLUDED_YOUTH_COMPETITION"
     ENGLISH_TIER = "EXCLUDED_ENGLISH_TIER_4_OR_LOWER"
     GERMAN_TIER = "EXCLUDED_GERMAN_TIER_4_OR_LOWER"
@@ -78,6 +79,24 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
         or _contains_phrase(name, ("africa", "caf"))
     ):
         return ScopeDecision(False, RejectionReason.AFRICA)
+
+    asian_markers = {
+        "afghanistan", "australia", "bahrain", "bangladesh", "bhutan", "brunei",
+        "cambodia", "china", "chinese taipei", "dpr korea", "guam", "hong kong",
+        "india", "indonesia", "iran", "iraq", "japan", "jordan", "korea republic",
+        "kuwait", "kyrgyzstan", "laos", "lebanon", "macao", "macau", "malaysia",
+        "maldives", "mongolia", "myanmar", "nepal", "north korea", "northern mariana islands",
+        "oman", "pakistan", "palestine", "philippines", "qatar", "saudi arabia",
+        "singapore", "south korea", "sri lanka", "syria", "tajikistan", "thailand",
+        "timor leste", "turkmenistan", "uae", "united arab emirates", "uzbekistan",
+        "vietnam", "yemen",
+    }
+    if (
+        country in asian_markers
+        or country == "asia"
+        or _contains_phrase(name, ("asia", "afc"))
+    ):
+        return ScopeDecision(False, RejectionReason.ASIA)
 
     youth_pattern = (
         r"\b(?:u|under)\s*\d{1,2}\b|\byouth\b|\bjuniors?\b|\bacademy\b|"
