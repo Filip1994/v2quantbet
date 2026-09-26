@@ -53,6 +53,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_market_observations",
             "quantlab_market_captures",
             "quantlab_goal_decisions",
+            "quantlab_goal_model_versions",
+            "quantlab_goal_feature_snapshots",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
             "quantlab_match_statistics_observations",
@@ -1166,6 +1168,746 @@ class PostgreSQLQuantLabRepository:
                     _json(item.raw_payload),
                 ),
             )
+
+    def goal_model_history(
+        self,
+        *,
+        before: datetime,
+        limit: int = 10_000,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return completed GoalLab history with optional timestamp-safe match statistics."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH fixture_rows AS ("
+                " SELECT DISTINCT ON (o.fixture_id) "
+                " o.fixture_id, o.league_id, o.season, o.home_team_id, o.away_team_id, "
+                " o.kickoff_at, o.captured_at, o.raw_payload "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.captured_at <= %s AND o.kickoff_at < %s "
+                " AND jsonb_typeof(o.raw_payload->'goals') = 'object' "
+                " AND (o.raw_payload->'goals'->>'home') ~ '^[0-9]+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH stats AS ("
+                " SELECT DISTINCT ON (fixture_id) * "
+                " FROM quantlab_match_statistics_observations "
+                " WHERE available_at <= %s "
+                " AND home_corner_kicks IS NOT NULL "
+                " AND away_corner_kicks IS NOT NULL "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT s.fixture_id, s.available_at, "
+                "COALESCE(q.latest_kickoff, p.latest_kickoff) AS kickoff_at, "
+                "COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) AS home_team_id, "
+                "COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) AS away_team_id, "
+                "COALESCE(q.competition_name, p.competition_name, 'UNKNOWN') AS competition_name, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM stats s "
+                "LEFT JOIN fixtures f ON f.fixture_id = s.fixture_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff, o.home_team_id, o.away_team_id, "
+                "        o.competition_name "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") q ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff, o.competition_name "
+                " FROM fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.observed_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") p ON TRUE "
+                "WHERE COALESCE(q.latest_kickoff, p.latest_kickoff) < %s "
+                "AND COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) IS NOT NULL "
+                "AND COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) IS NOT NULL "
+                "ORDER BY COALESCE(q.latest_kickoff, p.latest_kickoff) DESC, s.available_at DESC "
+                "LIMIT %s",
+                (before, before, limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def save_corner_model_version(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_model_versions ("
+                "model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, ridge_penalty, coefficients, "
+                "feature_means, feature_scales, training_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, "
+                "%s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    item.model_version,
+                    item.trained_at,
+                    item.training_cutoff,
+                    item.feature_version,
+                    item.training_sample_size,
+                    item.history_match_count,
+                    item.ridge_penalty,
+                    _json(item.coefficients),
+                    _json(item.feature_means),
+                    _json(item.feature_scales),
+                    _json(item.training_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_corner_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-corner-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "model_version": item.model_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, model_version, "
+                "expected_total_corners, home_history_size, away_history_size, feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.model_version,
+                    item.expected_total_corners,
+                    item.home_history_size,
+                    item.away_history_size,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
+
+    def save_standings_snapshot(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        available_at: datetime,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        snapshot_id = _identifier(
+            "quantlab-standings-v1:",
+            {
+                "league_id": league_id,
+                "season": season,
+                "available_at": available_at.isoformat(),
+                "raw_payload": raw_payload,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_standings_snapshots ("
+                "standings_snapshot_id, league_id, season, available_at, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                (snapshot_id, league_id, season, available_at, _json(raw_payload)),
+            )
+        return snapshot_id
+
+    def latest_standings_before(
+        self, league_id: int, season: int, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT available_at, raw_payload FROM quantlab_standings_snapshots "
+                "WHERE league_id = %s AND season = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, standings_snapshot_id DESC LIMIT 1",
+                (league_id, season, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+        return {"available_at": row[0], "raw_payload": payload}
+
+    def latest_context_before(
+        self, fixture_id: str, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT referee, kickoff_at, available_at, provider_status, raw_payload "
+                "FROM quantlab_fixture_context_observations "
+                "WHERE fixture_id = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, context_observation_id DESC LIMIT 1",
+                (fixture_id, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[4]) if isinstance(row[4], str) else row[4]
+        return {
+            "referee": row[0],
+            "kickoff_at": row[1],
+            "available_at": row[2],
+            "provider_status": row[3],
+            "raw_payload": payload,
+        }
+
+    def referee_history(
+        self, referee: str, *, decision_at: datetime, limit: int = 80
+    ) -> tuple[dict[str, Any], ...]:
+        if not referee.strip():
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH context AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, referee, kickoff_at, available_at "
+                " FROM quantlab_fixture_context_observations "
+                " WHERE lower(referee) = lower(%s) AND available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
+                "), stats AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
+                " home_fouls, away_fouls, home_yellow_cards, away_yellow_cards, "
+                " home_red_cards, away_red_cards, home_second_yellow_cards, away_second_yellow_cards "
+                " FROM quantlab_match_statistics_observations WHERE available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT context.referee, context.kickoff_at, "
+                "GREATEST(context.available_at, stats.available_at) AS available_at, "
+                "CASE WHEN stats.home_yellow_cards IS NULL OR stats.away_yellow_cards IS NULL "
+                " THEN NULL ELSE stats.home_yellow_cards + stats.away_yellow_cards END AS yellow_cards, "
+                "CASE WHEN stats.home_red_cards IS NULL OR stats.away_red_cards IS NULL "
+                " THEN NULL ELSE stats.home_red_cards + stats.away_red_cards END AS red_cards, "
+                "CASE WHEN stats.home_second_yellow_cards IS NULL OR stats.away_second_yellow_cards IS NULL "
+                " THEN NULL ELSE stats.home_second_yellow_cards + stats.away_second_yellow_cards END AS second_yellow_cards, "
+                "CASE WHEN stats.home_fouls IS NULL OR stats.away_fouls IS NULL "
+                " THEN NULL ELSE stats.home_fouls + stats.away_fouls END AS fouls "
+                "FROM context JOIN stats USING (fixture_id) "
+                "WHERE context.kickoff_at < %s "
+                "ORDER BY context.kickoff_at DESC LIMIT %s",
+                (referee, decision_at, decision_at, decision_at, limit),
+            )
+            return _row_dicts(cursor)
+
+    def save_card_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-card-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "feature_version": item.feature_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_card_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.available_at,
+                    item.referee,
+                    item.referee_card_rate,
+                    item.referee_sample_size,
+                    item.referee_foul_rate,
+                    item.referee_foul_sample_size,
+                    item.derby_rivalry_indicator,
+                    item.home_table_pressure,
+                    item.away_table_pressure,
+                    item.table_pressure,
+                    item.match_importance,
+                    item.feature_version,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
+
+    def latest_card_feature_snapshot(
+        self, fixture_id: str, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload FROM quantlab_card_feature_snapshots "
+                "WHERE fixture_id = %s AND decision_at <= %s AND available_at <= %s "
+                "ORDER BY decision_at DESC, feature_snapshot_id DESC LIMIT 1",
+                (fixture_id, decision_at, decision_at),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        payload = result.get("feature_payload")
+        if isinstance(payload, str):
+            result["feature_payload"] = json.loads(payload)
+        return result
+
+    def list_card_features(self, *, limit: int = 500) -> tuple[dict[str, Any], ...]:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.feature_snapshot_id, q.fixture_id, "
+                "q.decision_at, q.available_at, q.referee, q.referee_card_rate, "
+                "q.referee_sample_size, q.referee_foul_rate, q.referee_foul_sample_size, "
+                "q.derby_rivalry_indicator, q.home_table_pressure, q.away_table_pressure, "
+                "q.table_pressure, q.match_importance, q.feature_version, q.feature_payload, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country, "
+                "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
+                "FROM quantlab_card_feature_snapshots q "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
+                "ORDER BY q.fixture_id, q.decision_at DESC, q.feature_snapshot_id DESC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def api_usage_today(self) -> int:
+        today = datetime.now(UTC).date()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(request_count, 0) FROM provider_request_usage "
+                "WHERE request_day = %s AND category = 'quantlab_context'",
+                (today,),
+            )
+            row = cursor.fetchone()
+            return 0 if row is None else int(row[0])
+ "
+                " AND (o.raw_payload->'goals'->>'away') ~ '^[0-9]+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH stats AS ("
+                " SELECT DISTINCT ON (fixture_id) * "
+                " FROM quantlab_match_statistics_observations "
+                " WHERE available_at <= %s "
+                " AND home_corner_kicks IS NOT NULL "
+                " AND away_corner_kicks IS NOT NULL "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT s.fixture_id, s.available_at, "
+                "COALESCE(q.latest_kickoff, p.latest_kickoff) AS kickoff_at, "
+                "COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) AS home_team_id, "
+                "COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) AS away_team_id, "
+                "COALESCE(q.competition_name, p.competition_name, 'UNKNOWN') AS competition_name, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM stats s "
+                "LEFT JOIN fixtures f ON f.fixture_id = s.fixture_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff, o.home_team_id, o.away_team_id, "
+                "        o.competition_name "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") q ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.kickoff_at AS latest_kickoff, o.competition_name "
+                " FROM fixture_observations o "
+                " WHERE o.fixture_id = s.fixture_id "
+                " ORDER BY o.observed_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") p ON TRUE "
+                "WHERE COALESCE(q.latest_kickoff, p.latest_kickoff) < %s "
+                "AND COALESCE(q.home_team_id, f.provider_home_team_id::BIGINT) IS NOT NULL "
+                "AND COALESCE(q.away_team_id, f.provider_away_team_id::BIGINT) IS NOT NULL "
+                "ORDER BY COALESCE(q.latest_kickoff, p.latest_kickoff) DESC, s.available_at DESC "
+                "LIMIT %s",
+                (before, before, limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def save_corner_model_version(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_model_versions ("
+                "model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, ridge_penalty, coefficients, "
+                "feature_means, feature_scales, training_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, "
+                "%s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    item.model_version,
+                    item.trained_at,
+                    item.training_cutoff,
+                    item.feature_version,
+                    item.training_sample_size,
+                    item.history_match_count,
+                    item.ridge_penalty,
+                    _json(item.coefficients),
+                    _json(item.feature_means),
+                    _json(item.feature_scales),
+                    _json(item.training_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_corner_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-corner-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "model_version": item.model_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_corner_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, model_version, "
+                "expected_total_corners, home_history_size, away_history_size, feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.model_version,
+                    item.expected_total_corners,
+                    item.home_history_size,
+                    item.away_history_size,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
+
+    def save_standings_snapshot(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        available_at: datetime,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        snapshot_id = _identifier(
+            "quantlab-standings-v1:",
+            {
+                "league_id": league_id,
+                "season": season,
+                "available_at": available_at.isoformat(),
+                "raw_payload": raw_payload,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_standings_snapshots ("
+                "standings_snapshot_id, league_id, season, available_at, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                (snapshot_id, league_id, season, available_at, _json(raw_payload)),
+            )
+        return snapshot_id
+
+    def latest_standings_before(
+        self, league_id: int, season: int, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT available_at, raw_payload FROM quantlab_standings_snapshots "
+                "WHERE league_id = %s AND season = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, standings_snapshot_id DESC LIMIT 1",
+                (league_id, season, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+        return {"available_at": row[0], "raw_payload": payload}
+
+    def latest_context_before(
+        self, fixture_id: str, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT referee, kickoff_at, available_at, provider_status, raw_payload "
+                "FROM quantlab_fixture_context_observations "
+                "WHERE fixture_id = %s AND available_at <= %s "
+                "ORDER BY available_at DESC, context_observation_id DESC LIMIT 1",
+                (fixture_id, decision_at),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[4]) if isinstance(row[4], str) else row[4]
+        return {
+            "referee": row[0],
+            "kickoff_at": row[1],
+            "available_at": row[2],
+            "provider_status": row[3],
+            "raw_payload": payload,
+        }
+
+    def referee_history(
+        self, referee: str, *, decision_at: datetime, limit: int = 80
+    ) -> tuple[dict[str, Any], ...]:
+        if not referee.strip():
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH context AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, referee, kickoff_at, available_at "
+                " FROM quantlab_fixture_context_observations "
+                " WHERE lower(referee) = lower(%s) AND available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
+                "), stats AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
+                " home_fouls, away_fouls, home_yellow_cards, away_yellow_cards, "
+                " home_red_cards, away_red_cards, home_second_yellow_cards, away_second_yellow_cards "
+                " FROM quantlab_match_statistics_observations WHERE available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT context.referee, context.kickoff_at, "
+                "GREATEST(context.available_at, stats.available_at) AS available_at, "
+                "CASE WHEN stats.home_yellow_cards IS NULL OR stats.away_yellow_cards IS NULL "
+                " THEN NULL ELSE stats.home_yellow_cards + stats.away_yellow_cards END AS yellow_cards, "
+                "CASE WHEN stats.home_red_cards IS NULL OR stats.away_red_cards IS NULL "
+                " THEN NULL ELSE stats.home_red_cards + stats.away_red_cards END AS red_cards, "
+                "CASE WHEN stats.home_second_yellow_cards IS NULL OR stats.away_second_yellow_cards IS NULL "
+                " THEN NULL ELSE stats.home_second_yellow_cards + stats.away_second_yellow_cards END AS second_yellow_cards, "
+                "CASE WHEN stats.home_fouls IS NULL OR stats.away_fouls IS NULL "
+                " THEN NULL ELSE stats.home_fouls + stats.away_fouls END AS fouls "
+                "FROM context JOIN stats USING (fixture_id) "
+                "WHERE context.kickoff_at < %s "
+                "ORDER BY context.kickoff_at DESC LIMIT %s",
+                (referee, decision_at, decision_at, decision_at, limit),
+            )
+            return _row_dicts(cursor)
+
+    def save_card_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-card-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "feature_version": item.feature_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_card_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.available_at,
+                    item.referee,
+                    item.referee_card_rate,
+                    item.referee_sample_size,
+                    item.referee_foul_rate,
+                    item.referee_foul_sample_size,
+                    item.derby_rivalry_indicator,
+                    item.home_table_pressure,
+                    item.away_table_pressure,
+                    item.table_pressure,
+                    item.match_importance,
+                    item.feature_version,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
+
+    def latest_card_feature_snapshot(
+        self, fixture_id: str, *, decision_at: datetime
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT feature_snapshot_id, fixture_id, decision_at, available_at, referee, "
+                "referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "referee_foul_sample_size, derby_rivalry_indicator, home_table_pressure, "
+                "away_table_pressure, table_pressure, match_importance, feature_version, "
+                "feature_payload FROM quantlab_card_feature_snapshots "
+                "WHERE fixture_id = %s AND decision_at <= %s AND available_at <= %s "
+                "ORDER BY decision_at DESC, feature_snapshot_id DESC LIMIT 1",
+                (fixture_id, decision_at, decision_at),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        payload = result.get("feature_payload")
+        if isinstance(payload, str):
+            result["feature_payload"] = json.loads(payload)
+        return result
+
+    def list_card_features(self, *, limit: int = 500) -> tuple[dict[str, Any], ...]:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.feature_snapshot_id, q.fixture_id, "
+                "q.decision_at, q.available_at, q.referee, q.referee_card_rate, "
+                "q.referee_sample_size, q.referee_foul_rate, q.referee_foul_sample_size, "
+                "q.derby_rivalry_indicator, q.home_table_pressure, q.away_table_pressure, "
+                "q.table_pressure, q.match_importance, q.feature_version, q.feature_payload, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country, "
+                "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
+                "FROM quantlab_card_feature_snapshots q "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM fixture_observations o WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
+                "ORDER BY q.fixture_id, q.decision_at DESC, q.feature_snapshot_id DESC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def api_usage_today(self) -> int:
+        today = datetime.now(UTC).date()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(request_count, 0) FROM provider_request_usage "
+                "WHERE request_day = %s AND category = 'quantlab_context'",
+                (today,),
+            )
+            row = cursor.fetchone()
+            return 0 if row is None else int(row[0])
+ "
+                " ORDER BY o.fixture_id, o.captured_at DESC, o.fixture_observation_id DESC"
+                "), stats AS ("
+                " SELECT DISTINCT ON (s.fixture_id) s.* "
+                " FROM quantlab_match_statistics_observations s "
+                " WHERE s.available_at <= %s "
+                " ORDER BY s.fixture_id, s.available_at DESC, s.statistics_observation_id DESC"
+                ") "
+                "SELECT f.fixture_id, f.league_id, f.season, f.home_team_id, f.away_team_id, "
+                "f.kickoff_at, f.captured_at AS fixture_available_at, "
+                "(f.raw_payload->'goals'->>'home')::INTEGER AS home_goals, "
+                "(f.raw_payload->'goals'->>'away')::INTEGER AS away_goals, "
+                "s.available_at AS statistics_available_at, "
+                "s.home_fouls, s.away_fouls, "
+                "s.home_yellow_cards, s.away_yellow_cards, "
+                "s.home_red_cards, s.away_red_cards, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_shots_off_goal, s.away_shots_off_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_shots_outsidebox, s.away_shots_outsidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_goalkeeper_saves, s.away_goalkeeper_saves, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM fixture_rows f LEFT JOIN stats s USING (fixture_id) "
+                "WHERE f.league_id IS NOT NULL AND f.home_team_id IS NOT NULL "
+                "AND f.away_team_id IS NOT NULL "
+                "ORDER BY f.kickoff_at DESC, f.fixture_id DESC LIMIT %s",
+                (before, before, before, limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def save_goal_model_version(self, item: Any) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_model_versions ("
+                "model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, team_count, league_count, "
+                "ridge_team, ridge_feature, rho, intercept, home_advantage, parameters, "
+                "feature_means, feature_scales, training_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb) ON CONFLICT DO NOTHING",
+                (
+                    item.model_version,
+                    item.trained_at,
+                    item.training_cutoff,
+                    item.feature_version,
+                    item.training_sample_size,
+                    item.history_match_count,
+                    item.team_count,
+                    item.league_count,
+                    item.ridge_team,
+                    item.ridge_feature,
+                    item.rho,
+                    item.intercept,
+                    item.home_advantage,
+                    _json(item.parameters),
+                    _json(item.feature_means),
+                    _json(item.feature_scales),
+                    _json(item.training_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def save_goal_feature_snapshot(self, item: Any) -> str:
+        snapshot_id = _identifier(
+            "quantlab-goal-features-v1:",
+            {
+                "fixture_id": item.fixture_id,
+                "decision_at": item.decision_at.isoformat(),
+                "model_version": item.model_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_feature_snapshots ("
+                "feature_snapshot_id, fixture_id, decision_at, model_version, "
+                "expected_home_goals, expected_away_goals, home_history_size, "
+                "away_history_size, feature_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    snapshot_id,
+                    item.fixture_id,
+                    item.decision_at,
+                    item.model_version,
+                    item.expected_home_goals,
+                    item.expected_away_goals,
+                    item.home_history_size,
+                    item.away_history_size,
+                    _json(item.feature_payload),
+                ),
+            )
+        return snapshot_id
 
     def corner_model_history(
         self,
