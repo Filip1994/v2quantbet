@@ -111,6 +111,11 @@ _SEASON_METRICS = (
 
 @dataclass(frozen=True, slots=True)
 class TeamMatchSample:
+    fixture_id: str
+    fixture_observation_id: str | None
+    statistics_observation_id: str | None
+    fixture_available_at: datetime | None
+    statistics_available_at: datetime | None
     kickoff_at: datetime
     venue: str
     opponent_id: int
@@ -395,12 +400,49 @@ def _team_samples(row: dict[str, Any]) -> tuple[TeamMatchSample, TeamMatchSample
         yellow_cards=_number(row.get("away_yellow_cards")),
         red_cards=_number(row.get("away_red_cards")),
     )
+    fixture_id = str(row.get("fixture_id") or "")
+    fixture_observation_id = (
+        None
+        if row.get("fixture_observation_id") is None
+        else str(row["fixture_observation_id"])
+    )
+    statistics_observation_id = (
+        None
+        if row.get("statistics_observation_id") is None
+        else str(row["statistics_observation_id"])
+    )
+    fixture_available_at = row.get("fixture_available_at")
+    statistics_available_at = row.get("statistics_available_at")
     return (
         TeamMatchSample(
-            kickoff.astimezone(UTC), "HOME", away_id, season, league_id, home_values
+            fixture_id,
+            fixture_observation_id,
+            statistics_observation_id,
+            fixture_available_at if isinstance(fixture_available_at, datetime) else None,
+            statistics_available_at
+            if isinstance(statistics_available_at, datetime)
+            else None,
+            kickoff.astimezone(UTC),
+            "HOME",
+            away_id,
+            season,
+            league_id,
+            home_values,
         ),
         TeamMatchSample(
-            kickoff.astimezone(UTC), "AWAY", home_id, season, league_id, away_values
+            fixture_id,
+            fixture_observation_id,
+            statistics_observation_id,
+            fixture_available_at if isinstance(fixture_available_at, datetime) else None,
+            statistics_available_at
+            if isinstance(statistics_available_at, datetime)
+            else None,
+            kickoff.astimezone(UTC),
+            "AWAY",
+            home_id,
+            season,
+            league_id,
+            away_values,
         ),
     )
 
