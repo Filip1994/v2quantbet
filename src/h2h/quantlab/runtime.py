@@ -60,6 +60,8 @@ class QuantLabRuntime:
         settings: QuantLabRuntimeSettings | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         goal_engine: Any | None = None,
+        corner_engine: Any | None = None,
+        card_engine: Any | None = None,
     ) -> None:
         self._repository = repository
         self._provider = provider
@@ -67,6 +69,8 @@ class QuantLabRuntime:
         self._clock = clock
         self._collector = QuantLabMarketCollector(repository, provider)
         self._goal_engine = goal_engine
+        self._corner_engine = corner_engine
+        self._card_engine = card_engine
 
     @staticmethod
     def _scope_kwargs(fixture: dict[str, Any]) -> dict[str, object]:
@@ -290,6 +294,31 @@ class QuantLabRuntime:
             picks += int(outcome.picks_inserted)
         return decisions, picks
 
+    def _evaluate_count_picks(self, now: datetime) -> tuple[int, int, int, int]:
+        if self._corner_engine is None and self._card_engine is None:
+            return 0, 0, 0, 0
+        fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=self._settings.fixture_limit,
+        )
+        corner_decisions = 0
+        corner_picks = 0
+        card_decisions = 0
+        card_picks = 0
+        for fixture in fixtures:
+            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            if self._corner_engine is not None:
+                outcome = self._corner_engine.run_fixture(fixture, decision_at=now)
+                corner_decisions += int(outcome.decisions_inserted)
+                corner_picks += int(outcome.picks_inserted)
+            if self._card_engine is not None:
+                outcome = self._card_engine.run_fixture(fixture, decision_at=now)
+                card_decisions += int(outcome.decisions_inserted)
+                card_picks += int(outcome.picks_inserted)
+        return corner_decisions, corner_picks, card_decisions, card_picks
+
     def run_once(self) -> dict[str, int]:
         now = self._clock().astimezone(UTC)
         result = {
@@ -299,6 +328,10 @@ class QuantLabRuntime:
             "card_snapshots": 0,
             "goal_decisions": 0,
             "goal_picks": 0,
+            "corner_decisions": 0,
+            "corner_picks": 0,
+            "card_decisions": 0,
+            "card_picks": 0,
         }
         try:
             result["fixtures_discovered"] = self._discover_fixtures(now)
@@ -321,14 +354,33 @@ class QuantLabRuntime:
         except Exception:
             LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
 
+        try:
+            (
+                corner_decisions,
+                corner_picks,
+                card_decisions,
+                card_picks,
+            ) = self._evaluate_count_picks(now)
+            result["corner_decisions"] = corner_decisions
+            result["corner_picks"] = corner_picks
+            result["card_decisions"] = card_decisions
+            result["card_picks"] = card_picks
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab/CardLab shadow evaluation failed")
+
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
-            "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d",
+            "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
+            "corner_decisions=%d corner_picks=%d card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
             result["market_fixtures"],
             result["card_snapshots"],
             result["goal_decisions"],
             result["goal_picks"],
+            result["corner_decisions"],
+            result["corner_picks"],
+            result["card_decisions"],
+            result["card_picks"],
         )
         return result
