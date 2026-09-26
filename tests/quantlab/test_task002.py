@@ -5,6 +5,7 @@ import pytest
 
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
+from h2h.quantlab.entrypoint import _log_latest_goal_picks
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 from h2h.quantlab.runtime import QuantLabRuntime
 
@@ -211,3 +212,18 @@ def test_runtime_evaluates_goal_shadow_picks_after_api_budget_stops_collection()
     assert result["goal_decisions"] == 1
     assert result["goal_picks"] == 1
     assert goal_engine.calls == [("api-football:9001", NOW)]
+
+
+def test_goal_pick_operational_snapshot_is_bounded_and_read_only():
+    class SnapshotRepo:
+        def __init__(self):
+            self.calls = []
+
+        def list_bets(self, lab, *, limit):
+            self.calls.append((lab, limit))
+            return ()
+
+    repo = SnapshotRepo()
+    _log_latest_goal_picks(repo, limit=7)
+
+    assert repo.calls == [("GOAL", 7)]
