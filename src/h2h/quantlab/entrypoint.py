@@ -202,12 +202,26 @@ def main() -> None:
                 row.get("expected_value"),
             )
 
+    model_ready_audit_emitted = False
     try:
         server.start()
         while not stop.is_set():
             try:
                 runtime.run_once()
-                log_cornerlab_v2_training_readiness(repository, LOGGER)
+                readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
+                if (
+                    bool(readiness["model_fit_eligible"])
+                    and not model_ready_audit_emitted
+                ):
+                    try:
+                        log_cornerlab_v2_audit(repository, LOGGER)
+                        log_cornerlab_v2_readiness(repository, LOGGER)
+                    except Exception:
+                        LOGGER.exception(
+                            "QuantLab CornerLab V2 model-ready transition audit failed"
+                        )
+                    else:
+                        model_ready_audit_emitted = True
             except Exception as exc:
                 error_text = str(exc)
                 LOGGER.exception(
