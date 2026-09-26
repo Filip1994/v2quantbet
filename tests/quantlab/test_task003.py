@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-
+from types import SimpleNamespace
 
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
@@ -17,6 +17,8 @@ def fixture() -> dict[str, object]:
         "country": "England",
         "competition_name": "Premier League",
         "competition_type": "League",
+        "home_team_id": 1,
+        "away_team_id": 2,
         "home_team": "Arsenal",
         "away_team": "Chelsea",
         "kickoff_at": NOW + timedelta(hours=3),
@@ -88,7 +90,40 @@ class Repo:
         return True
 
 
-def test_corner_engine_uses_cross_book_reference_and_creates_one_directional_pick():
+class _CornerEstimate:
+    expected_total_corners = 11.7
+    model = SimpleNamespace(
+        model_version="CORNER_PRESSURE_POISSON_V1:" + "a" * 64,
+        feature_version="CORNER_PRESSURE_FEATURES_V1",
+        training_sample_size=250,
+        history_match_count=400,
+    )
+    snapshot = SimpleNamespace(home_history_size=12, away_history_size=10)
+
+    def probability(self, selection, line):
+        assert line == 10.5
+        return 0.62 if selection == "OVER" else 0.38
+
+
+class _CornerModel:
+    def estimate(self, fixture, *, decision_at):
+        assert fixture["home_team_id"] == 1
+        assert fixture["away_team_id"] == 2
+        assert decision_at == NOW
+        return SimpleNamespace(
+            estimate=_CornerEstimate(),
+            reason="MODEL_READY",
+            details={"training_sample_size": 250},
+        )
+
+
+def _corner_engine(repo):
+    engine = CornerLabShadowPickEngine(repo)
+    engine._model = _CornerModel()
+    return engine
+
+
+def test_corner_engine_uses_structural_model_and_needs_only_one_bookmaker():
     repo = Repo(
         pairs=(
             market_pair(
@@ -100,32 +135,26 @@ def test_corner_engine_uses_cross_book_reference_and_creates_one_directional_pic
                 over=2.20,
                 under=1.65,
             ),
-            market_pair(
-                11,
-                "1xBet",
-                bet_id=100,
-                bet_name="Total Corners",
-                line=10.5,
-                over=1.80,
-                under=2.00,
-            ),
         )
     )
 
-    result = CornerLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+    result = _corner_engine(repo).run_fixture(fixture(), decision_at=NOW)
 
-    assert result.decisions_inserted == 4
+    assert result.decisions_inserted == 2
     assert result.picks_inserted == 1
     pick = next(item for item in repo.decisions if item.decision == "PICK")
     assert pick.lab == "CORNER"
     assert pick.market_key == "TOTAL_CORNERS"
     assert pick.selection == "OVER"
     assert pick.bookmaker_id == 8
-    assert pick.reference_bookmaker_id == 11
+    assert pick.reference_bookmaker_id is None
+    assert pick.model_name == "Corner pressure Poisson GLM"
+    assert pick.model_probability == 0.62
+    assert pick.details["expected_total_corners"] == 11.7
+    assert pick.details["cross_book_reference_used"] is False
     assert pick.edge > 0.03
     assert pick.expected_value > 0.03
     assert len(repo.shadows) == 1
-
 
 def test_corner_engine_requires_supported_two_sided_total_market():
     repo = Repo(
@@ -142,7 +171,7 @@ def test_corner_engine_requires_supported_two_sided_total_market():
         )
     )
 
-    result = CornerLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+    result = _corner_engine(repo).run_fixture(fixture(), decision_at=NOW)
 
     assert result.decisions_inserted == 1
     assert result.picks_inserted == 0
