@@ -139,4 +139,5 @@ def test_persistent_training_budget_reserves_live_capacity(isolated_database) ->
         "model_training": 1,
         "opportunity_odds": 1,
         "results_monitoring": 0,
+        "quantlab_context": 0,
     }
