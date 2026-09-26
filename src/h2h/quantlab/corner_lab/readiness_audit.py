@@ -279,6 +279,7 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
         raw_market_pairs,
         now=now,
     )
+    historical_team_sizes = [len(items) for items in histories.values()]
 
     return {
         "as_of": now,
@@ -290,6 +291,11 @@ def collect_cornerlab_v2_readiness(repository: Any) -> dict[str, Any]:
             "training_shortfall": max(0, MIN_TRAINING_EXAMPLES - len(y)),
             "model_fit_eligible": len(y) >= MIN_TRAINING_EXAMPLES,
             "history_limit": HISTORY_LIMIT,
+            "historical_team_count": len(historical_team_sizes),
+            "historical_teams_ge_minimum": sum(
+                size >= MIN_TEAM_HISTORY for size in historical_team_sizes
+            ),
+            "historical_team_history_size": _distribution(historical_team_sizes),
             "latest_insufficient_model_pass": latest_pass,
         },
         "upcoming_team_history": {
