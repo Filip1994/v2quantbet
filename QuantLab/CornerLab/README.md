@@ -110,6 +110,25 @@ does not contain both fixture teams is stored as an append-only
 `UNAVAILABLE` statistics-capture watermark so the same unsupported fixture is not
 re-requested every cycle.
 
+### Market-driven history bootstrap
+
+The live V2 audit on 2026-09-26 showed that broad latest-match backfill had accumulated
+corner totals but still produced zero training examples because upcoming teams lacked
+repeated pre-match history. CornerLab therefore bootstraps history around teams that
+actually have upcoming CORNER markets:
+
+1. fetch recent completed fixtures for a bounded set of upcoming market teams;
+2. persist those fixture observations behind a per-team discovery watermark;
+3. identify the opponents from those historical matches;
+4. fetch a bounded one-hop recent history for those opponents;
+5. acquire historical `/fixtures/statistics` for the resulting local match graph;
+6. retain the existing per-fixture `AVAILABLE` / `UNAVAILABLE` watermarks.
+
+The one-hop expansion is required by the training rule: a historical target row is eligible
+only when both teams in that historical match already have at least three earlier
+statistical matches. This acquisition change does not alter model coefficients, betting
+thresholds, market semantics or production state.
+
 ## Supported betting market
 
 V2 currently supports only conservative full-match total-corner markets:
