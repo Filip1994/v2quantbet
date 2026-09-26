@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from h2h.api.quantlab_dashboard import QuantLabDashboardService
+from h2h.quantlab.dashboard import QuantLabDashboardService
 
 
 NOW = datetime(2026, 9, 26, 12, tzinfo=UTC)
