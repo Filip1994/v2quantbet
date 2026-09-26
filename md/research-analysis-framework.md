@@ -312,3 +312,41 @@ The Research dataset exists to answer:
 > Which final-gate candidates are actually worth allocating real-money exposure to?
 
 Until the data can answer that with reasonable stability, Production policy should remain conservative and Research should remain broad enough to observe the opportunities that Production does not take.
+
+
+## Research Analytics V1 implementation
+
+Contract: `RESEARCH_ANALYTICS_V1`.
+
+The analytics layer is read-only and continuously recomputes from the full canonical
+Research history. Pending candidates remain in Research capture but do not contribute to
+settled performance metrics until a settlement is available.
+
+V1 surfaces:
+
+- `/research/analytics` — human-readable cohort dashboard;
+- `/research/analytics.json` — machine-readable snapshot for later filter research;
+- lifetime, trailing 30-day, trailing 7-day, and ISO-week stability slices;
+- market × selection, model-probability, market-fair-probability, EV, odds, route,
+  bookmaker, league, and freshness cohorts;
+- a full Production-filter evidence cube across market, selection, model probability,
+  market fair probability, EV, and odds;
+- a dedicated low-scoring extreme-value diagnostic for OU 2.5 UNDER / BTTS NO versus
+  the remaining Research universe;
+- observed win rate, mean model probability, calibration gap, 95% Wilson interval,
+  flat-stake P/L and ROI, average entry odds, average edge/EV, CLV coverage,
+  average/median CLV, and positive-CLV rate.
+
+Market-fair-probability buckets are versioned with V1 as:
+`<25%`, `25–35%`, `35–40%`, `40–45%`, `45–50%`, `50–55%`,
+`55–60%`, `60–65%`, `65–75%`, and `75%+`.
+
+Evidence bands are descriptive only and have no Production authority:
+
+- fewer than 20 graded rows: `SIGNAL_ONLY`;
+- 20–49: `MONITOR`;
+- 50–99: `PROVISIONAL_EVIDENCE`;
+- 100+: `STABILITY_REVIEW`.
+
+No V1 analytics result can register, skip, block, promote, or otherwise mutate a
+Production pick.
