@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
+from datetime import UTC, datetime
 from math import exp, lgamma, log, sqrt
 from statistics import fmean, variance
 from typing import Any
@@ -271,7 +272,7 @@ def run_cornerlab_historical_holdout(
 
 def collect_cornerlab_historical_holdout(repository: Any) -> dict[str, Any]:
     rows = repository.corner_model_history(
-        before=__import__("datetime").datetime.now(__import__("datetime").UTC),
+        before=datetime.now(UTC),
         limit=HISTORY_LIMIT,
     )
     return run_cornerlab_historical_holdout(rows)
