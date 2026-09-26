@@ -413,8 +413,9 @@ class GoalLabShadowPickEngine:
                     },
                 },
             )
-            decisions_inserted += int(bool(self._repository.save_goal_decision(decision)))
-            if decision_value == "PICK":
+            decision_inserted = bool(self._repository.save_goal_decision(decision))
+            decisions_inserted += int(decision_inserted)
+            if decision_value == "PICK" and decision_inserted:
                 picks_inserted += int(
                     bool(
                         self._repository.save_goal_shadow_bet(
