@@ -978,4 +978,4 @@ def test_quantlab_discovery_drops_womens_fixtures_before_persistence() -> None:
 
     rows = parse_fixture_discovery_response(payload, captured_at=NOW)
 
-    assert [row.fixture.provider_fixture_id for row in rows] == [1001]
+    assert [row.fixture.provider_fixture_id for row in rows] == ["1001"]
