@@ -32,6 +32,10 @@ class QuantLabRuntimeSettings:
     standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
     history_backfill_per_cycle: int = 25
+    goal_team_history_last: int = 15
+    goal_team_history_teams_per_cycle: int = 120
+    goal_team_statistics_per_cycle: int = 360
+    goal_team_history_refresh_seconds: int = 21600
     corner_team_history_last: int = 12
     corner_team_history_teams_per_cycle: int = 120
     corner_team_statistics_per_cycle: int = 360
@@ -47,6 +51,10 @@ class QuantLabRuntimeSettings:
             ("context_refresh_seconds", self.context_refresh_seconds),
             ("standings_refresh_seconds", self.standings_refresh_seconds),
             ("feature_refresh_seconds", self.feature_refresh_seconds),
+            ("goal_team_history_last", self.goal_team_history_last),
+            ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
+            ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
+            ("goal_team_history_refresh_seconds", self.goal_team_history_refresh_seconds),
             ("corner_team_history_last", self.corner_team_history_last),
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
             ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
@@ -383,6 +391,131 @@ class QuantLabRuntime:
                 )
         return completed
 
+    def _goal_target_team_ids(self, now: datetime) -> tuple[int, ...]:
+        teams: list[int] = []
+        seen: set[int] = set()
+        fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=self._settings.fixture_limit,
+        )
+        for fixture in fixtures:
+            fixture_id = str(fixture["fixture_id"])
+            if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            if "GOAL" not in self._repository.market_labs_for_fixture(fixture_id):
+                continue
+            for key in ("home_team_id", "away_team_id"):
+                team_id = int(fixture[key])
+                if team_id <= 0 or team_id in seen:
+                    continue
+                seen.add(team_id)
+                teams.append(team_id)
+        return tuple(teams)
+
+    def _bootstrap_goal_team_history(self, now: datetime) -> tuple[int, int]:
+        root_team_ids = self._goal_target_team_ids(now)
+        if not root_team_ids:
+            return 0, 0
+
+        discovery_limit = self._settings.goal_team_history_teams_per_cycle
+        queue: deque[tuple[int, int]] = deque((team_id, 0) for team_id in root_team_ids)
+        queued = set(root_team_ids)
+        processed: set[int] = set()
+        expanded_team_ids: list[int] = []
+        discoveries = 0
+
+        while queue:
+            team_id, depth = queue.popleft()
+            if team_id in processed:
+                continue
+            processed.add(team_id)
+            expanded_team_ids.append(team_id)
+
+            if (
+                discoveries < discovery_limit
+                and self._repository.team_history_due(
+                    team_id,
+                    now=now,
+                    refresh_seconds=self._settings.goal_team_history_refresh_seconds,
+                )
+            ):
+                payload = self._provider.fetch_team_recent_fixtures(
+                    team_id,
+                    last=self._settings.goal_team_history_last,
+                )
+                observations = parse_fixture_discovery_response(payload, captured_at=now)
+                self._repository.save_fixture_observations(observations)
+                self._repository.save_team_history_capture(
+                    team_id=team_id,
+                    captured_at=now,
+                    requested_last=self._settings.goal_team_history_last,
+                    response_fixture_count=len(observations),
+                    raw_payload=dict(payload),
+                )
+                discoveries += 1
+
+            # One-hop opponents provide connected rolling histories without recursive
+            # expansion across the global GoalLab universe.
+            if depth >= 1:
+                continue
+            opponents = self._repository.recent_team_opponent_ids(
+                team_id,
+                before=now,
+                limit=self._settings.goal_team_history_last,
+            )
+            for opponent_id in reversed(opponents):
+                if opponent_id <= 0 or opponent_id in queued or opponent_id in processed:
+                    continue
+                queued.add(opponent_id)
+                queue.appendleft((opponent_id, depth + 1))
+
+        stats_target = self._settings.goal_team_statistics_per_cycle
+        candidates = self._repository.completed_for_team_statistics(
+            expanded_team_ids,
+            before=now,
+            limit=max(6000, stats_target * 50),
+        )
+        by_team: dict[int, list[dict[str, Any]]] = {
+            team_id: [] for team_id in expanded_team_ids
+        }
+        target_set = set(expanded_team_ids)
+        for fixture in candidates:
+            home_id = int(fixture["home_team_id"])
+            away_id = int(fixture["away_team_id"])
+            if home_id in target_set:
+                by_team[home_id].append(fixture)
+            if away_id in target_set and away_id != home_id:
+                by_team[away_id].append(fixture)
+
+        stats_backfilled = 0
+        attempted_fixtures: set[str] = set()
+        for team_id in expanded_team_ids:
+            for fixture in by_team[team_id]:
+                if stats_backfilled >= stats_target:
+                    return discoveries, stats_backfilled
+                fixture_id = str(fixture["fixture_id"])
+                if fixture_id in attempted_fixtures:
+                    continue
+                attempted_fixtures.add(fixture_id)
+                if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                    continue
+                try:
+                    if self._capture_historical_statistics(fixture, now):
+                        stats_backfilled += 1
+                except ApiBudgetExceededError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning(
+                        "QuantLab targeted GoalLab statistics failed fixture=%s "
+                        "team_id=%s error_class=%s error=%s",
+                        fixture_id,
+                        team_id,
+                        type(exc).__name__,
+                        str(exc),
+                    )
+        return discoveries, stats_backfilled
+
     def _corner_target_team_ids(self, now: datetime) -> tuple[int, ...]:
         teams: list[int] = []
         seen: set[int] = set()
@@ -664,6 +797,8 @@ class QuantLabRuntime:
         result = {
             "fixtures_discovered": 0,
             "history_backfilled": 0,
+            "goal_team_history_discovered": 0,
+            "goal_team_statistics_backfilled": 0,
             "corner_team_history_discovered": 0,
             "corner_team_statistics_backfilled": 0,
             "market_fixtures": 0,
@@ -681,6 +816,9 @@ class QuantLabRuntime:
             market_fixtures, card_snapshots = self._collect_upcoming(now)
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
+            goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
+            result["goal_team_history_discovered"] = goal_discoveries
+            result["goal_team_statistics_backfilled"] = goal_stats
             team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
             result["corner_team_history_discovered"] = team_discoveries
             result["corner_team_statistics_backfilled"] = team_stats
@@ -719,11 +857,14 @@ class QuantLabRuntime:
 
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
+            "goal_team_history_discovered=%d goal_team_statistics_backfilled=%d "
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "corner_decisions=%d corner_picks=%d card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
+            result["goal_team_history_discovered"],
+            result["goal_team_statistics_backfilled"],
             result["corner_team_history_discovered"],
             result["corner_team_statistics_backfilled"],
             result["market_fixtures"],
