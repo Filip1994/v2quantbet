@@ -12,6 +12,7 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.coverage import parse_fixture_statistics_coverage
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
 from h2h.quantlab.market_collector import QuantLabMarketCollector
 from h2h.quantlab.scope import card_corner_scope, goal_scope
@@ -35,6 +36,7 @@ class QuantLabRuntimeSettings:
     corner_team_history_teams_per_cycle: int = 120
     corner_team_statistics_per_cycle: int = 360
     corner_team_history_refresh_seconds: int = 21600
+    league_coverage_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -49,6 +51,7 @@ class QuantLabRuntimeSettings:
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
             ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
             ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
+            ("league_coverage_refresh_seconds", self.league_coverage_refresh_seconds),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
@@ -170,6 +173,55 @@ class QuantLabRuntime:
             day += timedelta(days=1)
         return discovered
 
+    def _fixture_statistics_coverage(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        league_raw = fixture.get("league_id")
+        season_raw = fixture.get("season")
+        if league_raw is None or season_raw is None:
+            return None
+        try:
+            league_id = int(league_raw)
+            season = int(season_raw)
+        except (TypeError, ValueError):
+            return None
+        if league_id <= 0 or season <= 0:
+            return None
+
+        cached = self._repository.latest_league_statistics_coverage(
+            league_id,
+            season,
+            now=now,
+            refresh_seconds=self._settings.league_coverage_refresh_seconds,
+        )
+        if cached is not None:
+            return cached
+
+        payload = self._provider.fetch_league_coverage(league_id, season)
+        statistics_fixtures = parse_fixture_statistics_coverage(
+            payload,
+            league_id=league_id,
+            season=season,
+        )
+        response = payload.get("response") if isinstance(payload, dict) else None
+        response_item_count = len(response) if isinstance(response, list) else 0
+        self._repository.save_league_statistics_coverage(
+            league_id=league_id,
+            season=season,
+            captured_at=now,
+            statistics_fixtures=statistics_fixtures,
+            response_item_count=response_item_count,
+            raw_payload=dict(payload),
+        )
+        return {
+            "captured_at": now,
+            "statistics_fixtures": statistics_fixtures,
+            "response_item_count": response_item_count,
+            "raw_payload": dict(payload),
+        }
+
     def _capture_historical_statistics(
         self,
         fixture: dict[str, Any],
@@ -185,6 +237,32 @@ class QuantLabRuntime:
             raise ValueError("fixture/provider team IDs must be positive")
         if home_team_id == away_team_id:
             raise ValueError("home and away team IDs must differ")
+
+        coverage = self._fixture_statistics_coverage(fixture, now)
+        if coverage is not None and coverage.get("statistics_fixtures") is False:
+            raw_coverage = coverage.get("raw_payload")
+            self._repository.save_statistics_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                captured_at=now,
+                status="UNAVAILABLE",
+                response_team_count=0,
+                reason="league-season-statistics-fixtures-false",
+                raw_payload=(
+                    dict(raw_coverage)
+                    if isinstance(raw_coverage, dict)
+                    else {"coverage": raw_coverage}
+                ),
+            )
+            LOGGER.debug(
+                "QuantLab statistics coverage skip fixture=%s provider_fixture_id=%s "
+                "league_id=%s season=%s",
+                fixture_id,
+                provider_fixture_id,
+                fixture.get("league_id"),
+                fixture.get("season"),
+            )
+            return False
 
         payload = self._provider.fetch_statistics(provider_fixture_id)
         response = payload.get("response") if isinstance(payload, dict) else None
@@ -288,8 +366,8 @@ class QuantLabRuntime:
                             str(exc),
                         )
 
-                self._capture_historical_statistics(fixture, now)
-                completed += 1
+                if self._capture_historical_statistics(fixture, now):
+                    completed += 1
             except ApiBudgetExceededError:
                 raise
             except Exception as exc:
