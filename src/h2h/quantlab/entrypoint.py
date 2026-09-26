@@ -181,8 +181,12 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
-            except Exception:
-                LOGGER.exception("QuantLab cycle failed")
+            except Exception as exc:
+                LOGGER.exception(
+                    "QuantLab cycle failed error_class=%s error=%s",
+                    type(exc).__name__,
+                    str(exc),
+                )
             stop.wait(cycle_seconds)
     finally:
         server.close()
