@@ -366,7 +366,9 @@ class QuantLabRuntime:
                             str(exc),
                         )
 
-                if self._capture_historical_statistics(fixture, now):
+                already_captured = self._repository.statistics_capture_exists(fixture_id)
+                attempted = self._capture_historical_statistics(fixture, now)
+                if attempted or already_captured:
                     completed += 1
             except ApiBudgetExceededError:
                 raise
