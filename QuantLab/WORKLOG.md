@@ -424,3 +424,27 @@ dashboard rendering failure.
 
 **NONE.** Changes remain inside QuantLab runtime, QuantLab migrations, QuantLab tests and
 QuantLab documentation. Production models, picks, bankroll and discovery are unchanged.
+
+
+## 2026-09-26 — Top-10 league substitution: MLS for Scotland
+
+**Owner:** QuantLab core
+
+Per review, CARDCORNER_TOP10_LEAGUES_V2 keeps ten competitions but replaces Scottish
+Premiership with Major League Soccer (MLS).
+
+New CardLab/CornerLab Top-10 membership:
+
+- Premier League
+- La Liga
+- Serie A
+- Bundesliga
+- Ligue 1
+- Eredivisie
+- Primeira Liga
+- Belgian Pro League
+- Süper Lig
+- Major League Soccer (MLS)
+
+Scottish Premiership is now outside the CardLab/CornerLab allowlist. GoalLab scope is
+unchanged. No production model, pick, bankroll or discovery behavior is changed.
