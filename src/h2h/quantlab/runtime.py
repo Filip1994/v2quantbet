@@ -30,6 +30,10 @@ class QuantLabRuntimeSettings:
     standings_refresh_seconds: int = 21600
     feature_refresh_seconds: int = 1800
     history_backfill_per_cycle: int = 25
+    corner_team_history_last: int = 12
+    corner_team_history_teams_per_cycle: int = 40
+    corner_team_statistics_per_cycle: int = 120
+    corner_team_history_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -40,6 +44,10 @@ class QuantLabRuntimeSettings:
             ("context_refresh_seconds", self.context_refresh_seconds),
             ("standings_refresh_seconds", self.standings_refresh_seconds),
             ("feature_refresh_seconds", self.feature_refresh_seconds),
+            ("corner_team_history_last", self.corner_team_history_last),
+            ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
+            ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
+            ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
@@ -161,6 +169,69 @@ class QuantLabRuntime:
             day += timedelta(days=1)
         return discovered
 
+    def _capture_historical_statistics(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        fixture_id = str(fixture["fixture_id"])
+        if self._repository.statistics_capture_exists(fixture_id):
+            return False
+        provider_fixture_id = int(fixture["provider_fixture_id"])
+        home_team_id = int(fixture["home_team_id"])
+        away_team_id = int(fixture["away_team_id"])
+        if provider_fixture_id <= 0 or home_team_id <= 0 or away_team_id <= 0:
+            raise ValueError("fixture/provider team IDs must be positive")
+        if home_team_id == away_team_id:
+            raise ValueError("home and away team IDs must differ")
+
+        payload = self._provider.fetch_statistics(provider_fixture_id)
+        response = payload.get("response") if isinstance(payload, dict) else None
+        response_team_count = len(response) if isinstance(response, list) else 0
+        try:
+            parsed_stats = parse_fixture_statistics(
+                payload,
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                captured_at=now,
+            )
+        except ValueError as exc:
+            if (
+                "does not contain both fixture teams" not in str(exc)
+                or not isinstance(response, list)
+            ):
+                raise
+            self._repository.save_statistics_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                captured_at=now,
+                status="UNAVAILABLE",
+                response_team_count=response_team_count,
+                reason=str(exc),
+                raw_payload=dict(payload),
+            )
+            LOGGER.info(
+                "QuantLab statistics unavailable fixture=%s provider_fixture_id=%s "
+                "response_team_count=%s",
+                fixture_id,
+                provider_fixture_id,
+                response_team_count,
+            )
+        else:
+            self._repository.save_match_statistics(parsed_stats)
+            self._repository.save_statistics_capture(
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                captured_at=now,
+                status="AVAILABLE",
+                response_team_count=response_team_count,
+                reason=None,
+                raw_payload=dict(payload),
+            )
+        return True
+
     def _backfill_history(self, now: datetime) -> int:
         target = self._settings.history_backfill_per_cycle
         if target <= 0:
@@ -216,52 +287,7 @@ class QuantLabRuntime:
                             str(exc),
                         )
 
-                if not self._repository.statistics_capture_exists(fixture_id):
-                    payload = self._provider.fetch_statistics(provider_fixture_id)
-                    response = payload.get("response") if isinstance(payload, dict) else None
-                    response_team_count = len(response) if isinstance(response, list) else 0
-                    try:
-                        parsed_stats = parse_fixture_statistics(
-                            payload,
-                            fixture_id=fixture_id,
-                            provider_fixture_id=provider_fixture_id,
-                            home_team_id=home_team_id,
-                            away_team_id=away_team_id,
-                            captured_at=now,
-                        )
-                    except ValueError as exc:
-                        if (
-                            "does not contain both fixture teams" not in str(exc)
-                            or not isinstance(response, list)
-                        ):
-                            raise
-                        self._repository.save_statistics_capture(
-                            fixture_id=fixture_id,
-                            provider_fixture_id=provider_fixture_id,
-                            captured_at=now,
-                            status="UNAVAILABLE",
-                            response_team_count=response_team_count,
-                            reason=str(exc),
-                            raw_payload=dict(payload),
-                        )
-                        LOGGER.info(
-                            "QuantLab statistics unavailable fixture=%s provider_fixture_id=%s "
-                            "response_team_count=%s",
-                            fixture_id,
-                            provider_fixture_id,
-                            response_team_count,
-                        )
-                    else:
-                        self._repository.save_match_statistics(parsed_stats)
-                        self._repository.save_statistics_capture(
-                            fixture_id=fixture_id,
-                            provider_fixture_id=provider_fixture_id,
-                            captured_at=now,
-                            status="AVAILABLE",
-                            response_team_count=response_team_count,
-                            reason=None,
-                            raw_payload=dict(payload),
-                        )
+                self._capture_historical_statistics(fixture, now)
                 completed += 1
             except ApiBudgetExceededError:
                 raise
@@ -275,6 +301,97 @@ class QuantLabRuntime:
                     error_text,
                 )
         return completed
+
+    def _corner_target_team_ids(self, now: datetime) -> tuple[int, ...]:
+        teams: list[int] = []
+        seen: set[int] = set()
+        for fixture in self._context_upcoming(now):
+            fixture_id = str(fixture["fixture_id"])
+            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            if "CORNER" not in self._repository.market_labs_for_fixture(fixture_id):
+                continue
+            for key in ("home_team_id", "away_team_id"):
+                team_id = int(fixture[key])
+                if team_id <= 0 or team_id in seen:
+                    continue
+                seen.add(team_id)
+                teams.append(team_id)
+        return tuple(teams)
+
+    def _bootstrap_corner_team_history(self, now: datetime) -> tuple[int, int]:
+        team_ids = self._corner_target_team_ids(now)
+        if not team_ids:
+            return 0, 0
+
+        discoveries = 0
+        for team_id in team_ids:
+            if discoveries >= self._settings.corner_team_history_teams_per_cycle:
+                break
+            if not self._repository.team_history_due(
+                team_id,
+                now=now,
+                refresh_seconds=self._settings.corner_team_history_refresh_seconds,
+            ):
+                continue
+            payload = self._provider.fetch_team_recent_fixtures(
+                team_id,
+                last=self._settings.corner_team_history_last,
+            )
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            self._repository.save_fixture_observations(observations)
+            self._repository.save_team_history_capture(
+                team_id=team_id,
+                captured_at=now,
+                requested_last=self._settings.corner_team_history_last,
+                response_fixture_count=len(observations),
+                raw_payload=dict(payload),
+            )
+            discoveries += 1
+
+        stats_target = self._settings.corner_team_statistics_per_cycle
+        candidates = self._repository.completed_for_team_statistics(
+            team_ids,
+            before=now,
+            limit=max(6000, stats_target * 50),
+        )
+        by_team: dict[int, list[dict[str, Any]]] = {team_id: [] for team_id in team_ids}
+        target_set = set(team_ids)
+        for fixture in candidates:
+            home_id = int(fixture["home_team_id"])
+            away_id = int(fixture["away_team_id"])
+            if home_id in target_set:
+                by_team[home_id].append(fixture)
+            if away_id in target_set and away_id != home_id:
+                by_team[away_id].append(fixture)
+
+        stats_backfilled = 0
+        attempted_fixtures: set[str] = set()
+        for team_id in team_ids:
+            for fixture in by_team[team_id]:
+                if stats_backfilled >= stats_target:
+                    return discoveries, stats_backfilled
+                fixture_id = str(fixture["fixture_id"])
+                if fixture_id in attempted_fixtures:
+                    continue
+                attempted_fixtures.add(fixture_id)
+                if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+                    continue
+                try:
+                    if self._capture_historical_statistics(fixture, now):
+                        stats_backfilled += 1
+                except ApiBudgetExceededError:
+                    raise
+                except Exception as exc:
+                    LOGGER.warning(
+                        "QuantLab targeted CornerLab statistics failed fixture=%s "
+                        "team_id=%s error_class=%s error=%s",
+                        fixture_id,
+                        team_id,
+                        type(exc).__name__,
+                        str(exc),
+                    )
+        return discoveries, stats_backfilled
 
     def _context_upcoming(self, now: datetime) -> tuple[dict[str, Any], ...]:
         """Return the broad market-driven CardLab/CornerLab upcoming queue."""
@@ -437,6 +554,8 @@ class QuantLabRuntime:
         result = {
             "fixtures_discovered": 0,
             "history_backfilled": 0,
+            "corner_team_history_discovered": 0,
+            "corner_team_statistics_backfilled": 0,
             "market_fixtures": 0,
             "card_snapshots": 0,
             "goal_decisions": 0,
@@ -452,6 +571,9 @@ class QuantLabRuntime:
             market_fixtures, card_snapshots = self._collect_upcoming(now)
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
+            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
+            result["corner_team_history_discovered"] = team_discoveries
+            result["corner_team_statistics_backfilled"] = team_stats
         except ApiBudgetExceededError:
             LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
         except FeatureLeakageError:
@@ -487,10 +609,13 @@ class QuantLabRuntime:
 
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
+            "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "corner_decisions=%d corner_picks=%d card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
+            result["corner_team_history_discovered"],
+            result["corner_team_statistics_backfilled"],
             result["market_fixtures"],
             result["card_snapshots"],
             result["goal_decisions"],
