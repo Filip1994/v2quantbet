@@ -115,7 +115,7 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
-            except Exception:  # noqa: BLE001 - dashboard stays alive while cycle is retried
+            except Exception:
                 LOGGER.exception("QuantLab cycle failed")
             stop.wait(cycle_seconds)
     finally:
