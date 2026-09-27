@@ -16,6 +16,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.quantlab.goal_analytics import (
+    build_goal_analytics_snapshot,
+    render_goal_analytics_html,
+    render_goal_model_html,
+    render_goal_pick_html,
+)
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import goal_scope
@@ -246,6 +252,44 @@ class QuantLabDashboardService:
                 return fallback_rows
             rows = loader(lab)
         return self._filter_rows(tuple(rows), params)
+
+    def render_goal_analytics(self) -> str:
+        picks = tuple(self._repository.list_all_goal_picks())
+        decisions = tuple(self._repository.list_all_goal_decisions())
+        snapshot = build_goal_analytics_snapshot(picks, decisions)
+        return render_goal_analytics_html(snapshot)
+
+    def render_goal_model(self, raw_query: str) -> str:
+        params = parse_qs(raw_query, keep_blank_values=True)
+        model_version = params.get("model_version", [""])[0].strip()
+        if not model_version:
+            raise ValueError("model_version is required")
+        contract = self._repository.goal_model_contract(model_version)
+        if contract is None:
+            raise LookupError("goal model version not found")
+        picks = tuple(
+            row
+            for row in self._repository.list_all_goal_picks()
+            if str(row.get("model_version") or "") == model_version
+        )
+        return render_goal_model_html(contract, picks)
+
+    def render_goal_pick(self, raw_query: str) -> str:
+        params = parse_qs(raw_query, keep_blank_values=True)
+        goal_pick_id = params.get("goal_pick_id", [""])[0].strip()
+        if not goal_pick_id:
+            raise ValueError("goal_pick_id is required")
+        row = next(
+            (
+                item
+                for item in self._repository.list_all_goal_picks()
+                if str(item.get("goal_pick_id") or "") == goal_pick_id
+            ),
+            None,
+        )
+        if row is None:
+            raise LookupError("goal pick not found")
+        return render_goal_pick_html(row)
 
     def render_html(self, raw_query: str = "") -> str:
         params = parse_qs(raw_query, keep_blank_values=True)
@@ -761,6 +805,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
+{('<p class="lab-note"><a href="/quantlab/goal/analytics"><b>Open GoalLab Analytics V1 →</b></a> · model/version cohorts · decision funnel · exact feature drilldown</p>' if lab_key == "goal" else "")}
 {warning_html}
 {version_notice_html}
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
@@ -793,20 +838,37 @@ class QuantLabDashboardHTTPService:
                 if parsed.path == "/livez":
                     service._text(self, 200, "ok\n", "text/plain; charset=utf-8")
                     return
-                if parsed.path not in {"/", "/quantlab"}:
+                allowed_paths = {
+                    "/",
+                    "/quantlab",
+                    "/quantlab/goal/analytics",
+                    "/quantlab/goal/model",
+                    "/quantlab/goal/pick",
+                }
+                if parsed.path not in allowed_paths:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                     return
                 if not service._authorize(self):
                     return
                 try:
+                    if parsed.path == "/quantlab/goal/analytics":
+                        body = dashboard.render_goal_analytics()
+                    elif parsed.path == "/quantlab/goal/model":
+                        body = dashboard.render_goal_model(parsed.query)
+                    elif parsed.path == "/quantlab/goal/pick":
+                        body = dashboard.render_goal_pick(parsed.query)
+                    else:
+                        body = dashboard.render_html(parsed.query)
                     service._text(
                         self,
                         200,
-                        dashboard.render_html(parsed.query),
+                        body,
                         "text/html; charset=utf-8",
                     )
                 except (TypeError, ValueError):
                     service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
+                except LookupError:
+                    service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                 except Exception as exc:
                     LOGGER.exception(
                         "QuantLab dashboard render failed path=%s query=%s error_class=%s",
