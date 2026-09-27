@@ -348,3 +348,41 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     assert "Research Analytics V2" in html
     assert "Production-filter evidence cube" in html
     assert "Low-scoring extreme-value diagnostic" in html
+    assert (
+        "/research/analytics/model?model_version_id=dcm-json-v1%3A"
+        in html
+    )
+
+
+def test_research_model_version_drilldown_exposes_constituent_picks() -> None:
+    dashboard = ResearchDashboardService(Repository())
+    model_version_id = signal_row()["model_version_id"]
+
+    payload = dashboard.model_version_details(model_version_id)
+
+    assert payload["contract_version"] == "RESEARCH_MODEL_VERSION_DRILLDOWN_V1"
+    assert payload["model_version_id"] == model_version_id
+    assert payload["summary"]["n"] == 1
+    assert payload["summary"]["wins"] == 1
+    assert payload["summary"]["roi_pct"] == 120.0
+    assert payload["rows"][0]["fixture_id"] == "api-football:123"
+    assert payload["rows"][0]["home_team"] == "Home"
+    assert payload["rows"][0]["away_team"] == "Away"
+    assert payload["rows"][0]["market"] == "BTTS"
+    assert payload["rows"][0]["selection"] == "YES"
+    assert payload["rows"][0]["odds"] == 2.2
+    assert payload["rows"][0]["outcome"] == "WIN"
+    assert payload["rows"][0]["pnl_minor"] == 36_000
+    assert payload["rows"][0]["clv_pct"] == 10.0
+    assert payload["rows"][0]["policy_config_fingerprint"].startswith(
+        "pick-policy-config-v1:"
+    )
+
+    html = dashboard.render_model_version_html(model_version_id)
+    assert "Model version picks" in html
+    assert "Home – Away" in html
+    assert "BTTS YES" in html
+    assert "2.20" in html
+    assert "+120.00%" in html
+    assert "pick-policy-config-v1:" in html
+    assert "/research/analytics/model.json?model_version_id=" in html
