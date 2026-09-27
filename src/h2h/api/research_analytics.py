@@ -22,7 +22,7 @@ DIAGNOSTIC_BUCKETS = (
 
 
 def diagnostic_bucket(row: dict[str, Any]) -> str:
-    """Return the stable Research Analytics V1 diagnostic bucket for one row."""
+    """Return the stable Research Analytics V2 diagnostic bucket for one row."""
     extreme = (
         float(row["expected_value"]) >= 0.30
         or float(row["edge"]) >= 0.20
@@ -554,7 +554,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QuantBet Research Analytics V1</title>
+<title>QuantBet Research Analytics V2</title>
 <style>
 :root{{--bg:#111315;--panel:#181b1f;--line:#30363d;--text:#eceff1;--muted:#9299a1}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);
