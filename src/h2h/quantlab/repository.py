@@ -838,7 +838,7 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
                 ") latest_settlement ON TRUE "
                 "WHERE q.lab = 'CORNER' "
-                "AND (latest_settlement.event_kind IS NULL OR latest_settlement.event_kind = 'REVERSAL') "
+                "AND latest_settlement.event_kind IS NULL "
                 "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
                 "AND (r.result_classification = 'NON_PLAYED_VOIDABLE' "
                 " OR stats.statistics_observation_id IS NOT NULL) "
