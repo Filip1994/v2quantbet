@@ -64,7 +64,7 @@ def _odds_payload():
                         "name": "1xBet",
                         "bets": [
                             {
-                                "id": 120,
+                                "id": 119,
                                 "name": "Total Cards",
                                 "values": [{"value": "Over 4.5", "odd": 2.05}],
                             }
@@ -217,7 +217,7 @@ def test_all_market_parser_keeps_unknown_raw_market_and_only_target_books() -> N
         if row.provider_bet_id == 5 and row.raw_selection == "Over 2.5"
     )
     assert float(over.parsed_line) == 2.5
-    cards = next(row for row in rows if row.provider_bet_id == 120)
+    cards = next(row for row in rows if row.provider_bet_id == 119)
     assert cards.lab_owner == "CARD"
 
 
