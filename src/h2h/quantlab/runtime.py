@@ -1303,9 +1303,21 @@ class QuantLabRuntime:
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
 
-        # GoalLab is evaluated before Corner/Card enrichment. Existing persisted quotes
-        # keep this path independent from provider budget, while fresh Goal history is
-        # still collected first when budget is available.
+        # GoalLab evaluation uses already persisted history and quotes immediately.
+        # Provider backfill is deliberately deferred until after the evaluation so a
+        # large acquisition batch can never delay DC+ fitting or current-cycle decisions.
+        try:
+            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+            result["goal_decisions"] = goal_decisions
+            result["goal_picks"] = goal_picks
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
+        try:
+            result["goal_settlements"] = self._settle_goal_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab settlement failed")
+
         if not collection_budget_exhausted:
             try:
                 goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
@@ -1321,18 +1333,6 @@ class QuantLabRuntime:
                 LOGGER.exception(
                     "QuantLab rejected a GoalLab feature snapshot because of timestamp leakage"
                 )
-
-        try:
-            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
-            result["goal_decisions"] = goal_decisions
-            result["goal_picks"] = goal_picks
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
-
-        try:
-            result["goal_settlements"] = self._settle_goal_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab settlement failed")
 
         if not collection_budget_exhausted:
             try:
