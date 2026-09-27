@@ -219,7 +219,7 @@ def _empty_validation(
 
 
 def _leakage_audit() -> dict[str, Any]:
-    checks = {
+    positive_checks = {
         "chronological_feature_construction": True,
         "target_result_excluded_from_target_features": True,
         "feature_preprocessing_fit_on_train_only": True,
@@ -228,19 +228,16 @@ def _leakage_audit() -> dict[str, Any]:
         "target_standings_requires_available_at_lte_decision": True,
         "target_injuries_requires_available_at_lte_decision": True,
         "target_manager_capture_requires_available_at_lte_decision": True,
+    }
+    forbidden_input_checks = {
         "target_match_live_statistics_used": False,
         "bookmaker_features_used_in_probability_model": False,
         "provider_predictions_used_in_probability_model": False,
     }
+    checks = {**positive_checks, **forbidden_input_checks}
+    passed = all(positive_checks.values()) and not any(forbidden_input_checks.values())
     return {
-        "status": "PASS" if all(
-            value is True
-            for key, value in checks.items()
-            if not key.endswith("_used") and "features_used" not in key
-        ) and checks["target_match_live_statistics_used"] is False
-        and checks["bookmaker_features_used_in_probability_model"] is False
-        and checks["provider_predictions_used_in_probability_model"] is False
-        else "FAIL",
+        "status": "PASS" if passed else "FAIL",
         "checks": checks,
     }
 
