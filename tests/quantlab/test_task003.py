@@ -182,15 +182,6 @@ def _card_repo_with_total_cards() -> Repo:
     return Repo(
         pairs=(
             market_pair(
-                8,
-                "Bet365",
-                bet_id=119,
-                bet_name="Total Cards",
-                line=4.5,
-                over=1.55,
-                under=2.40,
-            ),
-            market_pair(
                 11,
                 "1xBet",
                 bet_id=119,
@@ -214,7 +205,7 @@ def _card_repo_with_total_cards() -> Repo:
     )
 
 
-def test_card_engine_registers_only_1xbet_target_with_bet365_reference():
+def test_card_engine_uses_only_1xbet_and_its_own_poisson_probability():
     repo = _card_repo_with_total_cards()
 
     result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
@@ -227,43 +218,28 @@ def test_card_engine_registers_only_1xbet_target_with_bet365_reference():
     assert pick.selection == "OVER"
     assert pick.bookmaker_id == 11
     assert pick.bookmaker_name == "1xBet"
-    assert pick.reference_bookmaker_id == 8
-    assert pick.reference_bookmaker_name == "Bet365"
+    assert pick.reference_bookmaker_id is None
+    assert pick.reference_bookmaker_name is None
+    assert pick.reference_observation_id is None
+    assert pick.reference_companion_observation_id is None
+    assert pick.reference_odds is None
+    assert pick.reference_companion_odds is None
     assert pick.details["card_context"]["referee_card_rate"] == 5.8
+    assert pick.details["expected_total_cards"] == 5.8
+    assert pick.details["probability_model"]["reference_bookmaker_used"] is False
     assert pick.details["settlement_contract"]["status"] == "VERIFIED_1XBET_TARGET"
+    assert pick.model_probability > pick.market_probability
     assert {item.bookmaker_id for item in repo.decisions} == {11}
-    under_reasons = {
-        item.reason for item in repo.decisions if item.selection == "UNDER"
-    }
-    assert "REFEREE_RATE_DIRECTION_DISAGREES" in under_reasons
 
 
-def test_card_engine_still_requires_an_independent_reference_book():
-    repo = Repo(
-        pairs=(
-            market_pair(
-                11,
-                "1xBet",
-                bet_id=119,
-                bet_name="Total Cards",
-                line=4.5,
-                over=1.80,
-                under=2.00,
-            ),
-        ),
-        card_feature={
-            "referee": "Ref Example",
-            "referee_card_rate": 5.8,
-            "referee_sample_size": 12,
-            "feature_version": "CARDLAB_FEATURES_V1",
-        },
-    )
+def test_card_engine_does_not_require_bet365_reference():
+    repo = _card_repo_with_total_cards()
 
     result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
 
-    assert result.decisions_inserted == 1
-    assert result.picks_inserted == 0
-    assert repo.decisions[0].reason == "NO_INDEPENDENT_REFERENCE_BOOK"
+    assert result.decisions_inserted == 2
+    assert result.picks_inserted == 1
+    assert all(item.reference_bookmaker_id is None for item in repo.decisions)
 
 
 def test_card_engine_passes_before_market_lookup_when_referee_sample_is_too_small():
