@@ -1288,6 +1288,21 @@ class QuantLabRuntime:
         except Exception:
             LOGGER.exception("QuantLab CardLab settlement failed")
 
+        # GoalLab evaluation is deliberately first among current-cycle work.
+        # It uses persisted history and quotes, so slow provider acquisition must never
+        # delay DC+ fitting, readiness telemetry, or current-cycle decisions.
+        try:
+            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+            result["goal_decisions"] = goal_decisions
+            result["goal_picks"] = goal_picks
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
+        try:
+            result["goal_settlements"] = self._settle_goal_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab settlement failed")
+
         collection_budget_exhausted = False
         try:
             result["fixtures_discovered"] = self._discover_fixtures(now)
@@ -1302,21 +1317,6 @@ class QuantLabRuntime:
             )
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
-
-        # GoalLab evaluation uses already persisted history and quotes immediately.
-        # Provider backfill is deliberately deferred until after the evaluation so a
-        # large acquisition batch can never delay DC+ fitting or current-cycle decisions.
-        try:
-            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
-            result["goal_decisions"] = goal_decisions
-            result["goal_picks"] = goal_picks
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
-
-        try:
-            result["goal_settlements"] = self._settle_goal_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab settlement failed")
 
         if not collection_budget_exhausted:
             try:
