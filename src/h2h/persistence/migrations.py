@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 # Shared transaction-scoped lock for every service using this migration runner.
 # Railway may start multiple predeploy hooks concurrently against the same database.
 _MIGRATION_ADVISORY_LOCK_KEY = 724239531
+MIGRATION_RUNNER_VERSION = "POSTGRES_ADVISORY_LOCK_V1"
 
 
 def apply_migrations(connection: Any, migration_dir: str | Path) -> tuple[str, ...]:
