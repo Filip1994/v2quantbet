@@ -8,6 +8,15 @@ from h2h.persistence.postgres_research_signals import (
 )
 
 
+POLICY = {
+    "policy_config_fingerprint": "pick-policy-config-v1:" + "f" * 64,
+    "eligibility_policy_version": "ELIGIBILITY_V1",
+    "risk_policy_version": "RISK_V1",
+    "staking_policy_version": "FIXED_STAKE_V1",
+    "bookmaker_policy_version": "SERBIA_ALLOWLIST_V1",
+}
+
+
 def test_research_signal_id_is_deterministic_from_evaluation_id() -> None:
     suffix = "a" * 64
     assert research_signal_id("value-evaluation-v1:" + suffix) == "research-signal-v1:" + suffix
@@ -63,12 +72,14 @@ def test_record_exposure_blocked_upserts_by_fixture_not_evaluation() -> None:
         blocked_at=datetime(2026, 9, 25, 12, tzinfo=UTC),
         open_exposure_minor=300_000,
         exposure_cap_minor=300_000,
+        **POLICY,
     )
 
     assert signal_id == "research-signal-v1:" + "a" * 64
     assert "evaluation_id, fixture_id" in cursor.query
     assert "SELECT %s, e.evaluation_id, e.fixture_id" in cursor.query
     assert "ON CONFLICT (fixture_id) DO UPDATE" in cursor.query
+    assert "policy_config_fingerprint" in cursor.query
     assert cursor.params[-1] == evaluation_id
 
 
@@ -82,10 +93,12 @@ def test_record_production_candidate_upserts_same_fixture_universe() -> None:
         evaluation_id,
         qualified_at=datetime(2026, 9, 25, 13, tzinfo=UTC),
         production_pick_id="registered-pick-v1:" + "c" * 64,
+        **POLICY,
     )
 
     assert signal_id == "research-signal-v1:" + "a" * 64
     assert "qualified_at, production_pick_id" in cursor.query
     assert "ON CONFLICT (fixture_id) DO UPDATE" in cursor.query
     assert "production_pick_id = EXCLUDED.production_pick_id" in cursor.query
+    assert "policy_config_fingerprint = EXCLUDED.policy_config_fingerprint" in cursor.query
     assert cursor.params[-1] == evaluation_id
