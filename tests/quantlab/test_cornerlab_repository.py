@@ -12,6 +12,7 @@ class _Cursor:
         self.query = ""
         self.params = None
         self.rowcount = 1
+        self.description = ()
 
     def __enter__(self):
         return self
@@ -22,6 +23,9 @@ class _Cursor:
     def execute(self, query, params=None):
         self.query = query
         self.params = params
+
+    def fetchall(self):
+        return []
 
 
 class _Connection:
@@ -62,3 +66,16 @@ def test_corner_settlement_repository_appends_event_without_mutating_shadow_bet(
     assert "'NORMAL'" in cursor.query
     assert cursor.params[1] == settlement.shadow_bet_id
     assert cursor.params[3] == settlement.result_observation_id
+
+
+def test_corner_settlement_candidates_do_not_depend_on_production_result_tracking() -> None:
+    cursor = _Cursor()
+    repository = PostgreSQLQuantLabRepository(connect=lambda: _Connection(cursor))
+
+    assert repository.corner_shadow_settlement_candidates(limit=25) == ()
+    assert "FROM quantlab_fixture_observations o" in cursor.query
+    assert "fixture_result_acquisition_states" not in cursor.query
+    assert "fixture_result_observations" not in cursor.query
+    assert "('FT', 'AET', 'PEN')" in cursor.query
+    assert "('CANC', 'ABD', 'AWD', 'WO')" in cursor.query
+    assert cursor.params == (25,)
