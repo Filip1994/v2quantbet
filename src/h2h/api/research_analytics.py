@@ -565,7 +565,7 @@ border:1px solid var(--line);font-size:12px}}.version-warning{{background:#2a211
 .version-warning span,.version-ok span{{color:var(--muted)}}@media(max-width:900px){{
 .cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}}}
 </style></head><body><main>
-<header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V1</h1>
+<header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
 <p>Continuous settled-performance matrix. Read-only; no Production selection changes.</p></div>
 <div><a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
