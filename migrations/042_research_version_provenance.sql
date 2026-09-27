@@ -15,7 +15,10 @@ SET
     eligibility_policy_version = config.eligibility_policy_version,
     risk_policy_version = config.risk_policy_version,
     staking_policy_version = config.staking_policy_version,
-    bookmaker_policy_version = config.configuration ->> 'bookmaker_policy_version'
+    bookmaker_policy_version = COALESCE(
+        config.configuration ->> 'bookmaker_policy_version',
+        'LEGACY_UNRECORDED'
+    )
 FROM registered_picks r
 JOIN pick_policy_configurations config
     ON config.config_fingerprint = r.config_fingerprint
