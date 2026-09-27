@@ -52,6 +52,9 @@ MIN_TRAINING_EXAMPLES = 300
 MIN_FEATURE_OBSERVATIONS = 20
 HISTORY_LIMIT = 10_000
 SHORT_REST_DAYS = 4.0
+FIT_MAX_ITER = 300
+FIT_FTOL = 1e-7
+FIT_GTOL = 1e-4
 
 CONTRACT_COVERAGE_V1 = {
     "A_BASE_DC": {"status": "FULL", "implemented": list(range(1, 11)), "pending": []},
@@ -1629,13 +1632,44 @@ def _fit_dc_plus(
         method="L-BFGS-B",
         jac=True,
         bounds=bounds,
-        options={"maxiter": 700, "ftol": 1e-9, "gtol": 1e-6},
+        options={
+            "maxiter": FIT_MAX_ITER,
+            "ftol": FIT_FTOL,
+            "gtol": FIT_GTOL,
+        },
+    )
+    gradient_inf_norm = (
+        float(np.max(np.abs(result.jac)))
+        if result.jac is not None and len(result.jac)
+        else float("nan")
+    )
+    LOGGER.info(
+        "GoalLab DC+ optimizer success=%s status=%s nit=%s nfev=%s "
+        "objective=%s gradient_inf_norm=%s message=%s",
+        bool(result.success),
+        int(result.status),
+        int(result.nit),
+        int(result.nfev),
+        float(result.fun) if np.isfinite(result.fun) else result.fun,
+        gradient_inf_norm,
+        str(result.message),
     )
     if not result.success or not np.isfinite(result.fun):
         return None
 
     params = result.x
     payload = {
+        "optimizer": {
+            "method": "L-BFGS-B",
+            "maxiter": FIT_MAX_ITER,
+            "ftol": FIT_FTOL,
+            "gtol": FIT_GTOL,
+            "status": int(result.status),
+            "iterations": int(result.nit),
+            "function_evaluations": int(result.nfev),
+            "gradient_inf_norm": gradient_inf_norm,
+            "message": str(result.message),
+        },
         "team_ids": team_values,
         "league_ids": league_values,
         "attacks": {
