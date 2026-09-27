@@ -979,16 +979,15 @@ class QuantLabRuntime:
         if not targets:
             return 0, 0, frozenset()
 
-        target_referees = {
-            referee.casefold()
-            for referees in targets.values()
-            for referee in referees
-        }
+        target_referees: dict[str, str] = {}
+        for referees in targets.values():
+            for referee in referees:
+                target_referees.setdefault(referee.casefold(), referee)
         baseline_samples = {
             referee_key: self._card_history_sample_size(
-                self._repository.referee_history(referee_key, decision_at=now)
+                self._repository.referee_history(referee, decision_at=now)
             )
-            for referee_key in target_referees
+            for referee_key, referee in target_referees.items()
         }
         LOGGER.info(
             "QuantLab CardLab referee bootstrap targets scopes=%d referees=%d",
