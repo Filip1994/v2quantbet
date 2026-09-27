@@ -97,3 +97,22 @@ def test_corner_statistics_retry_candidates_are_pick_scoped_and_throttled() -> N
     assert "latest_capture.status = 'UNAVAILABLE'" in cursor.query
     assert "league-season-statistics-fixtures-false" in cursor.query
     assert cursor.params == (NOW, 1800, 7)
+
+
+def test_corner_result_refresh_candidates_are_post_match_pick_scoped_and_throttled() -> None:
+    cursor = _Cursor()
+    repository = PostgreSQLQuantLabRepository(connect=lambda: _Connection(cursor))
+
+    assert repository.corner_shadow_result_refresh_candidates(
+        now=NOW,
+        post_kickoff_delay_seconds=5400,
+        refresh_after_seconds=900,
+        limit=5,
+    ) == ()
+    assert "q.lab = 'CORNER'" in cursor.query
+    assert "quantlab_corner_settlement_events" in cursor.query
+    assert "latest.provider_status NOT IN" in cursor.query
+    assert "'FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'" in cursor.query
+    assert "latest.kickoff_at <=" in cursor.query
+    assert "latest.captured_at <=" in cursor.query
+    assert cursor.params == (NOW, 5400, NOW, 900, 5)
