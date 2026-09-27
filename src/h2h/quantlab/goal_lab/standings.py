@@ -230,13 +230,18 @@ def build_goal_standings_features(
             "available_at": available.isoformat(),
         }
 
-    by_rank = {int(row["rank"]): row for row in normalized}
-    title_rank, primary_rank, relegation_rank = _threshold_ranks(
+    title_position, primary_position, relegation_position = _threshold_ranks(
         len(normalized), competition_name
     )
-    leader_points = float(by_rank[title_rank]["points"])
-    primary_points = float(by_rank[primary_rank]["points"])
-    relegation_points = float(by_rank[relegation_rank]["points"])
+    leader_row = normalized[title_position - 1]
+    primary_row = normalized[primary_position - 1]
+    relegation_row = normalized[relegation_position - 1]
+    title_rank = int(leader_row["rank"])
+    primary_rank = int(primary_row["rank"])
+    relegation_rank = int(relegation_row["rank"])
+    leader_points = float(leader_row["points"])
+    primary_points = float(primary_row["points"])
+    relegation_points = float(relegation_row["points"])
     home_features = _team_features(
         home,
         n=len(normalized),

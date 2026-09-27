@@ -342,3 +342,26 @@ def test_goal_manager_features_reject_future_capture() -> None:
             away_match_dates=[],
             decision_at=NOW,
         )
+
+
+def test_goal_standings_features_tolerate_non_contiguous_provider_ranks() -> None:
+    payload = _standings_payload()
+    rows = payload["response"][0]["league"]["standings"][0]
+    rows[2]["rank"] = 5
+    rows[3]["rank"] = 7
+    rows[4]["rank"] = 9
+    rows[5]["rank"] = 12
+
+    features, meta = build_goal_standings_features(
+        payload,
+        home_team_id=1,
+        away_team_id=4,
+        competition_name="Premier League",
+        available_at=NOW - timedelta(hours=1),
+        decision_at=NOW,
+    )
+
+    assert features["standings_coverage_flag"] == 1.0
+    assert meta["title_rank"] == 1
+    assert meta["primary_threshold_rank"] == 7
+    assert meta["relegation_threshold_rank"] == 7
