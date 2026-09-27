@@ -1294,29 +1294,29 @@ class QuantLabRuntime:
             market_fixtures, card_snapshots = self._collect_upcoming(now)
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; core collection stopped for UTC day"
+            )
+        except FeatureLeakageError:
+            LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
+
+        # GoalLab is evaluated before Corner/Card enrichment. Existing persisted quotes
+        # keep this path independent from provider budget, while fresh Goal history is
+        # still collected first when budget is available.
+        try:
             goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
             result["goal_team_history_discovered"] = goal_discoveries
             result["goal_team_statistics_backfilled"] = goal_stats
             result["goal_player_history_backfilled"] = self._bootstrap_goal_player_history(now)
-            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
-            result["corner_team_history_discovered"] = team_discoveries
-            result["corner_team_statistics_backfilled"] = team_stats
         except ApiBudgetExceededError:
-            LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
-        except FeatureLeakageError:
-            LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
-
-        # Shadow evaluation is intentionally independent from provider budget. Existing
-        # persisted quotes can still produce auditable PASS/PICK decisions after the
-        # daily API ceiling has stopped collection.
-        try:
-            corner_decisions, corner_picks = self._evaluate_context_picks(
-                self._corner_engine, "CORNER", now
+            LOGGER.warning(
+                "Shared football API daily budget reached; GoalLab history collection stopped"
             )
-            result["corner_decisions"] = corner_decisions
-            result["corner_picks"] = corner_picks
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
+        except FeatureLeakageError:
+            LOGGER.exception(
+                "QuantLab rejected a GoalLab feature snapshot because of timestamp leakage"
+            )
 
         try:
             goal_decisions, goal_picks = self._evaluate_goal_picks(now)
@@ -1329,6 +1329,28 @@ class QuantLabRuntime:
             result["goal_settlements"] = self._settle_goal_picks(now)
         except Exception:
             LOGGER.exception("QuantLab GoalLab settlement failed")
+
+        try:
+            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
+            result["corner_team_history_discovered"] = team_discoveries
+            result["corner_team_statistics_backfilled"] = team_stats
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; CornerLab history collection stopped"
+            )
+        except FeatureLeakageError:
+            LOGGER.exception(
+                "QuantLab rejected a CornerLab feature snapshot because of timestamp leakage"
+            )
+
+        try:
+            corner_decisions, corner_picks = self._evaluate_context_picks(
+                self._corner_engine, "CORNER", now
+            )
+            result["corner_decisions"] = corner_decisions
+            result["corner_picks"] = corner_picks
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
 
         try:
             card_decisions, card_picks = self._evaluate_context_picks(
