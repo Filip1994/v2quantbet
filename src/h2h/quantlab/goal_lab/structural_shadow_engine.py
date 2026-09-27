@@ -73,8 +73,8 @@ class GoalLabStructuralShadowEngine:
         self._model = GoalStructuralModelService(repository)
         self._policy = policy or StructuralGoalPolicy()
 
-    def readiness(self) -> dict[str, Any]:
-        return self._model.readiness()
+    def readiness(self, *, decision_at: datetime | None = None) -> dict[str, Any]:
+        return self._model.readiness(decision_at=decision_at)
 
     @staticmethod
     def _scope_kwargs(fixture: dict[str, Any]) -> dict[str, object]:
