@@ -339,3 +339,17 @@ def test_cardlab_1xbet_settlement_migration_is_append_only() -> None:
     assert "quantlab_card_event_observations_immutable" in migration
     assert "quantlab_card_settlement_events_immutable" in migration
     assert "reject_card_shadow_settlement_mutation" in migration
+
+
+def test_cardlab_single_book_decision_migration_removes_reference_requirement() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "046_quantlab_cardlab_single_book_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "quantlab_context_market_decisions_pick_evidence_v2_check" in migration
+    assert "CARDLAB_1XBET_POISSON_POLICY_%" in migration
+    assert "bookmaker_id = 11" in migration
+    assert "reference_bookmaker_id IS NULL" in migration
+    assert "reference_observation_id IS NULL" in migration
