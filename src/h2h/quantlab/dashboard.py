@@ -385,6 +385,55 @@ class QuantLabDashboardService:
                 "</td></tr>"
             )
 
+        corner_picks_html = ""
+        if lab_key == "corner":
+            pending_rows = tuple(
+                row
+                for row in rows
+                if str(row.get("outcome") or "PENDING").upper() == "PENDING"
+            )
+            pending_html = ""
+            for row in pending_rows:
+                match = (
+                    f'{escape(str(row.get("home_team") or "?"))} – '
+                    f'{escape(str(row.get("away_team") or "?"))}'
+                )
+                league_text = escape(str(row.get("competition_name") or "—"))
+                line = "—" if row.get("line") is None else escape(str(row["line"]))
+                pick = (
+                    f'{escape(str(row.get("selection") or "—"))} {line}'
+                    f'<small>{escape(str(row.get("market_key") or "—"))}</small>'
+                )
+                pending_html += (
+                    "<tr>"
+                    f'<td class="match"><b>{match}</b>'
+                    f'<small>{league_text} · {_time(row.get("kickoff_at"))}</small></td>'
+                    f'<td>{_bookmaker_badge(row.get("bookmaker_name"))}</td>'
+                    f"<td><b>{pick}</b></td>"
+                    f"<td>{_pct(row.get('model_probability'))}</td>"
+                    f"<td>{_odd(row.get('odds'))}</td>"
+                    f"<td>{_pct(row.get('edge'))}</td>"
+                    f"<td>{_pct(row.get('expected_value'))}</td>"
+                    f"<td>{_corner_pick_note(row)}</td>"
+                    f"<td>{_time(row.get('decision_at'))}</td>"
+                    "</tr>"
+                )
+            if not pending_html:
+                pending_html = (
+                    '<tr><td class="empty" colspan="9">'
+                    "Nema aktivnih CornerLab pikova za izabrane filtere."
+                    "</td></tr>"
+                )
+            corner_picks_html = (
+                '<section class="table-shell context-table">'
+                '<div class="table-title"><b>CornerLab pikovi · čekaju rezultat</b>'
+                f'<span>{len(pending_rows)} active</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Match</th><th>Bookmaker</th><th>Pick</th><th>Model p</th>'
+                '<th>Odds</th><th>Edge</th><th>EV</th><th>Why</th><th>Decision</th>'
+                f'</tr></thead><tbody>{pending_html}</tbody></table></div></section>'
+            )
+
         goal_contract_html = ""
         goal_pipeline_html = ""
         if lab_key == "goal":
@@ -621,7 +670,14 @@ class QuantLabDashboardService:
 
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
-            ("Canonical picks" if lab_key == "goal" else "Shadow bets", str(len(metric_rows))),
+            (
+                "Canonical picks"
+                if lab_key == "goal"
+                else "Pikovi"
+                if lab_key == "corner"
+                else "Shadow bets",
+                str(len(metric_rows)),
+            ),
             ("Settled", str(len(settled))),
             ("P&L", _money(pnl, self._currency)),
             ("ROI", "—" if roi is None else f"{roi * 100:+.2f}%"),
@@ -654,7 +710,11 @@ class QuantLabDashboardService:
         ledger_title = (
             "GoalLab canonical picks"
             if lab_key == "goal"
-            else f"{title} shadow ledger"
+            else (
+                "CornerLab kompletan pick / settlement ledger"
+                if lab_key == "corner"
+                else f"{title} shadow ledger"
+            )
         )
         warning_html = "".join(
             '<p class="dashboard-warning">'
@@ -713,6 +773,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <button type="submit">Apply</button></form></section>
 {goal_contract_html}
 {goal_pipeline_html}
+{corner_picks_html}
 {corner_contract_html}
 {card_context_html}
 <section class="table-shell"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
