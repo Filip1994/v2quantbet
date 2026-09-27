@@ -12,6 +12,10 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.card_lab.settlement import (
+    parse_1xbet_card_events,
+    settle_card_shadow_bet,
+)
 from h2h.quantlab.corner_lab.settlement import settle_corner_shadow_bet
 from h2h.quantlab.coverage import (
     parse_fixture_statistics_coverage,
@@ -1096,6 +1100,57 @@ class QuantLabRuntime:
             settled += int(bool(self._repository.save_corner_settlement_event(settlement)))
         return settled
 
+    def _refresh_card_pick_results(self, now: datetime) -> int:
+        rows = self._repository.card_shadow_result_refresh_candidates(
+            now=now,
+            post_kickoff_delay_seconds=5400,
+            refresh_after_seconds=900,
+            limit=25,
+        )
+        refreshed = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            provider_fixture_id = int(fixture["provider_fixture_id"])
+            payload = self._provider.fetch_fixture(provider_fixture_id)
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            matching = tuple(
+                item for item in observations if str(item.fixture.fixture_id) == fixture_id
+            )
+            if not matching:
+                LOGGER.warning(
+                    "QuantLab CardLab result refresh returned no matching fixture fixture=%s",
+                    fixture_id,
+                )
+                continue
+            refreshed += int(self._repository.save_fixture_observations(matching))
+        return refreshed
+
+    def _capture_card_pick_events(self, now: datetime) -> int:
+        rows = self._repository.card_event_capture_candidates(limit=25)
+        captured = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            provider_fixture_id = int(fixture["provider_fixture_id"])
+            payload = self._provider.fetch_events(provider_fixture_id)
+            observation = parse_1xbet_card_events(
+                payload,
+                fixture_id=fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                captured_at=now,
+            )
+            captured += int(bool(self._repository.save_card_event_observation(observation)))
+        return captured
+
+    def _settle_card_picks(self, now: datetime) -> int:
+        settled = 0
+        rows = self._repository.card_shadow_settlement_candidates(limit=500)
+        for row in rows:
+            settlement = settle_card_shadow_bet(row, settled_at=now)
+            if settlement is None:
+                continue
+            settled += int(bool(self._repository.save_card_settlement_event(settlement)))
+        return settled
+
     def _evaluate_context_picks(
         self,
         engine: Any | None,
@@ -1140,6 +1195,8 @@ class QuantLabRuntime:
             "corner_settlements": 0,
             "card_decisions": 0,
             "card_picks": 0,
+            "card_event_captures": 0,
+            "card_settlements": 0,
         }
         # Existing CornerLab picks must settle even if collection or GoalLab model work is slow.
         try:
@@ -1174,6 +1231,34 @@ class QuantLabRuntime:
             result["corner_settlements"] = self._settle_corner_picks(now)
         except Exception:
             LOGGER.exception("QuantLab CornerLab settlement failed")
+
+        try:
+            refreshed_card_results = self._refresh_card_pick_results(now)
+            if refreshed_card_results:
+                LOGGER.info(
+                    "QuantLab CardLab post-match result observations refreshed=%d",
+                    refreshed_card_results,
+                )
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; CardLab result refresh skipped"
+            )
+        except Exception:
+            LOGGER.exception("QuantLab CardLab post-match result refresh failed")
+
+        try:
+            result["card_event_captures"] = self._capture_card_pick_events(now)
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; CardLab event capture skipped"
+            )
+        except Exception:
+            LOGGER.exception("QuantLab CardLab event capture failed")
+
+        try:
+            result["card_settlements"] = self._settle_card_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab CardLab settlement failed")
 
         try:
             result["fixtures_discovered"] = self._discover_fixtures(now)

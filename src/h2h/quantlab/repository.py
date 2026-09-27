@@ -62,6 +62,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_picks",
             "quantlab_goal_pick_settlements",
             "quantlab_corner_settlement_events",
+            "quantlab_card_event_observations",
+            "quantlab_card_settlement_events",
             "quantlab_goal_model_validations",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
@@ -104,14 +106,22 @@ class PostgreSQLQuantLabRepository:
                 "q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
                 "q.closing_observed_at, q.stake_minor, "
-                "CASE WHEN q.lab = 'CORNER' THEN COALESCE(corner_event.outcome, 'PENDING') "
-                "ELSE q.outcome END AS outcome, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.pnl_minor ELSE q.pnl_minor END "
-                "AS pnl_minor, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.occurred_at ELSE q.settled_at END "
-                "AS settled_at, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.result_detail ELSE q.result_detail END "
-                "AS result_detail, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN COALESCE(corner_event.outcome, 'PENDING') "
+                " WHEN q.lab = 'CARD' THEN COALESCE(card_event.outcome, 'PENDING') "
+                " ELSE q.outcome END AS outcome, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.pnl_minor "
+                " WHEN q.lab = 'CARD' THEN card_event.pnl_minor "
+                " ELSE q.pnl_minor END AS pnl_minor, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.occurred_at "
+                " WHEN q.lab = 'CARD' THEN card_event.occurred_at "
+                " ELSE q.settled_at END AS settled_at, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.result_detail "
+                " WHEN q.lab = 'CARD' THEN card_event.result_detail "
+                " ELSE q.result_detail END AS result_detail, "
                 "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
                 "cs.feature_payload AS corner_feature_payload, "
                 "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
@@ -126,6 +136,12 @@ class PostgreSQLQuantLabRepository:
                 " WHERE q.lab = 'CORNER' AND e.shadow_bet_id = q.shadow_bet_id "
                 " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
                 ") corner_event ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT e.outcome, e.pnl_minor, e.occurred_at, e.result_detail "
+                " FROM quantlab_card_settlement_events e "
+                " WHERE q.lab = 'CARD' AND e.shadow_bet_id = q.shadow_bet_id "
+                " ORDER BY e.occurred_at DESC, e.card_settlement_event_id DESC LIMIT 1"
+                ") card_event ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT d.policy_version FROM quantlab_context_market_decisions d "
                 " WHERE d.fixture_id = q.fixture_id AND d.lab = q.lab AND d.decision = 'PICK' "
@@ -759,16 +775,17 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("context shadow bet lab must be CORNER or CARD")
         if item.decision != "PICK":
             raise ValueError("only PICK decisions may create shadow bets")
-        shadow_bet_id = _identifier(
-            "quantlab-shadow-v1:",
-            {
-                "fixture_id": item.fixture_id,
-                "lab": item.lab,
-                "market_key": item.market_key,
-                "selection": item.selection,
-                "line": item.line,
-            },
-        )
+        shadow_identity = {
+            "fixture_id": item.fixture_id,
+            "lab": item.lab,
+            "market_key": item.market_key,
+            "selection": item.selection,
+            "line": item.line,
+        }
+        if item.lab == "CARD":
+            shadow_identity["bookmaker_id"] = item.bookmaker_id
+            shadow_identity["policy_version"] = item.policy_version
+        shadow_bet_id = _identifier("quantlab-shadow-v1:", shadow_identity)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO quantlab_shadow_bets ("
@@ -986,6 +1003,194 @@ class PostgreSQLQuantLabRepository:
                     item.result_observation_id,
                     item.statistics_observation_id,
                     item.result_detail["result_classification"],
+                    item.outcome,
+                    item.pnl_minor,
+                    item.settled_at,
+                    item.settlement_rule_version,
+                    _json(item.result_detail),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def card_shadow_result_refresh_candidates(
+        self,
+        *,
+        now: datetime,
+        post_kickoff_delay_seconds: int = 5400,
+        refresh_after_seconds: int = 900,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return open canonical 1xBet CardLab fixtures whose result status needs refreshing."""
+        if post_kickoff_delay_seconds <= 0 or refresh_after_seconds <= 0 or limit <= 0:
+            raise ValueError("refresh settings and limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.fixture_id, f.provider_fixture_id, "
+                "latest.kickoff_at, latest.provider_status, latest.captured_at "
+                "FROM quantlab_shadow_bets q "
+                "JOIN quantlab_fixtures f ON f.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE q.lab = 'CARD' AND q.bookmaker_id = 11 AND q.provider_bet_id = 119 "
+                "AND q.market_key = 'TOTAL_CARDS' "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND latest.provider_status NOT IN "
+                "('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
+                "AND latest.captured_at <= %s - (%s * interval '1 second') "
+                "ORDER BY q.fixture_id, q.decision_at ASC LIMIT %s",
+                (
+                    now,
+                    post_kickoff_delay_seconds,
+                    now,
+                    refresh_after_seconds,
+                    limit,
+                ),
+            )
+            return _row_dicts(cursor)
+
+    def card_event_capture_candidates(
+        self,
+        *,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return played 1xBet CardLab fixtures that still need a canonical events capture."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.fixture_id, f.provider_fixture_id, "
+                "latest.provider_status "
+                "FROM quantlab_shadow_bets q "
+                "JOIN quantlab_fixtures f ON f.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE q.lab = 'CARD' AND q.bookmaker_id = 11 AND q.provider_bet_id = 119 "
+                "AND q.market_key = 'TOTAL_CARDS' "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_event_observations ce "
+                " WHERE ce.fixture_id = q.fixture_id "
+                " AND ce.settlement_rule_version = 'CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1'"
+                ") "
+                "ORDER BY q.fixture_id, q.decision_at ASC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def save_card_event_observation(self, item: Any) -> bool:
+        """Persist one immutable canonical 1xBet card-events observation."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_card_event_observations ("
+                "card_event_observation_id, fixture_id, provider_fixture_id, "
+                "total_cards_1xbet, qualifying_event_count, available_at, "
+                "settlement_rule_version, event_payload, raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    item.card_event_observation_id,
+                    item.fixture_id,
+                    item.provider_fixture_id,
+                    item.total_cards_1xbet,
+                    item.qualifying_event_count,
+                    item.available_at,
+                    item.settlement_rule_version,
+                    _json(item.event_payload),
+                    _json(item.raw_payload),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def card_shadow_settlement_candidates(
+        self,
+        *,
+        limit: int = 500,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return settleable canonical 1xBet CardLab shadow bets."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT q.shadow_bet_id, q.fixture_id, q.bookmaker_id, q.provider_bet_id, "
+                "q.market_key, q.selection, q.line, q.odds, q.stake_minor, "
+                "result.fixture_observation_id, result.provider_status, "
+                "CASE "
+                " WHEN result.provider_status IN ('FT', 'AET', 'PEN') "
+                " THEN 'PLAYED_SETTLEABLE' "
+                " WHEN result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
+                " THEN 'NON_PLAYED_VOIDABLE' "
+                " ELSE NULL END AS result_classification, "
+                "card.card_event_observation_id, card.total_cards_1xbet "
+                "FROM quantlab_shadow_bets q "
+                "JOIN LATERAL ("
+                " SELECT o.fixture_observation_id, o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") result ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT ce.card_event_observation_id, ce.total_cards_1xbet "
+                " FROM quantlab_card_event_observations ce "
+                " WHERE ce.fixture_id = q.fixture_id "
+                " AND ce.settlement_rule_version = 'CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1' "
+                " ORDER BY ce.available_at DESC, ce.card_event_observation_id DESC LIMIT 1"
+                ") card ON TRUE "
+                "WHERE q.lab = 'CARD' AND q.bookmaker_id = 11 AND q.provider_bet_id = 119 "
+                "AND q.market_key = 'TOTAL_CARDS' "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND result.provider_status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND (result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
+                " OR card.card_event_observation_id IS NOT NULL) "
+                "ORDER BY q.decision_at ASC, q.shadow_bet_id ASC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def save_card_settlement_event(self, item: Any) -> bool:
+        """Append one immutable canonical 1xBet CardLab settlement."""
+        event_id = _identifier(
+            "quantlab-card-settlement-event-v1:",
+            {
+                "shadow_bet_id": item.shadow_bet_id,
+                "fixture_observation_id": item.fixture_observation_id,
+                "card_event_observation_id": item.card_event_observation_id,
+                "outcome": item.outcome,
+                "settlement_rule_version": item.settlement_rule_version,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_card_settlement_events ("
+                "card_settlement_event_id, shadow_bet_id, fixture_id, "
+                "fixture_observation_id, card_event_observation_id, outcome, pnl_minor, "
+                "occurred_at, settlement_rule_version, result_detail"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    event_id,
+                    item.shadow_bet_id,
+                    item.fixture_id,
+                    item.fixture_observation_id,
+                    item.card_event_observation_id,
                     item.outcome,
                     item.pnl_minor,
                     item.settled_at,

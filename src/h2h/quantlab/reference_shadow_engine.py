@@ -318,10 +318,10 @@ class ReferenceShadowPickEngine:
             (pair, self._settlement_contract_status(pair))
             for pair in market_pairs
         )
-        pairs = tuple(
+        supported_targets = tuple(
             pair for pair, contract in contract_rows if bool(contract.get("supported"))
         )
-        if not pairs:
+        if not supported_targets:
             contracts = sorted(
                 (dict(contract) for _, contract in contract_rows),
                 key=lambda item: (
@@ -338,7 +338,7 @@ class ReferenceShadowPickEngine:
             )
 
         groups: dict[tuple[int, float], list[dict[str, Any]]] = {}
-        for pair in pairs:
+        for pair in market_pairs:
             key = (int(pair["provider_bet_id"]), float(pair["line"]))
             groups.setdefault(key, []).append(pair)
         cross_book = {
@@ -356,6 +356,9 @@ class ReferenceShadowPickEngine:
         evaluated: list[dict[str, Any]] = []
         for rows in cross_book.values():
             for target in rows:
+                settlement_contract = self._settlement_contract_status(target)
+                if not bool(settlement_contract.get("supported")):
+                    continue
                 references = [
                     row
                     for row in rows
@@ -430,6 +433,7 @@ class ReferenceShadowPickEngine:
                             "target_age_seconds": target_age,
                             "reference_age_seconds": reference_age,
                             "seconds_to_kickoff": seconds_to_kickoff,
+                            "settlement_contract": dict(settlement_contract),
                             "reason": reason,
                         }
                     )
@@ -550,6 +554,7 @@ class ReferenceShadowPickEngine:
                     "reference_quote_age_seconds": item["reference_age_seconds"],
                     "seconds_to_kickoff": item["seconds_to_kickoff"],
                     "card_context": card_context if self._policy.lab == "CARD" else None,
+                    "settlement_contract": item["settlement_contract"],
                     "thresholds": {
                         "min_edge": self._policy.min_edge,
                         "min_expected_value": self._policy.min_expected_value,

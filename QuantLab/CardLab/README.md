@@ -52,12 +52,12 @@ QuantLab is shadow-only and does not write production picks, bankroll or model s
 
 ## Shadow Pick Engine / settlement authority
 
-The current decision policy is `CARDLAB_REFERENCE_CONTEXT_POLICY_V2_SETTLEMENT_GATED`.
+The current decision policy is `CARDLAB_REFERENCE_CONTEXT_POLICY_V3_1XBET_ONLY`.
 
-The previous V1 research evaluator could identify value candidates before CardLab had a
-canonical sportsbook settlement contract. V2 fails closed: a candidate may become a
-shadow PICK only when the exact provider market and bookmaker have an explicitly verified
-settlement contract.
+The previous policies could identify value candidates before CardLab had a canonical
+sportsbook settlement contract. V3 is 1xBet-only for PICK registration: 1xBet is the
+target/settled bookmaker, while Bet365 may be used only as an independent fair-price
+reference for the existing cross-book probability model.
 
 The CardLab evaluator uses the same conservative cross-book fair-reference mechanism as
 CornerLab for supported full-match total-card half-lines, then requires timestamp-safe
@@ -76,11 +76,10 @@ The evaluator adds zero provider requests and writes only QuantLab decision/shad
 
 ### Current settlement status
 
-API-Football's pre-match market catalog identifies bet ID 119 as `Total Cards`. QuantBet
-preserves that identity, but the provider feed does not itself define bookmaker-specific
-yellow/red/second-yellow settlement weighting. Therefore Bet365/1xBet `Total Cards`
-remain visible research markets but are **not PICK-authorized** yet.
+API-Football's pre-match catalog identifies bet ID 119 as `Total Cards`. Under V3,
+only bookmaker ID 11 (1xBet) is PICK-authorized. Bet365 is reference-only.
 
-Such candidates are recorded as `PASS / NO_CANONICAL_SETTLEMENT_CONTRACT`, including the
-contract status in decision evidence. This is intentional: CardLab must not publish ROI,
-win rate or P&L for a market whose settlement semantics have not been verified.
+1xBet settlement is reproduced from `/fixtures/events`: regular time including stoppage
+time, extra time excluded, player card events only, with a player's contribution capped at
+two cards so a second-bookable dismissal cannot be double-counted. Card event observations
+and settlement events are append-only.

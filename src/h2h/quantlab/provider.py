@@ -162,3 +162,13 @@ class QuantLabApiFootballClient:
             {"fixture": fixture_id},
             cache_ttl_seconds=86400.0,
         )
+
+    def fetch_events(self, fixture_id: int) -> Mapping[str, Any]:
+        """Fetch the fixture timeline used for CardLab settlement."""
+        if isinstance(fixture_id, bool) or not isinstance(fixture_id, int) or fixture_id <= 0:
+            raise ValueError("fixture_id must be a positive integer")
+        return self._get(
+            "fixtures/events",
+            {"fixture": fixture_id},
+            cache_ttl_seconds=86400.0,
+        )
