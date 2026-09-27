@@ -81,11 +81,19 @@ class PostgreSQLQuantLabRepository:
             found = {row[0] for row in cursor.fetchall()}
             return found == set(required)
 
-    def list_bets(self, lab: str, *, limit: int = 5000) -> tuple[dict[str, Any], ...]:
+    def list_bets(
+        self,
+        lab: str,
+        *,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
         if lab not in {"GOAL", "CORNER", "CARD"}:
             raise ValueError("unsupported QuantLab lab")
         if limit <= 0:
             raise ValueError("limit must be positive")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT q.shadow_bet_id, q.fixture_id, q.lab, q.bookmaker_id, "
@@ -120,8 +128,9 @@ class PostgreSQLQuantLabRepository:
                 " FROM fixture_observations o WHERE o.fixture_id = q.fixture_id "
                 " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") platest ON TRUE "
-                "WHERE q.lab = %s ORDER BY q.decision_at DESC, q.shadow_bet_id DESC LIMIT %s",
-                (lab, limit),
+                "WHERE q.lab = %s ORDER BY q.decision_at DESC, q.shadow_bet_id DESC "
+                "LIMIT %s OFFSET %s",
+                (lab, limit, offset),
             )
             rows = _row_dicts(cursor)
         for row in rows:
@@ -130,6 +139,25 @@ class PostgreSQLQuantLabRepository:
                 if isinstance(value, str):
                     row[key] = json.loads(value)
         return rows
+
+    def list_all_bets(
+        self,
+        lab: str,
+        *,
+        batch_size: int = 5000,
+    ) -> tuple[dict[str, Any], ...]:
+        if lab not in {"GOAL", "CORNER", "CARD"}:
+            raise ValueError("unsupported QuantLab lab")
+        if batch_size <= 0 or batch_size > 5000:
+            raise ValueError("batch_size must be between 1 and 5000")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = self.list_bets(lab, limit=batch_size, offset=offset)
+            rows.extend(batch)
+            if len(batch) < batch_size:
+                return tuple(rows)
+            offset += len(batch)
 
     def goal_market_pairs(
         self,
@@ -497,9 +525,16 @@ class PostgreSQLQuantLabRepository:
             )
             return cursor.rowcount > 0
 
-    def list_goal_picks(self, *, limit: int = 5000) -> tuple[dict[str, Any], ...]:
+    def list_goal_picks(
+        self,
+        *,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT p.goal_pick_id, p.fixture_id, p.source_decision_id, "
@@ -530,8 +565,8 @@ class PostgreSQLQuantLabRepository:
                 " FROM fixture_observations o WHERE o.fixture_id = p.fixture_id "
                 " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") platest ON TRUE "
-                "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s",
-                (limit,),
+                "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
             )
             rows = _row_dicts(cursor)
         for row in rows:
@@ -540,6 +575,22 @@ class PostgreSQLQuantLabRepository:
                 if isinstance(value, str):
                     row[key] = json.loads(value)
         return rows
+
+    def list_all_goal_picks(
+        self,
+        *,
+        batch_size: int = 5000,
+    ) -> tuple[dict[str, Any], ...]:
+        if batch_size <= 0 or batch_size > 5000:
+            raise ValueError("batch_size must be between 1 and 5000")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = self.list_goal_picks(limit=batch_size, offset=offset)
+            rows.extend(batch)
+            if len(batch) < batch_size:
+                return tuple(rows)
+            offset += len(batch)
 
     def goal_model_contract(self, model_version: str | None = None) -> dict[str, Any] | None:
         with self.connect() as connection, connection.cursor() as cursor:
