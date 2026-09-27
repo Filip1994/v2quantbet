@@ -1,6 +1,6 @@
 # GoalLab — DC+ Pro V1
 
-Status: proposed implementation contract.
+Status: Structural V1 implemented in GoalLab draft; Late-Lineup remains separately versioned.
 
 ## Objective
 
@@ -609,11 +609,28 @@ Priority:
 
 DC Control: **no GoalLab PICK authority**.
 
-DC+ Pro Structural / Late-Lineup may gain shadow-pick authority only after:
+DC+ Pro Structural uses the separately versioned
+`GOALLAB_DC_PLUS_PICK_POLICY_V1`.
 
-- the model artifact is versioned;
-- feature provenance passes leakage audit;
-- holdout/backtest metrics are recorded;
-- the decision policy is separately versioned.
+Authority requires all of:
+
+- an immutable versioned model artifact;
+- feature provenance and leakage audit;
+- recorded chronological DC-vs-DC+ holdout metrics;
+- sufficient common holdout coverage for manual review;
+- `QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY=true`;
+- `QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION` equal to the exact model hash.
+
+A new model hash automatically pauses pick creation until explicitly approved.
+
+Canonical pick selection is one pick per fixture/pick-policy version. After candidate
+thresholds are met, candidates are ranked by expected value, edge, model probability and
+odds, with deterministic tie-breaking. The first persisted canonical pick freezes that
+fixture/policy; later qualifying observations remain decision evidence rather than new
+picks.
+
+Canonical picks and settlements are stored in dedicated append-only GoalLab tables.
+Settlement uses only stable shared result facts and regulation-score semantics for O/U 2.5
+and BTTS.
 
 No experiment may write production registered picks or bankroll state.

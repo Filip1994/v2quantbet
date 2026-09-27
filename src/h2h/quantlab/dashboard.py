@@ -15,8 +15,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
-from h2h.quantlab.scope import card_corner_scope, goal_scope
+from h2h.quantlab.scope import goal_scope
 
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
@@ -119,7 +120,10 @@ def _clv_text(ppm: int | None) -> str:
 def _drawdown(rows: tuple[dict[str, Any], ...]) -> int:
     chronological = sorted(
         (row for row in rows if row.get("pnl_minor") is not None),
-        key=lambda row: (row.get("settled_at") or row["decision_at"], row["shadow_bet_id"]),
+        key=lambda row: (
+            row.get("settled_at") or row["decision_at"],
+            row.get("goal_pick_id") or row.get("shadow_bet_id") or row["fixture_id"],
+        ),
     )
     equity = peak = 0
     max_drawdown = 0
@@ -149,7 +153,11 @@ class QuantLabDashboardService:
         lab: str,
         params: dict[str, list[str]],
     ) -> tuple[dict[str, Any], ...]:
-        rows = self._repository.list_bets(lab)
+        rows = (
+            self._repository.list_goal_picks()
+            if lab == "GOAL"
+            else self._repository.list_bets(lab)
+        )
         bookmaker = params.get("bookmaker", [""])[0].strip().casefold()
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
@@ -222,7 +230,15 @@ class QuantLabDashboardService:
                 f'<small>{escape(str(row.get("provider_bet_name") or "—"))}</small></td>'
                 f'<td>{escape(str(row.get("selection") or "—"))}</td>'
                 f"<td>{line}</td>"
-                f'<td>{escape(str(row.get("model_name") or "—"))}<small>{escape(str(row.get("model_version") or "—"))}</small></td>'
+                f'<td>{escape(str(row.get("model_name") or "—"))}'
+                f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                + (
+                    f'<small>λH {_rate(row.get("expected_home_goals"))} · '
+                    f'λA {_rate(row.get("expected_away_goals"))}</small>'
+                    if lab_key == "goal"
+                    else ""
+                )
+                + "</td>"
                 f"<td>{_pct(row.get('model_probability'))}</td>"
                 f"<td>{_odd(row.get('odds'))}</td>"
                 f"<td>{_pct(row.get('edge'))}</td>"
@@ -234,14 +250,118 @@ class QuantLabDashboardService:
                 "</tr>"
             )
         if not rows_html:
+            empty_text = (
+                "No GoalLab canonical picks yet. Pick authority may still be OFF."
+                if lab_key == "goal"
+                else f"No {escape(title)} shadow bets yet. The ledger is ready for QuantLab ingestion."
+            )
             rows_html = (
                 '<tr><td class="empty" colspan="14">'
-                f'No {escape(title)} shadow bets yet. The ledger is ready for QuantLab ingestion.'
+                f"{empty_text}"
                 "</td></tr>"
             )
 
+        goal_contract_html = ""
         goal_pipeline_html = ""
         if lab_key == "goal":
+            contract = self._repository.goal_model_contract()
+            if contract is None:
+                goal_contract_html = (
+                    '<section class="table-shell context-table">'
+                    '<div class="table-title"><b>DC+ model contract</b><span>NO ARTIFACT</span></div>'
+                    '<div class="empty">No trained DC+ Structural artifact is stored yet.</div>'
+                    '</section>'
+                )
+            else:
+                training = contract.get("training_payload")
+                training = training if isinstance(training, dict) else {}
+                coverage = training.get("contract_coverage")
+                coverage = coverage if isinstance(coverage, dict) else {}
+                coverage_rows = ""
+                for block_name, coverage_item in coverage.items():
+                    if not isinstance(coverage_item, dict):
+                        continue
+                    status = str(coverage_item.get("status") or "UNKNOWN")
+                    implemented = coverage_item.get("implemented")
+                    pending = coverage_item.get("pending")
+                    coverage_rows += (
+                        "<tr>"
+                        f"<td><b>{escape(str(block_name))}</b></td>"
+                        f"<td>{escape(status)}</td>"
+                        f"<td>{len(implemented) if isinstance(implemented, list) else 0}</td>"
+                        f"<td>{len(pending) if isinstance(pending, list) else 0}</td>"
+                        f"<td>{escape(str(coverage_item.get('pending_reason') or '—'))}</td>"
+                        "</tr>"
+                    )
+                active_features = tuple(contract.get("active_feature_names") or ())
+                active_feature_text = " · ".join(
+                    escape(str(item)) for item in active_features
+                )
+                authority_raw = os.getenv(
+                    "QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false"
+                ).strip().casefold()
+                authority = authority_raw in {"1", "true", "yes", "on"}
+                approved_model_version = (
+                    os.getenv(
+                        "QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION", ""
+                    ).strip()
+                    or None
+                )
+                current_model_version = str(contract.get("model_version") or "")
+                model_approved = approved_model_version == current_model_version
+                authority_text = (
+                    "APPROVED"
+                    if authority and model_approved
+                    else "REQUESTED / MODEL NOT APPROVED"
+                    if authority
+                    else "OFF"
+                )
+                validation = contract.get("validation")
+                validation = validation if isinstance(validation, dict) else {}
+                validation_status = str(validation.get("status") or "PENDING")
+                review_status = str(
+                    validation.get("authority_review_status") or "NOT_READY"
+                )
+                common_n = int(validation.get("common_evaluation_size") or 0)
+                comparison = validation.get("comparison")
+                comparison = comparison if isinstance(comparison, dict) else {}
+                ll_delta = comparison.get(
+                    "dc_plus_minus_control_exact_score_mean_log_likelihood"
+                )
+                rmse_delta = comparison.get(
+                    "dc_plus_minus_control_total_goals_rmse"
+                )
+                over_delta = comparison.get("dc_plus_minus_control_over25_brier")
+                btts_delta = comparison.get("dc_plus_minus_control_btts_brier")
+                validation_text = (
+                    f"validation={validation_status} · review={review_status} · "
+                    f"model approved={'YES' if model_approved else 'NO'} · "
+                    f"common n={common_n} · "
+                    f"ΔLL={_rate(ll_delta)} · ΔRMSE={_rate(rmse_delta)} · "
+                    f"ΔO2.5 Brier={_rate(over_delta)} · ΔBTTS Brier={_rate(btts_delta)}"
+                )
+                goal_contract_html = (
+                    '<section class="table-shell context-table">'
+                    '<div class="table-title"><b>DC+ model contract / active variables</b>'
+                    f'<span>{int(contract.get("active_feature_count") or 0)} active features · '
+                    f'pick authority {authority_text}</span></div>'
+                    '<div class="contract-summary">'
+                    f'<b>{escape(str(contract.get("model_version") or "—"))}</b>'
+                    f'<small>{escape(str(contract.get("feature_version") or "—"))} · '
+                    f'train n={int(contract.get("training_sample_size") or 0)} · '
+                    f'history n={int(contract.get("history_match_count") or 0)} · '
+                    f'ρ={_rate(contract.get("rho"))} · '
+                    f'policy={escape(PICK_POLICY_VERSION)}</small>'
+                    f'<small>{escape(validation_text)}</small>'
+                    '</div>'
+                    '<div class="table"><table><thead><tr>'
+                    '<th>Contract block</th><th>Status</th><th>Implemented</th>'
+                    '<th>Pending</th><th>Reason</th>'
+                    f'</tr></thead><tbody>{coverage_rows}</tbody></table></div>'
+                    '<details class="feature-details"><summary>Exact active model features</summary>'
+                    f'<div class="feature-list">{active_feature_text or "—"}</div></details>'
+                    '</section>'
+                )
             pipeline_rows = self._repository.list_goal_fixture_status(now=datetime.now(UTC))
             rendered_pipeline = ""
             for item in pipeline_rows:
@@ -253,7 +373,6 @@ class QuantLabDashboardService:
                     "away_team": item.get("away_team"),
                 }
                 goal_allowed = goal_scope(**scope).allowed
-                context_allowed = card_corner_scope(**scope).allowed
                 decision = str(item.get("decision") or "WAITING")
                 reason = str(item.get("reason") or "NO_DECISION_YET")
                 decision_class = (
@@ -276,7 +395,6 @@ class QuantLabDashboardService:
                     "<tr>"
                     f'<td class="match"><b>{match}</b><small>{escape(str(item.get("competition_name") or "—"))} · {_time(item.get("kickoff_at"))}</small></td>'
                     f'<td>{"YES" if goal_allowed else "NO"}</td>'
-                    f'<td>{"YES" if context_allowed else "NO"}</td>'
                     f'<td>{_time(item.get("market_captured_at"))}</td>'
                     f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
                     f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
@@ -286,7 +404,7 @@ class QuantLabDashboardService:
                 )
             if not rendered_pipeline:
                 rendered_pipeline = (
-                    '<tr><td class="empty" colspan="8">'
+                    '<tr><td class="empty" colspan="7">'
                     'No upcoming QuantLab fixtures are stored in the current lookahead window.'
                     "</td></tr>"
                 )
@@ -295,9 +413,8 @@ class QuantLabDashboardService:
                 '<div class="table-title"><b>Upcoming fixture / GoalLab decision pipeline</b>'
                 f'<span>{len(pipeline_rows)} fixtures</span></div>'
                 '<div class="table"><table><thead><tr>'
-                '<th>Match</th><th>Goal scope</th><th>Card/Corner scope</th>'
-                '<th>Last odds capture</th><th>Decision</th><th>Model</th>'
-                '<th>Candidate</th><th>Edge / EV</th>'
+                '<th>Match</th><th>Goal scope</th><th>Last odds capture</th>'
+                '<th>Decision</th><th>Model</th><th>Candidate</th><th>Edge / EV</th>'
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
@@ -345,7 +462,7 @@ class QuantLabDashboardService:
 
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
-            ("Shadow bets", str(len(rows))),
+            ("Canonical picks" if lab_key == "goal" else "Shadow bets", str(len(rows))),
             ("Settled", str(len(settled))),
             ("P&L", _money(pnl, self._currency)),
             ("ROI", "—" if roi is None else f"{roi * 100:+.2f}%"),
@@ -357,6 +474,21 @@ class QuantLabDashboardService:
         cards_html = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
             for label, value in cards
+        )
+
+        lab_note = (
+            "GoalLab DC+ · one canonical research pick per fixture/policy · flat stake · "
+            "immutable settlement ledger · pick authority is explicit."
+            if lab_key == "goal"
+            else (
+                "Bet365 + 1xBet universe · flat shadow ledger · identical P&L / ROI / "
+                "CLV definitions."
+            )
+        )
+        ledger_title = (
+            "GoalLab canonical picks"
+            if lab_key == "goal"
+            else f"{title} shadow ledger"
         )
 
         return f"""<!doctype html>
@@ -384,20 +516,24 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
 .context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
+.contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
+.feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
+.feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
 footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
-<p class="lab-note">Bet365 + 1xBet universe · flat shadow ledger · identical P&amp;L / ROI / CLV definitions across all three labs.</p>
+<p class="lab-note">{escape(lab_note)}</p>
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
 <section class="toolbar"><form method="get"><input type="hidden" name="lab" value="{escape(lab_key, quote=True)}">
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
+{goal_contract_html}
 {goal_pipeline_html}
 {card_context_html}
-<section class="table-shell"><div class="table-title"><b>{escape(title)} shadow ledger</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
+<section class="table-shell"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
 <th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
 <footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; CardLab = card/referee models. Times are Europe/Belgrade.</footer>

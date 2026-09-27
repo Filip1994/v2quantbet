@@ -6,17 +6,28 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
-def parse_fixture_statistics_coverage(
+COVERAGE_KEYS = (
+    "statistics_fixtures",
+    "statistics_players",
+    "lineups",
+    "standings",
+    "players",
+    "injuries",
+    "predictions",
+    "odds",
+)
+
+
+def parse_league_coverage_flags(
     payload: Mapping[str, Any],
     *,
     league_id: int,
     season: int,
-) -> bool | None:
-    """Return statistics_fixtures coverage for one exact league-season.
+) -> dict[str, bool | None]:
+    """Return known coverage flags for one exact league-season.
 
-    None means the provider response did not contain an unambiguous boolean flag.
-    It is not converted to False because missing coverage metadata is not evidence
-    that fixture statistics are unavailable.
+    None means the provider response did not expose an unambiguous boolean. Missing
+    metadata is never converted to False.
     """
     if league_id <= 0 or season <= 0:
         raise ValueError("league_id and season must be positive")
@@ -27,6 +38,7 @@ def parse_fixture_statistics_coverage(
     if not isinstance(response, Sequence) or isinstance(response, (str, bytes)):
         raise TypeError("API-Football leagues response must be a list")
 
+    result = {key: None for key in COVERAGE_KEYS}
     for item in response:
         if not isinstance(item, Mapping):
             continue
@@ -53,10 +65,34 @@ def parse_fixture_statistics_coverage(
                 continue
             coverage = season_item.get("coverage")
             if not isinstance(coverage, Mapping):
-                return None
+                return result
             fixtures = coverage.get("fixtures")
-            if not isinstance(fixtures, Mapping):
-                return None
-            value = fixtures.get("statistics_fixtures")
-            return value if isinstance(value, bool) else None
-    return None
+            if isinstance(fixtures, Mapping):
+                for key in ("statistics_fixtures", "statistics_players", "lineups"):
+                    value = fixtures.get(key)
+                    result[key] = value if isinstance(value, bool) else None
+            for key in (
+                "standings",
+                "players",
+                "injuries",
+                "predictions",
+                "odds",
+            ):
+                value = coverage.get(key)
+                result[key] = value if isinstance(value, bool) else None
+            return result
+    return result
+
+
+def parse_fixture_statistics_coverage(
+    payload: Mapping[str, Any],
+    *,
+    league_id: int,
+    season: int,
+) -> bool | None:
+    """Backward-compatible fixture-statistics coverage accessor."""
+    return parse_league_coverage_flags(
+        payload,
+        league_id=league_id,
+        season=season,
+    )["statistics_fixtures"]

@@ -21,7 +21,14 @@ from h2h.quantlab.corner_lab.readiness_audit import (
 from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_holdout
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
+from h2h.quantlab.goal_lab.audit import ensure_latest_goal_model_validation
+from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
+from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
+from h2h.quantlab.goal_lab.structural_shadow_engine import (
+    GoalLabStructuralShadowEngine,
+    StructuralGoalPolicy,
+)
 from h2h.quantlab.provider import QuantLabApiFootballClient
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -59,13 +66,23 @@ def _positive_integer(name: str, default: str) -> int:
     return value
 
 
+def _boolean(name: str, default: str = "false") -> bool:
+    value = os.getenv(name, default).strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: int = 20) -> None:
-    """Emit a bounded read-only snapshot for operational inspection."""
-    for row in repository.list_bets("GOAL", limit=limit):
+    """Emit the dedicated canonical GoalLab pick sector."""
+    for row in repository.list_goal_picks(limit=limit):
         LOGGER.info(
-            "QuantLab GoalLab shadow pick fixture=%s match=%s vs %s league=%s "
-            "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
-            "model_p=%s market_p=%s edge=%s ev=%s",
+            "GoalLab canonical pick fixture=%s match=%s vs %s league=%s "
+            "kickoff=%s bookmaker=%s market=%s selection=%s odds=%s "
+            "model_p=%s market_p=%s edge=%s ev=%s lambda_home=%s lambda_away=%s "
+            "outcome=%s pnl_minor=%s model_version=%s",
             row.get("fixture_id"),
             row.get("home_team"),
             row.get("away_team"),
@@ -74,12 +91,16 @@ def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: i
             row.get("bookmaker_name"),
             row.get("market_key"),
             row.get("selection"),
-            row.get("line"),
             row.get("odds"),
             row.get("model_probability"),
             row.get("market_probability"),
             row.get("edge"),
             row.get("expected_value"),
+            row.get("expected_home_goals"),
+            row.get("expected_away_goals"),
+            row.get("outcome") or "PENDING",
+            row.get("pnl_minor"),
+            row.get("model_version"),
         )
 
 
@@ -119,7 +140,25 @@ def main() -> None:
         PostgreSQLDixonColesModelVersionRepository(database_url),
         PostgreSQLActiveDixonColesModelRepository(database_url),
     )
-    goal_engine = GoalLabShadowPickEngine(repository, model_loader)
+    goal_control_engine = GoalLabShadowPickEngine(repository, model_loader)
+    goal_pick_authority = _boolean("QUANTBET_QUANTLAB_GOAL_PICK_AUTHORITY", "false")
+    approved_goal_model_version = (
+        os.getenv("QUANTBET_QUANTLAB_GOAL_APPROVED_MODEL_VERSION", "").strip() or None
+    )
+    goal_structural_engine = GoalLabStructuralShadowEngine(
+        repository,
+        policy=StructuralGoalPolicy(
+            pick_authority=goal_pick_authority,
+            approved_model_version=approved_goal_model_version,
+        ),
+    )
+    LOGGER.info(
+        "GoalLab DC+ pick authority=%s approved_model=%s policy=%s",
+        goal_pick_authority,
+        approved_goal_model_version,
+        PICK_POLICY_VERSION,
+    )
+    goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
 
@@ -150,8 +189,35 @@ def main() -> None:
             feature_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_FEATURE_REFRESH_SECONDS", "1800"
             ),
+            goal_injury_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_INJURY_REFRESH_SECONDS", "14400"
+            ),
+            goal_lineup_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_LINEUP_REFRESH_SECONDS", "900"
+            ),
+            goal_lineup_window_minutes=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_LINEUP_WINDOW_MINUTES", "120"
+            ),
+            goal_coach_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_COACH_REFRESH_SECONDS", "86400"
+            ),
             history_backfill_per_cycle=_integer(
                 "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
+            ),
+            goal_team_history_last=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_LAST", "15"
+            ),
+            goal_team_history_teams_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_TEAMS_PER_CYCLE", "120"
+            ),
+            goal_team_statistics_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_STATS_PER_CYCLE", "360"
+            ),
+            goal_player_history_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_PLAYER_HISTORY_PER_CYCLE", "60"
+            ),
+            goal_team_history_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_GOAL_TEAM_HISTORY_REFRESH_SECONDS", "21600"
             ),
             corner_team_history_last=_positive_integer(
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_LAST", "12"
@@ -210,6 +276,10 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
+                try:
+                    ensure_latest_goal_model_validation(repository, LOGGER)
+                except Exception:
+                    LOGGER.exception("GoalLab DC+ validation failed")
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
                     bool(readiness["model_fit_eligible"])

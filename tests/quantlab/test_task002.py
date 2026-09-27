@@ -186,6 +186,9 @@ def test_runtime_evaluates_goal_shadow_picks_after_api_budget_stops_collection()
         def upcoming_fixtures(self, **_kwargs):
             return (fixture,)
 
+        def goal_pick_settlement_candidates(self, **_kwargs):
+            return ()
+
     class ExhaustedProvider:
         def fetch_fixtures_for_date(self, _fixture_date):
             raise ApiBudgetExceededError("exhausted")
@@ -220,11 +223,11 @@ def test_goal_pick_operational_snapshot_is_bounded_and_read_only():
         def __init__(self):
             self.calls = []
 
-        def list_bets(self, lab, *, limit):
-            self.calls.append((lab, limit))
+        def list_goal_picks(self, *, limit):
+            self.calls.append(limit)
             return ()
 
     repo = SnapshotRepo()
     _log_latest_goal_picks(repo, limit=7)
 
-    assert repo.calls == [("GOAL", 7)]
+    assert repo.calls == [7]
