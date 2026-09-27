@@ -14,7 +14,10 @@ from h2h.quantlab.card_lab.model import (
     MODEL_VERSION,
     total_cards_probability,
 )
-from h2h.quantlab.card_lab.settlement_contract import card_settlement_contract_status
+from h2h.quantlab.card_lab.settlement_contract import (
+    API_FOOTBALL_CARDS_OVER_UNDER_BET_ID,
+    card_settlement_contract_status,
+)
 from h2h.quantlab.reference_shadow_engine import (
     ContextMarketDecision,
     ReferenceEngineResult,
@@ -22,10 +25,10 @@ from h2h.quantlab.reference_shadow_engine import (
 from h2h.quantlab.scope import card_corner_scope
 
 
-POLICY_VERSION = "CARDLAB_1XBET_POISSON_POLICY_V4"
+POLICY_VERSION = "CARDLAB_1XBET_POISSON_POLICY_V5_MARKET80"
 MARKET_KEY = "TOTAL_CARDS"
 BOOKMAKER_ID = 11
-PROVIDER_BET_ID = 119
+PROVIDER_BET_ID = API_FOOTBALL_CARDS_OVER_UNDER_BET_ID
 MIN_EDGE = 0.03
 MIN_EXPECTED_VALUE = 0.03
 MIN_ODDS = 1.40
@@ -101,7 +104,7 @@ def _supported_market(pair: dict[str, Any]) -> bool:
 
 
 class CardLabShadowPickEngine:
-    """Evaluate only 1xBet Total Cards against CardLab's own probability model."""
+    """Evaluate only 1xBet Cards Over/Under against CardLab's own probability model."""
 
     def __init__(self, repository: Any) -> None:
         self._repository = repository
@@ -240,7 +243,7 @@ class CardLabShadowPickEngine:
             return self._fixture_pass(
                 fixture,
                 now,
-                reason="NO_1XBET_TOTAL_CARDS_MARKET",
+                reason="NO_1XBET_CARDS_OVER_UNDER_MARKET",
             )
 
         evaluated: list[dict[str, Any]] = []
