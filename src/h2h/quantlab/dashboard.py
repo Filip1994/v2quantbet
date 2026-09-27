@@ -187,7 +187,7 @@ class QuantLabDashboardService:
         dashboard_warnings: list[str] = []
         try:
             rows = self._filtered_rows(lab, params)
-        except Exception:  # noqa: BLE001
+        except Exception:
             if lab_key != "goal":
                 raise
             LOGGER.exception("GoalLab dashboard canonical-pick ledger query failed")
@@ -276,7 +276,7 @@ class QuantLabDashboardService:
         if lab_key == "goal":
             try:
                 contract = self._repository.goal_model_contract()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 LOGGER.exception("GoalLab dashboard model-contract query failed")
                 dashboard_warnings.append("DC+ model contract temporarily unavailable.")
                 contract = None
@@ -381,7 +381,7 @@ class QuantLabDashboardService:
                 pipeline_rows = self._repository.list_goal_fixture_status(
                     now=datetime.now(UTC)
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 LOGGER.exception("GoalLab dashboard fixture-pipeline query failed")
                 dashboard_warnings.append("Upcoming GoalLab pipeline temporarily unavailable.")
                 pipeline_rows = ()
@@ -594,7 +594,7 @@ class QuantLabDashboardHTTPService:
                     )
                 except (TypeError, ValueError):
                     service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     LOGGER.exception(
                         "QuantLab dashboard render failed path=%s query=%s error_class=%s",
                         parsed.path,
