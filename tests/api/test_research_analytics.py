@@ -27,6 +27,8 @@ def row(
     ev: float,
     pnl_minor: int,
     clv_ppm: int | None,
+    model_version: str = "dcm-json-v1:" + "a" * 64,
+    policy_config: str | None = "pick-policy-config-v1:" + "b" * 64,
 ):
     return {
         "fixture_id": fixture,
@@ -48,6 +50,14 @@ def row(
         "odds_bucket": "1.81–2.00",
         "disposition": "BLOCKED_EXPOSURE",
         "bookmaker": "Bet365",
+        "model_version_id": model_version,
+        "prediction_method_version": "DIXON_COLES_V1",
+        "devig_method_version": "PROPORTIONAL_TWO_WAY_V1",
+        "policy_config_fingerprint": policy_config,
+        "eligibility_policy_version": "ELIGIBILITY_V1" if policy_config else None,
+        "risk_policy_version": "RISK_V1" if policy_config else None,
+        "staking_policy_version": "FIXED_STAKE_V1" if policy_config else None,
+        "bookmaker_policy_version": "SERBIA_ALLOWLIST_V1" if policy_config else None,
         "competition_name": "Research League",
         "freshness": "FRESH",
         "kickoff_at": AS_OF,
@@ -215,13 +225,16 @@ def test_snapshot_contains_continuous_windows_cohorts_and_low_scoring_diagnostic
         as_of=AS_OF,
     )
 
-    assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V1"
+    assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V2"
     assert snapshot["windows"]["lifetime"]["n"] == 2
     assert snapshot["windows"]["last_7d"]["n"] == 2
     assert snapshot["windows"]["last_30d"]["n"] == 2
     assert snapshot["weekly"][0]["week"] == "2026-W39"
     assert snapshot["cohorts"]["market_selection"]
     assert snapshot["cohorts"]["production_filter_cube"]
+    assert snapshot["version_summary"]["mixed_model_versions"] is False
+    assert snapshot["version_summary"]["mixed_policy_configs"] is False
+    assert snapshot["cohorts"]["model_policy"][0]["graded_n"] == 2
 
     diagnostic = {
         item["diagnostic"]: item for item in snapshot["diagnostics"]
@@ -247,3 +260,50 @@ def test_repository_list_all_signals_pages_until_history_is_exhausted() -> None:
         {"fixture_id": "3"},
     )
     assert calls == [(2, 0), (2, 2)]
+
+
+
+def test_snapshot_flags_mixed_and_unrecorded_version_regimes() -> None:
+    rows = (
+        row(
+            fixture="1",
+            market="BTTS",
+            selection="YES",
+            outcome="WIN",
+            model_probability=0.60,
+            market_fair_probability=0.50,
+            odds=2.0,
+            edge=0.10,
+            ev=0.20,
+            pnl_minor=30_000,
+            clv_ppm=10_000,
+            model_version="dcm-json-v1:" + "1" * 64,
+            policy_config="pick-policy-config-v1:" + "2" * 64,
+        ),
+        row(
+            fixture="2",
+            market="BTTS",
+            selection="NO",
+            outcome="LOSS",
+            model_probability=0.60,
+            market_fair_probability=0.50,
+            odds=2.0,
+            edge=0.10,
+            ev=0.20,
+            pnl_minor=-30_000,
+            clv_ppm=-10_000,
+            model_version="dcm-json-v1:" + "3" * 64,
+            policy_config=None,
+        ),
+    )
+
+    snapshot = build_research_analytics_snapshot(
+        rows,
+        fixed_stake_minor=30_000,
+        as_of=AS_OF,
+    )
+
+    assert snapshot["version_summary"]["mixed_model_versions"] is True
+    assert snapshot["version_summary"]["mixed_policy_configs"] is True
+    assert snapshot["version_summary"]["unrecorded_policy_n"] == 1
+    assert len(snapshot["cohorts"]["model_policy"]) == 2
