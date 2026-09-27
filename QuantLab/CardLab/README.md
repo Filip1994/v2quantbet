@@ -37,9 +37,9 @@ or CornerLab unless a later separately-versioned experiment explicitly tests tha
 
 ## Market ingestion
 
-The shared QuantLab collector parses one returned Bet365/1xBet all-market payload, but
-CARD and UNCLASSIFIED rows are persisted only when the fixture passes
-CARDCORNER_MARKET_DRIVEN_V4. That scope is market-driven for senior men's football but
+The shared QuantLab collector may receive multiple approved bookmakers in one all-market
+payload, but CardLab persists CARD rows only from 1xBet (bookmaker ID 11).
+CARDCORNER_MARKET_DRIVEN_V4 remains the fixture scope for senior men's football and
 hard-rejects women's football before fixture-specific provider spend.
 
 ## Settlement warning
@@ -52,32 +52,29 @@ QuantLab is shadow-only and does not write production picks, bankroll or model s
 
 ## Shadow Pick Engine / settlement authority
 
-The current decision policy is `CARDLAB_REFERENCE_CONTEXT_POLICY_V3_1XBET_ONLY`.
+The current decision policy is `CARDLAB_1XBET_POISSON_POLICY_V4`.
 
-The previous policies could identify value candidates before CardLab had a canonical
-sportsbook settlement contract. V3 is 1xBet-only for PICK registration: 1xBet is the
-target/settled bookmaker, while Bet365 may be used only as an independent fair-price
-reference for the existing cross-book probability model.
+V4 removes cross-book pricing from CardLab completely. A CardLab PICK requires only a
+complete 1xBet `Total Cards` half-line market and the timestamp-safe CardLab feature
+snapshot.
 
-The CardLab evaluator uses the same conservative cross-book fair-reference mechanism as
-CornerLab for supported full-match total-card half-lines, then requires timestamp-safe
-CardLab context before a PICK is possible.
+The active probability model is `CARDLAB_REFEREE_POISSON_V1`:
 
-V1 requires `referee_card_rate` with at least five historical matches. OVER is admitted
-only when the referee rate is above the offered line; UNDER only when it is below. Foul
-rate, derby, table pressure and match importance are preserved in decision evidence but
-are not assigned invented probability weights.
+- expected total cards (Poisson lambda) = historical `referee_card_rate`;
+- minimum referee sample = five completed historical matches;
+- OVER/UNDER probability is calculated directly from the Poisson distribution;
+- 1xBet's own Over/Under pair is de-vigged to produce market probability;
+- edge = model probability - 1xBet market probability;
+- EV = model probability * 1xBet odds - 1.
 
-Yellow-only, red-only, bookings and booking-points markets are rejected in V1 because
-their settlement semantics are not interchangeable with the aggregate referee card-rate
-feature.
+Bet365 is not a CardLab input, reference bookmaker, PICK source or settlement source.
+Foul rate, derby, table pressure and match importance remain persisted CardLab context for
+later measured model upgrades, but V4 does not assign arbitrary weights to them.
 
-The evaluator adds zero provider requests and writes only QuantLab decision/shadow tables.
+Yellow-only, red-only, bookings and booking-points markets remain excluded. The canonical
+PICK market is API-Football bet ID 119, `Total Cards`, on 1xBet only.
 
 ### Current settlement status
-
-API-Football's pre-match catalog identifies bet ID 119 as `Total Cards`. Under V3,
-only bookmaker ID 11 (1xBet) is PICK-authorized. Bet365 is reference-only.
 
 1xBet settlement is reproduced from `/fixtures/events`: regular time including stoppage
 time, extra time excluded, player card events only, with a player's contribution capped at
