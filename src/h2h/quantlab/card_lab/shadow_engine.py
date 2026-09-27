@@ -4,17 +4,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from h2h.quantlab.card_lab.settlement_contract import card_settlement_contract_status
 from h2h.quantlab.reference_shadow_engine import (
     ReferenceShadowPickEngine,
     ReferenceShadowPolicy,
 )
 
 
-POLICY_VERSION = "CARDLAB_REFERENCE_CONTEXT_POLICY_V1"
+POLICY_VERSION = "CARDLAB_REFERENCE_CONTEXT_POLICY_V2_SETTLEMENT_GATED"
 MODEL_VERSION = "CROSS_BOOK_FAIR_REFERENCE_CARD_CONTEXT_V1"
 
 
 class CardLabShadowPickEngine(ReferenceShadowPickEngine):
+    def _settlement_contract_status(self, pair: dict[str, Any]) -> dict[str, Any]:
+        return card_settlement_contract_status(
+            provider_bet_id=int(pair["provider_bet_id"]),
+            provider_bet_name=str(pair["provider_bet_name"]),
+            bookmaker_id=int(pair["bookmaker_id"]),
+        ).payload()
+
     def __init__(self, repository: Any) -> None:
         super().__init__(
             repository,
