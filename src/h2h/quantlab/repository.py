@@ -775,16 +775,17 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("context shadow bet lab must be CORNER or CARD")
         if item.decision != "PICK":
             raise ValueError("only PICK decisions may create shadow bets")
-        shadow_bet_id = _identifier(
-            "quantlab-shadow-v1:",
-            {
-                "fixture_id": item.fixture_id,
-                "lab": item.lab,
-                "market_key": item.market_key,
-                "selection": item.selection,
-                "line": item.line,
-            },
-        )
+        shadow_identity = {
+            "fixture_id": item.fixture_id,
+            "lab": item.lab,
+            "market_key": item.market_key,
+            "selection": item.selection,
+            "line": item.line,
+        }
+        if item.lab == "CARD":
+            shadow_identity["bookmaker_id"] = item.bookmaker_id
+            shadow_identity["policy_version"] = item.policy_version
+        shadow_bet_id = _identifier("quantlab-shadow-v1:", shadow_identity)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO quantlab_shadow_bets ("
