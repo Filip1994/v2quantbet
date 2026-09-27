@@ -1226,6 +1226,21 @@ class QuantLabRuntime:
             "card_event_captures": 0,
             "card_settlements": 0,
         }
+
+        # GoalLab is the current research priority. Fit/evaluate DC+ from already
+        # persisted history and quotes before any provider-backed refresh or backfill.
+        # Fresh collection later in this cycle becomes input to the next evaluation.
+        try:
+            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+            result["goal_decisions"] = goal_decisions
+            result["goal_picks"] = goal_picks
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
+        try:
+            result["goal_settlements"] = self._settle_goal_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab settlement failed")
         # Existing CornerLab picks must settle even if collection or GoalLab model work is slow.
         try:
             refreshed_results = self._refresh_corner_pick_results(now)
@@ -1302,21 +1317,6 @@ class QuantLabRuntime:
             )
         except FeatureLeakageError:
             LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
-
-        # GoalLab evaluation uses already persisted history and quotes immediately.
-        # Provider backfill is deliberately deferred until after the evaluation so a
-        # large acquisition batch can never delay DC+ fitting or current-cycle decisions.
-        try:
-            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
-            result["goal_decisions"] = goal_decisions
-            result["goal_picks"] = goal_picks
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
-
-        try:
-            result["goal_settlements"] = self._settle_goal_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab settlement failed")
 
         if not collection_budget_exhausted:
             try:
