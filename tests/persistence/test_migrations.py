@@ -353,3 +353,18 @@ def test_cardlab_single_book_decision_migration_removes_reference_requirement() 
     assert "bookmaker_id = 11" in migration
     assert "reference_bookmaker_id IS NULL" in migration
     assert "reference_observation_id IS NULL" in migration
+
+
+def test_referee_context_backfill_uses_existing_team_history_without_provider_calls() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "047_quantlab_referee_context_backfill.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "quantlab_team_history_captures" in migration
+    assert "quantlab_fixture_context_observations" in migration
+    assert "fixture,referee" in migration
+    assert "h.captured_at" in migration
+    assert "ON CONFLICT DO NOTHING" in migration
+    assert "api-football" in migration
