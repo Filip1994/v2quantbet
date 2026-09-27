@@ -432,6 +432,7 @@ def test_runtime_settles_finished_corner_shadow_bets():
                     "line": 9.5,
                     "odds": 2.0,
                     "stake_minor": 10_000,
+                    "result_observation_id": "fixture-result-observation-v1:" + "d" * 64,
                     "result_classification": "PLAYED_SETTLEABLE",
                     "provider_status": "FT",
                     "statistics_observation_id": "stats:settled",
@@ -441,7 +442,7 @@ def test_runtime_settles_finished_corner_shadow_bets():
                 },
             )
 
-        def settle_corner_shadow_bet(self, settlement):
+        def save_corner_settlement_event(self, settlement):
             self.saved.append(settlement)
             return True
 
