@@ -808,22 +808,30 @@ class PostgreSQLQuantLabRepository:
         *,
         limit: int = 500,
     ) -> tuple[dict[str, Any], ...]:
-        """Return pending CornerLab shadow bets with terminal result evidence."""
+        """Return pending CornerLab bets from QuantLab-owned terminal result evidence."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT q.shadow_bet_id, q.fixture_id, q.market_key, q.selection, q.line, "
                 "q.odds, q.stake_minor, q.model_version, q.decision_at, "
-                "r.result_observation_id, r.provider_status, r.result_classification, "
+                "result.fixture_observation_id AS result_observation_id, "
+                "result.provider_status, "
+                "CASE "
+                " WHEN result.provider_status IN ('FT', 'AET', 'PEN') "
+                " THEN 'PLAYED_SETTLEABLE' "
+                " WHEN result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
+                " THEN 'NON_PLAYED_VOIDABLE' "
+                " ELSE NULL END AS result_classification, "
                 "stats.statistics_observation_id, stats.available_at AS statistics_available_at, "
                 "stats.home_corner_kicks, stats.away_corner_kicks "
                 "FROM quantlab_shadow_bets q "
-                "JOIN fixture_result_acquisition_states state "
-                "  ON state.fixture_id = q.fixture_id AND state.phase = 'COMPLETE' "
-                "JOIN fixture_result_observations r "
-                "  ON r.result_observation_id = state.current_observation_id "
-                " AND r.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.fixture_observation_id, o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") result ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT s.statistics_observation_id, s.available_at, "
                 "        s.home_corner_kicks, s.away_corner_kicks "
@@ -839,8 +847,8 @@ class PostgreSQLQuantLabRepository:
                 ") latest_settlement ON TRUE "
                 "WHERE q.lab = 'CORNER' "
                 "AND latest_settlement.event_kind IS NULL "
-                "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
-                "AND (r.result_classification = 'NON_PLAYED_VOIDABLE' "
+                "AND result.provider_status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND (result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
                 " OR stats.statistics_observation_id IS NOT NULL) "
                 "ORDER BY q.decision_at ASC, q.shadow_bet_id ASC LIMIT %s",
                 (limit,),
