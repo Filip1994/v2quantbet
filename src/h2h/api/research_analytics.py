@@ -223,8 +223,20 @@ def _cohort_rows(
     fixed_stake_minor: int,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+
+    def dimension_value(row: dict[str, Any], dimension: str) -> str:
+        if dimension == "policy_config_fingerprint":
+            return _version_value(
+                row,
+                dimension,
+                missing="LEGACY_UNRECORDED_POLICY",
+            )
+        if dimension == "model_version_id":
+            return _version_value(row, dimension, missing="UNRECORDED_MODEL")
+        return str(row.get(dimension) or "—")
+
     for row in rows:
-        key = tuple(str(row.get(dimension) or "—") for dimension in dimensions)
+        key = tuple(dimension_value(row, dimension) for dimension in dimensions)
         grouped[key].append(row)
 
     result: list[dict[str, Any]] = []
