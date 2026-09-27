@@ -13,7 +13,7 @@ from h2h.persistence.postgres_model_lifecycle import (
     PostgreSQLDixonColesModelVersionRepository,
 )
 from h2h.quantlab.budget import QuantLabRequestBudget
-from h2h.quantlab.card_lab.audit import log_cardlab_v4_audit
+from h2h.quantlab.card_lab.audit import log_cardlab_v5_audit
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
 from h2h.quantlab.corner_lab.audit import log_cornerlab_v2_audit
 from h2h.quantlab.corner_lab.readiness_audit import (
@@ -119,9 +119,9 @@ def main() -> None:
     LOGGER.info("QuantLab migration runner=%s", MIGRATION_RUNNER_VERSION)
 
     try:
-        log_cardlab_v4_audit(repository, LOGGER)
+        log_cardlab_v5_audit(repository, LOGGER)
     except Exception:
-        LOGGER.exception("QuantLab CardLab V4 startup audit failed")
+        LOGGER.exception("QuantLab CardLab V5 startup audit failed")
 
     try:
         log_cornerlab_v2_audit(repository, LOGGER)
@@ -287,9 +287,9 @@ def main() -> None:
                 cycle_result = runtime.run_once()
                 if cycle_result.get("card_decisions") or cycle_result.get("card_picks"):
                     try:
-                        log_cardlab_v4_audit(repository, LOGGER)
+                        log_cardlab_v5_audit(repository, LOGGER)
                     except Exception:
-                        LOGGER.exception("QuantLab CardLab V4 cycle audit failed")
+                        LOGGER.exception("QuantLab CardLab V5 cycle audit failed")
                 goal_readiness = goal_structural_engine.readiness()
                 LOGGER.info(
                     "GoalLab DC+ readiness reason=%s training_sample=%s minimum=%s "
