@@ -131,3 +131,25 @@ def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
     assert repository.labs == ["CORNER"]
     assert "CornerLab shadow ledger" in html
     assert "No CornerLab shadow bets yet" in html
+
+
+class FailingGoalRepository(StubRepository):
+    def list_goal_picks(self):
+        raise RuntimeError("ledger unavailable")
+
+    def goal_model_contract(self):
+        raise RuntimeError("contract unavailable")
+
+    def list_goal_fixture_status(self, **_kwargs):
+        raise RuntimeError("pipeline unavailable")
+
+
+def test_goal_dashboard_degrades_instead_of_returning_render_failure() -> None:
+    html = QuantLabDashboardService(FailingGoalRepository()).render_html("lab=goal")
+
+    assert "GoalLab" in html
+    assert "Canonical pick ledger temporarily unavailable." in html
+    assert "DC+ model contract temporarily unavailable." in html
+    assert "Upcoming GoalLab pipeline temporarily unavailable." in html
+    assert "No GoalLab canonical picks yet" in html
+    assert "No trained DC+ Structural artifact is stored yet." in html
