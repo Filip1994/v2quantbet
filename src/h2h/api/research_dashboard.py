@@ -699,11 +699,17 @@ class ResearchDashboardService:
         if not model_version_id:
             raise ValueError("model_version_id is required")
 
+        def belongs_to_model(row: dict[str, Any]) -> bool:
+            recorded = str(row.get("model_version_id") or "").strip()
+            if model_version_id == "UNRECORDED_MODEL":
+                return not recorded
+            return recorded == model_version_id
+
         settled = tuple(
             row
             for row in self.signals({})
             if row.get("outcome") in {"WIN", "LOSS", "VOID"}
-            and str(row.get("model_version_id") or "").strip() == model_version_id
+            and belongs_to_model(row)
         )
         rows = sorted(
             settled,
