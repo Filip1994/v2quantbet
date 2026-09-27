@@ -117,6 +117,42 @@ def _clv_text(ppm: int | None) -> str:
     return "—" if ppm is None else f"{ppm / 10_000:+.2f}%"
 
 
+def _corner_pick_note(row: dict[str, Any]) -> str:
+    expected = _number(row.get("expected_total_corners"))
+    line = _number(row.get("line"))
+    model_p = _number(row.get("model_probability"))
+    market_p = _number(row.get("market_probability"))
+    edge = _number(row.get("edge"))
+    ev = _number(row.get("expected_value"))
+    selection = str(row.get("selection") or "—")
+
+    payload = row.get("corner_feature_payload")
+    raw = payload.get("raw_features") if isinstance(payload, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+
+    def value(name: str) -> str:
+        return _rate(raw.get(name))
+
+    summary = (
+        f"Model očekuje {_rate(expected)} ukupnih kornera. "
+        f"{selection} {_rate(line)} ima modelsku verovatnoću {_pct(model_p)} "
+        f"naspram tržišne {_pct(market_p)}; edge {_pct(edge)}, EV {_pct(ev)}."
+    )
+    form = (
+        "L5 korneri za/protiv — "
+        f"domaćin {value('home_l5_corners_for')}/{value('home_l5_corners_against')}, "
+        f"gost {value('away_l5_corners_for')}/{value('away_l5_corners_against')}. "
+        "L5 šutevi — "
+        f"domaćin {value('home_l5_shots_for')} ({value('home_l5_sot_for')} u okvir), "
+        f"gost {value('away_l5_shots_for')} ({value('away_l5_sot_for')} u okvir)."
+    )
+    return (
+        '<details class="pick-note"><summary title="Zašto je sistem izabrao ovaj pik">📝</summary>'
+        f'<div class="note-popover"><b>Zašto ovaj pik</b><span>{escape(summary)}</span>'
+        f'<span>{escape(form)}</span></div></details>'
+    )
+
+
 def _drawdown(rows: tuple[dict[str, Any], ...]) -> int:
     chronological = sorted(
         (row for row in rows if row.get("pnl_minor") is not None),
@@ -222,6 +258,12 @@ class QuantLabDashboardService:
             match = f'{escape(str(row.get("home_team") or "?"))} – {escape(str(row.get("away_team") or "?"))}'
             league_text = escape(str(row.get("competition_name") or "—"))
             line = "—" if row.get("line") is None else escape(str(row["line"]))
+            note_cell = _corner_pick_note(row) if lab_key == "corner" else "—"
+            close_cell = (
+                f'<td>{_odd(row.get("closing_odds"))}<small>audit only</small></td>'
+                if lab_key == "corner"
+                else f'<td>{_odd(row.get("closing_odds"))}<small>{_clv_text(_clv_ppm(row))} CLV</small></td>'
+            )
             rows_html += (
                 "<tr>"
                 f'<td class="match"><b>{match}</b><small>{league_text} · {_time(row.get("kickoff_at"))}</small></td>'
@@ -243,8 +285,9 @@ class QuantLabDashboardService:
                 f"<td>{_odd(row.get('odds'))}</td>"
                 f"<td>{_pct(row.get('edge'))}</td>"
                 f"<td>{_pct(row.get('expected_value'))}</td>"
-                f"<td>{_odd(row.get('closing_odds'))}<small>{_clv_text(_clv_ppm(row))} CLV</small></td>"
-                f'<td><span class="badge {outcome_class}">{escape(outcome)}</span></td>'
+                + close_cell
+                + f"<td>{note_cell}</td>"
+                + f'<td><span class="badge {outcome_class}">{escape(outcome)}</span></td>'
                 f'<td class="{pnl_class}">{_money(None if pnl_minor is None else int(pnl_minor), self._currency)}</td>'
                 f"<td>{_time(row.get('decision_at'))}</td>"
                 "</tr>"
@@ -256,7 +299,7 @@ class QuantLabDashboardService:
                 else f"No {escape(title)} shadow bets yet. The ledger is ready for QuantLab ingestion."
             )
             rows_html = (
-                '<tr><td class="empty" colspan="14">'
+                '<tr><td class="empty" colspan="15">'
                 f"{empty_text}"
                 "</td></tr>"
             )
@@ -418,6 +461,29 @@ class QuantLabDashboardService:
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
+        corner_contract_html = ""
+        if lab_key == "corner":
+            corner_contract_html = (
+                '<section class="table-shell context-table">'
+                '<div class="table-title"><b>Kako CornerLab dolazi do procene</b>'
+                '<span>48 strukturnih varijabli · kvote nisu model input</span></div>'
+                '<div class="corner-model-guide">'
+                '<div><b>1. Korneri</b><span>Korneri za i protiv obe ekipe — poslednjih 5 i 10 utakmica, plus domaći/gostujući L5.</span></div>'
+                '<div><b>2. Pritisak napada</b><span>Šutevi, šutevi u okvir, blokirani šutevi i šutevi iz kaznenog prostora.</span></div>'
+                '<div><b>3. Kontrola igre</b><span>Posed, precizna dodavanja i procenat tačnih pasova.</span></div>'
+                '<div><b>4. Stil napada</b><span>Ofsajdi i venue-specific forma pomažu modelu da razlikuje način na koji tim stvara pritisak.</span></div>'
+                '<div><b>5. Odluka</b><span>Model prvo proceni očekivan ukupan broj kornera, zatim verovatnoću Over/Under linije. Pik postoji samo ako edge i EV oba prelaze 3%.</span></div>'
+                '</div>'
+                '<details class="feature-details"><summary>Tačne grupe i prozori</summary>'
+                '<div class="feature-list">'
+                'L5 obe ekipe: korneri za/protiv, posed, šutevi za/protiv, šutevi u okvir za/protiv, blokirani šutevi, šutevi iz kaznenog prostora, ofsajdi, precizna dodavanja, pass accuracy. '
+                'L10 obe ekipe: korneri za/protiv, posed, šutevi, šutevi u okvir. '
+                'Venue L5: korneri za/protiv, posed, šutevi, šutevi u okvir, šutevi iz kaznenog prostora, precizna dodavanja.'
+                '</div></details>'
+                '<div class="contract-summary"><small>Bet365/1xBet kvote služe samo za market probability, edge i EV. Ne ulaze u CornerLab model.</small></div>'
+                '</section>'
+            )
+
         card_context_html = ""
         if lab_key == "card":
             context_rows = self._repository.list_card_features()
@@ -467,7 +533,12 @@ class QuantLabDashboardService:
             ("P&L", _money(pnl, self._currency)),
             ("ROI", "—" if roi is None else f"{roi * 100:+.2f}%"),
             ("Win rate", "—" if win_rate is None else f"{win_rate * 100:.1f}%"),
-            ("Avg CLV", "—" if avg_clv is None else f"{avg_clv / 10_000:+.2f}%"),
+            (
+                "W-L" if lab_key == "corner" else "Avg CLV",
+                f"{wins}-{losses}"
+                if lab_key == "corner"
+                else ("—" if avg_clv is None else f"{avg_clv / 10_000:+.2f}%"),
+            ),
             ("Max drawdown", _money(max_dd, self._currency)),
             ("QuantLab API", f"{api_used:,} / {self._api_limit:,}"),
         )
@@ -481,8 +552,10 @@ class QuantLabDashboardService:
             "immutable settlement ledger · pick authority is explicit."
             if lab_key == "goal"
             else (
-                "Bet365 + 1xBet universe · flat shadow ledger · identical P&L / ROI / "
-                "CLV definitions."
+                "CornerLab structural model · odds are a value benchmark, not a model input · "
+                "closing movement is audit-only."
+                if lab_key == "corner"
+                else "Bet365 + 1xBet universe · flat shadow ledger."
             )
         )
         ledger_title = (
@@ -516,6 +589,7 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
 .context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
+.pick-note{{position:relative}}.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}.pick-note summary::-webkit-details-marker{{display:none}}.note-popover{{position:absolute;z-index:8;right:0;top:35px;width:360px;max-width:75vw;padding:12px;border:1px solid #3b434a;border-radius:10px;background:#111518;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:normal;line-height:1.45}}.note-popover b,.note-popover span{{display:block}}.note-popover span{{margin-top:7px;color:#b3bbc2;font-size:11px}}.corner-model-guide{{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:8px;padding:12px}}.corner-model-guide div{{border:1px solid #2d343a;border-radius:9px;background:#15191c;padding:10px}}.corner-model-guide b{{display:block;font-size:11px;margin-bottom:5px}}.corner-model-guide span{{font-size:10px;line-height:1.45;color:var(--muted)}}.contract-summary{{padding:12px 14px}}.feature-details{{padding:10px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-size:11px;font-weight:800}}.feature-list{{margin-top:8px;font-size:10px;line-height:1.55;color:var(--muted)}}
 .contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
 .feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
 .feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
@@ -532,9 +606,10 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
 {goal_contract_html}
 {goal_pipeline_html}
+{corner_contract_html}
 {card_context_html}
 <section class="table-shell"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
-<th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close / CLV</th><th>Result</th><th>P/L</th><th>Decision</th>
+<th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close audit</th><th>Why</th><th>Result</th><th>P/L</th><th>Decision</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
 <footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; CardLab = card/referee models. Times are Europe/Belgrade.</footer>
 </main></body></html>"""
