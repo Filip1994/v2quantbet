@@ -808,22 +808,30 @@ class PostgreSQLQuantLabRepository:
         *,
         limit: int = 500,
     ) -> tuple[dict[str, Any], ...]:
-        """Return pending CornerLab shadow bets with terminal result evidence."""
+        """Return pending CornerLab bets from QuantLab-owned terminal result evidence."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT q.shadow_bet_id, q.fixture_id, q.market_key, q.selection, q.line, "
                 "q.odds, q.stake_minor, q.model_version, q.decision_at, "
-                "r.result_observation_id, r.provider_status, r.result_classification, "
+                "result.fixture_observation_id AS result_observation_id, "
+                "result.provider_status, "
+                "CASE "
+                " WHEN result.provider_status IN ('FT', 'AET', 'PEN') "
+                " THEN 'PLAYED_SETTLEABLE' "
+                " WHEN result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
+                " THEN 'NON_PLAYED_VOIDABLE' "
+                " ELSE NULL END AS result_classification, "
                 "stats.statistics_observation_id, stats.available_at AS statistics_available_at, "
                 "stats.home_corner_kicks, stats.away_corner_kicks "
                 "FROM quantlab_shadow_bets q "
-                "JOIN fixture_result_acquisition_states state "
-                "  ON state.fixture_id = q.fixture_id AND state.phase = 'COMPLETE' "
-                "JOIN fixture_result_observations r "
-                "  ON r.result_observation_id = state.current_observation_id "
-                " AND r.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.fixture_observation_id, o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") result ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT s.statistics_observation_id, s.available_at, "
                 "        s.home_corner_kicks, s.away_corner_kicks "
@@ -839,11 +847,114 @@ class PostgreSQLQuantLabRepository:
                 ") latest_settlement ON TRUE "
                 "WHERE q.lab = 'CORNER' "
                 "AND latest_settlement.event_kind IS NULL "
-                "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
-                "AND (r.result_classification = 'NON_PLAYED_VOIDABLE' "
+                "AND result.provider_status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND (result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
                 " OR stats.statistics_observation_id IS NOT NULL) "
                 "ORDER BY q.decision_at ASC, q.shadow_bet_id ASC LIMIT %s",
                 (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def corner_shadow_result_refresh_candidates(
+        self,
+        *,
+        now: datetime,
+        post_kickoff_delay_seconds: int = 5400,
+        refresh_after_seconds: int = 900,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return open CornerLab fixtures whose QuantLab result status needs refreshing."""
+        if post_kickoff_delay_seconds <= 0:
+            raise ValueError("post_kickoff_delay_seconds must be positive")
+        if refresh_after_seconds <= 0:
+            raise ValueError("refresh_after_seconds must be positive")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.fixture_id, f.provider_fixture_id, "
+                "latest.kickoff_at, latest.provider_status, latest.captured_at "
+                "FROM quantlab_shadow_bets q "
+                "JOIN quantlab_fixtures f ON f.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE q.lab = 'CORNER' "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_corner_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND latest.provider_status NOT IN "
+                "('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
+                "AND latest.captured_at <= %s - (%s * interval '1 second') "
+                "ORDER BY q.fixture_id, q.decision_at ASC LIMIT %s",
+                (
+                    now,
+                    post_kickoff_delay_seconds,
+                    now,
+                    refresh_after_seconds,
+                    limit,
+                ),
+            )
+            return _row_dicts(cursor)
+
+    def corner_shadow_statistics_retry_candidates(
+        self,
+        *,
+        now: datetime,
+        retry_after_seconds: int = 1800,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return unsettled played CornerLab fixtures whose corner stats need a retry."""
+        if retry_after_seconds <= 0:
+            raise ValueError("retry_after_seconds must be positive")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.fixture_id, f.provider_fixture_id, "
+                "latest.league_id, latest.season, latest.home_team_id, latest.away_team_id, "
+                "latest.home_team, latest.away_team, latest.competition_name, latest.country, "
+                "latest.competition_type, latest.kickoff_at, latest.provider_status "
+                "FROM quantlab_shadow_bets q "
+                "JOIN quantlab_fixtures f ON f.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.league_id, o.season, o.home_team_id, o.away_team_id, "
+                "        o.home_team, o.away_team, o.competition_name, o.country, "
+                "        o.competition_type, o.kickoff_at, o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT sc.statistics_capture_id, sc.captured_at, sc.status, sc.reason "
+                " FROM quantlab_statistics_captures sc "
+                " WHERE sc.fixture_id = q.fixture_id "
+                " AND sc.reason IS DISTINCT FROM 'legacy-statistics-observation' "
+                " ORDER BY sc.captured_at DESC, sc.statistics_capture_id DESC LIMIT 1"
+                ") latest_capture ON TRUE "
+                "WHERE q.lab = 'CORNER' "
+                "AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_corner_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = q.fixture_id "
+                " AND s.home_corner_kicks IS NOT NULL AND s.away_corner_kicks IS NOT NULL"
+                ") "
+                "AND (latest_capture.statistics_capture_id IS NULL OR ("
+                " latest_capture.status = 'UNAVAILABLE' "
+                " AND latest_capture.reason IS DISTINCT FROM 'league-season-statistics-fixtures-false' "
+                " AND latest_capture.captured_at <= %s - (%s * interval '1 second')"
+                ")) "
+                "ORDER BY q.fixture_id, q.decision_at ASC LIMIT %s",
+                (now, retry_after_seconds, limit),
             )
             return _row_dicts(cursor)
 
