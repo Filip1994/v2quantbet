@@ -7,6 +7,7 @@ import os
 from threading import Event
 
 from h2h.logging_config import configure_logging
+from h2h.persistence.migrations import MIGRATION_RUNNER_VERSION
 from h2h.persistence.postgres_model_lifecycle import (
     PostgreSQLActiveDixonColesModelRepository,
     PostgreSQLDixonColesModelVersionRepository,
@@ -114,6 +115,8 @@ def main() -> None:
     repository = PostgreSQLQuantLabRepository(database_url)
     if not repository.check_database():
         raise RuntimeError("QuantLab schema is unavailable")
+
+    LOGGER.info("QuantLab migration runner=%s", MIGRATION_RUNNER_VERSION)
 
     try:
         log_cardlab_v4_audit(repository, LOGGER)
