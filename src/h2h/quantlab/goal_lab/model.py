@@ -13,11 +13,13 @@ missing-indicator features; zero is never used as a missing-value convention.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import exp, isfinite
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -35,6 +37,8 @@ from h2h.quantlab.goal_lab.players import (
 )
 from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
+
+LOGGER = logging.getLogger("quantbet.quantlab.goallab.model")
 
 FEATURE_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1"
 MODEL_NAME = "DC+ Pro Structural"
@@ -1706,7 +1710,14 @@ class GoalStructuralModelService:
         now = decision_at.astimezone(UTC)
         if self._cache_at == now:
             return
+        started_at = perf_counter()
         rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
+        history_loaded_at = perf_counter()
+        LOGGER.info(
+            "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
+            len(rows),
+            history_loaded_at - started_at,
+        )
         (
             feature_rows,
             y_home,
@@ -1720,8 +1731,24 @@ class GoalStructuralModelService:
             pairs,
             history_match_count,
         ) = _build_training(rows)
+        training_built_at = perf_counter()
+        LOGGER.info(
+            "GoalLab DC+ prepare stage=training_built history_matches=%d "
+            "training_sample=%d elapsed_seconds=%.3f",
+            history_match_count,
+            len(y_home),
+            training_built_at - history_loaded_at,
+        )
         x, model_feature_names, means, scales, base_feature_names = _prepare_features(
             feature_rows
+        )
+        features_prepared_at = perf_counter()
+        LOGGER.info(
+            "GoalLab DC+ prepare stage=features_prepared training_sample=%d "
+            "active_features=%d elapsed_seconds=%.3f",
+            len(y_home),
+            int(x.shape[1]),
+            features_prepared_at - training_built_at,
         )
         self._cache_at = now
         self._histories = histories
@@ -1740,6 +1767,12 @@ class GoalStructuralModelService:
             return
 
         training_reference = max(dates).astimezone(UTC)
+        LOGGER.info(
+            "GoalLab DC+ prepare stage=fit_started training_sample=%d active_features=%d",
+            len(y_home),
+            len(model_feature_names),
+        )
+        fit_started_at = perf_counter()
         fitted = _fit_dc_plus(
             x,
             y_home,
@@ -1750,6 +1783,15 @@ class GoalStructuralModelService:
             dates,
             model_feature_names,
             reference_time=training_reference,
+        )
+        fit_finished_at = perf_counter()
+        LOGGER.info(
+            "GoalLab DC+ prepare stage=fit_finished training_sample=%d active_features=%d "
+            "elapsed_seconds=%.3f success=%s",
+            len(y_home),
+            len(model_feature_names),
+            fit_finished_at - fit_started_at,
+            fitted is not None,
         )
         if fitted is None:
             self._artifact = None
