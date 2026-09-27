@@ -314,12 +314,12 @@ The Research dataset exists to answer:
 Until the data can answer that with reasonable stability, Production policy should remain conservative and Research should remain broad enough to observe the opportunities that Production does not take.
 
 
-## Research Analytics V1 implementation
+## Research Analytics V2 implementation
 
-Contract: `RESEARCH_ANALYTICS_V1`.
+Contract: `RESEARCH_ANALYTICS_V2`.
 
 The analytics layer is read-only and continuously recomputes from the full canonical
-Research history. Pending candidates remain in Research capture but do not contribute to
+Research history. V2 additionally stratifies settled performance by immutable model and policy\nregimes and explicitly labels legacy rows whose policy fingerprint was never recorded. Pending\ncandidates remain in Research capture but do not contribute to
 settled performance metrics until a settlement is available.
 
 V1 surfaces:

@@ -11,7 +11,7 @@ from statistics import mean, median
 from typing import Any
 
 
-ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V1"
+ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
 
 DIAGNOSTIC_BUCKETS = (
     "LOW_SCORING_EXTREME",
@@ -22,7 +22,7 @@ DIAGNOSTIC_BUCKETS = (
 
 
 def diagnostic_bucket(row: dict[str, Any]) -> str:
-    """Return the stable Research Analytics V1 diagnostic bucket for one row."""
+    """Return the stable Research Analytics V2 diagnostic bucket for one row."""
     extreme = (
         float(row["expected_value"]) >= 0.30
         or float(row["edge"]) >= 0.20
@@ -104,6 +104,46 @@ def _pct(value: float | None) -> float | None:
     return None if value is None else value * 100
 
 
+def _version_value(row: dict[str, Any], key: str, *, missing: str) -> str:
+    value = row.get(key)
+    if value is None:
+        return missing
+    rendered = str(value).strip()
+    return rendered or missing
+
+
+def _version_summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    model_versions = sorted(
+        {
+            _version_value(row, "model_version_id", missing="UNRECORDED_MODEL")
+            for row in rows
+        }
+    )
+    policy_configs = sorted(
+        {
+            _version_value(
+                row,
+                "policy_config_fingerprint",
+                missing="LEGACY_UNRECORDED_POLICY",
+            )
+            for row in rows
+        }
+    )
+    unrecorded_policy_n = sum(
+        not str(row.get("policy_config_fingerprint") or "").strip()
+        for row in rows
+    )
+    return {
+        "model_version_count": len(model_versions),
+        "policy_config_count": len(policy_configs),
+        "mixed_model_versions": len(model_versions) > 1,
+        "mixed_policy_configs": len(policy_configs) > 1,
+        "unrecorded_policy_n": unrecorded_policy_n,
+        "model_versions": model_versions,
+        "policy_configs": policy_configs,
+    }
+
+
 def cohort_metrics(
     rows: Sequence[dict[str, Any]],
     *,
@@ -183,8 +223,20 @@ def _cohort_rows(
     fixed_stake_minor: int,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+
+    def dimension_value(row: dict[str, Any], dimension: str) -> str:
+        if dimension == "policy_config_fingerprint":
+            return _version_value(
+                row,
+                dimension,
+                missing="LEGACY_UNRECORDED_POLICY",
+            )
+        if dimension == "model_version_id":
+            return _version_value(row, dimension, missing="UNRECORDED_MODEL")
+        return str(row.get(dimension) or "—")
+
     for row in rows:
-        key = tuple(str(row.get(dimension) or "—") for dimension in dimensions)
+        key = tuple(dimension_value(row, dimension) for dimension in dimensions)
         grouped[key].append(row)
 
     result: list[dict[str, Any]] = []
@@ -256,6 +308,15 @@ def build_research_analytics_snapshot(
         "bookmaker": ("bookmaker",),
         "league": ("competition_name",),
         "freshness": ("freshness",),
+        "model_version": ("model_version_id",),
+        "policy_config": ("policy_config_fingerprint",),
+        "model_policy": ("model_version_id", "policy_config_fingerprint"),
+        "decision_contract": (
+            "model_version_id",
+            "prediction_method_version",
+            "devig_method_version",
+            "policy_config_fingerprint",
+        ),
         "market_selection_model_probability": (
             "market",
             "selection",
@@ -292,6 +353,10 @@ def build_research_analytics_snapshot(
             ),
             "calibration_gap": "Observed win rate minus mean model probability, percentage points.",
             "clv": "Research close must be a later stored same-series/source pre-kickoff quote.",
+            "versioning": (
+                "Overall windows may combine versions; use model/policy/decision-contract "
+                "cohorts for regime-specific conclusions. Legacy policy rows are never inferred."
+            ),
             "sample_bands": {
                 "SIGNAL_ONLY": "<20 graded",
                 "MONITOR": "20–49 graded",
@@ -299,6 +364,7 @@ def build_research_analytics_snapshot(
                 "STABILITY_REVIEW": "100+ graded",
             },
         },
+        "version_summary": _version_summary(settled),
         "windows": {
             "lifetime": cohort_metrics(settled, fixed_stake_minor=fixed_stake_minor),
             "last_30d": cohort_metrics(since(30), fixed_stake_minor=fixed_stake_minor),
@@ -384,6 +450,22 @@ def _metrics_table(
 def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
     windows = snapshot["windows"]
     lifetime = windows["lifetime"]
+    version_summary = snapshot["version_summary"]
+    mixed_versions = (
+        version_summary["mixed_model_versions"]
+        or version_summary["mixed_policy_configs"]
+        or version_summary["unrecorded_policy_n"] > 0
+    )
+    version_notice = (
+        '<div class="version-warning"><b>MIXED / LEGACY VERSION AGGREGATE</b>'
+        f'<span>model versions={version_summary["model_version_count"]} · '
+        f'policy configs={version_summary["policy_config_count"]} · '
+        f'unrecorded policy rows={version_summary["unrecorded_policy_n"]}. '
+        'Use the version cohorts below before interpreting lifetime performance.</span></div>'
+        if mixed_versions
+        else '<div class="version-ok"><b>SINGLE VERSION REGIME</b>'
+        '<span>Lifetime cards represent one recorded model/policy regime.</span></div>'
+    )
     cards = "".join(
         (
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -405,6 +487,31 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Low-scoring extreme-value diagnostic",
         snapshot["diagnostics"],
         ("diagnostic",),
+    )
+    model_versions = _metrics_table(
+        "Model versions",
+        snapshot["cohorts"]["model_version"],
+        ("model_version_id",),
+    )
+    policy_configs = _metrics_table(
+        "Policy configurations",
+        snapshot["cohorts"]["policy_config"],
+        ("policy_config_fingerprint",),
+    )
+    model_policy = _metrics_table(
+        "Model × policy regimes",
+        snapshot["cohorts"]["model_policy"],
+        ("model_version_id", "policy_config_fingerprint"),
+    )
+    decision_contract = _metrics_table(
+        "Full decision contract",
+        snapshot["cohorts"]["decision_contract"],
+        (
+            "model_version_id",
+            "prediction_method_version",
+            "devig_method_version",
+            "policy_config_fingerprint",
+        ),
     )
     market_selection = _metrics_table(
         "Market × selection",
@@ -447,7 +554,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QuantBet Research Analytics V1</title>
+<title>QuantBet Research Analytics V2</title>
 <style>
 :root{{--bg:#111315;--panel:#181b1f;--line:#30363d;--text:#eceff1;--muted:#9299a1}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);
@@ -463,15 +570,22 @@ border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;border-bottom:1
 white-space:nowrap;text-align:left}}th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;
 font-size:10px;text-transform:uppercase;letter-spacing:.05em}}.empty{{color:var(--muted);
 text-align:center}}.definition{{padding:12px 14px;border:1px solid var(--line);
-border-radius:10px;color:var(--muted);font-size:12px}}@media(max-width:900px){{
+border-radius:10px;color:var(--muted);font-size:12px}}.version-warning,.version-ok{{
+display:flex;gap:10px;align-items:center;padding:11px 14px;margin:12px 0;border-radius:10px;
+border:1px solid var(--line);font-size:12px}}.version-warning{{background:#2a2117}}
+.version-warning b{{color:#f0b36a}}.version-ok{{background:#17251d}}.version-ok b{{color:#79c995}}
+.version-warning span,.version-ok span{{color:var(--muted)}}@media(max-width:900px){{
 .cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}}}
 </style></head><body><main>
-<header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V1</h1>
+<header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
 <p>Continuous settled-performance matrix. Read-only; no Production selection changes.</p></div>
 <div><a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
 <div class="definition">Universe: {escape(snapshot['definitions']['universe'])}
-ROI: {escape(snapshot['definitions']['roi'])}</div>
+ROI: {escape(snapshot['definitions']['roi'])}<br>
+Versioning: {escape(snapshot['definitions']['versioning'])}</div>
+{version_notice}
 <section class="cards">{cards}</section>
+{model_versions}{policy_configs}{model_policy}{decision_contract}
 {diagnostics}{market_selection}{model_probability}{fair_probability}{ev}{odds}{weekly}{cube}
 </main></body></html>"""

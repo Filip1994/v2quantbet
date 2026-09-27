@@ -11,6 +11,7 @@ from typing import Any
 
 ConnectionFactory = Callable[[], Any]
 _EVALUATION_ID = re.compile(r"^value-evaluation-v1:[0-9a-f]{64}$")
+_POLICY_FINGERPRINT = re.compile(r"^pick-policy-config-v1:[0-9a-f]{64}$")
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -23,6 +24,35 @@ def research_signal_id(evaluation_id: str) -> str:
     if not isinstance(evaluation_id, str) or _EVALUATION_ID.fullmatch(evaluation_id) is None:
         raise ValueError("evaluation_id must be a durable value-evaluation-v1 identifier")
     return "research-signal-v1:" + evaluation_id.split(":", 1)[1]
+
+
+def _policy_snapshot(
+    policy_config_fingerprint: str,
+    eligibility_policy_version: str,
+    risk_policy_version: str,
+    staking_policy_version: str,
+    bookmaker_policy_version: str,
+) -> tuple[str, str, str, str, str]:
+    if (
+        not isinstance(policy_config_fingerprint, str)
+        or _POLICY_FINGERPRINT.fullmatch(policy_config_fingerprint) is None
+    ):
+        raise ValueError("policy_config_fingerprint must be a durable policy fingerprint")
+    versions = (
+        eligibility_policy_version,
+        risk_policy_version,
+        staking_policy_version,
+        bookmaker_policy_version,
+    )
+    if any(not isinstance(value, str) or not value.strip() for value in versions):
+        raise ValueError("policy versions must be non-empty strings")
+    return (
+        policy_config_fingerprint,
+        eligibility_policy_version.strip(),
+        risk_policy_version.strip(),
+        staking_policy_version.strip(),
+        bookmaker_policy_version.strip(),
+    )
 
 
 class PostgreSQLResearchSignalRepository:
@@ -61,9 +91,21 @@ class PostgreSQLResearchSignalRepository:
         blocked_at: datetime,
         open_exposure_minor: int,
         exposure_cap_minor: int,
+        policy_config_fingerprint: str,
+        eligibility_policy_version: str,
+        risk_policy_version: str,
+        staking_policy_version: str,
+        bookmaker_policy_version: str,
     ) -> str:
         signal_id = research_signal_id(evaluation_id)
         blocked = _utc(blocked_at, "blocked_at")
+        policy = _policy_snapshot(
+            policy_config_fingerprint,
+            eligibility_policy_version,
+            risk_policy_version,
+            staking_policy_version,
+            bookmaker_policy_version,
+        )
         for name, value, allow_zero in (
             ("open_exposure_minor", open_exposure_minor, True),
             ("exposure_cap_minor", exposure_cap_minor, False),
@@ -77,9 +119,11 @@ class PostgreSQLResearchSignalRepository:
                 "INSERT INTO research_signals (research_signal_id, evaluation_id, fixture_id, "
                 "stage, block_reason, first_blocked_at, last_blocked_at, blocked_count, "
                 "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor, "
-                "qualified_at) "
+                "qualified_at, policy_config_fingerprint, eligibility_policy_version, "
+                "risk_policy_version, staking_policy_version, bookmaker_policy_version) "
                 "SELECT %s, e.evaluation_id, e.fixture_id, 'PRELIMINARY', "
-                "'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, 1, %s, %s, %s, %s "
+                "'MAX_OPEN_EXPOSURE_EXCEEDED', %s, %s, 1, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s "
                 "FROM value_evaluations e WHERE e.evaluation_id = %s "
                 "ON CONFLICT (fixture_id) DO UPDATE SET "
                 "first_open_exposure_minor = CASE WHEN research_signals.first_blocked_at "
@@ -107,6 +151,7 @@ class PostgreSQLResearchSignalRepository:
                     open_exposure_minor,
                     exposure_cap_minor,
                     blocked,
+                    *policy,
                     evaluation_id,
                 ),
             )
@@ -121,9 +166,21 @@ class PostgreSQLResearchSignalRepository:
         *,
         qualified_at: datetime,
         production_pick_id: str,
+        policy_config_fingerprint: str,
+        eligibility_policy_version: str,
+        risk_policy_version: str,
+        staking_policy_version: str,
+        bookmaker_policy_version: str,
     ) -> str:
         signal_id = research_signal_id(evaluation_id)
         qualified = _utc(qualified_at, "qualified_at")
+        policy = _policy_snapshot(
+            policy_config_fingerprint,
+            eligibility_policy_version,
+            risk_policy_version,
+            staking_policy_version,
+            bookmaker_policy_version,
+        )
         if not isinstance(production_pick_id, str) or not production_pick_id.strip():
             raise ValueError("production_pick_id must be a non-empty string")
         with self.connect() as connection, connection.cursor() as cursor:
@@ -131,9 +188,11 @@ class PostgreSQLResearchSignalRepository:
                 "INSERT INTO research_signals (research_signal_id, evaluation_id, fixture_id, "
                 "stage, block_reason, first_blocked_at, last_blocked_at, blocked_count, "
                 "first_open_exposure_minor, last_open_exposure_minor, exposure_cap_minor, "
-                "qualified_at, production_pick_id) "
+                "qualified_at, production_pick_id, policy_config_fingerprint, "
+                "eligibility_policy_version, risk_policy_version, staking_policy_version, "
+                "bookmaker_policy_version) "
                 "SELECT %s, e.evaluation_id, e.fixture_id, 'PRELIMINARY', NULL, NULL, NULL, "
-                "NULL, NULL, NULL, NULL, %s, %s FROM value_evaluations e "
+                "NULL, NULL, NULL, NULL, %s, %s, %s, %s, %s, %s, %s FROM value_evaluations e "
                 "WHERE e.evaluation_id = %s "
                 "ON CONFLICT (fixture_id) DO UPDATE SET "
                 "research_signal_id = EXCLUDED.research_signal_id, "
@@ -142,9 +201,14 @@ class PostgreSQLResearchSignalRepository:
                 "qualified_at = EXCLUDED.qualified_at, "
                 "block_reason = NULL, first_blocked_at = NULL, last_blocked_at = NULL, "
                 "blocked_count = NULL, first_open_exposure_minor = NULL, "
-                "last_open_exposure_minor = NULL, exposure_cap_minor = NULL "
+                "last_open_exposure_minor = NULL, exposure_cap_minor = NULL, "
+                "policy_config_fingerprint = EXCLUDED.policy_config_fingerprint, "
+                "eligibility_policy_version = EXCLUDED.eligibility_policy_version, "
+                "risk_policy_version = EXCLUDED.risk_policy_version, "
+                "staking_policy_version = EXCLUDED.staking_policy_version, "
+                "bookmaker_policy_version = EXCLUDED.bookmaker_policy_version "
                 "RETURNING research_signal_id",
-                (signal_id, qualified, production_pick_id.strip(), evaluation_id),
+                (signal_id, qualified, production_pick_id.strip(), *policy, evaluation_id),
             )
             row = cursor.fetchone()
             if row is None:
@@ -173,6 +237,10 @@ class PostgreSQLResearchSignalRepository:
                 "latest.home_team, latest.away_team, "
                 "latest.competition_name, latest.country, latest.kickoff_at, "
                 "latest.provider_status, e.market, e.selected_selection, e.bookmaker_key, "
+                "e.model_version_id, prediction.prediction_method_version, "
+                "e.devig_method_version, rs.policy_config_fingerprint, "
+                "rs.eligibility_policy_version, rs.risk_policy_version, "
+                "rs.staking_policy_version, rs.bookmaker_policy_version, "
                 "e.model_probability, e.selected_devig_probability, e.selected_odd, "
                 "e.edge, e.expected_value, e.quote_observed_at, e.selected_captured_at, "
                 "e.source, closing.odd, closing.observed_at, closing.captured_at, "
@@ -180,6 +248,7 @@ class PostgreSQLResearchSignalRepository:
                 "result.regulation_home_goals, result.regulation_away_goals "
                 "FROM research_signals rs "
                 "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id "
+                "JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id "
                 "JOIN fixtures f ON f.fixture_id = e.fixture_id "
                 "JOIN LATERAL (SELECT fo.home_team, fo.away_team, fo.competition_name, "
                 "fo.country, fo.kickoff_at, fo.provider_status "
@@ -209,7 +278,11 @@ class PostgreSQLResearchSignalRepository:
                 "last_open_exposure_minor", "exposure_cap_minor", "qualified_at",
                 "production_pick_id", "disposition", "home_team", "away_team",
                 "competition_name", "country", "kickoff_at", "fixture_status", "market",
-                "selection", "bookmaker", "model_probability", "market_fair_probability",
+                "selection", "bookmaker", "model_version_id", "prediction_method_version",
+                "devig_method_version", "policy_config_fingerprint",
+                "eligibility_policy_version", "risk_policy_version",
+                "staking_policy_version", "bookmaker_policy_version",
+                "model_probability", "market_fair_probability",
                 "odds", "edge", "expected_value", "quote_observed_at", "quote_captured_at",
                 "source", "closing_odds", "closing_observed_at", "closing_captured_at",
                 "result_phase", "result_classification", "result_provider_status",

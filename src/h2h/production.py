@@ -237,15 +237,21 @@ def build_production_application(
         )
 
     def record_research_signal(evaluation_id: str, blocked_at: datetime) -> None:
+        policy = application_settings.registration_policy
         exposure = registration.repository.risk_exposure_breakdown(
-            application_settings.registration_policy.bankroll_account_id,
+            policy.bankroll_account_id,
             checked_at=blocked_at,
         )
         research.record_exposure_blocked(
             evaluation_id,
             blocked_at=blocked_at,
             open_exposure_minor=int(exposure["open_exposure_minor"]),
-            exposure_cap_minor=application_settings.registration_policy.max_open_exposure_minor,
+            exposure_cap_minor=policy.max_open_exposure_minor,
+            policy_config_fingerprint=policy.fingerprint,
+            eligibility_policy_version=policy.eligibility_policy_version,
+            risk_policy_version=policy.risk_policy_version,
+            staking_policy_version=policy.staking_policy_version,
+            bookmaker_policy_version=policy.bookmaker_policy_version,
         )
 
     def record_research_production(
@@ -253,10 +259,16 @@ def build_production_application(
         production_pick_id: str,
         qualified_at: datetime,
     ) -> None:
+        policy = application_settings.registration_policy
         research.record_production_candidate(
             evaluation_id,
             qualified_at=qualified_at,
             production_pick_id=production_pick_id,
+            policy_config_fingerprint=policy.fingerprint,
+            eligibility_policy_version=policy.eligibility_policy_version,
+            risk_policy_version=policy.risk_policy_version,
+            staking_policy_version=policy.staking_policy_version,
+            bookmaker_policy_version=policy.bookmaker_policy_version,
         )
 
     opportunity = OpportunityWorker(
