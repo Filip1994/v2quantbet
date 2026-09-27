@@ -11,6 +11,10 @@ from hashlib import sha256
 from math import isfinite
 from typing import Any
 
+from h2h.quantlab.card_lab.settlement_contract import (
+    API_FOOTBALL_CARDS_OVER_UNDER_BET_ID,
+)
+
 
 SETTLEMENT_RULE_VERSION = "CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1"
 
@@ -61,10 +65,10 @@ def parse_1xbet_card_events(
     provider_fixture_id: int,
     captured_at: datetime,
 ) -> CardEventObservation:
-    """Normalize API-Football card events into the 1xBet Total Cards count.
+    """Normalize API-Football card events into the 1xBet Cards Over/Under count.
 
     API-Football exposes card timeline details as Yellow Card, Red Card and
-    Yellow-Red Card. 1xBet Total Cards counts regular time including stoppage
+    Yellow-Red Card. 1xBet Cards Over/Under counts regular time including stoppage
     time, excludes extra time, and caps a player's contribution at two cards.
     Requiring a provider player ID also prevents staff/unknown card events from
     entering the settlement count.
@@ -188,7 +192,7 @@ def settle_card_shadow_bet(
         return None
     if int(row.get("bookmaker_id") or 0) != 11:
         return None
-    if int(row.get("provider_bet_id") or 0) != 119:
+    if int(row.get("provider_bet_id") or 0) != API_FOOTBALL_CARDS_OVER_UNDER_BET_ID:
         return None
     selection = str(row.get("selection") or "").upper()
     if selection not in {"OVER", "UNDER"}:
@@ -229,7 +233,7 @@ def settle_card_shadow_bet(
             "line": line,
             "odds": odds,
             "rule": (
-                "1xBet Total Cards: regular time including stoppage; extra time excluded; "
+                "1xBet Cards Over/Under: regular time including stoppage; extra time excluded; "
                 "player card events only; max two cards per player"
             ),
         },
