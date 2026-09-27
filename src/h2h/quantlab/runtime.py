@@ -1032,6 +1032,34 @@ class QuantLabRuntime:
             settled += int(bool(self._repository.save_goal_pick_settlement(settlement)))
         return settled
 
+    def _refresh_corner_pick_results(self, now: datetime) -> int:
+        """Refresh post-match fixture status for open CornerLab picks inside QuantLab."""
+        rows = self._repository.corner_shadow_result_refresh_candidates(
+            now=now,
+            post_kickoff_delay_seconds=5400,
+            refresh_after_seconds=900,
+            limit=25,
+        )
+        refreshed = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            provider_fixture_id = int(fixture["provider_fixture_id"])
+            payload = self._provider.fetch_fixture(provider_fixture_id)
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            matching = tuple(
+                item
+                for item in observations
+                if str(item.fixture.fixture_id) == fixture_id
+            )
+            if not matching:
+                LOGGER.warning(
+                    "QuantLab CornerLab result refresh returned no matching fixture fixture=%s",
+                    fixture_id,
+                )
+                continue
+            refreshed += int(self._repository.save_fixture_observations(matching))
+        return refreshed
+
     def _refresh_corner_pick_statistics(self, now: datetime) -> int:
         """Retry transiently unavailable corner stats only for unsettled CornerLab picks."""
         rows = self._repository.corner_shadow_statistics_retry_candidates(
@@ -1154,6 +1182,20 @@ class QuantLabRuntime:
             result["corner_picks"] = corner_picks
         except Exception:
             LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
+
+        try:
+            refreshed_results = self._refresh_corner_pick_results(now)
+            if refreshed_results:
+                LOGGER.info(
+                    "QuantLab CornerLab post-match result observations refreshed=%d",
+                    refreshed_results,
+                )
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; CornerLab result refresh skipped"
+            )
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab post-match result refresh failed")
 
         try:
             refreshed = self._refresh_corner_pick_statistics(now)
