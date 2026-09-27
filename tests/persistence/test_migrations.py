@@ -51,8 +51,14 @@ def test_apply_migrations_runs_pending_files_in_lexical_order(tmp_path: Path) ->
     applied = apply_migrations(connection, tmp_path)
 
     assert applied == ("001_first.sql", "002_second.sql")
-    assert "SELECT 1;" in [sql for sql, _ in connection.executed]
-    assert "SELECT 2;" in [sql for sql, _ in connection.executed]
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert "SELECT 1;" in executed_sql
+    assert "SELECT 2;" in executed_sql
+    assert any("pg_advisory_xact_lock" in sql for sql in executed_sql)
+    assert any(
+        "INSERT INTO schema_migrations" in sql and "ON CONFLICT (version) DO NOTHING" in sql
+        for sql in executed_sql
+    )
 
 
 def test_apply_migrations_skips_already_recorded_files(tmp_path: Path) -> None:
