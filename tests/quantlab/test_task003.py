@@ -493,6 +493,93 @@ def test_runtime_settles_finished_corner_shadow_bets():
 
 
 
+def test_runtime_captures_and_settles_finished_1xbet_card_shadow_bet():
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    class CardSettlementRepo:
+        def __init__(self):
+            self.observation = None
+            self.settlement = None
+
+        def card_event_capture_candidates(self, *, limit):
+            assert limit == 25
+            return (
+                {
+                    "fixture_id": "api-football:card-settled",
+                    "provider_fixture_id": 999,
+                    "provider_status": "FT",
+                },
+            )
+
+        def save_card_event_observation(self, observation):
+            self.observation = observation
+            return True
+
+        def card_shadow_settlement_candidates(self, *, limit):
+            assert limit == 500
+            assert self.observation is not None
+            return (
+                {
+                    "shadow_bet_id": "quantlab-shadow-v1:" + "f" * 64,
+                    "fixture_id": "api-football:card-settled",
+                    "bookmaker_id": 11,
+                    "provider_bet_id": 119,
+                    "market_key": "TOTAL_CARDS",
+                    "selection": "OVER",
+                    "line": 2.5,
+                    "odds": 1.9,
+                    "stake_minor": 10_000,
+                    "fixture_observation_id": "quantlab-fixture-v1:" + "e" * 64,
+                    "provider_status": "FT",
+                    "result_classification": "PLAYED_SETTLEABLE",
+                    "card_event_observation_id": self.observation.card_event_observation_id,
+                    "total_cards_1xbet": self.observation.total_cards_1xbet,
+                },
+            )
+
+        def save_card_settlement_event(self, settlement):
+            self.settlement = settlement
+            return True
+
+    class Provider:
+        def fetch_events(self, fixture_id):
+            assert fixture_id == 999
+            return {
+                "errors": [],
+                "response": [
+                    {
+                        "time": {"elapsed": 10, "extra": None},
+                        "team": {"id": 1},
+                        "player": {"id": 10, "name": "A"},
+                        "type": "Card",
+                        "detail": "Yellow Card",
+                    },
+                    {
+                        "time": {"elapsed": 40, "extra": None},
+                        "team": {"id": 1},
+                        "player": {"id": 11, "name": "B"},
+                        "type": "Card",
+                        "detail": "Yellow Card",
+                    },
+                    {
+                        "time": {"elapsed": 80, "extra": None},
+                        "team": {"id": 2},
+                        "player": {"id": 12, "name": "C"},
+                        "type": "Card",
+                        "detail": "Red Card",
+                    },
+                ],
+            }
+
+    repo = CardSettlementRepo()
+    runtime = QuantLabRuntime(repo, Provider(), clock=lambda: NOW)
+
+    assert runtime._capture_card_pick_events(NOW) == 1
+    assert runtime._settle_card_picks(NOW) == 1
+    assert repo.observation.total_cards_1xbet == 3
+    assert repo.settlement.outcome == "WIN"
+
+
 def test_run_once_prioritizes_corner_settlement_and_evaluation_before_goallab():
     from h2h.quantlab.runtime import QuantLabRuntime
 
@@ -516,6 +603,9 @@ def test_run_once_prioritizes_corner_settlement_and_evaluation_before_goallab():
     runtime._refresh_corner_pick_results = mark("corner_result_refresh", 0)  # type: ignore[method-assign]
     runtime._refresh_corner_pick_statistics = mark("corner_stats_refresh", 0)  # type: ignore[method-assign]
     runtime._settle_corner_picks = mark("corner_settlement", 1)  # type: ignore[method-assign]
+    runtime._refresh_card_pick_results = mark("card_result_refresh", 0)  # type: ignore[method-assign]
+    runtime._capture_card_pick_events = mark("card_event_capture", 0)  # type: ignore[method-assign]
+    runtime._settle_card_picks = mark("card_settlement", 1)  # type: ignore[method-assign]
     runtime._discover_fixtures = mark("discover", 0)  # type: ignore[method-assign]
     runtime._backfill_history = mark("history", 0)  # type: ignore[method-assign]
     runtime._collect_upcoming = mark("collect", (0, 0))  # type: ignore[method-assign]
@@ -534,10 +624,12 @@ def test_run_once_prioritizes_corner_settlement_and_evaluation_before_goallab():
     result = runtime.run_once()
 
     assert result["corner_settlements"] == 1
+    assert result["card_settlements"] == 1
     assert order[:3] == [
         "corner_result_refresh",
         "corner_stats_refresh",
         "corner_settlement",
     ]
-    assert order.index("corner_settlement") < order.index("discover")
+    assert order.index("corner_settlement") < order.index("card_result_refresh")
+    assert order.index("card_settlement") < order.index("discover")
     assert order.index("corner_evaluation") < order.index("goal_evaluation")
