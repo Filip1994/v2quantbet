@@ -607,10 +607,10 @@ def test_run_once_prioritizes_settlement_then_goallab_before_corner_enrichment()
         "corner_settlement",
     ]
     assert order.index("corner_settlement") < order.index("card_result_refresh")
-    assert order.index("card_settlement") < order.index("discover")
-    assert order.index("collect") < order.index("goal_evaluation")
+    assert order.index("card_settlement") < order.index("goal_evaluation")
     assert order.index("goal_evaluation") < order.index("goal_settlement")
-    assert order.index("goal_settlement") < order.index("goal_history")
+    assert order.index("goal_settlement") < order.index("discover")
+    assert order.index("collect") < order.index("goal_history")
     assert order.index("goal_history") < order.index("corner_history")
     assert order.index("corner_history") < order.index("corner_evaluation")
     assert order.index("corner_evaluation") < order.index("card_evaluation")
