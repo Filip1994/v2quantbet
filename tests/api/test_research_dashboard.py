@@ -40,6 +40,14 @@ def signal_row():
         "market": "BTTS",
         "selection": "YES",
         "bookmaker": "Bet365",
+        "model_version_id": "dcm-json-v1:" + "1" * 64,
+        "prediction_method_version": "DIXON_COLES_V1",
+        "devig_method_version": "PROPORTIONAL_TWO_WAY_V1",
+        "policy_config_fingerprint": "pick-policy-config-v1:" + "2" * 64,
+        "eligibility_policy_version": "ELIGIBILITY_V1",
+        "risk_policy_version": "RISK_V1",
+        "staking_policy_version": "FIXED_STAKE_V1",
+        "bookmaker_policy_version": "SERBIA_ALLOWLIST_V1",
         "model_probability": 0.62,
         "market_fair_probability": 0.48,
         "odds": 2.20,
@@ -327,11 +335,16 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     assert signal["market_fair_probability_bucket"] == "45–50%"
 
     snapshot = dashboard.analytics_snapshot()
-    assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V1"
+    assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V2"
     assert snapshot["windows"]["lifetime"]["n"] == 1
     assert snapshot["cohorts"]["market_selection"][0]["market"] == "BTTS"
+    assert snapshot["version_summary"]["model_version_count"] == 1
+    assert snapshot["version_summary"]["policy_config_count"] == 1
+    assert snapshot["cohorts"]["model_policy"][0]["model_version_id"].startswith(
+        "dcm-json-v1:"
+    )
 
     html = dashboard.render_analytics_html()
-    assert "Research Analytics V1" in html
+    assert "Research Analytics V2" in html
     assert "Production-filter evidence cube" in html
     assert "Low-scoring extreme-value diagnostic" in html
