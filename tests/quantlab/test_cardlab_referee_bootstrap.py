@@ -199,6 +199,70 @@ def test_targeted_referee_bootstrap_uses_one_scope_call_and_stops_at_target() ->
     assert repo.sample_size == 8
 
 
+
+def test_scope_context_unlocks_existing_referee_statistics_for_same_cycle_refresh() -> None:
+    from types import MethodType
+
+    from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+
+    class Repo:
+        def __init__(self) -> None:
+            self.scope_loaded = False
+
+        def referee_history_scope_due(self, *_args, **_kwargs):
+            return True
+
+        def save_fixture_observations(self, observations):
+            return len(tuple(observations))
+
+        def save_fixture_context(self, _context):
+            self.scope_loaded = True
+
+        def save_referee_history_scope_capture(self, **_kwargs):
+            return "scope"
+
+        def referee_history(self, referee, *, decision_at):
+            assert referee == "Ref A"
+            assert decision_at == NOW
+            count = 6 if self.scope_loaded else 1
+            return tuple(
+                {
+                    "referee": referee,
+                    "kickoff_at": NOW.replace(hour=18),
+                    "available_at": NOW.replace(hour=20),
+                    "yellow_cards": 3,
+                    "red_cards": 0,
+                    "second_yellow_cards": None,
+                    "fouls": 20,
+                }
+                for _ in range(count)
+            )
+
+        def referee_statistics_backfill_candidates(self, *_args, **_kwargs):
+            raise AssertionError("existing stats should avoid new statistics fetches")
+
+    class Provider:
+        def fetch_completed_league_fixtures(self, *_args, **_kwargs):
+            return _league_history_payload()
+
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        Provider(),
+        settings=QuantLabRuntimeSettings(card_referee_history_target=5),
+        clock=lambda: NOW,
+    )
+    runtime._card_referee_history_targets = MethodType(
+        lambda self, _now: {(39, 2026): {"Ref A"}},
+        runtime,
+    )
+
+    scopes, stats, updated = runtime._bootstrap_card_referee_history(NOW)
+
+    assert scopes == 1
+    assert stats == 0
+    assert updated == frozenset({"ref a"})
+
 def test_collect_upcoming_can_force_snapshot_after_referee_history_change() -> None:
     import inspect
 

@@ -979,6 +979,21 @@ class QuantLabRuntime:
         if not targets:
             return 0, 0, frozenset()
 
+        target_referees: dict[str, str] = {}
+        for referees in targets.values():
+            for referee in referees:
+                target_referees.setdefault(referee.casefold(), referee)
+        baseline_samples = {
+            referee_key: self._card_history_sample_size(
+                self._repository.referee_history(referee, decision_at=now)
+            )
+            for referee_key, referee in target_referees.items()
+        }
+        LOGGER.info(
+            "QuantLab CardLab referee bootstrap targets scopes=%d referees=%d",
+            len(targets),
+            len(target_referees),
+        )
         scopes_refreshed = 0
         statistics_backfilled = 0
         statistics_attempts = 0
@@ -1025,10 +1040,29 @@ class QuantLabRuntime:
                     raw_payload=dict(payload),
                 )
                 scopes_refreshed += 1
+                LOGGER.info(
+                    "QuantLab CardLab referee scope refreshed league_id=%d season=%d "
+                    "response_fixtures=%d referee_contexts=%d target_referees=%d",
+                    league_id,
+                    season,
+                    response_count,
+                    saved_contexts,
+                    len(referees),
+                )
 
             for referee in sorted(referees):
+                referee_key = referee.casefold()
                 history = self._repository.referee_history(referee, decision_at=now)
                 current_sample = self._card_history_sample_size(history)
+                baseline_sample = baseline_samples.get(referee_key, 0)
+                if current_sample > baseline_sample:
+                    updated_referees.add(referee_key)
+                    baseline_samples[referee_key] = current_sample
+                    LOGGER.info(
+                        "QuantLab CardLab referee history unlocked referee=%s sample=%d",
+                        referee,
+                        current_sample,
+                    )
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
                 candidates = self._repository.referee_statistics_backfill_candidates(
@@ -1068,10 +1102,20 @@ class QuantLabRuntime:
                     if not saved:
                         continue
                     statistics_backfilled += 1
-                    updated_referees.add(referee.casefold())
                     history = self._repository.referee_history(referee, decision_at=now)
                     current_sample = self._card_history_sample_size(history)
+                    if current_sample > baseline_samples.get(referee_key, 0):
+                        updated_referees.add(referee_key)
+                        baseline_samples[referee_key] = current_sample
 
+        LOGGER.info(
+            "QuantLab CardLab referee bootstrap completed scopes_refreshed=%d "
+            "statistics_attempts=%d statistics_backfilled=%d updated_referees=%d",
+            scopes_refreshed,
+            statistics_attempts,
+            statistics_backfilled,
+            len(updated_referees),
+        )
         return scopes_refreshed, statistics_backfilled, frozenset(updated_referees)
 
     def _collect_upcoming(
@@ -1468,27 +1512,40 @@ class QuantLabRuntime:
             LOGGER.exception("QuantLab CardLab settlement failed")
 
         collection_budget_exhausted = False
+        updated_card_referees: frozenset[str] = frozenset()
         try:
-            result["fixtures_discovered"] = self._discover_fixtures(now)
-            result["history_backfilled"] = self._backfill_history(now)
             (
                 result["card_referee_scopes_refreshed"],
                 result["card_referee_statistics_backfilled"],
                 updated_card_referees,
             ) = self._bootstrap_card_referee_history(now)
-            market_fixtures, card_snapshots = self._collect_upcoming(
-                now,
-                force_card_referees=updated_card_referees,
-            )
-            result["market_fixtures"] = market_fixtures
-            result["card_snapshots"] = card_snapshots
         except ApiBudgetExceededError:
             collection_budget_exhausted = True
             LOGGER.warning(
-                "Shared football API daily budget reached; core collection stopped for UTC day"
+                "Shared football API daily budget reached; CardLab referee bootstrap stopped"
             )
-        except FeatureLeakageError:
-            LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
+        except Exception:
+            LOGGER.exception("QuantLab CardLab referee bootstrap failed")
+
+        if not collection_budget_exhausted:
+            try:
+                result["fixtures_discovered"] = self._discover_fixtures(now)
+                result["history_backfilled"] = self._backfill_history(now)
+                market_fixtures, card_snapshots = self._collect_upcoming(
+                    now,
+                    force_card_referees=updated_card_referees,
+                )
+                result["market_fixtures"] = market_fixtures
+                result["card_snapshots"] = card_snapshots
+            except ApiBudgetExceededError:
+                collection_budget_exhausted = True
+                LOGGER.warning(
+                    "Shared football API daily budget reached; core collection stopped for UTC day"
+                )
+            except FeatureLeakageError:
+                LOGGER.exception(
+                    "QuantLab rejected a feature snapshot because of timestamp leakage"
+                )
 
         if not collection_budget_exhausted:
             try:
