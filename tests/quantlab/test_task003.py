@@ -556,7 +556,7 @@ def test_runtime_captures_and_settles_finished_1xbet_card_shadow_bet():
     assert repo.settlement.outcome == "WIN"
 
 
-def test_run_once_prioritizes_settlement_then_goallab_before_corner_enrichment():
+def test_run_once_prioritizes_goallab_before_provider_backed_work():
     from h2h.quantlab.runtime import QuantLabRuntime
 
     order: list[str] = []
@@ -601,16 +601,11 @@ def test_run_once_prioritizes_settlement_then_goallab_before_corner_enrichment()
 
     assert result["corner_settlements"] == 1
     assert result["card_settlements"] == 1
-    assert order[:3] == [
-        "corner_result_refresh",
-        "corner_stats_refresh",
-        "corner_settlement",
-    ]
+    assert order[:2] == ["goal_evaluation", "goal_settlement"]
+    assert order.index("goal_settlement") < order.index("corner_result_refresh")
     assert order.index("corner_settlement") < order.index("card_result_refresh")
     assert order.index("card_settlement") < order.index("discover")
-    assert order.index("collect") < order.index("goal_evaluation")
-    assert order.index("goal_evaluation") < order.index("goal_settlement")
-    assert order.index("goal_settlement") < order.index("goal_history")
+    assert order.index("collect") < order.index("goal_history")
     assert order.index("goal_history") < order.index("corner_history")
     assert order.index("corner_history") < order.index("corner_evaluation")
     assert order.index("corner_evaluation") < order.index("card_evaluation")
