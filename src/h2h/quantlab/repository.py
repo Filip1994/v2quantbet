@@ -74,6 +74,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_corner_model_versions",
             "quantlab_corner_feature_snapshots",
             "quantlab_team_history_captures",
+            "quantlab_referee_history_scope_captures",
             "quantlab_league_coverage_captures",
         )
         with self.connect() as connection, connection.cursor() as cursor:
@@ -1349,6 +1350,139 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
         return capture_id
+
+    def referee_history_scope_due(
+        self,
+        league_id: int,
+        season: int,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        if league_id <= 0 or season <= 0 or refresh_seconds <= 0:
+            raise ValueError("league_id, season and refresh_seconds must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(captured_at) FROM quantlab_referee_history_scope_captures "
+                "WHERE league_id = %s AND season = %s",
+                (league_id, season),
+            )
+            row = cursor.fetchone()
+        latest = None if row is None else row[0]
+        return latest is None or latest <= now - timedelta(seconds=refresh_seconds)
+
+    def save_referee_history_scope_capture(
+        self,
+        *,
+        league_id: int,
+        season: int,
+        window_start: date,
+        window_end: date,
+        captured_at: datetime,
+        response_fixture_count: int,
+        referee_fixture_count: int,
+        raw_payload: dict[str, Any],
+    ) -> str:
+        if league_id <= 0 or season <= 0:
+            raise ValueError("league_id and season must be positive")
+        if window_end < window_start:
+            raise ValueError("window_end must not be before window_start")
+        if response_fixture_count < 0 or referee_fixture_count < 0:
+            raise ValueError("fixture counts must be non-negative")
+        capture_id = _identifier(
+            "quantlab-referee-history-scope-v1:",
+            {
+                "league_id": league_id,
+                "season": season,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "captured_at": captured_at.isoformat(),
+                "response_fixture_count": response_fixture_count,
+                "referee_fixture_count": referee_fixture_count,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_referee_history_scope_captures ("
+                "referee_history_scope_capture_id, league_id, season, window_start, "
+                "window_end, captured_at, response_fixture_count, referee_fixture_count, "
+                "raw_payload"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    league_id,
+                    season,
+                    window_start,
+                    window_end,
+                    captured_at,
+                    response_fixture_count,
+                    referee_fixture_count,
+                    _json(raw_payload),
+                ),
+            )
+        return capture_id
+
+    def referee_statistics_backfill_candidates(
+        self,
+        referee: str,
+        *,
+        decision_at: datetime,
+        retry_after_seconds: int = 86400,
+        limit: int = 12,
+    ) -> tuple[dict[str, Any], ...]:
+        if not referee.strip():
+            return ()
+        if retry_after_seconds <= 0 or limit <= 0:
+            raise ValueError("retry_after_seconds and limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH context AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, referee, kickoff_at "
+                " FROM quantlab_fixture_context_observations "
+                " WHERE lower(referee) = lower(%s) AND available_at <= %s "
+                " AND kickoff_at < %s "
+                " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
+                ") "
+                "SELECT f.fixture_id, f.provider_fixture_id::BIGINT AS provider_fixture_id, "
+                "latest.league_id, latest.season, latest.home_team_id, latest.away_team_id, "
+                "latest.home_team, latest.away_team, latest.competition_name, latest.country, "
+                "latest.competition_type, latest.kickoff_at, latest.provider_status "
+                "FROM context c "
+                "JOIN quantlab_fixtures f ON f.fixture_id = c.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.league_id, o.season, o.home_team_id, o.away_team_id, "
+                " o.home_team, o.away_team, o.competition_name, o.country, "
+                " o.competition_type, o.kickoff_at, o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = c.fixture_id AND o.captured_at <= %s "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT sc.captured_at, sc.status FROM quantlab_statistics_captures sc "
+                " WHERE sc.fixture_id = c.fixture_id "
+                " ORDER BY sc.captured_at DESC, sc.statistics_capture_id DESC LIMIT 1"
+                ") capture ON TRUE "
+                "WHERE latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = c.fixture_id AND s.available_at <= %s"
+                ") "
+                "AND (capture.captured_at IS NULL "
+                " OR capture.captured_at <= %s - (%s * interval '1 second')) "
+                "ORDER BY c.kickoff_at DESC LIMIT %s",
+                (
+                    referee,
+                    decision_at,
+                    decision_at,
+                    decision_at,
+                    decision_at,
+                    decision_at,
+                    retry_after_seconds,
+                    limit,
+                ),
+            )
+            return _row_dicts(cursor)
 
     def save_fixture_observations(self, observations: Iterable[Any]) -> int:
         """Persist QuantLab fixture observations without creating a date-shard watermark."""

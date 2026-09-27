@@ -374,3 +374,19 @@ def test_referee_context_backfill_uses_existing_team_history_without_provider_ca
     assert "h.captured_at" in migration
     assert "ON CONFLICT DO NOTHING" in migration
     assert "api-football" in migration
+
+
+def test_referee_history_scope_capture_migration_is_immutable() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "048_quantlab_referee_history_scope_captures.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE quantlab_referee_history_scope_captures" in migration
+    assert "league_id BIGINT NOT NULL" in migration
+    assert "season INTEGER NOT NULL" in migration
+    assert "response_fixture_count" in migration
+    assert "referee_fixture_count" in migration
+    assert "quantlab_referee_history_scope_captures_immutable" in migration
+    assert "quantlab_reject_mutation()" in migration

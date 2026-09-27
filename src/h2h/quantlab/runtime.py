@@ -58,6 +58,12 @@ class QuantLabRuntimeSettings:
     corner_team_history_teams_per_cycle: int = 120
     corner_team_statistics_per_cycle: int = 360
     corner_team_history_refresh_seconds: int = 21600
+    card_referee_history_target: int = 8
+    card_referee_history_lookback_days: int = 400
+    card_referee_history_scopes_per_cycle: int = 8
+    card_referee_statistics_per_cycle: int = 64
+    card_referee_history_refresh_seconds: int = 604800
+    card_referee_statistics_retry_seconds: int = 86400
     league_coverage_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
@@ -82,6 +88,12 @@ class QuantLabRuntimeSettings:
             ("corner_team_history_teams_per_cycle", self.corner_team_history_teams_per_cycle),
             ("corner_team_statistics_per_cycle", self.corner_team_statistics_per_cycle),
             ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
+            ("card_referee_history_target", self.card_referee_history_target),
+            ("card_referee_history_lookback_days", self.card_referee_history_lookback_days),
+            ("card_referee_history_scopes_per_cycle", self.card_referee_history_scopes_per_cycle),
+            ("card_referee_statistics_per_cycle", self.card_referee_statistics_per_cycle),
+            ("card_referee_history_refresh_seconds", self.card_referee_history_refresh_seconds),
+            ("card_referee_statistics_retry_seconds", self.card_referee_statistics_retry_seconds),
             ("league_coverage_refresh_seconds", self.league_coverage_refresh_seconds),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -922,7 +934,152 @@ class QuantLabRuntime:
             limit=self._settings.fixture_limit,
         )
 
-    def _collect_upcoming(self, now: datetime) -> tuple[int, int]:
+    @staticmethod
+    def _card_history_sample_size(rows: tuple[dict[str, Any], ...]) -> int:
+        return sum(
+            1
+            for row in rows
+            if row.get("yellow_cards") is not None and row.get("red_cards") is not None
+        )
+
+    def _card_referee_history_targets(
+        self,
+        now: datetime,
+    ) -> dict[tuple[int, int], set[str]]:
+        targets: dict[tuple[int, int], set[str]] = {}
+        fixtures = self._context_upcoming(now)
+        for fixture in fixtures:
+            fixture_id = str(fixture["fixture_id"])
+            if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            if "CARD" not in self._repository.market_labs_for_fixture(fixture_id):
+                continue
+            context = self._repository.latest_context_before(fixture_id, decision_at=now)
+            if context is None:
+                continue
+            referee = str(context.get("referee") or "").strip()
+            if not referee:
+                continue
+            history = self._repository.referee_history(referee, decision_at=now)
+            if self._card_history_sample_size(history) >= self._settings.card_referee_history_target:
+                continue
+            league_id = int(fixture.get("league_id") or 0)
+            season = int(fixture.get("season") or 0)
+            if league_id <= 0 or season <= 0:
+                continue
+            targets.setdefault((league_id, season), set()).add(referee)
+        return targets
+
+    def _bootstrap_card_referee_history(
+        self,
+        now: datetime,
+    ) -> tuple[int, int, frozenset[str]]:
+        """Fill referee history from league fixtures, then fetch only missing match stats."""
+        targets = self._card_referee_history_targets(now)
+        if not targets:
+            return 0, 0, frozenset()
+
+        scopes_refreshed = 0
+        statistics_backfilled = 0
+        statistics_attempts = 0
+        updated_referees: set[str] = set()
+        window_start = (now - timedelta(days=self._settings.card_referee_history_lookback_days)).date()
+        window_end = now.date()
+
+        for (league_id, season), referees in sorted(
+            targets.items(),
+            key=lambda item: (-len(item[1]), item[0][0], item[0][1]),
+        ):
+            if (
+                scopes_refreshed < self._settings.card_referee_history_scopes_per_cycle
+                and self._repository.referee_history_scope_due(
+                    league_id,
+                    season,
+                    now=now,
+                    refresh_seconds=self._settings.card_referee_history_refresh_seconds,
+                )
+            ):
+                payload = self._provider.fetch_completed_league_fixtures(
+                    league_id,
+                    season,
+                    start_date=window_start,
+                    end_date=window_end,
+                )
+                observations = parse_fixture_discovery_response(payload, captured_at=now)
+                self._repository.save_fixture_observations(observations)
+                saved_contexts = self._persist_team_history_contexts(
+                    dict(payload),
+                    observations,
+                    now,
+                )
+                response = payload.get("response") if isinstance(payload, dict) else None
+                response_count = len(response) if isinstance(response, list) else 0
+                self._repository.save_referee_history_scope_capture(
+                    league_id=league_id,
+                    season=season,
+                    window_start=window_start,
+                    window_end=window_end,
+                    captured_at=now,
+                    response_fixture_count=response_count,
+                    referee_fixture_count=saved_contexts,
+                    raw_payload=dict(payload),
+                )
+                scopes_refreshed += 1
+
+            for referee in sorted(referees):
+                history = self._repository.referee_history(referee, decision_at=now)
+                current_sample = self._card_history_sample_size(history)
+                if current_sample >= self._settings.card_referee_history_target:
+                    continue
+                candidates = self._repository.referee_statistics_backfill_candidates(
+                    referee,
+                    decision_at=now,
+                    retry_after_seconds=self._settings.card_referee_statistics_retry_seconds,
+                    limit=max(12, self._settings.card_referee_history_target * 2),
+                )
+                for fixture in candidates:
+                    if current_sample >= self._settings.card_referee_history_target:
+                        break
+                    if statistics_attempts >= self._settings.card_referee_statistics_per_cycle:
+                        return (
+                            scopes_refreshed,
+                            statistics_backfilled,
+                            frozenset(updated_referees),
+                        )
+                    statistics_attempts += 1
+                    try:
+                        saved = self._capture_historical_statistics(
+                            fixture,
+                            now,
+                            allow_retry=True,
+                        )
+                    except ApiBudgetExceededError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        LOGGER.warning(
+                            "QuantLab CardLab referee statistics failed referee=%s "
+                            "fixture=%s error_class=%s error=%s",
+                            referee,
+                            fixture.get("fixture_id"),
+                            type(exc).__name__,
+                            str(exc),
+                        )
+                        continue
+                    if not saved:
+                        continue
+                    statistics_backfilled += 1
+                    updated_referees.add(referee.casefold())
+                    history = self._repository.referee_history(referee, decision_at=now)
+                    current_sample = self._card_history_sample_size(history)
+
+        return scopes_refreshed, statistics_backfilled, frozenset(updated_referees)
+
+    def _collect_upcoming(
+        self,
+        now: datetime,
+        *,
+        force_card_referees: frozenset[str] = frozenset(),
+    ) -> tuple[int, int]:
         goal_queue = self._repository.upcoming_fixtures(
             start_at=now,
             end_at=now + timedelta(hours=self._settings.lookahead_hours),
@@ -982,13 +1139,18 @@ class QuantLabRuntime:
                     standings = self._standings(fixture, now)
                 if context is None:
                     continue
-                if not self._repository.feature_snapshot_due(
-                    fixture_id,
-                    now=now,
-                    refresh_seconds=self._settings.feature_refresh_seconds,
+                referee = context.get("referee")
+                referee_key = str(referee or "").strip().casefold()
+                force_snapshot = bool(referee_key and referee_key in force_card_referees)
+                if (
+                    not force_snapshot
+                    and not self._repository.feature_snapshot_due(
+                        fixture_id,
+                        now=now,
+                        refresh_seconds=self._settings.feature_refresh_seconds,
+                    )
                 ):
                     continue
-                referee = context.get("referee")
                 history = (
                     self._repository.referee_history(str(referee), decision_at=now)
                     if referee
@@ -1213,6 +1375,8 @@ class QuantLabRuntime:
             "goal_player_history_backfilled": 0,
             "corner_team_history_discovered": 0,
             "corner_team_statistics_backfilled": 0,
+            "card_referee_scopes_refreshed": 0,
+            "card_referee_statistics_backfilled": 0,
             "market_fixtures": 0,
             "card_snapshots": 0,
             "goal_decisions": 0,
@@ -1307,7 +1471,15 @@ class QuantLabRuntime:
         try:
             result["fixtures_discovered"] = self._discover_fixtures(now)
             result["history_backfilled"] = self._backfill_history(now)
-            market_fixtures, card_snapshots = self._collect_upcoming(now)
+            (
+                result["card_referee_scopes_refreshed"],
+                result["card_referee_statistics_backfilled"],
+                updated_card_referees,
+            ) = self._bootstrap_card_referee_history(now)
+            market_fixtures, card_snapshots = self._collect_upcoming(
+                now,
+                force_card_referees=updated_card_referees,
+            )
             result["market_fixtures"] = market_fixtures
             result["card_snapshots"] = card_snapshots
         except ApiBudgetExceededError:
@@ -1372,6 +1544,7 @@ class QuantLabRuntime:
             "goal_team_history_discovered=%d goal_team_statistics_backfilled=%d "
             "goal_player_history_backfilled=%d "
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
+            "card_referee_scopes_refreshed=%d card_referee_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "goal_settlements=%d corner_decisions=%d corner_picks=%d corner_settlements=%d "
             "card_decisions=%d card_picks=%d",
@@ -1382,6 +1555,8 @@ class QuantLabRuntime:
             result["goal_player_history_backfilled"],
             result["corner_team_history_discovered"],
             result["corner_team_statistics_backfilled"],
+            result["card_referee_scopes_refreshed"],
+            result["card_referee_statistics_backfilled"],
             result["market_fixtures"],
             result["card_snapshots"],
             result["goal_decisions"],

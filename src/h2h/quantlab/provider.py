@@ -81,6 +81,39 @@ class QuantLabApiFootballClient:
             cache_ttl_seconds=21600.0,
         )
 
+    def fetch_completed_league_fixtures(
+        self,
+        league_id: int,
+        season: int,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> Mapping[str, Any]:
+        """Fetch completed league fixtures used to discover referee history."""
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in (league_id, season)
+        ):
+            raise ValueError("league_id and season must be positive integers")
+        if isinstance(start_date, datetime) or not isinstance(start_date, date):
+            raise TypeError("start_date must be a date")
+        if isinstance(end_date, datetime) or not isinstance(end_date, date):
+            raise TypeError("end_date must be a date")
+        if end_date < start_date:
+            raise ValueError("end_date must not be before start_date")
+        return self._get(
+            "fixtures",
+            {
+                "league": league_id,
+                "season": season,
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "status": "FT",
+                "timezone": "UTC",
+            },
+            cache_ttl_seconds=21600.0,
+        )
+
     def fetch_team_recent_fixtures(
         self,
         team_id: int,

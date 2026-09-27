@@ -240,6 +240,24 @@ def main() -> None:
             corner_team_history_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CORNER_TEAM_HISTORY_REFRESH_SECONDS", "21600"
             ),
+            card_referee_history_target=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_TARGET", "8"
+            ),
+            card_referee_history_lookback_days=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_LOOKBACK_DAYS", "400"
+            ),
+            card_referee_history_scopes_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_SCOPES_PER_CYCLE", "8"
+            ),
+            card_referee_statistics_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_STATS_PER_CYCLE", "64"
+            ),
+            card_referee_history_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_REFRESH_SECONDS", "604800"
+            ),
+            card_referee_statistics_retry_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_STATS_RETRY_SECONDS", "86400"
+            ),
             league_coverage_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_LEAGUE_COVERAGE_REFRESH_SECONDS", "21600"
             ),
