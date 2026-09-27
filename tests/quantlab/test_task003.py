@@ -412,3 +412,42 @@ def test_collection_allows_lower_league_and_only_fetches_card_context_when_marke
     assert card_snapshots == 0
     assert repo.context_checked == ["api-football:low"]
     assert repo.limits == [1, 1]
+
+
+def test_runtime_settles_finished_corner_shadow_bets():
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    class SettlementRepo:
+        def __init__(self):
+            self.saved = []
+
+        def corner_shadow_settlement_candidates(self, *, limit):
+            assert limit == 500
+            return (
+                {
+                    "shadow_bet_id": "quantlab-shadow-v1:" + "e" * 64,
+                    "fixture_id": "api-football:settled",
+                    "market_key": "TOTAL_CORNERS",
+                    "selection": "OVER",
+                    "line": 9.5,
+                    "odds": 2.0,
+                    "stake_minor": 10_000,
+                    "result_classification": "PLAYED_SETTLEABLE",
+                    "provider_status": "FT",
+                    "statistics_observation_id": "stats:settled",
+                    "statistics_available_at": NOW,
+                    "home_corner_kicks": 7,
+                    "away_corner_kicks": 4,
+                },
+            )
+
+        def settle_corner_shadow_bet(self, settlement):
+            self.saved.append(settlement)
+            return True
+
+    repo = SettlementRepo()
+    runtime = QuantLabRuntime(repo, object(), clock=lambda: NOW)
+
+    assert runtime._settle_corner_picks(NOW) == 1
+    assert repo.saved[0].outcome == "WIN"
+    assert repo.saved[0].result_detail["actual_total_corners"] == 11

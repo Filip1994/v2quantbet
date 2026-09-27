@@ -125,12 +125,72 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
 
 
 def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
-    repository = StubRepository()
+    class CornerRepository(StubRepository):
+        def list_bets(self, lab: str):
+            self.labs.append(lab)
+            return (
+                {
+                    "shadow_bet_id": "quantlab-shadow-v1:" + "c" * 64,
+                    "fixture_id": "api-football:777",
+                    "lab": "CORNER",
+                    "bookmaker_id": 8,
+                    "bookmaker_name": "Bet365",
+                    "provider_bet_id": 100,
+                    "provider_bet_name": "Corners Over Under",
+                    "market_key": "TOTAL_CORNERS",
+                    "selection": "OVER",
+                    "line": 9.5,
+                    "model_name": "Corner pressure Poisson GLM",
+                    "model_version": "CORNER_PRESSURE_POISSON_V1:" + "d" * 64,
+                    "model_probability": 0.62,
+                    "market_probability": 0.48,
+                    "edge": 0.14,
+                    "expected_value": 0.24,
+                    "odds": 2.0,
+                    "quote_observed_at": NOW,
+                    "decision_at": NOW,
+                    "closing_odds": 1.95,
+                    "closing_observed_at": NOW,
+                    "stake_minor": 10_000,
+                    "outcome": "WIN",
+                    "pnl_minor": 10_000,
+                    "settled_at": NOW,
+                    "home_team": "Home",
+                    "away_team": "Away",
+                    "competition_name": "League",
+                    "country": "England",
+                    "kickoff_at": NOW,
+                    "expected_total_corners": 11.2,
+                    "home_history_size": 10,
+                    "away_history_size": 9,
+                    "corner_feature_payload": {
+                        "raw_features": {
+                            "home_l5_corners_for": 6.2,
+                            "home_l5_corners_against": 4.0,
+                            "away_l5_corners_for": 5.7,
+                            "away_l5_corners_against": 4.5,
+                            "home_l5_shots_for": 15.0,
+                            "away_l5_shots_for": 13.0,
+                            "home_l5_sot_for": 5.5,
+                            "away_l5_sot_for": 4.8,
+                        }
+                    },
+                },
+            )
+
+    repository = CornerRepository()
     html = QuantLabDashboardService(repository).render_html("lab=corner")
 
     assert repository.labs == ["CORNER"]
     assert "CornerLab shadow ledger" in html
-    assert "No CornerLab shadow bets yet" in html
+    assert "Kako CornerLab dolazi do procene" in html
+    assert "48 strukturnih varijabli" in html
+    assert "kvote nisu model input" in html
+    assert "📝" in html
+    assert "Zašto ovaj pik" in html
+    assert "Model očekuje 11.20 ukupnih kornera" in html
+    assert "audit only" in html
+    assert ">1-0<" in html
 
 
 class FailingGoalRepository(StubRepository):
