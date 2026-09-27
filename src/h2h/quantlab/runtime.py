@@ -1141,48 +1141,7 @@ class QuantLabRuntime:
             "card_decisions": 0,
             "card_picks": 0,
         }
-        try:
-            result["fixtures_discovered"] = self._discover_fixtures(now)
-            result["history_backfilled"] = self._backfill_history(now)
-            market_fixtures, card_snapshots = self._collect_upcoming(now)
-            result["market_fixtures"] = market_fixtures
-            result["card_snapshots"] = card_snapshots
-            goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
-            result["goal_team_history_discovered"] = goal_discoveries
-            result["goal_team_statistics_backfilled"] = goal_stats
-            result["goal_player_history_backfilled"] = self._bootstrap_goal_player_history(now)
-            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
-            result["corner_team_history_discovered"] = team_discoveries
-            result["corner_team_statistics_backfilled"] = team_stats
-        except ApiBudgetExceededError:
-            LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
-        except FeatureLeakageError:
-            LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
-
-        # Shadow evaluation is intentionally independent from provider budget. Existing
-        # persisted quotes can still produce auditable PASS/PICK decisions after the
-        # daily API ceiling has stopped collection.
-        try:
-            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
-            result["goal_decisions"] = goal_decisions
-            result["goal_picks"] = goal_picks
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
-
-        try:
-            result["goal_settlements"] = self._settle_goal_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab settlement failed")
-
-        try:
-            corner_decisions, corner_picks = self._evaluate_context_picks(
-                self._corner_engine, "CORNER", now
-            )
-            result["corner_decisions"] = corner_decisions
-            result["corner_picks"] = corner_picks
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
-
+        # Existing CornerLab picks must settle even if collection or GoalLab model work is slow.
         try:
             refreshed_results = self._refresh_corner_pick_results(now)
             if refreshed_results:
@@ -1215,6 +1174,48 @@ class QuantLabRuntime:
             result["corner_settlements"] = self._settle_corner_picks(now)
         except Exception:
             LOGGER.exception("QuantLab CornerLab settlement failed")
+
+        try:
+            result["fixtures_discovered"] = self._discover_fixtures(now)
+            result["history_backfilled"] = self._backfill_history(now)
+            market_fixtures, card_snapshots = self._collect_upcoming(now)
+            result["market_fixtures"] = market_fixtures
+            result["card_snapshots"] = card_snapshots
+            goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
+            result["goal_team_history_discovered"] = goal_discoveries
+            result["goal_team_statistics_backfilled"] = goal_stats
+            result["goal_player_history_backfilled"] = self._bootstrap_goal_player_history(now)
+            team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
+            result["corner_team_history_discovered"] = team_discoveries
+            result["corner_team_statistics_backfilled"] = team_stats
+        except ApiBudgetExceededError:
+            LOGGER.warning("Shared football API daily budget reached; collection stopped for UTC day")
+        except FeatureLeakageError:
+            LOGGER.exception("QuantLab rejected a feature snapshot because of timestamp leakage")
+
+        # Shadow evaluation is intentionally independent from provider budget. Existing
+        # persisted quotes can still produce auditable PASS/PICK decisions after the
+        # daily API ceiling has stopped collection.
+        try:
+            corner_decisions, corner_picks = self._evaluate_context_picks(
+                self._corner_engine, "CORNER", now
+            )
+            result["corner_decisions"] = corner_decisions
+            result["corner_picks"] = corner_picks
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
+
+        try:
+            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+            result["goal_decisions"] = goal_decisions
+            result["goal_picks"] = goal_picks
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
+        try:
+            result["goal_settlements"] = self._settle_goal_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab settlement failed")
 
         try:
             card_decisions, card_picks = self._evaluate_context_picks(

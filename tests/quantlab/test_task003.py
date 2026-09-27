@@ -480,3 +480,54 @@ def test_runtime_settles_finished_corner_shadow_bets():
     assert runtime._settle_corner_picks(NOW) == 1
     assert repo.saved[0].outcome == "WIN"
     assert repo.saved[0].result_detail["actual_total_corners"] == 11
+
+
+
+def test_run_once_prioritizes_corner_settlement_and_evaluation_before_goallab():
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    order: list[str] = []
+    runtime = QuantLabRuntime(
+        object(),
+        object(),
+        goal_engine=object(),
+        corner_engine=object(),
+        card_engine=object(),
+        clock=lambda: NOW,
+    )
+
+    def mark(name, value):
+        def call(*_args, **_kwargs):
+            order.append(name)
+            return value
+
+        return call
+
+    runtime._refresh_corner_pick_results = mark("corner_result_refresh", 0)  # type: ignore[method-assign]
+    runtime._refresh_corner_pick_statistics = mark("corner_stats_refresh", 0)  # type: ignore[method-assign]
+    runtime._settle_corner_picks = mark("corner_settlement", 1)  # type: ignore[method-assign]
+    runtime._discover_fixtures = mark("discover", 0)  # type: ignore[method-assign]
+    runtime._backfill_history = mark("history", 0)  # type: ignore[method-assign]
+    runtime._collect_upcoming = mark("collect", (0, 0))  # type: ignore[method-assign]
+    runtime._bootstrap_goal_team_history = mark("goal_history", (0, 0))  # type: ignore[method-assign]
+    runtime._bootstrap_goal_player_history = mark("goal_players", 0)  # type: ignore[method-assign]
+    runtime._bootstrap_corner_team_history = mark("corner_history", (0, 0))  # type: ignore[method-assign]
+
+    def evaluate_context(_engine, lab, _now):
+        order.append(f"{lab.lower()}_evaluation")
+        return 0, 0
+
+    runtime._evaluate_context_picks = evaluate_context  # type: ignore[method-assign]
+    runtime._evaluate_goal_picks = mark("goal_evaluation", (0, 0))  # type: ignore[method-assign]
+    runtime._settle_goal_picks = mark("goal_settlement", 0)  # type: ignore[method-assign]
+
+    result = runtime.run_once()
+
+    assert result["corner_settlements"] == 1
+    assert order[:3] == [
+        "corner_result_refresh",
+        "corner_stats_refresh",
+        "corner_settlement",
+    ]
+    assert order.index("corner_settlement") < order.index("discover")
+    assert order.index("corner_evaluation") < order.index("goal_evaluation")
