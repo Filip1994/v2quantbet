@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from h2h.api.research_analytics import (
     DIAGNOSTIC_BUCKETS,
     build_research_analytics_snapshot,
+    cohort_metrics,
     diagnostic_bucket,
     market_fair_probability_bucket,
     render_research_analytics_html,
@@ -692,6 +693,232 @@ class ResearchDashboardService:
             "rows": items,
         }
 
+    def model_version_details(self, model_version_id: str) -> dict[str, Any]:
+        """Return exact settled Research picks belonging to one model version."""
+        model_version_id = model_version_id.strip()
+        if not model_version_id:
+            raise ValueError("model_version_id is required")
+
+        def belongs_to_model(row: dict[str, Any]) -> bool:
+            recorded = str(row.get("model_version_id") or "").strip()
+            if model_version_id == "UNRECORDED_MODEL":
+                return not recorded
+            return recorded == model_version_id
+
+        settled = tuple(
+            row
+            for row in self.signals({})
+            if row.get("outcome") in {"WIN", "LOSS", "VOID"}
+            and belongs_to_model(row)
+        )
+        rows = sorted(
+            settled,
+            key=lambda row: (
+                row.get("kickoff_at")
+                if isinstance(row.get("kickoff_at"), datetime)
+                else datetime.min.replace(tzinfo=UTC),
+                str(row.get("evaluation_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        def iso(value: Any) -> str | None:
+            if not isinstance(value, datetime):
+                return None
+            if value.tzinfo is None or value.utcoffset() is None:
+                value = value.replace(tzinfo=UTC)
+            return value.astimezone(UTC).isoformat()
+
+        def integer(value: Any) -> int | None:
+            return None if value is None else int(value)
+
+        items = []
+        for row in rows:
+            home_goals = integer(row.get("regulation_home_goals"))
+            away_goals = integer(row.get("regulation_away_goals"))
+            clv_ppm = integer(row.get("clv_ppm"))
+            items.append(
+                {
+                    "research_signal_id": str(row.get("research_signal_id") or ""),
+                    "evaluation_id": str(row.get("evaluation_id") or ""),
+                    "fixture_id": str(row.get("fixture_id") or ""),
+                    "provider_fixture_id": str(row.get("provider_fixture_id") or ""),
+                    "home_team": row.get("home_team"),
+                    "away_team": row.get("away_team"),
+                    "competition_name": row.get("competition_name"),
+                    "country": row.get("country"),
+                    "kickoff_at": iso(row.get("kickoff_at")),
+                    "market": row.get("market"),
+                    "selection": row.get("selection"),
+                    "bookmaker": row.get("bookmaker"),
+                    "odds": float(row["odds"]),
+                    "model_probability": float(row["model_probability"]),
+                    "market_fair_probability": float(row["market_fair_probability"]),
+                    "edge": float(row["edge"]),
+                    "expected_value": float(row["expected_value"]),
+                    "outcome": row.get("outcome"),
+                    "score": (
+                        None
+                        if home_goals is None or away_goals is None
+                        else {"home": home_goals, "away": away_goals}
+                    ),
+                    "pnl_minor": integer(row.get("pnl_minor")),
+                    "clv_pct": None if clv_ppm is None else clv_ppm / 10_000,
+                    "disposition": row.get("disposition"),
+                    "qualified_at": iso(row.get("qualified_at")),
+                    "quote_observed_at": iso(row.get("quote_observed_at")),
+                    "closing_odds": (
+                        None
+                        if row.get("closing_odds") is None
+                        else float(row["closing_odds"])
+                    ),
+                    "closing_observed_at": iso(row.get("closing_observed_at")),
+                    "policy_config_fingerprint": row.get("policy_config_fingerprint"),
+                    "prediction_method_version": row.get("prediction_method_version"),
+                    "devig_method_version": row.get("devig_method_version"),
+                    "production_pick_id": row.get("production_pick_id"),
+                }
+            )
+
+        return {
+            "contract_version": "RESEARCH_MODEL_VERSION_DRILLDOWN_V1",
+            "model_version_id": model_version_id,
+            "summary": cohort_metrics(
+                settled,
+                fixed_stake_minor=self._stake,
+            ),
+            "rows": items,
+        }
+
+    def render_model_version_html(self, model_version_id: str) -> str:
+        """Render the exact settled picks behind one model-version analytics cohort."""
+        payload = self.model_version_details(model_version_id)
+        summary = payload["summary"]
+        rows = payload["rows"]
+
+        def metric(value: Any, suffix: str = "", *, signed: bool = False) -> str:
+            if value is None:
+                return "—"
+            number = float(value)
+            prefix = "+" if signed and number > 0 else ""
+            return f"{prefix}{number:.2f}{suffix}"
+
+        cards = "".join(
+            f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
+            for label, value in (
+                ("Settled", str(summary["n"])),
+                (
+                    "W-L-V",
+                    f'{summary["wins"]}-{summary["losses"]}-{summary["voids"]}',
+                ),
+                ("Win rate", metric(summary["win_rate_pct"], "%")),
+                ("Expected", metric(summary["expected_win_rate_pct"], "%")),
+                ("ROI", metric(summary["roi_pct"], "%", signed=True)),
+                ("Flat P/L", f'{summary["flat_pnl_minor"] / 100:+.0f} RSD'),
+                ("Avg CLV", metric(summary["avg_clv_pct"], "%", signed=True)),
+                ("Evidence", str(summary["sample_band"])),
+            )
+        )
+
+        body = []
+        for row in rows:
+            score = row["score"]
+            score_text = (
+                "—"
+                if score is None
+                else f'{score["home"]}:{score["away"]}'
+            )
+            pnl_minor = row["pnl_minor"]
+            pnl_text = "—" if pnl_minor is None else f"{pnl_minor / 100:+.0f} RSD"
+            clv = row["clv_pct"]
+            clv_text = "—" if clv is None else f"{clv:+.2f}%"
+            close = (
+                "—"
+                if row["closing_odds"] is None
+                else f'{float(row["closing_odds"]):.2f}'
+            )
+            match = (
+                f'{escape(str(row["home_team"] or "—"))} – '
+                f'{escape(str(row["away_team"] or "—"))}'
+            )
+            outcome = escape(str(row["outcome"] or "—"))
+            outcome_class = str(row["outcome"] or "").casefold()
+            policy = escape(
+                str(row["policy_config_fingerprint"] or "LEGACY_UNRECORDED_POLICY")
+            )
+            body.append(
+                f'<tr class="row-{outcome_class}">'
+                f'<td class="match"><b>{match}</b><small>'
+                f'{escape(str(row["competition_name"] or "—"))} · '
+                f'fixture {escape(str(row["provider_fixture_id"] or "—"))}</small></td>'
+                f'<td><b class="result result-{outcome_class}">{outcome}</b>'
+                f'<small>{score_text}</small></td>'
+                f'<td><b>{escape(str(row["market"] or "—"))} '
+                f'{escape(str(row["selection"] or "—"))}</b></td>'
+                f'<td><b>{float(row["odds"]):.2f}</b><small>'
+                f'{escape(str(row["bookmaker"] or "—"))}</small></td>'
+                f'<td>{_pct(row["model_probability"])}</td>'
+                f'<td>{_pct(row["market_fair_probability"])}</td>'
+                f'<td>{_pct(row["edge"])}</td>'
+                f'<td>{_pct(row["expected_value"])}</td>'
+                f'<td>{close}<small>{escape(str(row["closing_observed_at"] or "—"))}</small></td>'
+                f'<td>{clv_text}</td>'
+                f'<td>{pnl_text}</td>'
+                f'<td>{escape(str(row["disposition"] or "—"))}</td>'
+                f'<td>{escape(str(row["kickoff_at"] or "—"))}</td>'
+                f'<td>{escape(str(row["qualified_at"] or "—"))}</td>'
+                f'<td class="policy">{policy}</td>'
+                "</tr>"
+            )
+        rows_html = "".join(body) or (
+            '<tr><td colspan="15" class="empty">'
+            "No settled Research picks belong to this model version.</td></tr>"
+        )
+        query = urlencode({"model_version_id": model_version_id})
+        model_label = escape(model_version_id)
+
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research model drilldown</title>
+<style>
+:root{{--bg:#111315;--panel:#181b1f;--line:#30363d;--text:#eceff1;--muted:#9299a1;
+--win:#69c98f;--loss:#e06f78;--void:#9aa1a8}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);
+font-family:Inter,ui-sans-serif,system-ui,sans-serif}}main{{max-width:1920px;margin:auto;padding:24px}}
+header{{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}}
+h1{{margin:4px 0 0;font-size:22px}}p,small{{color:var(--muted)}}a{{color:#d8dcdf}}
+.model-id{{display:block;max-width:1150px;overflow-wrap:anywhere;font-family:ui-monospace,
+SFMono-Regular,Menlo,monospace;color:#d7dce0}}.cards{{display:grid;
+grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0}}
+.card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px}}
+.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;letter-spacing:.08em}}
+.card b{{display:block;font-size:18px;margin-top:7px}}.panel{{padding:14px}}.scroll{{overflow:auto;
+max-height:72vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
+border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;vertical-align:top}}
+th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;
+letter-spacing:.05em}}td.match{{min-width:240px}}td.policy{{max-width:360px;overflow:hidden;
+text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}td small{{display:block;
+margin-top:4px}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}}
+.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}.result-void{{color:var(--void)}}
+.row-win{{box-shadow:inset 3px 0 var(--win)}}.row-loss{{box-shadow:inset 3px 0 var(--loss)}}
+.row-void{{box-shadow:inset 3px 0 var(--void)}}.empty{{text-align:center;color:var(--muted);
+padding:36px!important}}@media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}
+main{{padding:14px}}header{{display:block}}}}
+</style></head><body><main>
+<header><div><small>RESEARCH_MODEL_VERSION_DRILLDOWN_V1</small>
+<h1>Model version picks</h1><span class="model-id">{model_label}</span>
+<p>Exact settled Research rows behind this Analytics V2 model cohort.</p></div>
+<div><a href="/research/analytics">← Analytics V2</a> ·
+<a href="/research/analytics/model.json?{escape(query, quote=True)}">JSON</a></div></header>
+<section class="cards">{cards}</section>
+<section class="panel"><div class="scroll"><table><thead><tr>
+<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th>
+<th>Fair P</th><th>Edge</th><th>EV</th><th>Close</th><th>CLV</th><th>P/L</th>
+<th>Route</th><th>Kickoff UTC</th><th>Qualified UTC</th><th>Policy config</th>
+</tr></thead><tbody>{rows_html}</tbody></table></div></section>
+</main></body></html>"""
+
     def render_analytics_html(self) -> str:
         return render_research_analytics_html(self.analytics_snapshot())
 
@@ -1079,13 +1306,29 @@ class ResearchDashboardHTTPService:
                     "/research/analytics",
                     "/research/analytics.json",
                     "/research/analytics/diagnostic.json",
+                    "/research/analytics/model",
+                    "/research/analytics/model.json",
                 }:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                     return
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/research/analytics/diagnostic.json":
+                    if parsed.path == "/research/analytics/model.json":
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        model_version_id = params.get("model_version_id", [""])[0]
+                        body = json.dumps(
+                            dashboard.model_version_details(model_version_id),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        content_type = "application/json; charset=utf-8"
+                    elif parsed.path == "/research/analytics/model":
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        model_version_id = params.get("model_version_id", [""])[0]
+                        body = dashboard.render_model_version_html(model_version_id)
+                        content_type = "text/html; charset=utf-8"
+                    elif parsed.path == "/research/analytics/diagnostic.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         bucket = params.get("bucket", ["OTHER_EXTREME"])[0]
                         body = json.dumps(

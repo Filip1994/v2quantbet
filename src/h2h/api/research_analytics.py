@@ -9,6 +9,7 @@ from html import escape
 from math import sqrt
 from statistics import mean, median
 from typing import Any
+from urllib.parse import urlencode
 
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
@@ -408,13 +409,26 @@ def _metrics_table(
     title: str,
     rows: Sequence[dict[str, Any]],
     dimensions: tuple[str, ...],
+    *,
+    dimension_links: dict[str, str] | None = None,
 ) -> str:
     dimension_headers = "".join(f"<th>{escape(name)}</th>" for name in dimensions)
     body = []
     for row in rows:
-        dims = "".join(
-            f"<td><b>{escape(str(row.get(name, '—')))}</b></td>" for name in dimensions
-        )
+        cells = []
+        for name in dimensions:
+            raw_value = str(row.get(name, "—"))
+            value = escape(raw_value)
+            base_path = (dimension_links or {}).get(name)
+            if base_path:
+                href = base_path + "?" + urlencode({name: raw_value})
+                cells.append(
+                    f'<td><b><a class="dimension-link" href="{escape(href, quote=True)}">'
+                    f"{value}</a></b></td>"
+                )
+            else:
+                cells.append(f"<td><b>{value}</b></td>")
+        dims = "".join(cells)
         body.append(
             "<tr>"
             + dims
@@ -492,6 +506,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Model versions",
         snapshot["cohorts"]["model_version"],
         ("model_version_id",),
+        dimension_links={"model_version_id": "/research/analytics/model"},
     )
     policy_configs = _metrics_table(
         "Policy configurations",
@@ -502,6 +517,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Model × policy regimes",
         snapshot["cohorts"]["model_policy"],
         ("model_version_id", "policy_config_fingerprint"),
+        dimension_links={"model_version_id": "/research/analytics/model"},
     )
     decision_contract = _metrics_table(
         "Full decision contract",
@@ -512,6 +528,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "devig_method_version",
             "policy_config_fingerprint",
         ),
+        dimension_links={"model_version_id": "/research/analytics/model"},
     )
     market_selection = _metrics_table(
         "Market × selection",
@@ -561,7 +578,8 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
 font-family:Inter,ui-sans-serif,system-ui,sans-serif}}main{{max-width:1920px;margin:auto;padding:24px}}
 header{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}}
 h1{{margin:0;font-size:25px}}h2{{font-size:15px;margin:0 0 12px}}p,small{{color:var(--muted)}}
-a{{color:#d8dcdf}}.cards{{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));
+a{{color:#d8dcdf}}.dimension-link{{text-decoration:none;border-bottom:1px dotted #778089}}
+.dimension-link:hover{{color:#fff;border-bottom-color:#fff}}.cards{{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));
 gap:9px;margin:15px 0}}.card,.panel{{background:var(--panel);border:1px solid var(--line);
 border-radius:12px}}.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;
 letter-spacing:.08em}}.card b{{display:block;font-size:20px;margin-top:7px}}.panel{{padding:14px;
