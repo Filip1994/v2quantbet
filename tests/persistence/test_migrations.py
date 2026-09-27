@@ -309,3 +309,18 @@ def test_research_version_provenance_migration_preserves_legacy_unknowns() -> No
     assert "LEGACY_UNRECORDED" in migration
     assert "WHERE rs.production_pick_id = r.pick_id" in migration
     assert "UPDATE value_evaluations" not in migration
+
+
+def test_cornerlab_settlement_events_are_append_only_and_backfill_legacy_rows() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "043_quantlab_corner_settlement_events.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE quantlab_corner_settlement_events" in migration
+    assert "LEGACY_BACKFILL" in migration
+    assert "INSERT INTO quantlab_corner_settlement_events" in migration
+    assert "quantlab_corner_settlement_events_immutable" in migration
+    assert "reject_corner_shadow_settlement_mutation" in migration
+    assert "BEFORE UPDATE OF outcome, pnl_minor, settled_at, result_detail" in migration
