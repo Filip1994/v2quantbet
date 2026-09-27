@@ -855,6 +855,53 @@ class PostgreSQLQuantLabRepository:
             )
             return _row_dicts(cursor)
 
+    def corner_shadow_result_refresh_candidates(
+        self,
+        *,
+        now: datetime,
+        post_kickoff_delay_seconds: int = 5400,
+        refresh_after_seconds: int = 900,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return open CornerLab fixtures whose QuantLab result status needs refreshing."""
+        if post_kickoff_delay_seconds <= 0:
+            raise ValueError("post_kickoff_delay_seconds must be positive")
+        if refresh_after_seconds <= 0:
+            raise ValueError("refresh_after_seconds must be positive")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (q.fixture_id) q.fixture_id, f.provider_fixture_id, "
+                "latest.kickoff_at, latest.provider_status, latest.captured_at "
+                "FROM quantlab_shadow_bets q "
+                "JOIN quantlab_fixtures f ON f.fixture_id = q.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = q.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE q.lab = 'CORNER' "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_corner_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id"
+                ") "
+                "AND latest.provider_status NOT IN "
+                "('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
+                "AND latest.captured_at <= %s - (%s * interval '1 second') "
+                "ORDER BY q.fixture_id, q.decision_at ASC LIMIT %s",
+                (
+                    now,
+                    post_kickoff_delay_seconds,
+                    now,
+                    refresh_after_seconds,
+                    limit,
+                ),
+            )
+            return _row_dicts(cursor)
+
     def corner_shadow_statistics_retry_candidates(
         self,
         *,
