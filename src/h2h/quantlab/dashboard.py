@@ -195,6 +195,8 @@ class QuantLabDashboardService:
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         market = params.get("market", [""])[0].strip().casefold()
+        model_version = params.get("model_version", [""])[0].strip()
+        policy_version = params.get("policy_version", [""])[0].strip()
 
         def keep(row: dict[str, Any]) -> bool:
             if bookmaker and bookmaker not in str(row.get("bookmaker_name") or "").casefold():
@@ -203,9 +205,13 @@ class QuantLabDashboardService:
                 return False
             if league and league not in str(row.get("competition_name") or "").casefold():
                 return False
-            return not (
-                market and market not in str(row.get("market_key") or "").casefold()
-            )
+            if market and market not in str(row.get("market_key") or "").casefold():
+                return False
+            if model_version and str(row.get("model_version") or "") != model_version:
+                return False
+            if policy_version and str(row.get("policy_version") or "") != policy_version:
+                return False
+            return True
 
         return tuple(row for row in rows if keep(row))
 
@@ -274,6 +280,36 @@ class QuantLabDashboardService:
         avg_clv = None if not clvs else sum(clvs) / len(clvs)
         max_dd = _drawdown(metric_rows)
         api_used = self._repository.api_usage_today()
+        model_versions = sorted(
+            {
+                str(row.get("model_version") or "UNRECORDED_MODEL")
+                for row in metric_rows
+            }
+        )
+        policy_versions = sorted(
+            {
+                str(row.get("policy_version") or "LEGACY_UNRECORDED_POLICY")
+                for row in metric_rows
+            }
+        )
+        unrecorded_policy_n = sum(
+            not str(row.get("policy_version") or "").strip()
+            for row in metric_rows
+        )
+        mixed_versions = len(model_versions) > 1 or len(policy_versions) > 1
+        version_notice_html = (
+            '<p class="version-warning"><b>MIXED VERSION KPI</b> '
+            f'Model versions: {len(model_versions)} · policy versions: {len(policy_versions)} · '
+            f'unrecorded policy rows: {unrecorded_policy_n}. '
+            'Use the model/policy filters before interpreting performance.</p>'
+            if metric_rows and (mixed_versions or unrecorded_policy_n)
+            else (
+                '<p class="version-ok"><b>SINGLE VERSION KPI</b> '
+                'Current KPI cards represent one recorded model/policy regime.</p>'
+                if metric_rows
+                else ""
+            )
+        )
 
         def query_for(target: str) -> str:
             current = {key: values[0] for key, values in params.items() if values and key != "lab"}
@@ -639,6 +675,8 @@ main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-ite
 .tabs a{{text-decoration:none;color:#9ba4ac;padding:10px 18px;border-radius:8px;font-weight:900;font-size:13px}}.tabs a.active{{background:#e4e7e9;color:#14171a}}
 .lab-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
 .dashboard-warning{{margin:0 0 10px;padding:10px 12px;border:1px solid rgba(224,111,120,.35);border-left:3px solid var(--loss);border-radius:8px;background:rgba(224,111,120,.08);color:#f0a0a7;font-size:12px}}
+.version-warning,.version-ok{{margin:0 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:12px}}
+.version-warning{{background:#2a2117;color:#d8b77e}}.version-ok{{background:#17251d;color:#8fd1a8}}
 .cards{{display:grid;grid-template-columns:repeat(8,minmax(125px,1fr));gap:9px;margin-bottom:14px}}
 .card{{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:12px;padding:13px 14px;min-height:82px}}
 .card small{{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:900}}.card b{{display:block;margin-top:9px;font-size:20px}}
@@ -663,11 +701,15 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <nav class="tabs">{tabs}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
 {warning_html}
+{version_notice_html}
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
 <section class="toolbar"><form method="get"><input type="hidden" name="lab" value="{escape(lab_key, quote=True)}">
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
-<input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}"><button type="submit">Apply</button></form></section>
+<input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}">
+<input name="model_version" placeholder="Exact model version" value="{field("model_version")}">
+<input name="policy_version" placeholder="Exact policy version" value="{field("policy_version")}">
+<button type="submit">Apply</button></form></section>
 {goal_contract_html}
 {goal_pipeline_html}
 {corner_contract_html}
