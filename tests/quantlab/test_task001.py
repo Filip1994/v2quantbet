@@ -289,6 +289,75 @@ def test_collector_filters_card_corner_rows_and_watermarks_empty_or_filtered_cap
     assert set(repo.capture["allowed_labs"]) == {"GOAL"}
 
 
+def test_collector_persists_cardlab_markets_only_from_1xbet() -> None:
+    class Provider:
+        def fetch_odds(self, fixture_id):
+            assert fixture_id == 42
+            return {
+                "response": [
+                    {
+                        "fixture": {"id": 42},
+                        "bookmakers": [
+                            {
+                                "id": 8,
+                                "name": "Bet365",
+                                "bets": [
+                                    {
+                                        "id": 119,
+                                        "name": "Total Cards",
+                                        "values": [
+                                            {"value": "Over 4.5", "odd": 1.90},
+                                            {"value": "Under 4.5", "odd": 1.90},
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "id": 11,
+                                "name": "1xBet",
+                                "bets": [
+                                    {
+                                        "id": 119,
+                                        "name": "Total Cards",
+                                        "values": [
+                                            {"value": "Over 4.5", "odd": 1.95},
+                                            {"value": "Under 4.5", "odd": 1.85},
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ]
+            }
+
+    class Repo:
+        def __init__(self):
+            self.saved = ()
+            self.capture = None
+
+        def save_market_observations(self, rows):
+            self.saved = tuple(rows)
+
+        def save_market_capture(self, **kwargs):
+            self.capture = kwargs
+
+    repo = Repo()
+    rows = QuantLabMarketCollector(repo, Provider()).collect_fixture(
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+        allowed_labs={"CARD"},
+    )
+
+    assert len(rows) == 2
+    assert {row.bookmaker_id for row in rows} == {11}
+    assert {row.provider_bet_id for row in rows} == {119}
+    assert repo.saved == rows
+    assert repo.capture["raw_observation_count"] == 4
+    assert repo.capture["stored_observation_count"] == 2
+
+
 def test_collector_write_path_has_no_production_table_mutations() -> None:
     collector_source = inspect.getsource(QuantLabMarketCollector)
     persistence_source = inspect.getsource(
