@@ -96,6 +96,19 @@ def collect_cardlab_v4_audit(repository: Any) -> dict[str, Any]:
         market_coverage = _one(cursor)
 
         cursor.execute(
+            "SELECT bookmaker_id, bookmaker_name, provider_bet_id, provider_bet_name, "
+            "COUNT(*)::BIGINT AS observation_rows, "
+            "COUNT(DISTINCT fixture_id)::BIGINT AS fixture_count, "
+            "MAX(captured_at) AS latest_capture "
+            "FROM quantlab_market_observations "
+            "WHERE lab_owner = 'CARD' "
+            "GROUP BY bookmaker_id, bookmaker_name, provider_bet_id, provider_bet_name "
+            "ORDER BY fixture_count DESC, observation_rows DESC, bookmaker_id, provider_bet_id "
+            "LIMIT 50"
+        )
+        market_inventory = _rows(cursor)
+
+        cursor.execute(
             "SELECT COUNT(*)::BIGINT AS snapshot_rows, "
             "COUNT(DISTINCT fixture_id)::BIGINT AS snapshot_fixtures, "
             "COUNT(*) FILTER (WHERE referee_card_rate IS NOT NULL "
@@ -129,6 +142,7 @@ def collect_cardlab_v4_audit(repository: Any) -> dict[str, Any]:
         "reason_distribution": reasons,
         "pass_funnel": pass_funnel,
         "market_coverage": market_coverage,
+        "market_inventory": market_inventory,
         "feature_coverage": feature_coverage,
         "value_filter": value_filter,
     }
@@ -142,6 +156,7 @@ def log_cardlab_v4_audit(repository: Any, logger: logging.Logger) -> None:
         "reason_distribution",
         "pass_funnel",
         "market_coverage",
+        "market_inventory",
         "feature_coverage",
         "value_filter",
     ):
