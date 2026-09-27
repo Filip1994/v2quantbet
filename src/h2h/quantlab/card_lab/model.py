@@ -27,7 +27,7 @@ def total_cards_probability(
     if abs(doubled - nearest) > 1e-9 or int(nearest) % 2 != 1:
         raise ValueError("CardLab Poisson model supports half-lines only")
 
-    threshold = int(floor(target_line))
+    threshold = floor(target_line)
     term = exp(-rate)
     cdf = term
     for count in range(1, threshold + 1):
