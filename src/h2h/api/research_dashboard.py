@@ -790,6 +790,290 @@ class ResearchDashboardService:
             "rows": items,
         }
 
+    def league_details(self, league_id: int, season: int) -> dict[str, Any]:
+        """Return settled Research performance for one league-season across retrains."""
+        if isinstance(league_id, bool) or not isinstance(league_id, int) or league_id <= 0:
+            raise ValueError("league_id must be a positive integer")
+        if isinstance(season, bool) or not isinstance(season, int) or season <= 0:
+            raise ValueError("season must be a positive integer")
+
+        settled = tuple(
+            row
+            for row in self.signals({})
+            if row.get("outcome") in {"WIN", "LOSS", "VOID"}
+            and int(row.get("league_id") or 0) == league_id
+            and int(row.get("season") or 0) == season
+        )
+        rows = sorted(
+            settled,
+            key=lambda row: (
+                row.get("kickoff_at")
+                if isinstance(row.get("kickoff_at"), datetime)
+                else datetime.min.replace(tzinfo=UTC),
+                str(row.get("evaluation_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        def iso(value: Any) -> str | None:
+            if not isinstance(value, datetime):
+                return None
+            if value.tzinfo is None or value.utcoffset() is None:
+                value = value.replace(tzinfo=UTC)
+            return value.astimezone(UTC).isoformat()
+
+        def integer(value: Any) -> int | None:
+            return None if value is None else int(value)
+
+        items = []
+        grouped_models: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            model_version_id = str(row.get("model_version_id") or "").strip()
+            model_version_id = model_version_id or "UNRECORDED_MODEL"
+            grouped_models.setdefault(model_version_id, []).append(row)
+
+            home_goals = integer(row.get("regulation_home_goals"))
+            away_goals = integer(row.get("regulation_away_goals"))
+            clv_ppm = integer(row.get("clv_ppm"))
+            items.append(
+                {
+                    "research_signal_id": str(row.get("research_signal_id") or ""),
+                    "evaluation_id": str(row.get("evaluation_id") or ""),
+                    "fixture_id": str(row.get("fixture_id") or ""),
+                    "provider_fixture_id": str(row.get("provider_fixture_id") or ""),
+                    "league_id": league_id,
+                    "season": season,
+                    "home_team": row.get("home_team"),
+                    "away_team": row.get("away_team"),
+                    "competition_name": row.get("competition_name"),
+                    "country": row.get("country"),
+                    "kickoff_at": iso(row.get("kickoff_at")),
+                    "market": row.get("market"),
+                    "selection": row.get("selection"),
+                    "bookmaker": row.get("bookmaker"),
+                    "odds": float(row["odds"]),
+                    "model_probability": float(row["model_probability"]),
+                    "market_fair_probability": float(row["market_fair_probability"]),
+                    "edge": float(row["edge"]),
+                    "expected_value": float(row["expected_value"]),
+                    "outcome": row.get("outcome"),
+                    "score": (
+                        None
+                        if home_goals is None or away_goals is None
+                        else {"home": home_goals, "away": away_goals}
+                    ),
+                    "pnl_minor": integer(row.get("pnl_minor")),
+                    "clv_pct": None if clv_ppm is None else clv_ppm / 10_000,
+                    "disposition": row.get("disposition"),
+                    "qualified_at": iso(row.get("qualified_at")),
+                    "closing_odds": (
+                        None
+                        if row.get("closing_odds") is None
+                        else float(row["closing_odds"])
+                    ),
+                    "closing_observed_at": iso(row.get("closing_observed_at")),
+                    "model_version_id": model_version_id,
+                    "policy_config_fingerprint": row.get("policy_config_fingerprint"),
+                    "production_pick_id": row.get("production_pick_id"),
+                }
+            )
+
+        model_versions = [
+            {
+                "model_version_id": model_version_id,
+                **cohort_metrics(
+                    tuple(model_rows),
+                    fixed_stake_minor=self._stake,
+                ),
+            }
+            for model_version_id, model_rows in grouped_models.items()
+        ]
+        model_versions.sort(
+            key=lambda item: (
+                -int(item["graded_n"]),
+                str(item["model_version_id"]),
+            )
+        )
+
+        first = rows[0] if rows else {}
+        return {
+            "contract_version": "RESEARCH_LEAGUE_DRILLDOWN_V1",
+            "league": {
+                "league_id": league_id,
+                "season": season,
+                "competition_name": first.get("competition_name"),
+                "country": first.get("country"),
+            },
+            "summary": cohort_metrics(
+                settled,
+                fixed_stake_minor=self._stake,
+            ),
+            "model_version_count": len(model_versions),
+            "model_versions": model_versions,
+            "rows": items,
+        }
+
+    def render_league_html(self, league_id: int, season: int) -> str:
+        """Render League -> model versions -> settled picks hierarchy."""
+        payload = self.league_details(league_id, season)
+        league = payload["league"]
+        summary = payload["summary"]
+        model_versions = payload["model_versions"]
+        rows = payload["rows"]
+
+        def metric(value: Any, suffix: str = "", *, signed: bool = False) -> str:
+            if value is None:
+                return "—"
+            number = float(value)
+            prefix = "+" if signed and number > 0 else ""
+            return f"{prefix}{number:.2f}{suffix}"
+
+        def short_model(value: str) -> str:
+            if ":" not in value:
+                return value if len(value) <= 24 else value[:23] + "…"
+            prefix, digest = value.split(":", 1)
+            return f"{prefix}:{digest[:12]}…" if len(digest) > 12 else value
+
+        cards = "".join(
+            f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
+            for label, value in (
+                ("Settled", str(summary["n"])),
+                (
+                    "W-L-V",
+                    f'{summary["wins"]}-{summary["losses"]}-{summary["voids"]}',
+                ),
+                ("Win rate", metric(summary["win_rate_pct"], "%")),
+                ("Expected", metric(summary["expected_win_rate_pct"], "%")),
+                ("ROI", metric(summary["roi_pct"], "%", signed=True)),
+                ("Flat P/L", f'{summary["flat_pnl_minor"] / 100:+.0f} RSD'),
+                ("Avg CLV", metric(summary["avg_clv_pct"], "%", signed=True)),
+                ("Retrains", str(payload["model_version_count"])),
+            )
+        )
+
+        model_body = []
+        for model in model_versions:
+            model_version_id = str(model["model_version_id"])
+            model_query = urlencode({"model_version_id": model_version_id})
+            label = escape(short_model(model_version_id))
+            href = "/research/analytics/model?" + model_query
+            model_body.append(
+                "<tr>"
+                f'<td><a class="model-link" href="{escape(href, quote=True)}" '
+                f'title="{escape(model_version_id, quote=True)}">{label}</a></td>'
+                f'<td>{model["n"]}</td>'
+                f'<td>{model["wins"]}-{model["losses"]}-{model["voids"]}</td>'
+                f'<td>{metric(model["win_rate_pct"], "%")}</td>'
+                f'<td>{metric(model["expected_win_rate_pct"], "%")}</td>'
+                f'<td>{metric(model["roi_pct"], "%", signed=True)}</td>'
+                f'<td>{metric(model["avg_clv_pct"], "%", signed=True)}</td>'
+                f'<td>{escape(str(model["sample_band"]))}</td>'
+                "</tr>"
+            )
+        model_rows_html = "".join(model_body) or (
+            '<tr><td colspan="8" class="empty">No settled model versions.</td></tr>'
+        )
+
+        pick_body = []
+        for row in rows:
+            score = row["score"]
+            score_text = "—" if score is None else f'{score["home"]}:{score["away"]}'
+            pnl_minor = row["pnl_minor"]
+            pnl_text = "—" if pnl_minor is None else f"{pnl_minor / 100:+.0f} RSD"
+            clv = row["clv_pct"]
+            clv_text = "—" if clv is None else f"{clv:+.2f}%"
+            close = (
+                "—"
+                if row["closing_odds"] is None
+                else f'{float(row["closing_odds"]):.2f}'
+            )
+            model_version_id = str(row["model_version_id"])
+            model_query = urlencode({"model_version_id": model_version_id})
+            model_href = "/research/analytics/model?" + model_query
+            match = (
+                f'{escape(str(row["home_team"] or "—"))} – '
+                f'{escape(str(row["away_team"] or "—"))}'
+            )
+            outcome = escape(str(row["outcome"] or "—"))
+            outcome_class = str(row["outcome"] or "").casefold()
+            pick_body.append(
+                f'<tr class="row-{outcome_class}">'
+                f'<td class="match"><b>{match}</b><small>'
+                f'fixture {escape(str(row["provider_fixture_id"] or "—"))}</small></td>'
+                f'<td><b class="result result-{outcome_class}">{outcome}</b>'
+                f'<small>{score_text}</small></td>'
+                f'<td><b>{escape(str(row["market"] or "—"))} '
+                f'{escape(str(row["selection"] or "—"))}</b></td>'
+                f'<td><b>{float(row["odds"]):.2f}</b><small>'
+                f'{escape(str(row["bookmaker"] or "—"))}</small></td>'
+                f'<td>{_pct(row["model_probability"])}</td>'
+                f'<td>{_pct(row["expected_value"])}</td>'
+                f'<td>{close}</td>'
+                f'<td>{clv_text}</td>'
+                f'<td>{pnl_text}</td>'
+                f'<td><a class="model-link" href="{escape(model_href, quote=True)}" '
+                f'title="{escape(model_version_id, quote=True)}">'
+                f'{escape(short_model(model_version_id))}</a></td>'
+                f'<td>{escape(str(row["kickoff_at"] or "—"))}</td>'
+                "</tr>"
+            )
+        pick_rows_html = "".join(pick_body) or (
+            '<tr><td colspan="11" class="empty">'
+            "No settled Research picks belong to this league-season.</td></tr>"
+        )
+
+        competition_name = escape(str(league.get("competition_name") or f"League {league_id}"))
+        country = escape(str(league.get("country") or "—"))
+        query = urlencode({"league_id": league_id, "season": season})
+
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research league performance</title>
+<style>
+:root{{--bg:#111315;--panel:#181b1f;--line:#30363d;--text:#eceff1;--muted:#9299a1;
+--win:#69c98f;--loss:#e06f78;--void:#9aa1a8}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);
+font-family:Inter,ui-sans-serif,system-ui,sans-serif}}main{{max-width:1920px;margin:auto;padding:24px}}
+header{{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}}
+h1{{margin:4px 0 0;font-size:24px}}h2{{margin:0 0 11px;font-size:15px}}
+p,small{{color:var(--muted)}}a{{color:#d8dcdf}}.meta{{color:var(--muted);font-size:12px}}
+.cards{{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0}}
+.card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px}}
+.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;letter-spacing:.08em}}
+.card b{{display:block;font-size:18px;margin-top:7px}}.panel{{padding:14px;margin:12px 0}}
+.scroll{{overflow:auto;max-height:65vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}
+th,td{{padding:9px 10px;border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;
+vertical-align:top}}th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;
+text-transform:uppercase;letter-spacing:.05em}}td.match{{min-width:240px}}td small{{display:block;
+margin-top:4px}}.model-link{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+text-decoration:none;border-bottom:1px dotted #778089}}.model-link:hover{{color:#fff;
+border-bottom-color:#fff}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;
+font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
+.result-void{{color:var(--void)}}.row-win{{box-shadow:inset 3px 0 var(--win)}}
+.row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}
+.empty{{text-align:center;color:var(--muted);padding:36px!important}}@media(max-width:900px){{
+.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}}}
+</style></head><body><main>
+<header><div><small>RESEARCH_LEAGUE_DRILLDOWN_V1</small>
+<h1>{competition_name} · {season}</h1>
+<div class="meta">{country} · League ID {league_id} · all DC retrains combined</div>
+<p>League performance first; model versions remain available as the audit layer.</p></div>
+<div><a href="/research/analytics">← Analytics V2</a> ·
+<a href="/research/analytics/league.json?{escape(query, quote=True)}">JSON</a></div></header>
+<section class="cards">{cards}</section>
+<section class="panel"><h2>Model versions · retrain history</h2>
+<div class="scroll"><table><thead><tr>
+<th>Model version</th><th>N</th><th>W-L-V</th><th>Win%</th><th>Expected</th>
+<th>ROI</th><th>Avg CLV</th><th>Evidence</th>
+</tr></thead><tbody>{model_rows_html}</tbody></table></div></section>
+<section class="panel"><h2>All settled picks · all retrains</h2>
+<div class="scroll"><table><thead><tr>
+<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th><th>EV</th>
+<th>Close</th><th>CLV</th><th>P/L</th><th>Model version</th><th>Kickoff UTC</th>
+</tr></thead><tbody>{pick_rows_html}</tbody></table></div></section>
+</main></body></html>"""
+
     def render_model_version_html(self, model_version_id: str) -> str:
         """Render the exact settled picks behind one model-version analytics cohort."""
         payload = self.model_version_details(model_version_id)
@@ -1250,7 +1534,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
 <a class="{awaiting_class}" href="{awaiting_href}">Awaiting result <span>({len(awaiting_rows)})</span></a>
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
-<a href="/research/analytics">Analytics V1</a>
+<a href="/research/analytics">Analytics V2</a>
 </nav>
 <section class="cards">
 <div class="card"><small>Active</small><b>{len(active_rows)}</b></div>
@@ -1308,13 +1592,31 @@ class ResearchDashboardHTTPService:
                     "/research/analytics/diagnostic.json",
                     "/research/analytics/model",
                     "/research/analytics/model.json",
+                    "/research/analytics/league",
+                    "/research/analytics/league.json",
                 }:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
                     return
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/research/analytics/model.json":
+                    if parsed.path == "/research/analytics/league.json":
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        league_id = int(params.get("league_id", ["0"])[0])
+                        season = int(params.get("season", ["0"])[0])
+                        body = json.dumps(
+                            dashboard.league_details(league_id, season),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        content_type = "application/json; charset=utf-8"
+                    elif parsed.path == "/research/analytics/league":
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        league_id = int(params.get("league_id", ["0"])[0])
+                        season = int(params.get("season", ["0"])[0])
+                        body = dashboard.render_league_html(league_id, season)
+                        content_type = "text/html; charset=utf-8"
+                    elif parsed.path == "/research/analytics/model.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         model_version_id = params.get("model_version_id", [""])[0]
                         body = json.dumps(
