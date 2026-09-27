@@ -607,9 +607,10 @@ def test_run_once_prioritizes_goallab_before_provider_backed_work():
     assert order[:2] == ["goal_evaluation", "goal_settlement"]
     assert order.index("goal_settlement") < order.index("corner_result_refresh")
     assert order.index("corner_settlement") < order.index("card_result_refresh")
-    assert order.index("card_settlement") < order.index("discover")
-    assert order.index("history") < order.index("card_referee_history")
-    assert order.index("card_referee_history") < order.index("collect")
+    assert order.index("card_settlement") < order.index("card_referee_history")
+    assert order.index("card_referee_history") < order.index("discover")
+    assert order.index("discover") < order.index("history")
+    assert order.index("history") < order.index("collect")
     assert order.index("collect") < order.index("goal_history")
     assert order.index("goal_history") < order.index("corner_history")
     assert order.index("corner_history") < order.index("corner_evaluation")
