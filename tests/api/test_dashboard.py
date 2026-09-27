@@ -22,6 +22,7 @@ def _pick(**changes: object) -> dict[str, object]:
         "home_team": "Red & <script>alert(1)</script>",
         "away_team": "Blue",
         "competition_name": "Premier <League>",
+        "country": "England",
         "kickoff_at": NOW,
         "market": "OU_25",
         "selection": "OVER",
@@ -145,6 +146,24 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "Best current" not in html
     assert "Same-book close" not in html
     assert "Market close" not in html
+
+
+def test_country_flag_is_shown_beside_league_metadata() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                )
+            ]
+        )
+    ).render_html()
+
+    assert 'class="league-meta"' in html
+    assert 'class="country-flag" title="England" aria-label="England">🇬🇧</span>' in html
+    assert "Premier &lt;League&gt; · 23 Sep 2026 · 12:00 UTC" in html
 
 
 def test_registered_bookmaker_identity_is_kept_on_active_pick() -> None:
