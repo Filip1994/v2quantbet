@@ -177,6 +177,21 @@ class ReferenceShadowPickEngine:
                 return False
         return True
 
+    def _settlement_contract_status(self, pair: dict[str, Any]) -> dict[str, Any]:
+        """Return settlement authority for one market pair.
+
+        CornerLab's supported total-corner contract is already canonical. CardLab
+        overrides this hook and fails closed until exact bookmaker semantics are
+        separately verified.
+        """
+        return {
+            "supported": True,
+            "status": "CANONICAL",
+            "provider_bet_id": int(pair["provider_bet_id"]),
+            "provider_bet_name": str(pair["provider_bet_name"]),
+            "bookmaker_id": int(pair["bookmaker_id"]),
+        }
+
     def _fixture_pass(
         self,
         fixture: dict[str, Any],
@@ -282,7 +297,7 @@ class ReferenceShadowPickEngine:
         if blocked is not None:
             return blocked
 
-        pairs = tuple(
+        market_pairs = tuple(
             pair
             for pair in self._repository.total_market_pairs(
                 str(fixture["fixture_id"]),
@@ -292,11 +307,34 @@ class ReferenceShadowPickEngine:
             if self._market_name_supported(str(pair["provider_bet_name"]))
             and _is_half_line(float(pair["line"]))
         )
-        if not pairs:
+        if not market_pairs:
             return self._fixture_pass(
                 fixture,
                 now,
                 reason="NO_SUPPORTED_TOTAL_MARKET",
+            )
+
+        contract_rows = tuple(
+            (pair, self._settlement_contract_status(pair))
+            for pair in market_pairs
+        )
+        pairs = tuple(
+            pair for pair, contract in contract_rows if bool(contract.get("supported"))
+        )
+        if not pairs:
+            contracts = sorted(
+                (dict(contract) for _, contract in contract_rows),
+                key=lambda item: (
+                    int(item.get("provider_bet_id") or 0),
+                    int(item.get("bookmaker_id") or 0),
+                    str(item.get("status") or ""),
+                ),
+            )
+            return self._fixture_pass(
+                fixture,
+                now,
+                reason="NO_CANONICAL_SETTLEMENT_CONTRACT",
+                details={"settlement_contracts": contracts},
             )
 
         groups: dict[tuple[int, float], list[dict[str, Any]]] = {}

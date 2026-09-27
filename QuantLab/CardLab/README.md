@@ -50,9 +50,14 @@ settlement rule is assumed.
 
 QuantLab is shadow-only and does not write production picks, bankroll or model state.
 
-## Shadow Pick Engine V1
+## Shadow Pick Engine / settlement authority
 
-Task 003 adds `CARDLAB_REFERENCE_CONTEXT_POLICY_V1`.
+The current decision policy is `CARDLAB_REFERENCE_CONTEXT_POLICY_V2_SETTLEMENT_GATED`.
+
+The previous V1 research evaluator could identify value candidates before CardLab had a
+canonical sportsbook settlement contract. V2 fails closed: a candidate may become a
+shadow PICK only when the exact provider market and bookmaker have an explicitly verified
+settlement contract.
 
 The CardLab evaluator uses the same conservative cross-book fair-reference mechanism as
 CornerLab for supported full-match total-card half-lines, then requires timestamp-safe
@@ -68,3 +73,14 @@ their settlement semantics are not interchangeable with the aggregate referee ca
 feature.
 
 The evaluator adds zero provider requests and writes only QuantLab decision/shadow tables.
+
+### Current settlement status
+
+API-Football's pre-match market catalog identifies bet ID 119 as `Total Cards`. QuantBet
+preserves that identity, but the provider feed does not itself define bookmaker-specific
+yellow/red/second-yellow settlement weighting. Therefore Bet365/1xBet `Total Cards`
+remain visible research markets but are **not PICK-authorized** yet.
+
+Such candidates are recorded as `PASS / NO_CANONICAL_SETTLEMENT_CONTRACT`, including the
+contract status in decision evidence. This is intentional: CardLab must not publish ROI,
+win rate or P&L for a market whose settlement semantics have not been verified.
