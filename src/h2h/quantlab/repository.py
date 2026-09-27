@@ -94,12 +94,22 @@ class PostgreSQLQuantLabRepository:
                 "q.model_probability, q.market_probability, q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
                 "q.closing_observed_at, q.stake_minor, q.outcome, q.pnl_minor, "
-                "q.settled_at, COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "q.settled_at, q.result_detail, "
+                "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
+                "cs.feature_payload AS corner_feature_payload, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
                 "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
                 "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
                 "COALESCE(qlatest.country, platest.country) AS country, "
                 "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
                 "FROM quantlab_shadow_bets q "
+                "LEFT JOIN LATERAL ("
+                " SELECT expected_total_corners, home_history_size, away_history_size, feature_payload "
+                " FROM quantlab_corner_feature_snapshots s "
+                " WHERE q.lab = 'CORNER' AND s.fixture_id = q.fixture_id "
+                " AND s.model_version = q.model_version AND s.decision_at <= q.decision_at "
+                " ORDER BY s.decision_at DESC, s.feature_snapshot_id DESC LIMIT 1"
+                ") cs ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT home_team, away_team, competition_name, country, kickoff_at "
                 " FROM quantlab_fixture_observations o WHERE o.fixture_id = q.fixture_id "
@@ -113,7 +123,13 @@ class PostgreSQLQuantLabRepository:
                 "WHERE q.lab = %s ORDER BY q.decision_at DESC, q.shadow_bet_id DESC LIMIT %s",
                 (lab, limit),
             )
-            return _row_dicts(cursor)
+            rows = _row_dicts(cursor)
+        for row in rows:
+            for key in ("result_detail", "corner_feature_payload"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    row[key] = json.loads(value)
+        return rows
 
     def goal_market_pairs(
         self,
@@ -706,6 +722,61 @@ class PostgreSQLQuantLabRepository:
                     item.quote_observed_at,
                     item.decision_at,
                     stake_minor,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def corner_shadow_settlement_candidates(
+        self,
+        *,
+        limit: int = 500,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return pending CornerLab shadow bets with terminal result evidence."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT q.shadow_bet_id, q.fixture_id, q.market_key, q.selection, q.line, "
+                "q.odds, q.stake_minor, q.model_version, q.decision_at, "
+                "r.result_observation_id, r.provider_status, r.result_classification, "
+                "stats.statistics_observation_id, stats.available_at AS statistics_available_at, "
+                "stats.home_corner_kicks, stats.away_corner_kicks "
+                "FROM quantlab_shadow_bets q "
+                "JOIN fixture_result_acquisition_states state "
+                "  ON state.fixture_id = q.fixture_id AND state.phase = 'COMPLETE' "
+                "JOIN fixture_result_observations r "
+                "  ON r.result_observation_id = state.current_observation_id "
+                " AND r.fixture_id = q.fixture_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT s.statistics_observation_id, s.available_at, "
+                "        s.home_corner_kicks, s.away_corner_kicks "
+                " FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = q.fixture_id "
+                " AND s.home_corner_kicks IS NOT NULL AND s.away_corner_kicks IS NOT NULL "
+                " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
+                ") stats ON TRUE "
+                "WHERE q.lab = 'CORNER' AND q.outcome = 'PENDING' "
+                "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
+                "AND (r.result_classification = 'NON_PLAYED_VOIDABLE' "
+                " OR stats.statistics_observation_id IS NOT NULL) "
+                "ORDER BY q.decision_at ASC, q.shadow_bet_id ASC LIMIT %s",
+                (limit,),
+            )
+            return _row_dicts(cursor)
+
+    def settle_corner_shadow_bet(self, item: Any) -> bool:
+        """Atomically settle one still-pending CornerLab shadow bet."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE quantlab_shadow_bets "
+                "SET outcome = %s, pnl_minor = %s, settled_at = %s, result_detail = %s::jsonb "
+                "WHERE shadow_bet_id = %s AND lab = 'CORNER' AND outcome = 'PENDING'",
+                (
+                    item.outcome,
+                    item.pnl_minor,
+                    item.settled_at,
+                    _json(item.result_detail),
+                    item.shadow_bet_id,
                 ),
             )
             return cursor.rowcount > 0
