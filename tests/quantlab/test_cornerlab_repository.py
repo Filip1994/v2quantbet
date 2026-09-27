@@ -79,3 +79,21 @@ def test_corner_settlement_candidates_do_not_depend_on_production_result_trackin
     assert "('FT', 'AET', 'PEN')" in cursor.query
     assert "('CANC', 'ABD', 'AWD', 'WO')" in cursor.query
     assert cursor.params == (25,)
+
+
+def test_corner_statistics_retry_candidates_are_pick_scoped_and_throttled() -> None:
+    cursor = _Cursor()
+    repository = PostgreSQLQuantLabRepository(connect=lambda: _Connection(cursor))
+
+    assert repository.corner_shadow_statistics_retry_candidates(
+        now=NOW,
+        retry_after_seconds=1800,
+        limit=7,
+    ) == ()
+    assert "q.lab = 'CORNER'" in cursor.query
+    assert "latest.provider_status IN ('FT', 'AET', 'PEN')" in cursor.query
+    assert "quantlab_corner_settlement_events" in cursor.query
+    assert "quantlab_match_statistics_observations" in cursor.query
+    assert "latest_capture.status = 'UNAVAILABLE'" in cursor.query
+    assert "league-season-statistics-fixtures-false" in cursor.query
+    assert cursor.params == (NOW, 1800, 7)
