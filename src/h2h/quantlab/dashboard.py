@@ -209,9 +209,10 @@ class QuantLabDashboardService:
                 return False
             if model_version and str(row.get("model_version") or "") != model_version:
                 return False
-            if policy_version and str(row.get("policy_version") or "") != policy_version:
-                return False
-            return True
+            return not (
+                policy_version
+                and str(row.get("policy_version") or "") != policy_version
+            )
 
         return tuple(row for row in rows if keep(row))
 
