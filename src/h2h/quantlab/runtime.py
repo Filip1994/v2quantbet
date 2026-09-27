@@ -1037,7 +1037,7 @@ class QuantLabRuntime:
             settlement = settle_corner_shadow_bet(row, settled_at=now)
             if settlement is None:
                 continue
-            settled += int(bool(self._repository.settle_corner_shadow_bet(settlement)))
+            settled += int(bool(self._repository.save_corner_settlement_event(settlement)))
         return settled
 
     def _evaluate_context_picks(
