@@ -444,9 +444,11 @@ class QuantLabRuntime:
         self,
         fixture: dict[str, Any],
         now: datetime,
+        *,
+        allow_retry: bool = False,
     ) -> bool:
         fixture_id = str(fixture["fixture_id"])
-        if self._repository.statistics_capture_exists(fixture_id):
+        if not allow_retry and self._repository.statistics_capture_exists(fixture_id):
             return False
         provider_fixture_id = int(fixture["provider_fixture_id"])
         home_team_id = int(fixture["home_team_id"])
@@ -1030,6 +1032,32 @@ class QuantLabRuntime:
             settled += int(bool(self._repository.save_goal_pick_settlement(settlement)))
         return settled
 
+    def _refresh_corner_pick_statistics(self, now: datetime) -> int:
+        """Retry transiently unavailable corner stats only for unsettled CornerLab picks."""
+        rows = self._repository.corner_shadow_statistics_retry_candidates(
+            now=now,
+            retry_after_seconds=1800,
+            limit=25,
+        )
+        refreshed = 0
+        for fixture in rows:
+            try:
+                refreshed += int(
+                    self._capture_historical_statistics(
+                        fixture,
+                        now,
+                        allow_retry=True,
+                    )
+                )
+            except ApiBudgetExceededError:
+                raise
+            except Exception:
+                LOGGER.exception(
+                    "QuantLab CornerLab settlement statistics retry failed fixture=%s",
+                    fixture.get("fixture_id"),
+                )
+        return refreshed
+
     def _settle_corner_picks(self, now: datetime) -> int:
         settled = 0
         rows = self._repository.corner_shadow_settlement_candidates(limit=500)
@@ -1126,6 +1154,20 @@ class QuantLabRuntime:
             result["corner_picks"] = corner_picks
         except Exception:
             LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
+
+        try:
+            refreshed = self._refresh_corner_pick_statistics(now)
+            if refreshed:
+                LOGGER.info(
+                    "QuantLab CornerLab settlement statistics refreshed=%d",
+                    refreshed,
+                )
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; CornerLab settlement statistics retry skipped"
+            )
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab settlement statistics retry failed")
 
         try:
             result["corner_settlements"] = self._settle_corner_picks(now)
