@@ -186,16 +186,11 @@ class QuantLabDashboardService:
         self._api_limit = api_daily_limit
         self._currency = currency
 
-    def _filtered_rows(
+    def _filter_rows(
         self,
-        lab: str,
+        rows: tuple[dict[str, Any], ...],
         params: dict[str, list[str]],
     ) -> tuple[dict[str, Any], ...]:
-        rows = (
-            self._repository.list_goal_picks()
-            if lab == "GOAL"
-            else self._repository.list_bets(lab)
-        )
         bookmaker = params.get("bookmaker", [""])[0].strip().casefold()
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
@@ -214,6 +209,37 @@ class QuantLabDashboardService:
 
         return tuple(row for row in rows if keep(row))
 
+    def _filtered_rows(
+        self,
+        lab: str,
+        params: dict[str, list[str]],
+    ) -> tuple[dict[str, Any], ...]:
+        rows = (
+            self._repository.list_goal_picks()
+            if lab == "GOAL"
+            else self._repository.list_bets(lab)
+        )
+        return self._filter_rows(tuple(rows), params)
+
+    def _filtered_metric_rows(
+        self,
+        lab: str,
+        params: dict[str, list[str]],
+        *,
+        fallback_rows: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if lab == "GOAL":
+            loader = getattr(self._repository, "list_all_goal_picks", None)
+            if not callable(loader):
+                return fallback_rows
+            rows = loader()
+        else:
+            loader = getattr(self._repository, "list_all_bets", None)
+            if not callable(loader):
+                return fallback_rows
+            rows = loader(lab)
+        return self._filter_rows(tuple(rows), params)
+
     def render_html(self, raw_query: str = "") -> str:
         params = parse_qs(raw_query, keep_blank_values=True)
         lab_key = params.get("lab", ["goal"])[0].strip().casefold()
@@ -223,13 +249,21 @@ class QuantLabDashboardService:
         dashboard_warnings: list[str] = []
         try:
             rows = self._filtered_rows(lab, params)
+            metric_rows = self._filtered_metric_rows(
+                lab,
+                params,
+                fallback_rows=rows,
+            )
         except Exception:
             if lab_key != "goal":
                 raise
             LOGGER.exception("GoalLab dashboard canonical-pick ledger query failed")
             dashboard_warnings.append("Canonical pick ledger temporarily unavailable.")
             rows = ()
-        settled = tuple(row for row in rows if row.get("outcome") in {"WIN", "LOSS", "VOID"})
+            metric_rows = ()
+        settled = tuple(
+            row for row in metric_rows if row.get("outcome") in {"WIN", "LOSS", "VOID"}
+        )
         wins = sum(1 for row in settled if row.get("outcome") == "WIN")
         losses = sum(1 for row in settled if row.get("outcome") == "LOSS")
         pnl = sum(int(row["pnl_minor"]) for row in settled if row.get("pnl_minor") is not None)
@@ -238,7 +272,7 @@ class QuantLabDashboardService:
         win_rate = None if wins + losses == 0 else wins / (wins + losses)
         clvs = [value for row in settled if (value := _clv_ppm(row)) is not None]
         avg_clv = None if not clvs else sum(clvs) / len(clvs)
-        max_dd = _drawdown(rows)
+        max_dd = _drawdown(metric_rows)
         api_used = self._repository.api_usage_today()
 
         def query_for(target: str) -> str:
@@ -550,7 +584,7 @@ class QuantLabDashboardService:
 
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
-            ("Canonical picks" if lab_key == "goal" else "Shadow bets", str(len(rows))),
+            ("Canonical picks" if lab_key == "goal" else "Shadow bets", str(len(metric_rows))),
             ("Settled", str(len(settled))),
             ("P&L", _money(pnl, self._currency)),
             ("ROI", "—" if roi is None else f"{roi * 100:+.2f}%"),

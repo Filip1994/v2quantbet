@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from h2h.quantlab.dashboard import QuantLabDashboardService
+from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 
 
 NOW = datetime(2026, 9, 26, 12, tzinfo=UTC)
@@ -213,3 +214,77 @@ def test_goal_dashboard_degrades_instead_of_returning_render_failure() -> None:
     assert "Upcoming GoalLab pipeline temporarily unavailable." in html
     assert "No GoalLab canonical picks yet" in html
     assert "No trained DC+ Structural artifact is stored yet." in html
+
+
+
+def test_quantlab_repository_pages_complete_histories_for_metrics() -> None:
+    repository = PostgreSQLQuantLabRepository(connect=lambda: None)
+
+    bet_calls: list[tuple[str, int, int]] = []
+
+    def bet_page(
+        lab: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[dict[str, str], ...]:
+        bet_calls.append((lab, limit, offset))
+        pages = {
+            0: ({"fixture_id": "1"}, {"fixture_id": "2"}),
+            2: ({"fixture_id": "3"},),
+        }
+        return pages.get(offset, ())
+
+    repository.list_bets = bet_page  # type: ignore[method-assign]
+
+    assert repository.list_all_bets("CORNER", batch_size=2) == (
+        {"fixture_id": "1"},
+        {"fixture_id": "2"},
+        {"fixture_id": "3"},
+    )
+    assert bet_calls == [("CORNER", 2, 0), ("CORNER", 2, 2)]
+
+    goal_calls: list[tuple[int, int]] = []
+
+    def goal_page(
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[dict[str, str], ...]:
+        goal_calls.append((limit, offset))
+        pages = {
+            0: ({"fixture_id": "10"}, {"fixture_id": "11"}),
+            2: ({"fixture_id": "12"},),
+        }
+        return pages.get(offset, ())
+
+    repository.list_goal_picks = goal_page  # type: ignore[method-assign]
+
+    assert repository.list_all_goal_picks(batch_size=2) == (
+        {"fixture_id": "10"},
+        {"fixture_id": "11"},
+        {"fixture_id": "12"},
+    )
+    assert goal_calls == [(2, 0), (2, 2)]
+
+
+def test_quantlab_kpis_use_complete_history_not_latest_display_page() -> None:
+    class CompleteHistoryRepository(StubRepository):
+        def list_all_goal_picks(self):
+            visible = dict(StubRepository.list_goal_picks(self)[0])
+            older_loss = dict(visible)
+            older_loss["goal_pick_id"] = "quantlab-goal-pick-v1:" + "f" * 64
+            older_loss["fixture_id"] = "api-football:122"
+            older_loss["outcome"] = "LOSS"
+            older_loss["pnl_minor"] = -30_000
+            older_loss["home_team"] = "Older"
+            older_loss["away_team"] = "Loss"
+            return (visible, older_loss)
+
+    html = QuantLabDashboardService(CompleteHistoryRepository()).render_html("lab=goal")
+
+    assert '<div class="card"><small>Canonical picks</small><b>2</b></div>' in html
+    assert '<div class="card"><small>Settled</small><b>2</b></div>' in html
+    assert '<div class="card"><small>ROI</small><b>+0.00%</b></div>' in html
+    assert '<div class="card"><small>Win rate</small><b>50.0%</b></div>' in html
+    assert "Older – Loss" not in html
