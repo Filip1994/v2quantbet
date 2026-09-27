@@ -61,6 +61,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_player_captures",
             "quantlab_goal_picks",
             "quantlab_goal_pick_settlements",
+            "quantlab_corner_settlement_events",
             "quantlab_goal_model_validations",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
@@ -102,8 +103,15 @@ class PostgreSQLQuantLabRepository:
                 "decision.policy_version, q.model_probability, q.market_probability, "
                 "q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
-                "q.closing_observed_at, q.stake_minor, q.outcome, q.pnl_minor, "
-                "q.settled_at, q.result_detail, "
+                "q.closing_observed_at, q.stake_minor, "
+                "CASE WHEN q.lab = 'CORNER' THEN COALESCE(corner_event.outcome, 'PENDING') "
+                "ELSE q.outcome END AS outcome, "
+                "CASE WHEN q.lab = 'CORNER' THEN corner_event.pnl_minor ELSE q.pnl_minor END "
+                "AS pnl_minor, "
+                "CASE WHEN q.lab = 'CORNER' THEN corner_event.occurred_at ELSE q.settled_at END "
+                "AS settled_at, "
+                "CASE WHEN q.lab = 'CORNER' THEN corner_event.result_detail ELSE q.result_detail END "
+                "AS result_detail, "
                 "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
                 "cs.feature_payload AS corner_feature_payload, "
                 "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
@@ -112,6 +120,12 @@ class PostgreSQLQuantLabRepository:
                 "COALESCE(qlatest.country, platest.country) AS country, "
                 "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
                 "FROM quantlab_shadow_bets q "
+                "LEFT JOIN LATERAL ("
+                " SELECT e.event_kind, e.outcome, e.pnl_minor, e.occurred_at, e.result_detail "
+                " FROM quantlab_corner_settlement_events e "
+                " WHERE q.lab = 'CORNER' AND e.shadow_bet_id = q.shadow_bet_id "
+                " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
+                ") corner_event ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT d.policy_version FROM quantlab_context_market_decisions d "
                 " WHERE d.fixture_id = q.fixture_id AND d.lab = q.lab AND d.decision = 'PICK' "
@@ -818,7 +832,13 @@ class PostgreSQLQuantLabRepository:
                 " AND s.home_corner_kicks IS NOT NULL AND s.away_corner_kicks IS NOT NULL "
                 " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
                 ") stats ON TRUE "
-                "WHERE q.lab = 'CORNER' AND q.outcome = 'PENDING' "
+                "LEFT JOIN LATERAL ("
+                " SELECT e.event_kind FROM quantlab_corner_settlement_events e "
+                " WHERE e.shadow_bet_id = q.shadow_bet_id "
+                " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
+                ") latest_settlement ON TRUE "
+                "WHERE q.lab = 'CORNER' "
+                "AND (latest_settlement.event_kind IS NULL OR latest_settlement.event_kind = 'REVERSAL') "
                 "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
                 "AND (r.result_classification = 'NON_PLAYED_VOIDABLE' "
                 " OR stats.statistics_observation_id IS NOT NULL) "
@@ -827,19 +847,39 @@ class PostgreSQLQuantLabRepository:
             )
             return _row_dicts(cursor)
 
-    def settle_corner_shadow_bet(self, item: Any) -> bool:
-        """Atomically settle one still-pending CornerLab shadow bet."""
+    def save_corner_settlement_event(self, item: Any) -> bool:
+        """Append one immutable CornerLab settlement event."""
+        event_id = _identifier(
+            "quantlab-corner-settlement-event-v1:",
+            {
+                "shadow_bet_id": item.shadow_bet_id,
+                "result_observation_id": item.result_observation_id,
+                "statistics_observation_id": item.statistics_observation_id,
+                "outcome": item.outcome,
+                "settlement_rule_version": item.settlement_rule_version,
+            },
+        )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "UPDATE quantlab_shadow_bets "
-                "SET outcome = %s, pnl_minor = %s, settled_at = %s, result_detail = %s::jsonb "
-                "WHERE shadow_bet_id = %s AND lab = 'CORNER' AND outcome = 'PENDING'",
+                "INSERT INTO quantlab_corner_settlement_events ("
+                "corner_settlement_event_id, shadow_bet_id, fixture_id, event_kind, "
+                "prior_event_id, result_observation_id, statistics_observation_id, "
+                "result_classification, outcome, pnl_minor, occurred_at, "
+                "settlement_rule_version, result_detail"
+                ") VALUES (%s, %s, %s, 'NORMAL', NULL, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT DO NOTHING",
                 (
+                    event_id,
+                    item.shadow_bet_id,
+                    item.fixture_id,
+                    item.result_observation_id,
+                    item.statistics_observation_id,
+                    item.result_detail["result_classification"],
                     item.outcome,
                     item.pnl_minor,
                     item.settled_at,
+                    item.settlement_rule_version,
                     _json(item.result_detail),
-                    item.shadow_bet_id,
                 ),
             )
             return cursor.rowcount > 0
