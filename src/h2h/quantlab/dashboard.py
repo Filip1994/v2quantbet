@@ -225,13 +225,19 @@ class QuantLabDashboardService:
         self,
         lab: str,
         params: dict[str, list[str]],
+        *,
+        fallback_rows: tuple[dict[str, Any], ...],
     ) -> tuple[dict[str, Any], ...]:
         if lab == "GOAL":
             loader = getattr(self._repository, "list_all_goal_picks", None)
-            rows = loader() if callable(loader) else self._repository.list_goal_picks()
+            if not callable(loader):
+                return fallback_rows
+            rows = loader()
         else:
             loader = getattr(self._repository, "list_all_bets", None)
-            rows = loader(lab) if callable(loader) else self._repository.list_bets(lab)
+            if not callable(loader):
+                return fallback_rows
+            rows = loader(lab)
         return self._filter_rows(tuple(rows), params)
 
     def render_html(self, raw_query: str = "") -> str:
@@ -243,7 +249,11 @@ class QuantLabDashboardService:
         dashboard_warnings: list[str] = []
         try:
             rows = self._filtered_rows(lab, params)
-            metric_rows = self._filtered_metric_rows(lab, params)
+            metric_rows = self._filtered_metric_rows(
+                lab,
+                params,
+                fallback_rows=rows,
+            )
         except Exception:
             if lab_key != "goal":
                 raise
