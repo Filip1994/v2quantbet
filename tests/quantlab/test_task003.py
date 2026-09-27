@@ -178,13 +178,13 @@ def test_corner_engine_requires_supported_two_sided_total_market():
     assert repo.decisions[0].reason == "NO_SUPPORTED_TOTAL_MARKET"
 
 
-def test_card_engine_requires_referee_history_and_direction_agreement():
-    repo = Repo(
+def _card_repo_with_total_cards() -> Repo:
+    return Repo(
         pairs=(
             market_pair(
                 8,
                 "Bet365",
-                bet_id=200,
+                bet_id=119,
                 bet_name="Total Cards",
                 line=4.5,
                 over=2.20,
@@ -193,7 +193,7 @@ def test_card_engine_requires_referee_history_and_direction_agreement():
             market_pair(
                 11,
                 "1xBet",
-                bet_id=200,
+                bet_id=119,
                 bet_name="Total Cards",
                 line=4.5,
                 over=1.80,
@@ -213,7 +213,35 @@ def test_card_engine_requires_referee_history_and_direction_agreement():
         },
     )
 
+
+def test_card_engine_blocks_pick_without_canonical_settlement_contract():
+    repo = _card_repo_with_total_cards()
+
     result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.decisions_inserted == 1
+    assert result.picks_inserted == 0
+    assert repo.shadows == []
+    decision = repo.decisions[0]
+    assert decision.reason == "NO_CANONICAL_SETTLEMENT_CONTRACT"
+    contracts = decision.details["settlement_contracts"]
+    assert {item["status"] for item in contracts} == {"UNVERIFIED_BOOKMAKER_RULES"}
+    assert {item["provider_bet_id"] for item in contracts} == {119}
+
+
+def test_card_engine_direction_gate_remains_testable_with_verified_contract():
+    class VerifiedCardEngine(CardLabShadowPickEngine):
+        def _settlement_contract_status(self, pair):
+            return {
+                "supported": True,
+                "status": "TEST_VERIFIED",
+                "provider_bet_id": int(pair["provider_bet_id"]),
+                "provider_bet_name": str(pair["provider_bet_name"]),
+                "bookmaker_id": int(pair["bookmaker_id"]),
+            }
+
+    repo = _card_repo_with_total_cards()
+    result = VerifiedCardEngine(repo).run_fixture(fixture(), decision_at=NOW)
 
     assert result.decisions_inserted == 4
     assert result.picks_inserted == 1
