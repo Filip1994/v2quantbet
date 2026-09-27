@@ -223,7 +223,12 @@ class QuantLabMarketCollector:
             provider_fixture_id=provider_fixture_id,
             captured_at=captured_at,
         )
-        selected = tuple(row for row in observations if row.lab_owner in allowed)
+        selected = tuple(
+            row
+            for row in observations
+            if row.lab_owner in allowed
+            and not (row.lab_owner == "CARD" and row.bookmaker_id != 11)
+        )
         self._repository.save_market_observations(selected)
         self._repository.save_market_capture(
             fixture_id=fixture_id,
