@@ -979,10 +979,21 @@ class QuantLabRuntime:
         if not targets:
             return 0, 0, frozenset()
 
+        target_referees = {
+            referee.casefold()
+            for referees in targets.values()
+            for referee in referees
+        }
+        baseline_samples = {
+            referee_key: self._card_history_sample_size(
+                self._repository.referee_history(referee_key, decision_at=now)
+            )
+            for referee_key in target_referees
+        }
         LOGGER.info(
             "QuantLab CardLab referee bootstrap targets scopes=%d referees=%d",
             len(targets),
-            len({referee.casefold() for referees in targets.values() for referee in referees}),
+            len(target_referees),
         )
         scopes_refreshed = 0
         statistics_backfilled = 0
@@ -1041,8 +1052,18 @@ class QuantLabRuntime:
                 )
 
             for referee in sorted(referees):
+                referee_key = referee.casefold()
                 history = self._repository.referee_history(referee, decision_at=now)
                 current_sample = self._card_history_sample_size(history)
+                baseline_sample = baseline_samples.get(referee_key, 0)
+                if current_sample > baseline_sample:
+                    updated_referees.add(referee_key)
+                    baseline_samples[referee_key] = current_sample
+                    LOGGER.info(
+                        "QuantLab CardLab referee history unlocked referee=%s sample=%d",
+                        referee,
+                        current_sample,
+                    )
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
                 candidates = self._repository.referee_statistics_backfill_candidates(
@@ -1082,9 +1103,11 @@ class QuantLabRuntime:
                     if not saved:
                         continue
                     statistics_backfilled += 1
-                    updated_referees.add(referee.casefold())
                     history = self._repository.referee_history(referee, decision_at=now)
                     current_sample = self._card_history_sample_size(history)
+                    if current_sample > baseline_samples.get(referee_key, 0):
+                        updated_referees.add(referee_key)
+                        baseline_samples[referee_key] = current_sample
 
         LOGGER.info(
             "QuantLab CardLab referee bootstrap completed scopes_refreshed=%d "
