@@ -790,6 +790,13 @@ class ResearchDashboardService:
         summary = payload["summary"]
         rows = payload["rows"]
 
+        def metric(value: Any, suffix: str = "", *, signed: bool = False) -> str:
+            if value is None:
+                return "—"
+            number = float(value)
+            prefix = "+" if signed and number > 0 else ""
+            return f"{prefix}{number:.2f}{suffix}"
+
         cards = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
             for label, value in (
@@ -798,11 +805,11 @@ class ResearchDashboardService:
                     "W-L-V",
                     f'{summary["wins"]}-{summary["losses"]}-{summary["voids"]}',
                 ),
-                ("Win rate", _fmt(summary["win_rate_pct"], "%")),
-                ("Expected", _fmt(summary["expected_win_rate_pct"], "%")),
-                ("ROI", _fmt(summary["roi_pct"], "%", signed=True)),
+                ("Win rate", metric(summary["win_rate_pct"], "%")),
+                ("Expected", metric(summary["expected_win_rate_pct"], "%")),
+                ("ROI", metric(summary["roi_pct"], "%", signed=True)),
                 ("Flat P/L", f'{summary["flat_pnl_minor"] / 100:+.0f} RSD'),
-                ("Avg CLV", _fmt(summary["avg_clv_pct"], "%", signed=True)),
+                ("Avg CLV", metric(summary["avg_clv_pct"], "%", signed=True)),
                 ("Evidence", str(summary["sample_band"])),
             )
         )
