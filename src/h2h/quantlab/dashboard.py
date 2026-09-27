@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import logging
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -20,6 +21,7 @@ from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import goal_scope
 
 
+LOGGER = logging.getLogger("quantbet.quantlab.dashboard")
 BELGRADE = ZoneInfo("Europe/Belgrade")
 LABS = {
     "goal": ("GOAL", "GoalLab", "Goals · DC+ and goal-market experiments"),
@@ -182,7 +184,15 @@ class QuantLabDashboardService:
         if lab_key not in LABS:
             lab_key = "goal"
         lab, title, subtitle = LABS[lab_key]
-        rows = self._filtered_rows(lab, params)
+        dashboard_warnings: list[str] = []
+        try:
+            rows = self._filtered_rows(lab, params)
+        except Exception:  # noqa: BLE001
+            if lab_key != "goal":
+                raise
+            LOGGER.exception("GoalLab dashboard canonical-pick ledger query failed")
+            dashboard_warnings.append("Canonical pick ledger temporarily unavailable.")
+            rows = ()
         settled = tuple(row for row in rows if row.get("outcome") in {"WIN", "LOSS", "VOID"})
         wins = sum(1 for row in settled if row.get("outcome") == "WIN")
         losses = sum(1 for row in settled if row.get("outcome") == "LOSS")
@@ -264,7 +274,12 @@ class QuantLabDashboardService:
         goal_contract_html = ""
         goal_pipeline_html = ""
         if lab_key == "goal":
-            contract = self._repository.goal_model_contract()
+            try:
+                contract = self._repository.goal_model_contract()
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("GoalLab dashboard model-contract query failed")
+                dashboard_warnings.append("DC+ model contract temporarily unavailable.")
+                contract = None
             if contract is None:
                 goal_contract_html = (
                     '<section class="table-shell context-table">'
@@ -362,7 +377,14 @@ class QuantLabDashboardService:
                     f'<div class="feature-list">{active_feature_text or "—"}</div></details>'
                     '</section>'
                 )
-            pipeline_rows = self._repository.list_goal_fixture_status(now=datetime.now(UTC))
+            try:
+                pipeline_rows = self._repository.list_goal_fixture_status(
+                    now=datetime.now(UTC)
+                )
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("GoalLab dashboard fixture-pipeline query failed")
+                dashboard_warnings.append("Upcoming GoalLab pipeline temporarily unavailable.")
+                pipeline_rows = ()
             rendered_pipeline = ""
             for item in pipeline_rows:
                 scope = {
@@ -490,6 +512,12 @@ class QuantLabDashboardService:
             if lab_key == "goal"
             else f"{title} shadow ledger"
         )
+        warning_html = "".join(
+            '<p class="dashboard-warning">'
+            + escape(message)
+            + "</p>"
+            for message in dashboard_warnings
+        )
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -503,6 +531,7 @@ main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-ite
 .tabs{{display:flex;gap:7px;width:max-content;padding:5px;margin-bottom:14px;border:1px solid var(--line);border-radius:12px;background:#15191c}}
 .tabs a{{text-decoration:none;color:#9ba4ac;padding:10px 18px;border-radius:8px;font-weight:900;font-size:13px}}.tabs a.active{{background:#e4e7e9;color:#14171a}}
 .lab-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
+.dashboard-warning{{margin:0 0 10px;padding:10px 12px;border:1px solid rgba(224,111,120,.35);border-left:3px solid var(--loss);border-radius:8px;background:rgba(224,111,120,.08);color:#f0a0a7;font-size:12px}}
 .cards{{display:grid;grid-template-columns:repeat(8,minmax(125px,1fr));gap:9px;margin-bottom:14px}}
 .card{{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:12px;padding:13px 14px;min-height:82px}}
 .card small{{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:900}}.card b{{display:block;margin-top:9px;font-size:20px}}
@@ -525,6 +554,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
+{warning_html}
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
 <section class="toolbar"><form method="get"><input type="hidden" name="lab" value="{escape(lab_key, quote=True)}">
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
@@ -565,7 +595,18 @@ class QuantLabDashboardHTTPService:
                 except (TypeError, ValueError):
                     service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
                 except Exception as exc:  # noqa: BLE001
-                    service._text(self, 503, type(exc).__name__ + "\n", "text/plain; charset=utf-8")
+                    LOGGER.exception(
+                        "QuantLab dashboard render failed path=%s query=%s error_class=%s",
+                        parsed.path,
+                        parsed.query,
+                        type(exc).__name__,
+                    )
+                    service._text(
+                        self,
+                        503,
+                        type(exc).__name__ + "\n",
+                        "text/plain; charset=utf-8",
+                    )
 
             def do_POST(self) -> None:
                 service._text(self, 405, "read_only\n", "text/plain; charset=utf-8")
