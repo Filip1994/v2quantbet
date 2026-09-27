@@ -276,6 +276,20 @@ def main() -> None:
         while not stop.is_set():
             try:
                 runtime.run_once()
+                goal_readiness = goal_structural_engine.readiness()
+                LOGGER.info(
+                    "GoalLab DC+ readiness reason=%s training_sample=%s minimum=%s "
+                    "history_matches=%s active_features=%s model_version=%s "
+                    "api_used_today=%s api_daily_limit=%s",
+                    goal_readiness.get("reason"),
+                    goal_readiness.get("training_sample_size"),
+                    goal_readiness.get("minimum_training_examples", 300),
+                    goal_readiness.get("history_match_count"),
+                    goal_readiness.get("active_feature_count"),
+                    goal_readiness.get("model_version"),
+                    repository.api_usage_today(),
+                    api_daily_limit,
+                )
                 try:
                     ensure_latest_goal_model_validation(repository, LOGGER)
                 except Exception:
