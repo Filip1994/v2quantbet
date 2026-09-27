@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-SETTLEMENT_CONTRACT_VERSION = "CARDLAB_SETTLEMENT_CONTRACT_V1"
+SETTLEMENT_CONTRACT_VERSION = "CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1"
 API_FOOTBALL_TOTAL_CARDS_BET_ID = 119
 
 
@@ -53,17 +53,28 @@ def card_settlement_contract_status(
     """
     name = " ".join(str(provider_bet_name).strip().casefold().split())
     if provider_bet_id == API_FOOTBALL_TOTAL_CARDS_BET_ID and name == "total cards":
+        if bookmaker_id == 11:
+            return CardSettlementContractStatus(
+                provider_bet_id=provider_bet_id,
+                provider_bet_name=provider_bet_name,
+                bookmaker_id=bookmaker_id,
+                contract_version=SETTLEMENT_CONTRACT_VERSION,
+                supported=True,
+                status="VERIFIED_1XBET_TARGET",
+                reason=(
+                    "1xBet Total Cards: regular time including stoppage time; extra time excluded; "
+                    "cards count only when shown to a player on the pitch; a second bookable offence "
+                    "counts as one card event and a player contributes at most two cards."
+                ),
+            )
         return CardSettlementContractStatus(
             provider_bet_id=provider_bet_id,
             provider_bet_name=provider_bet_name,
             bookmaker_id=bookmaker_id,
             contract_version=SETTLEMENT_CONTRACT_VERSION,
             supported=False,
-            status="UNVERIFIED_BOOKMAKER_RULES",
-            reason=(
-                "Total Cards market identity is known, but yellow/red/second-yellow "
-                "settlement weighting is not yet verified for this bookmaker."
-            ),
+            status="REFERENCE_ONLY_BOOKMAKER",
+            reason="CardLab registers Total Cards shadow picks only at 1xBet.",
         )
     return CardSettlementContractStatus(
         provider_bet_id=provider_bet_id,
