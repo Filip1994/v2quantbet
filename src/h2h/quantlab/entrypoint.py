@@ -160,26 +160,6 @@ def main() -> None:
         PICK_POLICY_VERSION,
     )
     goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
-    try:
-        startup_goal_readiness = goal_structural_engine.readiness(
-            decision_at=datetime.now(UTC)
-        )
-        LOGGER.info(
-            "GoalLab DC+ startup readiness reason=%s training_sample=%s minimum=%s "
-            "history_matches=%s active_features=%s model_version=%s api_used_today=%s "
-            "api_daily_limit=%s",
-            startup_goal_readiness.get("reason"),
-            startup_goal_readiness.get("training_sample_size"),
-            startup_goal_readiness.get("minimum_training_examples", 300),
-            startup_goal_readiness.get("history_match_count"),
-            startup_goal_readiness.get("active_feature_count"),
-            startup_goal_readiness.get("model_version"),
-            repository.api_usage_today(),
-            api_daily_limit,
-        )
-        ensure_latest_goal_model_validation(repository, LOGGER)
-    except Exception:
-        LOGGER.exception("GoalLab DC+ startup readiness/validation failed")
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
 
@@ -294,6 +274,26 @@ def main() -> None:
     model_ready_audit_emitted = False
     try:
         server.start()
+        try:
+            startup_goal_readiness = goal_structural_engine.readiness(
+                decision_at=datetime.now(UTC)
+            )
+            LOGGER.info(
+                "GoalLab DC+ startup readiness reason=%s training_sample=%s minimum=%s "
+                "history_matches=%s active_features=%s model_version=%s api_used_today=%s "
+                "api_daily_limit=%s",
+                startup_goal_readiness.get("reason"),
+                startup_goal_readiness.get("training_sample_size"),
+                startup_goal_readiness.get("minimum_training_examples", 300),
+                startup_goal_readiness.get("history_match_count"),
+                startup_goal_readiness.get("active_feature_count"),
+                startup_goal_readiness.get("model_version"),
+                repository.api_usage_today(),
+                api_daily_limit,
+            )
+            ensure_latest_goal_model_validation(repository, LOGGER)
+        except Exception:
+            LOGGER.exception("GoalLab DC+ startup readiness/validation failed")
         while not stop.is_set():
             try:
                 runtime.run_once()
