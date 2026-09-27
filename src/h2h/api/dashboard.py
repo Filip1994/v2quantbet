@@ -21,6 +21,92 @@ from h2h.domain.operator_pick_state import OperatorPickState
 
 WORKER_FRESHNESS_SECONDS = 120
 
+_COUNTRY_FLAG_CODES = {
+    "albania": "AL",
+    "andorra": "AD",
+    "argentina": "AR",
+    "armenia": "AM",
+    "austria": "AT",
+    "azerbaijan": "AZ",
+    "belarus": "BY",
+    "belgium": "BE",
+    "bolivia": "BO",
+    "bosnia": "BA",
+    "bosnia and herzegovina": "BA",
+    "brazil": "BR",
+    "bulgaria": "BG",
+    "canada": "CA",
+    "chile": "CL",
+    "colombia": "CO",
+    "costa rica": "CR",
+    "croatia": "HR",
+    "cyprus": "CY",
+    "czech republic": "CZ",
+    "czechia": "CZ",
+    "denmark": "DK",
+    "dominican republic": "DO",
+    "ecuador": "EC",
+    "el salvador": "SV",
+    "england": "GB",
+    "estonia": "EE",
+    "faroe islands": "FO",
+    "finland": "FI",
+    "france": "FR",
+    "georgia": "GE",
+    "germany": "DE",
+    "gibraltar": "GI",
+    "greece": "GR",
+    "guatemala": "GT",
+    "haiti": "HT",
+    "honduras": "HN",
+    "hungary": "HU",
+    "iceland": "IS",
+    "ireland": "IE",
+    "israel": "IL",
+    "italy": "IT",
+    "jamaica": "JM",
+    "kazakhstan": "KZ",
+    "kosovo": "XK",
+    "latvia": "LV",
+    "liechtenstein": "LI",
+    "lithuania": "LT",
+    "luxembourg": "LU",
+    "malta": "MT",
+    "mexico": "MX",
+    "moldova": "MD",
+    "monaco": "MC",
+    "montenegro": "ME",
+    "netherlands": "NL",
+    "nicaragua": "NI",
+    "north macedonia": "MK",
+    "northern ireland": "GB",
+    "norway": "NO",
+    "panama": "PA",
+    "paraguay": "PY",
+    "peru": "PE",
+    "poland": "PL",
+    "portugal": "PT",
+    "puerto rico": "PR",
+    "romania": "RO",
+    "san marino": "SM",
+    "scotland": "GB",
+    "serbia": "RS",
+    "slovakia": "SK",
+    "slovenia": "SI",
+    "spain": "ES",
+    "sweden": "SE",
+    "switzerland": "CH",
+    "trinidad and tobago": "TT",
+    "turkey": "TR",
+    "turkiye": "TR",
+    "ukraine": "UA",
+    "united states": "US",
+    "usa": "US",
+    "uruguay": "UY",
+    "venezuela": "VE",
+    "wales": "GB",
+}
+
 
 def dashboard_is_public() -> bool:
     """Return whether dashboard read routes are intentionally public."""
@@ -107,7 +193,7 @@ class DashboardService:
             WITH latest_fixture AS (
                 SELECT DISTINCT ON (fo.fixture_id)
                     fo.fixture_id, fo.home_team, fo.away_team, fo.competition_name,
-                    fo.kickoff_at, fo.provider_status
+                    fo.country, fo.kickoff_at, fo.provider_status
                 FROM fixture_observations fo
                 ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC
             ), effective_settlement AS (
@@ -119,7 +205,7 @@ class DashboardService:
             )
             SELECT
                 r.pick_id, r.registered_at, r.fixture_id,
-                latest.home_team, latest.away_team, latest.competition_name,
+                latest.home_team, latest.away_team, latest.competition_name, latest.country,
                 latest.kickoff_at, latest.provider_status,
                 r.market, r.selection, r.stake_minor, r.currency,
                 entry.odd AS pick_odd, entry.observed_at AS pick_observed_at,
@@ -460,6 +546,31 @@ class DashboardService:
         return primary, tuple(dict.fromkeys(history)), " · ".join(history_titles)
 
     @staticmethod
+    def _country_flag(country: Any) -> str:
+        key = " ".join(str(country or "").replace("-", " ").split()).casefold()
+        code = _COUNTRY_FLAG_CODES.get(key)
+        if code is None or len(code) != 2 or not code.isalpha():
+            return ""
+        return "".join(chr(0x1F1E6 + ord(letter) - ord("A")) for letter in code.upper())
+
+    def _league_meta(self, pick: dict[str, Any]) -> str:
+        country = str(pick.get("country") or "")
+        flag = self._country_flag(country)
+        flag_html = (
+            f'<span class="country-flag" title="{escape(country)}" '
+            f'aria-label="{escape(country)}">{flag}</span>'
+            if flag
+            else ""
+        )
+        league = escape(str(pick.get("competition_name") or "—"))
+        kickoff = escape(self._dt(pick.get("kickoff_at")))
+        return (
+            '<small class="league-meta">'
+            f"{flag_html}<span>{league} · {kickoff}</span>"
+            "</small>"
+        )
+
+    @staticmethod
     def _bookmaker_badge(bookmaker: Any) -> str:
         key = str(bookmaker or "").casefold()
         name = {
@@ -540,8 +651,7 @@ class DashboardService:
         return (
             '<tr class="history-row">'
             f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
-            f"<small>{escape(str(pick.get('competition_name') or '—'))} · "
-            f"{escape(self._dt(pick.get('kickoff_at')))}</small></td>"
+            f"{self._league_meta(pick)}</td>"
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong>"
             f'<div class="history-operator"><span class="status operator-{operator_state.casefold()}">'
@@ -659,9 +769,8 @@ class DashboardService:
             f'<tr data-provenance="{escape(provenance)}">'
             f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
             f"{escape(self._short_id(pick.get('pick_id')))}</code></td>"
-            f'<td class="fixture"><strong>{escape(fixture)}</strong><small>'
-            f"{escape(str(pick.get('competition_name') or '—'))} · "
-            f"{escape(self._dt(pick.get('kickoff_at')))}</small>"
+            f'<td class="fixture"><strong>{escape(fixture)}</strong>'
+            f"{self._league_meta(pick)}"
             f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
@@ -792,6 +901,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1450px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}}
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
+.league-meta{{display:flex;align-items:center;gap:5px}}.country-flag{{display:inline-flex;font-size:11px;line-height:1;flex:0 0 auto}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
 .odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(82px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
 .odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
