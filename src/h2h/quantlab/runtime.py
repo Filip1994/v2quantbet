@@ -12,6 +12,7 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.corner_lab.settlement import settle_corner_shadow_bet
 from h2h.quantlab.coverage import (
     parse_fixture_statistics_coverage,
     parse_league_coverage_flags,
@@ -1029,6 +1030,16 @@ class QuantLabRuntime:
             settled += int(bool(self._repository.save_goal_pick_settlement(settlement)))
         return settled
 
+    def _settle_corner_picks(self, now: datetime) -> int:
+        settled = 0
+        rows = self._repository.corner_shadow_settlement_candidates(limit=500)
+        for row in rows:
+            settlement = settle_corner_shadow_bet(row, settled_at=now)
+            if settlement is None:
+                continue
+            settled += int(bool(self._repository.settle_corner_shadow_bet(settlement)))
+        return settled
+
     def _evaluate_context_picks(
         self,
         engine: Any | None,
@@ -1070,6 +1081,7 @@ class QuantLabRuntime:
             "goal_settlements": 0,
             "corner_decisions": 0,
             "corner_picks": 0,
+            "corner_settlements": 0,
             "card_decisions": 0,
             "card_picks": 0,
         }
@@ -1116,6 +1128,11 @@ class QuantLabRuntime:
             LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
 
         try:
+            result["corner_settlements"] = self._settle_corner_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab settlement failed")
+
+        try:
             card_decisions, card_picks = self._evaluate_context_picks(
                 self._card_engine, "CARD", now
             )
@@ -1130,7 +1147,7 @@ class QuantLabRuntime:
             "goal_player_history_backfilled=%d "
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
-            "goal_settlements=%d corner_decisions=%d corner_picks=%d "
+            "goal_settlements=%d corner_decisions=%d corner_picks=%d corner_settlements=%d "
             "card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
@@ -1146,6 +1163,7 @@ class QuantLabRuntime:
             result["goal_settlements"],
             result["corner_decisions"],
             result["corner_picks"],
+            result["corner_settlements"],
             result["card_decisions"],
             result["card_picks"],
         )
