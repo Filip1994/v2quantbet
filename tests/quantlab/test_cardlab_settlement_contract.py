@@ -18,7 +18,7 @@ def test_1xbet_total_cards_is_pick_authorized() -> None:
     assert status.status == "VERIFIED_1XBET_TARGET"
 
 
-def test_bet365_total_cards_is_reference_only() -> None:
+def test_bet365_total_cards_is_not_a_cardlab_bookmaker() -> None:
     status = card_settlement_contract_status(
         provider_bet_id=119,
         provider_bet_name="Total Cards",
@@ -26,7 +26,7 @@ def test_bet365_total_cards_is_reference_only() -> None:
     )
 
     assert status.supported is False
-    assert status.status == "REFERENCE_ONLY_BOOKMAKER"
+    assert status.status == "UNSUPPORTED_CARDLAB_BOOKMAKER"
 
 
 def test_unknown_card_market_identity_fails_closed() -> None:
