@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 
 SETTLEMENT_CONTRACT_VERSION = "CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1"
-API_FOOTBALL_TOTAL_CARDS_BET_ID = 119
+API_FOOTBALL_CARDS_OVER_UNDER_BET_ID = 80
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,14 +45,11 @@ def card_settlement_contract_status(
 ) -> CardSettlementContractStatus:
     """Return settlement authority for one exact CardLab market/bookmaker pair.
 
-    API-Football's pre-match catalog identifies bet 119 as Total Cards. The feed
-    preserves that market identity, but it does not define the sportsbook-specific
-    weighting or treatment of yellow, second-yellow and red cards. Until those rules
-    are separately verified for a bookmaker, the market is research-visible but cannot
-    become a CardLab shadow PICK.
+    Production market inventory identifies API-Football bet 80 as "Cards Over/Under"
+    for 1xBet. CardLab authorizes only that exact market identity and bookmaker.
     """
     name = " ".join(str(provider_bet_name).strip().casefold().split())
-    if provider_bet_id == API_FOOTBALL_TOTAL_CARDS_BET_ID and name == "total cards":
+    if provider_bet_id == API_FOOTBALL_CARDS_OVER_UNDER_BET_ID and name == "cards over/under":
         if bookmaker_id == 11:
             return CardSettlementContractStatus(
                 provider_bet_id=provider_bet_id,
@@ -62,7 +59,7 @@ def card_settlement_contract_status(
                 supported=True,
                 status="VERIFIED_1XBET_TARGET",
                 reason=(
-                    "1xBet Total Cards: regular time including stoppage time; extra time excluded; "
+                    "1xBet Cards Over/Under: regular time including stoppage time; extra time excluded; "
                     "cards count only when shown to a player on the pitch; a second bookable offence "
                     "counts as one card event and a player contributes at most two cards."
                 ),
@@ -74,7 +71,7 @@ def card_settlement_contract_status(
             contract_version=SETTLEMENT_CONTRACT_VERSION,
             supported=False,
             status="UNSUPPORTED_CARDLAB_BOOKMAKER",
-            reason="CardLab V4 accepts Total Cards only from 1xBet.",
+            reason="CardLab V5 accepts Cards Over/Under only from 1xBet.",
         )
     return CardSettlementContractStatus(
         provider_bet_id=provider_bet_id,
