@@ -62,6 +62,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_goal_picks",
             "quantlab_goal_pick_settlements",
             "quantlab_corner_settlement_events",
+            "quantlab_card_event_observations",
+            "quantlab_card_settlement_events",
             "quantlab_goal_model_validations",
             "quantlab_context_market_decisions",
             "quantlab_fixture_context_observations",
@@ -104,14 +106,22 @@ class PostgreSQLQuantLabRepository:
                 "q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
                 "q.closing_observed_at, q.stake_minor, "
-                "CASE WHEN q.lab = 'CORNER' THEN COALESCE(corner_event.outcome, 'PENDING') "
-                "ELSE q.outcome END AS outcome, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.pnl_minor ELSE q.pnl_minor END "
-                "AS pnl_minor, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.occurred_at ELSE q.settled_at END "
-                "AS settled_at, "
-                "CASE WHEN q.lab = 'CORNER' THEN corner_event.result_detail ELSE q.result_detail END "
-                "AS result_detail, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN COALESCE(corner_event.outcome, 'PENDING') "
+                " WHEN q.lab = 'CARD' THEN COALESCE(card_event.outcome, 'PENDING') "
+                " ELSE q.outcome END AS outcome, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.pnl_minor "
+                " WHEN q.lab = 'CARD' THEN card_event.pnl_minor "
+                " ELSE q.pnl_minor END AS pnl_minor, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.occurred_at "
+                " WHEN q.lab = 'CARD' THEN card_event.occurred_at "
+                " ELSE q.settled_at END AS settled_at, "
+                "CASE "
+                " WHEN q.lab = 'CORNER' THEN corner_event.result_detail "
+                " WHEN q.lab = 'CARD' THEN card_event.result_detail "
+                " ELSE q.result_detail END AS result_detail, "
                 "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
                 "cs.feature_payload AS corner_feature_payload, "
                 "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
@@ -126,6 +136,12 @@ class PostgreSQLQuantLabRepository:
                 " WHERE q.lab = 'CORNER' AND e.shadow_bet_id = q.shadow_bet_id "
                 " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
                 ") corner_event ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT e.outcome, e.pnl_minor, e.occurred_at, e.result_detail "
+                " FROM quantlab_card_settlement_events e "
+                " WHERE q.lab = 'CARD' AND e.shadow_bet_id = q.shadow_bet_id "
+                " ORDER BY e.occurred_at DESC, e.card_settlement_event_id DESC LIMIT 1"
+                ") card_event ON TRUE "
                 "LEFT JOIN LATERAL ("
                 " SELECT d.policy_version FROM quantlab_context_market_decisions d "
                 " WHERE d.fixture_id = q.fixture_id AND d.lab = q.lab AND d.decision = 'PICK' "
