@@ -73,8 +73,8 @@ def card_settlement_contract_status(
             bookmaker_id=bookmaker_id,
             contract_version=SETTLEMENT_CONTRACT_VERSION,
             supported=False,
-            status="REFERENCE_ONLY_BOOKMAKER",
-            reason="CardLab registers Total Cards shadow picks only at 1xBet.",
+            status="UNSUPPORTED_CARDLAB_BOOKMAKER",
+            reason="CardLab V4 accepts Total Cards only from 1xBet.",
         )
     return CardSettlementContractStatus(
         provider_bet_id=provider_bet_id,
