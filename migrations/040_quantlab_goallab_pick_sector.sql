@@ -74,7 +74,7 @@ CREATE TABLE quantlab_goal_pick_settlements (
         CHECK (goal_pick_settlement_id ~ '^quantlab-goal-settlement-v1:[0-9a-f]{64}$'),
     goal_pick_id TEXT NOT NULL,
     fixture_id TEXT NOT NULL,
-    result_observation_id TEXT NOT NULL,
+    result_observation_id TEXT NOT NULL CHECK (length(trim(result_observation_id)) > 0),
     result_classification TEXT NOT NULL
         CHECK (result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE')),
     regulation_home_goals INTEGER CHECK (regulation_home_goals IS NULL OR regulation_home_goals >= 0),
@@ -89,9 +89,6 @@ CREATE TABLE quantlab_goal_pick_settlements (
     UNIQUE (goal_pick_id),
     FOREIGN KEY (goal_pick_id, fixture_id)
         REFERENCES quantlab_goal_picks(goal_pick_id, fixture_id) ON DELETE RESTRICT,
-    FOREIGN KEY (result_observation_id, fixture_id)
-        REFERENCES fixture_result_observations(result_observation_id, fixture_id)
-        ON DELETE RESTRICT,
     CHECK (
         (result_classification = 'PLAYED_SETTLEABLE'
             AND regulation_home_goals IS NOT NULL
