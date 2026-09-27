@@ -45,7 +45,7 @@ class CardEventObservation:
 class CardShadowSettlement:
     shadow_bet_id: str
     fixture_id: str
-    result_observation_id: str
+    fixture_observation_id: str
     card_event_observation_id: str | None
     outcome: str
     pnl_minor: int
@@ -163,14 +163,14 @@ def settle_card_shadow_bet(
     settled = _utc(settled_at, "settled_at")
     shadow_bet_id = str(row["shadow_bet_id"])
     fixture_id = str(row["fixture_id"])
-    result_observation_id = str(row["result_observation_id"])
+    fixture_observation_id = str(row["fixture_observation_id"])
     stake_minor = int(row["stake_minor"])
 
     if classification == "NON_PLAYED_VOIDABLE":
         return CardShadowSettlement(
             shadow_bet_id=shadow_bet_id,
             fixture_id=fixture_id,
-            result_observation_id=result_observation_id,
+            fixture_observation_id=fixture_observation_id,
             card_event_observation_id=None,
             outcome="VOID",
             pnl_minor=0,
@@ -213,7 +213,7 @@ def settle_card_shadow_bet(
     return CardShadowSettlement(
         shadow_bet_id=shadow_bet_id,
         fixture_id=fixture_id,
-        result_observation_id=result_observation_id,
+        fixture_observation_id=fixture_observation_id,
         card_event_observation_id=str(card_observation_id),
         outcome=outcome,
         pnl_minor=pnl_minor,
