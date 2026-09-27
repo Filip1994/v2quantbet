@@ -290,3 +290,22 @@ def test_last_seen_closing_migration_is_audited_and_backfills_clv() -> None:
     assert "CREATE TRIGGER pick_closing_finalizations_immutable" in migration
     assert "INSERT INTO pick_realized_clv" in migration
     assert "CLV_ODDS_RATIO_PPM_V1" in migration
+
+
+
+def test_research_version_provenance_migration_preserves_legacy_unknowns() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "042_research_version_provenance.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "policy_config_fingerprint" in migration
+    assert "eligibility_policy_version" in migration
+    assert "risk_policy_version" in migration
+    assert "staking_policy_version" in migration
+    assert "bookmaker_policy_version" in migration
+    assert "JOIN pick_policy_configurations" in migration
+    assert "LEGACY_UNRECORDED" in migration
+    assert "WHERE rs.production_pick_id = r.pick_id" in migration
+    assert "UPDATE value_evaluations" not in migration
