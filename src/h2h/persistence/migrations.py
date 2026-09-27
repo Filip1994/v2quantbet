@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )
 """
 
+# Shared transaction-scoped lock for every service using this migration runner.
+# Railway may start multiple predeploy hooks concurrently against the same database.
+_MIGRATION_ADVISORY_LOCK_KEY = 724239531
+
 
 def apply_migrations(connection: Any, migration_dir: str | Path) -> tuple[str, ...]:
     """Apply pending ``*.sql`` files in lexical order.
@@ -33,6 +37,10 @@ def apply_migrations(connection: Any, migration_dir: str | Path) -> tuple[str, .
 
     with connection, connection.cursor() as cursor:
         cursor.execute(_MIGRATION_TABLE_SQL)
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (_MIGRATION_ADVISORY_LOCK_KEY,),
+        )
         cursor.execute("SELECT version FROM schema_migrations")
         completed = {row[0] for row in cursor.fetchall()}
 
@@ -43,7 +51,8 @@ def apply_migrations(connection: Any, migration_dir: str | Path) -> tuple[str, .
             sql = migration.read_text(encoding="utf-8")
             cursor.execute(sql)
             cursor.execute(
-                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                "INSERT INTO schema_migrations (version) VALUES (%s) "
+                "ON CONFLICT (version) DO NOTHING",
                 (version,),
             )
             applied.append(version)
