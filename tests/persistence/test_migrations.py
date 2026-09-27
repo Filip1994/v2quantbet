@@ -324,3 +324,18 @@ def test_cornerlab_settlement_events_are_append_only_and_backfill_legacy_rows() 
     assert "quantlab_corner_settlement_events_immutable" in migration
     assert "reject_corner_shadow_settlement_mutation" in migration
     assert "BEFORE UPDATE OF outcome, pnl_minor, settled_at, result_detail" in migration
+
+
+def test_cardlab_1xbet_settlement_migration_is_append_only() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "045_quantlab_cardlab_1xbet_settlement.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE quantlab_card_event_observations" in migration
+    assert "CREATE TABLE quantlab_card_settlement_events" in migration
+    assert "CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1" in migration
+    assert "quantlab_card_event_observations_immutable" in migration
+    assert "quantlab_card_settlement_events_immutable" in migration
+    assert "reject_card_shadow_settlement_mutation" in migration
