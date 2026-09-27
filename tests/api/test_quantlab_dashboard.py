@@ -185,7 +185,9 @@ def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
     html = QuantLabDashboardService(repository).render_html("lab=corner")
 
     assert repository.labs == ["CORNER"]
-    assert "CornerLab shadow ledger" in html
+    assert "CornerLab pikovi · čekaju rezultat" in html
+    assert "CornerLab kompletan pick / settlement ledger" in html
+    assert '<div class="card"><small>Pikovi</small><b>1</b></div>' in html
     assert "Kako CornerLab dolazi do procene" in html
     assert "48 strukturnih varijabli" in html
     assert "kvote nisu model input" in html
