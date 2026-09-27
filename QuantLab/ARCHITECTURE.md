@@ -210,7 +210,7 @@ Migration 030 introduced the shared append-only
 `quantlab_context_market_decisions` ledger for CornerLab and CardLab.
 
 CardLab uses `CARDLAB_REFEREE_POISSON_V1` under
-`CARDLAB_1XBET_POISSON_POLICY_V4`. It consumes only 1xBet Total Cards prices for CardLab
+`CARDLAB_1XBET_POISSON_POLICY_V5_MARKET80`. It consumes only 1xBet Cards Over/Under prices for CardLab
 value evaluation; no second bookmaker is used as a probability reference.
 
 CornerLab V1's `CROSS_BOOK_FAIR_REFERENCE_V1` is retained only as a historical baseline.

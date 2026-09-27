@@ -1,6 +1,6 @@
-"""Read-only CardLab V4 funnel audit.
+"""Read-only CardLab V5 funnel audit.
 
-Summarizes the append-only V4 decision ledger, 1xBet Total Cards coverage,
+Summarizes the append-only V5 decision ledger, 1xBet Cards Over/Under coverage,
 CardLab feature coverage and value thresholds. No writes are performed.
 """
 
@@ -11,10 +11,10 @@ import logging
 from typing import Any
 
 
-POLICY_VERSION = "CARDLAB_1XBET_POISSON_POLICY_V4"
+POLICY_VERSION = "CARDLAB_1XBET_POISSON_POLICY_V5_MARKET80"
 MODEL_VERSION = "CARDLAB_REFEREE_POISSON_V1"
 BOOKMAKER_ID = 11
-PROVIDER_BET_ID = 119
+PROVIDER_BET_ID = 80
 
 
 def _rows(cursor: Any) -> tuple[dict[str, Any], ...]:
@@ -27,8 +27,8 @@ def _one(cursor: Any) -> dict[str, Any]:
     return {} if not rows else rows[0]
 
 
-def collect_cardlab_v4_audit(repository: Any) -> dict[str, Any]:
-    """Collect exact read-only CardLab V4 diagnostics from PostgreSQL."""
+def collect_cardlab_v5_audit(repository: Any) -> dict[str, Any]:
+    """Collect exact read-only CardLab V5 diagnostics from PostgreSQL."""
     with repository.connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             "SELECT decision, reason, COUNT(*)::BIGINT AS row_count, "
@@ -148,9 +148,9 @@ def collect_cardlab_v4_audit(repository: Any) -> dict[str, Any]:
     }
 
 
-def log_cardlab_v4_audit(repository: Any, logger: logging.Logger) -> None:
-    """Emit bounded structured CardLab V4 audit sections to Railway logs."""
-    report = collect_cardlab_v4_audit(repository)
+def log_cardlab_v5_audit(repository: Any, logger: logging.Logger) -> None:
+    """Emit bounded structured CardLab V5 audit sections to Railway logs."""
+    report = collect_cardlab_v5_audit(repository)
     for key in (
         "summary",
         "reason_distribution",
@@ -161,7 +161,7 @@ def log_cardlab_v4_audit(repository: Any, logger: logging.Logger) -> None:
         "value_filter",
     ):
         logger.info(
-            "QuantLab CardLab V4 audit section=%s payload=%s",
+            "QuantLab CardLab V5 audit section=%s payload=%s",
             key,
             json.dumps(report[key], sort_keys=True, default=str, separators=(",", ":")),
         )

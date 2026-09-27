@@ -52,10 +52,10 @@ QuantLab is shadow-only and does not write production picks, bankroll or model s
 
 ## Shadow Pick Engine / settlement authority
 
-The current decision policy is `CARDLAB_1XBET_POISSON_POLICY_V4`.
+The current decision policy is `CARDLAB_1XBET_POISSON_POLICY_V5_MARKET80`.
 
-V4 removes cross-book pricing from CardLab completely. A CardLab PICK requires only a
-complete 1xBet `Total Cards` half-line market and the timestamp-safe CardLab feature
+V5 removes cross-book pricing from CardLab completely. A CardLab PICK requires only a
+complete 1xBet `Cards Over/Under` half-line market and the timestamp-safe CardLab feature
 snapshot.
 
 The active probability model is `CARDLAB_REFEREE_POISSON_V1`:
@@ -69,10 +69,10 @@ The active probability model is `CARDLAB_REFEREE_POISSON_V1`:
 
 Bet365 is not a CardLab input, reference bookmaker, PICK source or settlement source.
 Foul rate, derby, table pressure and match importance remain persisted CardLab context for
-later measured model upgrades, but V4 does not assign arbitrary weights to them.
+later measured model upgrades, but V5 does not assign arbitrary weights to them.
 
 Yellow-only, red-only, bookings and booking-points markets remain excluded. The canonical
-PICK market is API-Football bet ID 119, `Total Cards`, on 1xBet only.
+PICK market is API-Football bet ID 80, `Cards Over/Under`, on 1xBet only.
 
 ### Current settlement status
 
