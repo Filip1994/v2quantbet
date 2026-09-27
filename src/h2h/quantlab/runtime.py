@@ -10,7 +10,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from h2h.odds.budget import ApiBudgetExceededError
-from h2h.quantlab.card_lab.context import parse_fixture_context, parse_fixture_statistics
+from h2h.quantlab.card_lab.context import (
+    parse_fixture_context,
+    parse_fixture_contexts_from_fixture_response,
+    parse_fixture_statistics,
+)
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
 from h2h.quantlab.card_lab.settlement import (
     parse_1xbet_card_events,
@@ -137,6 +141,28 @@ class QuantLabRuntime:
             )
             self._repository.save_fixture_context(context)
         return self._repository.latest_context_before(fixture_id, decision_at=now)
+
+    def _persist_team_history_contexts(
+        self,
+        payload: dict[str, Any],
+        observations: tuple[Any, ...],
+        now: datetime,
+    ) -> int:
+        """Persist referee context already present in team-history fixture payloads."""
+        allowed_fixture_ids = {
+            str(item.fixture.fixture_id)
+            for item in observations
+        }
+        saved = 0
+        for context in parse_fixture_contexts_from_fixture_response(
+            payload,
+            captured_at=now,
+        ):
+            if context.fixture_id not in allowed_fixture_ids:
+                continue
+            self._repository.save_fixture_context(context)
+            saved += 1
+        return saved
 
     def _standings(self, fixture: dict[str, Any], now: datetime) -> dict[str, Any] | None:
         if fixture.get("season") is None:
@@ -663,6 +689,7 @@ class QuantLabRuntime:
                 )
                 observations = parse_fixture_discovery_response(payload, captured_at=now)
                 self._repository.save_fixture_observations(observations)
+                self._persist_team_history_contexts(payload, observations, now)
                 self._repository.save_team_history_capture(
                     team_id=team_id,
                     captured_at=now,
@@ -816,6 +843,7 @@ class QuantLabRuntime:
                 )
                 observations = parse_fixture_discovery_response(payload, captured_at=now)
                 self._repository.save_fixture_observations(observations)
+                self._persist_team_history_contexts(payload, observations, now)
                 self._repository.save_team_history_capture(
                     team_id=team_id,
                     captured_at=now,

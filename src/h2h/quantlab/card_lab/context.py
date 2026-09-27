@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
+from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
+
 
 def _utc(value: datetime, field: str) -> datetime:
     if not isinstance(value, datetime):
@@ -173,6 +175,52 @@ def parse_fixture_context(
         available_at=captured,
         raw_payload=dict(record),
     )
+
+
+def parse_fixture_contexts_from_fixture_response(
+    payload: Mapping[str, Any],
+    *,
+    captured_at: datetime,
+) -> tuple[FixtureContextObservation, ...]:
+    """Extract context for every fixture record in a multi-fixture response.
+
+    Team-history fixture calls already contain referee/status/kickoff data. Persisting
+    those fields here lets CardLab build referee history without any additional provider
+    request.
+    """
+    captured = _utc(captured_at, "captured_at")
+    errors = payload.get("errors")
+    if errors:
+        raise RuntimeError(f"API-Football returned errors: {errors}")
+    response = payload.get("response")
+    if not isinstance(response, list):
+        raise TypeError("fixture context response must contain a list")
+
+    adapter = ApiFootballFixtureAdapter()
+    result: list[FixtureContextObservation] = []
+    for record in response:
+        if not isinstance(record, Mapping):
+            continue
+        fixture_raw = record.get("fixture")
+        if not isinstance(fixture_raw, Mapping):
+            continue
+        provider_fixture_id = fixture_raw.get("id")
+        if (
+            isinstance(provider_fixture_id, bool)
+            or not isinstance(provider_fixture_id, int)
+            or provider_fixture_id <= 0
+        ):
+            continue
+        fixture = adapter.adapt(record)
+        result.append(
+            parse_fixture_context(
+                {"errors": [], "response": [record]},
+                fixture_id=fixture.fixture_id,
+                provider_fixture_id=provider_fixture_id,
+                captured_at=captured,
+            )
+        )
+    return tuple(result)
 
 
 def _stat_value(record: Mapping[str, Any], stat_name: str) -> int | None:

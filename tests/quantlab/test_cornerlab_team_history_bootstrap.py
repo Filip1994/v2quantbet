@@ -55,6 +55,7 @@ def _team_fixture_payload(team_id: int) -> dict[str, object]:
                     "id": fixture_id,
                     "date": (NOW - timedelta(days=offset + 1)).isoformat(),
                     "status": {"short": "FT"},
+                    "referee": f"Referee {offset}",
                 },
                 "league": {
                     "id": 39,
@@ -110,6 +111,7 @@ class Repo:
         self.opponents = opponents or {}
         self.team_captures: list[dict[str, object]] = []
         self.fixture_observations = []
+        self.context_observations = []
         self.statistics_captures: dict[str, dict[str, object]] = {}
         self.statistics = []
         self.historical = (
@@ -133,6 +135,9 @@ class Repo:
     def save_fixture_observations(self, observations):
         self.fixture_observations.extend(observations)
         return len(tuple(observations))
+
+    def save_fixture_context(self, item):
+        self.context_observations.append(item)
 
     def save_team_history_capture(self, **kwargs):
         self.team_captures.append(kwargs)
@@ -202,6 +207,12 @@ def test_corner_team_history_bootstrap_targets_only_corner_market_teams() -> Non
     assert provider.team_calls == [(10, 12), (11, 12)]
     assert len(repo.team_captures) == 2
     assert len(repo.fixture_observations) == 6
+    assert len(repo.context_observations) == 6
+    assert {item.referee for item in repo.context_observations} == {
+        "Referee 0",
+        "Referee 1",
+        "Referee 2",
+    }
     assert stats == 4
     assert len(provider.stats_calls) == 4
     assert len(repo.statistics_captures) == 4
