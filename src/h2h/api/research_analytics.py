@@ -308,6 +308,7 @@ def build_research_analytics_snapshot(
         "disposition": ("disposition",),
         "bookmaker": ("bookmaker",),
         "league": ("competition_name",),
+        "league_season": ("competition_name", "league_id", "season"),
         "freshness": ("freshness",),
         "model_version": ("model_version_id",),
         "policy_config": ("policy_config_fingerprint",),
@@ -411,8 +412,13 @@ def _metrics_table(
     dimensions: tuple[str, ...],
     *,
     dimension_links: dict[str, str] | None = None,
+    dimension_link_params: dict[str, tuple[str, ...]] | None = None,
+    dimension_labels: dict[str, str] | None = None,
 ) -> str:
-    dimension_headers = "".join(f"<th>{escape(name)}</th>" for name in dimensions)
+    dimension_headers = "".join(
+        f"<th>{escape((dimension_labels or {}).get(name, name))}</th>"
+        for name in dimensions
+    )
     body = []
     for row in rows:
         cells = []
@@ -421,7 +427,13 @@ def _metrics_table(
             value = escape(raw_value)
             base_path = (dimension_links or {}).get(name)
             if base_path:
-                href = base_path + "?" + urlencode({name: raw_value})
+                param_names = (dimension_link_params or {}).get(name, (name,))
+                href = base_path + "?" + urlencode(
+                    {
+                        param_name: str(row.get(param_name, "—"))
+                        for param_name in param_names
+                    }
+                )
                 cells.append(
                     f'<td><b><a class="dimension-link" href="{escape(href, quote=True)}">'
                     f"{value}</a></b></td>"
@@ -502,8 +514,20 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         snapshot["diagnostics"],
         ("diagnostic",),
     )
+    league_seasons = _metrics_table(
+        "Leagues · all retrains combined",
+        snapshot["cohorts"]["league_season"],
+        ("competition_name", "league_id", "season"),
+        dimension_links={"competition_name": "/research/analytics/league"},
+        dimension_link_params={"competition_name": ("league_id", "season")},
+        dimension_labels={
+            "competition_name": "League",
+            "league_id": "League ID",
+            "season": "Season",
+        },
+    )
     model_versions = _metrics_table(
-        "Model versions",
+        "Model versions · individual retrains",
         snapshot["cohorts"]["model_version"],
         ("model_version_id",),
         dimension_links={"model_version_id": "/research/analytics/model"},
@@ -604,6 +628,6 @@ ROI: {escape(snapshot['definitions']['roi'])}<br>
 Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 {version_notice}
 <section class="cards">{cards}</section>
-{model_versions}{policy_configs}{model_policy}{decision_contract}
+{league_seasons}{model_versions}{policy_configs}{model_policy}{decision_contract}
 {diagnostics}{market_selection}{model_probability}{fair_probability}{ev}{odds}{weekly}{cube}
 </main></body></html>"""

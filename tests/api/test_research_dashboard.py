@@ -159,6 +159,39 @@ class SegmentedRepository:
         return (pending, awaiting, win, loss)
 
 
+class LeagueVersionRepository:
+    def list_signals(self, *, limit):
+        assert limit == 5000
+
+        first = signal_row()
+
+        retrain = signal_row()
+        retrain["research_signal_id"] = "research-signal-v1:" + "f" * 64
+        retrain["evaluation_id"] = "value-evaluation-v1:" + "f" * 64
+        retrain["fixture_id"] = "api-football:127"
+        retrain["provider_fixture_id"] = "127"
+        retrain["home_team"] = "Retrain Home"
+        retrain["away_team"] = "Retrain Away"
+        retrain["kickoff_at"] = NOW + timedelta(hours=3)
+        retrain["model_version_id"] = "dcm-json-v1:" + "3" * 64
+        retrain["regulation_home_goals"] = 1
+        retrain["regulation_away_goals"] = 0
+
+        other_league = signal_row()
+        other_league["research_signal_id"] = "research-signal-v1:" + "9" * 64
+        other_league["evaluation_id"] = "value-evaluation-v1:" + "9" * 64
+        other_league["fixture_id"] = "api-football:128"
+        other_league["provider_fixture_id"] = "128"
+        other_league["league_id"] = 40
+        other_league["competition_name"] = "Other League"
+        other_league["home_team"] = "Other Home"
+        other_league["away_team"] = "Other Away"
+        other_league["kickoff_at"] = NOW + timedelta(hours=4)
+        other_league["model_version_id"] = "dcm-json-v1:" + "4" * 64
+
+        return (first, retrain, other_league)
+
+
 def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
     row = signal_row()
 
@@ -338,6 +371,8 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     assert snapshot["contract_version"] == "RESEARCH_ANALYTICS_V2"
     assert snapshot["windows"]["lifetime"]["n"] == 1
     assert snapshot["cohorts"]["market_selection"][0]["market"] == "BTTS"
+    assert snapshot["cohorts"]["league_season"][0]["league_id"] == "39"
+    assert snapshot["cohorts"]["league_season"][0]["season"] == "2026"
     assert snapshot["version_summary"]["model_version_count"] == 1
     assert snapshot["version_summary"]["policy_config_count"] == 1
     assert snapshot["cohorts"]["model_policy"][0]["model_version_id"].startswith(
@@ -348,6 +383,8 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     assert "Research Analytics V2" in html
     assert "Production-filter evidence cube" in html
     assert "Low-scoring extreme-value diagnostic" in html
+    assert "Leagues · all retrains combined" in html
+    assert "/research/analytics/league?league_id=39&amp;season=2026" in html
     assert (
         "/research/analytics/model?model_version_id=dcm-json-v1%3A"
         in html
@@ -386,3 +423,38 @@ def test_research_model_version_drilldown_exposes_constituent_picks() -> None:
     assert "+120.00%" in html
     assert "pick-policy-config-v1:" in html
     assert "/research/analytics/model.json?model_version_id=" in html
+
+
+
+def test_research_league_drilldown_combines_retrains_and_preserves_model_audit() -> None:
+    dashboard = ResearchDashboardService(LeagueVersionRepository())
+
+    payload = dashboard.league_details(39, 2026)
+
+    assert payload["contract_version"] == "RESEARCH_LEAGUE_DRILLDOWN_V1"
+    assert payload["league"]["league_id"] == 39
+    assert payload["league"]["season"] == 2026
+    assert payload["league"]["competition_name"] == "Research League"
+    assert payload["summary"]["n"] == 2
+    assert payload["summary"]["wins"] == 1
+    assert payload["summary"]["losses"] == 1
+    assert payload["summary"]["roi_pct"] == 10.0
+    assert payload["model_version_count"] == 2
+    assert {row["model_version_id"] for row in payload["model_versions"]} == {
+        "dcm-json-v1:" + "1" * 64,
+        "dcm-json-v1:" + "3" * 64,
+    }
+    assert {row["provider_fixture_id"] for row in payload["rows"]} == {"123", "127"}
+    assert all(row["league_id"] == 39 for row in payload["rows"])
+
+    html = dashboard.render_league_html(39, 2026)
+
+    assert "Research League · 2026" in html
+    assert "all DC retrains combined" in html
+    assert "Model versions · retrain history" in html
+    assert "All settled picks · all retrains" in html
+    assert "Home – Away" in html
+    assert "Retrain Home – Retrain Away" in html
+    assert "Other Home – Other Away" not in html
+    assert "/research/analytics/model?model_version_id=" in html
+    assert "/research/analytics/league.json?league_id=39&amp;season=2026" in html
