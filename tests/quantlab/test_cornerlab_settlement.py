@@ -15,6 +15,7 @@ def _row(*, selection="OVER", line=9.5, home=6, away=5, odds=2.10):
         "line": line,
         "odds": odds,
         "stake_minor": 10_000,
+        "result_observation_id": "fixture-result-observation-v1:" + "b" * 64,
         "result_classification": "PLAYED_SETTLEABLE",
         "provider_status": "FT",
         "statistics_observation_id": "stats:123",
@@ -30,6 +31,9 @@ def test_corner_settlement_over_win_uses_actual_corner_total():
     assert settlement is not None
     assert settlement.outcome == "WIN"
     assert settlement.pnl_minor == 11_000
+    assert settlement.result_observation_id.endswith("b" * 64)
+    assert settlement.statistics_observation_id == "stats:123"
+    assert settlement.settlement_rule_version == "CORNERLAB_TOTAL_CORNERS_HALF_LINE_SETTLEMENT_V1"
     assert settlement.result_detail["actual_total_corners"] == 11
     assert settlement.result_detail["line"] == 9.5
 

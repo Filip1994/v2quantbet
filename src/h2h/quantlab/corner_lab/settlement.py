@@ -15,9 +15,12 @@ SETTLEMENT_RULE_VERSION = "CORNERLAB_TOTAL_CORNERS_HALF_LINE_SETTLEMENT_V1"
 class CornerShadowSettlement:
     shadow_bet_id: str
     fixture_id: str
+    result_observation_id: str
+    statistics_observation_id: str | None
     outcome: str
     pnl_minor: int
     settled_at: datetime
+    settlement_rule_version: str
     result_detail: dict[str, Any]
 
 
@@ -33,17 +36,27 @@ def settle_corner_shadow_bet(
 
     shadow_bet_id = str(row["shadow_bet_id"])
     fixture_id = str(row["fixture_id"])
+    result_observation_id = str(row["result_observation_id"])
+    statistics_observation_id = (
+        None
+        if row.get("statistics_observation_id") is None
+        else str(row["statistics_observation_id"])
+    )
     stake_minor = int(row["stake_minor"])
 
     if classification == "NON_PLAYED_VOIDABLE":
         return CornerShadowSettlement(
             shadow_bet_id=shadow_bet_id,
             fixture_id=fixture_id,
+            result_observation_id=result_observation_id,
+            statistics_observation_id=None,
             outcome="VOID",
             pnl_minor=0,
             settled_at=settled_at,
+            settlement_rule_version=SETTLEMENT_RULE_VERSION,
             result_detail={
                 "settlement_rule_version": SETTLEMENT_RULE_VERSION,
+                "result_observation_id": result_observation_id,
                 "result_classification": classification,
                 "provider_status": row.get("provider_status"),
                 "rule": "non-played terminal fixture voids CornerLab shadow bet",
@@ -85,14 +98,18 @@ def settle_corner_shadow_bet(
     return CornerShadowSettlement(
         shadow_bet_id=shadow_bet_id,
         fixture_id=fixture_id,
+        result_observation_id=result_observation_id,
+        statistics_observation_id=statistics_observation_id,
         outcome=outcome,
         pnl_minor=pnl_minor,
         settled_at=settled_at,
+        settlement_rule_version=SETTLEMENT_RULE_VERSION,
         result_detail={
             "settlement_rule_version": SETTLEMENT_RULE_VERSION,
+            "result_observation_id": result_observation_id,
             "result_classification": classification,
             "provider_status": row.get("provider_status"),
-            "statistics_observation_id": row.get("statistics_observation_id"),
+            "statistics_observation_id": statistics_observation_id,
             "statistics_available_at": row.get("statistics_available_at"),
             "home_corner_kicks": home_corners,
             "away_corner_kicks": away_corners,
