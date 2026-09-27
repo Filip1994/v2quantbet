@@ -1691,6 +1691,16 @@ class GoalStructuralModelService:
         self._fit_reason = "NOT_FITTED"
         self._fit_details: dict[str, Any] = {}
 
+    def readiness(self) -> dict[str, Any]:
+        result = {
+            "reason": self._fit_reason,
+            **self._fit_details,
+            "model_version": (
+                None if self._artifact is None else self._artifact.model_version
+            ),
+        }
+        return result
+
     def _prepare(self, decision_at: datetime) -> None:
         now = decision_at.astimezone(UTC)
         if self._cache_at == now:
