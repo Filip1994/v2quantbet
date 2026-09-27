@@ -683,7 +683,7 @@ class ResearchDashboardService:
             "definition": (
                 "not low-scoring and (expected_value >= 0.30 or edge >= 0.20)"
                 if name == "OTHER_EXTREME"
-                else "See RESEARCH_ANALYTICS_V1 diagnostic bucket classifier."
+                else "See RESEARCH_ANALYTICS_V2 diagnostic bucket classifier."
             ),
             "count": len(items),
             "wins": sum(item["outcome"] == "WIN" for item in items),
