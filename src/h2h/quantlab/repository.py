@@ -635,6 +635,79 @@ class PostgreSQLQuantLabRepository:
                 return tuple(rows)
             offset += len(batch)
 
+    def list_goal_decisions(
+        self,
+        *,
+        limit: int = 5000,
+        offset: int = 0,
+        structural_only: bool = True,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0 or limit > 5000:
+            raise ValueError("limit must be between 1 and 5000")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        policy_filter = (
+            "AND d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+            if structural_only
+            else ""
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT d.decision_id, d.fixture_id, d.decision_at, d.policy_version, "
+                "d.model_name, d.model_version, d.bookmaker_id, d.bookmaker_name, "
+                "d.provider_bet_id, d.provider_bet_name, d.market_key, d.selection, d.line, "
+                "d.quote_observed_at, d.odds, d.companion_odds, d.market_probability, "
+                "d.model_probability, d.edge, d.expected_value, d.decision, d.reason, "
+                "d.details, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country, "
+                "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
+                "FROM quantlab_goal_decisions d "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = d.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, kickoff_at "
+                " FROM fixture_observations o WHERE o.fixture_id = d.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
+                "WHERE TRUE "
+                + policy_filter
+                + "ORDER BY d.decision_at DESC, d.decision_id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = _row_dicts(cursor)
+        for row in rows:
+            value = row.get("details")
+            if isinstance(value, str):
+                row["details"] = json.loads(value)
+        return rows
+
+    def list_all_goal_decisions(
+        self,
+        *,
+        batch_size: int = 5000,
+        structural_only: bool = True,
+    ) -> tuple[dict[str, Any], ...]:
+        if batch_size <= 0 or batch_size > 5000:
+            raise ValueError("batch_size must be between 1 and 5000")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = self.list_goal_decisions(
+                limit=batch_size,
+                offset=offset,
+                structural_only=structural_only,
+            )
+            rows.extend(batch)
+            if len(batch) < batch_size:
+                return tuple(rows)
+            offset += len(batch)
+
     def goal_model_contract(self, model_version: str | None = None) -> dict[str, Any] | None:
         with self.connect() as connection, connection.cursor() as cursor:
             if model_version is None:
