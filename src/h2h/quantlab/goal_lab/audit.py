@@ -24,10 +24,12 @@ from h2h.quantlab.goal_lab.model import (
 )
 
 
-METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V1"
+METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V2"
 HOLDOUT_FRACTION = 0.30
 MIN_COMMON_EVALUATION = 50
 CONTROL_RIDGE = 0.01
+CONTROL_MIN_MATCHES = 80
+CONTROL_MIN_TEAM_APPEARANCES = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,9 +347,10 @@ def build_goal_model_validation(
             for index in range(train_n)
             if int(train_leagues[index]) == league_id
         ]
-        if len(indices) < 80:
+        if len(indices) < CONTROL_MIN_MATCHES:
             control_fit_errors[str(league_id)] = (
-                f"insufficient league training sample {len(indices)} < 80"
+                f"insufficient league training sample {len(indices)} < "
+                f"{CONTROL_MIN_MATCHES}"
             )
             continue
         control_records = [
@@ -367,12 +370,49 @@ def build_goal_model_validation(
                 reference_time=dates[train_n],
                 xi=RECENCY_XI,
                 ridge=CONTROL_RIDGE,
-                min_matches=80,
+                min_matches=CONTROL_MIN_MATCHES,
             )
         except DixonColesFitError as exc:
             control_fit_errors[str(league_id)] = str(exc)
 
-    if not controls:
+    pooled_records_all = [
+        SimpleNamespace(
+            date=dates[index],
+            home_id=int(home_ids[index]),
+            away_id=int(away_ids[index]),
+            home_goals=int(y_home[index]),
+            away_goals=int(y_away[index]),
+        )
+        for index in range(train_n)
+    ]
+    pooled_team_counts = DixonColesModel.team_match_counts(pooled_records_all)
+    pooled_records = [
+        record
+        for record in pooled_records_all
+        if pooled_team_counts[record.home_id] >= CONTROL_MIN_TEAM_APPEARANCES
+        and pooled_team_counts[record.away_id] >= CONTROL_MIN_TEAM_APPEARANCES
+    ]
+    pooled_control: DixonColesModel | None = None
+    pooled_control_error: str | None = None
+    if len(pooled_records) >= CONTROL_MIN_MATCHES:
+        try:
+            pooled_control = DixonColesModel.fit(
+                pooled_records,
+                team_id_namespace="api-football",
+                reference_time=dates[train_n],
+                xi=RECENCY_XI,
+                ridge=CONTROL_RIDGE,
+                min_matches=CONTROL_MIN_MATCHES,
+            )
+        except DixonColesFitError as exc:
+            pooled_control_error = str(exc)
+    else:
+        pooled_control_error = (
+            f"insufficient pooled stable-team training sample {len(pooled_records)} < "
+            f"{CONTROL_MIN_MATCHES}"
+        )
+
+    if not controls and pooled_control is None:
         return _empty_validation(
             model_version=model_version,
             evaluated_at=evaluated_at,
@@ -383,8 +423,11 @@ def build_goal_model_validation(
             contract_snapshot={
                 **contract_snapshot,
                 "control_fit_errors": control_fit_errors,
+                "pooled_control_error": pooled_control_error,
+                "pooled_control_training_matches": len(pooled_records),
+                "control_min_team_appearances": CONTROL_MIN_TEAM_APPEARANCES,
             },
-            reason="no league-specific Dixon-Coles control could be fitted",
+            reason="no league-specific or pooled stable-team Dixon-Coles control could be fitted",
         )
 
     dc_plus_rows: list[dict[str, float]] = []
@@ -395,6 +438,10 @@ def build_goal_model_validation(
         away_id = int(away_ids[index])
         league_id = int(league_ids[index])
         control = controls.get(league_id)
+        control_scope = "league"
+        if control is None or home_id not in set(control.team_ids) or away_id not in set(control.team_ids):
+            control = pooled_control
+            control_scope = "pooled"
         if control is None:
             continue
         control_teams = set(control.team_ids)
@@ -423,9 +470,9 @@ def build_goal_model_validation(
 
         actual_home = int(y_home[index])
         actual_away = int(y_away[index])
-        for target, lambdas, rho in (
-            (dc_plus_rows, dc_lambdas, float(dc_plus_params["rho"])),
-            (control_rows, control_lambdas, float(control.rho)),
+        for target, lambdas, rho, scope in (
+            (dc_plus_rows, dc_lambdas, float(dc_plus_params["rho"]), control_scope),
+            (control_rows, control_lambdas, float(control.rho), control_scope),
         ):
             lambda_home, lambda_away = lambdas
             over25, btts = _market_probabilities(lambda_home, lambda_away, rho)
@@ -444,6 +491,7 @@ def build_goal_model_validation(
                         lambda_away,
                         rho,
                     ),
+                    "control_scope": scope,
                 }
             )
 
@@ -485,7 +533,21 @@ def build_goal_model_validation(
         "automatic_promotion_rule": None,
         "control_leagues_fitted": sorted(controls),
         "control_league_fit_errors": control_fit_errors,
-        "note": "comparison is evidence for manual GoalLab pick-authority review",
+        "pooled_control_fitted": pooled_control is not None,
+        "pooled_control_training_matches": len(pooled_records),
+        "pooled_control_team_count": (
+            0 if pooled_control is None else len(pooled_control.team_ids)
+        ),
+        "pooled_control_error": pooled_control_error,
+        "control_scope_counts": {
+            "league": sum(row.get("control_scope") == "league" for row in control_rows),
+            "pooled": sum(row.get("control_scope") == "pooled" for row in control_rows),
+        },
+        "note": (
+            "comparison is evidence for manual GoalLab pick-authority review; "
+            "pooled plain Dixon-Coles is used only when league-specific control coverage "
+            "is unavailable"
+        ),
     }
     leakage = _leakage_audit()
     ready = common_n >= MIN_COMMON_EVALUATION and leakage["status"] == "PASS"
@@ -523,7 +585,10 @@ def ensure_latest_goal_model_validation(
     if contract is None:
         return {"status": "NO_MODEL"}
     model_version = str(contract["model_version"])
-    existing = repository.goal_model_validation(model_version)
+    existing = repository.goal_model_validation(
+        model_version,
+        method_version=METHOD_VERSION,
+    )
     if existing is not None:
         return existing
 
@@ -546,7 +611,10 @@ def ensure_latest_goal_model_validation(
         validation.comparison,
         validation.leakage_audit,
     )
-    return repository.goal_model_validation(model_version) or {
+    return repository.goal_model_validation(
+        model_version,
+        method_version=METHOD_VERSION,
+    ) or {
         "status": validation.status,
         "model_version": validation.model_version,
     }
