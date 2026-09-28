@@ -1976,10 +1976,11 @@ class GoalStructuralModelService:
         )
         if persisted is not None:
             context_started_at = perf_counter()
-            histories, player_histories, pairs, history_match_count = (
+            histories, player_histories, pairs, _context_history_match_count = (
                 _build_scoring_context(rows)
             )
             artifact = _artifact_from_row(persisted)
+            history_match_count = artifact.history_match_count
             self._cache_at = now
             self._histories = histories
             self._player_histories = player_histories
