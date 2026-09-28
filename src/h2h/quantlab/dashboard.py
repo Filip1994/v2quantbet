@@ -574,6 +574,61 @@ class QuantLabDashboardService:
                 "</td></tr>"
             )
 
+        goal_selected_picks_html = ""
+        if lab_key == "goal":
+            active_goal_picks = tuple(
+                row
+                for row in rows
+                if str(row.get("outcome") or "PENDING").upper() == "PENDING"
+            )
+            selected_rows_html = ""
+            for row in active_goal_picks:
+                match_text = (
+                    f'{escape(str(row.get("home_team") or "?"))} – '
+                    f'{escape(str(row.get("away_team") or "?"))}'
+                )
+                pick_href = "/quantlab/goal/pick?" + urlencode(
+                    {"goal_pick_id": str(row.get("goal_pick_id") or "")}
+                )
+                line = "" if row.get("line") is None else f" {escape(str(row['line']))}"
+                pick_label = (
+                    f'{escape(str(row.get("market_key") or "—"))} '
+                    f'{escape(str(row.get("selection") or "—"))}{line}'
+                )
+                note = render_goal_pick_note_html(
+                    row,
+                    goal_contract_for(row),
+                    detail_href=pick_href,
+                )
+                selected_rows_html += (
+                    "<tr>"
+                    f'<td class="match"><b><a href="{escape(pick_href, quote=True)}">{match_text}</a></b>'
+                    f'<small>{escape(str(row.get("competition_name") or "—"))} · {_time(row.get("kickoff_at"))}</small></td>'
+                    f'<td><b>{pick_label}</b><small>{_bookmaker_badge(row.get("bookmaker_name"))}</small></td>'
+                    f"<td>{_pct(row.get('model_probability'))}<small>market {_pct(row.get('market_probability'))}</small></td>"
+                    f"<td>λH {_rate(row.get('expected_home_goals'))}<small>λA {_rate(row.get('expected_away_goals'))}</small></td>"
+                    f"<td>{_odd(row.get('odds'))}</td>"
+                    f"<td>{_pct(row.get('edge'))}<small>{_pct(row.get('expected_value'))} EV</small></td>"
+                    f"<td>{note}</td>"
+                    f"<td>{_time(row.get('decision_at'))}</td>"
+                    "</tr>"
+                )
+            if not selected_rows_html:
+                selected_rows_html = (
+                    '<tr><td class="empty" colspan="8">'
+                    "Trenutno nema aktivnih GoalLab pikova za izabrane filtere."
+                    "</td></tr>"
+                )
+            goal_selected_picks_html = (
+                '<section class="table-shell context-table selected-picks">'
+                '<div class="table-title"><b>Izabrani pikovi · aktivni</b>'
+                f'<span>{len(active_goal_picks)} aktivnih · 📝 otvara brojčano objašnjenje</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Meč</th><th>Pik</th><th>Model / market</th><th>Očekivani golovi</th>'
+                '<th>Kvota</th><th>Edge / EV</th><th>Notes</th><th>Odluka</th>'
+                f'</tr></thead><tbody>{selected_rows_html}</tbody></table></div></section>'
+            )
+
         corner_picks_html = ""
         if lab_key == "corner":
             pending_rows = tuple(
