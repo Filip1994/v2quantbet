@@ -664,7 +664,7 @@ class PostgreSQLQuantLabRepository:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         policy_filter = (
-            "AND d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+            "AND d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%%' "
             if structural_only
             else ""
         )
@@ -738,7 +738,7 @@ class PostgreSQLQuantLabRepository:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         policy_filter = (
-            "WHERE policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+            "WHERE policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%%' "
             if structural_only
             else ""
         )
@@ -1364,7 +1364,7 @@ class PostgreSQLQuantLabRepository:
                 " d.odds, d.edge, d.expected_value "
                 " FROM quantlab_goal_decisions d "
                 " JOIN latest l ON l.fixture_id = d.fixture_id "
-                " WHERE d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+                " WHERE d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%%' "
                 " ORDER BY d.fixture_id, d.decision_at DESC, "
                 " (d.decision = 'PICK') DESC, d.decision_id DESC"
                 "), captures AS ("
