@@ -277,6 +277,38 @@ Product/UI rules:
 - a model version opens its immutable model contract / feature drilldown;
 - filters are preserved across sorting so aggregate-to-row navigation remains reproducible.
 
+
+## GoalLab V1 production-readiness lock
+
+GoalLab V1 is frozen by `GOALLAB_V1_LOCK_2026_09_28`.
+
+Startup now verifies the live runtime constants against the frozen contract and fails closed
+if an in-place semantic change is detected. A change to any of the following requires an
+explicitly versioned successor contract rather than silently mutating V1:
+
+- model prefix and Structural feature version;
+- evaluation policy and canonical pick policy;
+- settlement rule and chronological validation method;
+- flat stake;
+- edge / EV / odds / quote-age / kickoff gates;
+- canonical market set (O/U 2.5 and BTTS).
+
+Operational readiness rules:
+
+- a retrained model receives a new immutable hash and old approval does not transfer;
+- pick authority therefore pauses until the new exact model hash is manually approved;
+- one malformed GoalLab fixture is isolated and logged without aborting evaluation of the
+  remaining eligible fixtures;
+- one malformed settlement candidate is isolated and logged without blocking later
+  settlements in the same cycle;
+- API-budget exhaustion remains a global stop and is intentionally not swallowed;
+- canonical picks and settlements remain append-only and version-linked.
+
+The V1 regression suite exercises the full canonical-pick path using Premier League,
+La Liga and Serie A fixture metadata, plus explicit old-model-after-retrain authority
+behavior and per-fixture error isolation.
+
+
 ## Scope
 
 GoalLab uses `GOAL_SCOPE_V2`.
