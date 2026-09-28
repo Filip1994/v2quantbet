@@ -780,7 +780,8 @@ class PostgreSQLQuantLabRepository:
                 cursor.execute(
                     "SELECT model_version, trained_at, training_cutoff, feature_version, "
                     "training_sample_size, history_match_count, team_count, league_count, "
-                    "rho, intercept, home_advantage, parameters, training_payload "
+                    "rho, intercept, home_advantage, parameters, feature_means, "
+                    "feature_scales, training_payload "
                     "FROM quantlab_goal_model_versions "
                     "ORDER BY trained_at DESC, model_version DESC LIMIT 1"
                 )
@@ -788,7 +789,8 @@ class PostgreSQLQuantLabRepository:
                 cursor.execute(
                     "SELECT model_version, trained_at, training_cutoff, feature_version, "
                     "training_sample_size, history_match_count, team_count, league_count, "
-                    "rho, intercept, home_advantage, parameters, training_payload "
+                    "rho, intercept, home_advantage, parameters, feature_means, "
+                    "feature_scales, training_payload "
                     "FROM quantlab_goal_model_versions WHERE model_version = %s",
                     (model_version,),
                 )
@@ -797,7 +799,7 @@ class PostgreSQLQuantLabRepository:
                 return None
             columns = tuple(item.name for item in cursor.description)
             result = dict(zip(columns, row, strict=True))
-        for key in ("parameters", "training_payload"):
+        for key in ("parameters", "feature_means", "feature_scales", "training_payload"):
             value = result.get(key)
             if isinstance(value, str):
                 result[key] = json.loads(value)
