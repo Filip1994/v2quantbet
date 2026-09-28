@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC, datetime
 from threading import Event
 
 from h2h.logging_config import configure_logging
@@ -315,6 +316,18 @@ def main() -> None:
                     row.get("expected_value"),
                 )
         try:
+            startup_goal_readiness = goal_structural_engine.readiness(
+                decision_at=datetime.now(UTC)
+            )
+            LOGGER.info(
+                "GoalLab DC+ startup readiness reason=%s training_sample=%s "
+                "history_matches=%s active_features=%s model_version=%s",
+                startup_goal_readiness.get("reason"),
+                startup_goal_readiness.get("training_sample_size"),
+                startup_goal_readiness.get("history_match_count"),
+                startup_goal_readiness.get("active_feature_count"),
+                startup_goal_readiness.get("model_version"),
+            )
             ensure_latest_goal_model_validation(repository, LOGGER)
         except Exception as exc:
             sqlstate = getattr(exc, "sqlstate", None)
