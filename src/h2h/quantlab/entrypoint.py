@@ -275,6 +275,9 @@ def main() -> None:
         dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
     )
     cycle_seconds = _positive_integer("QUANTBET_QUANTLAB_CYCLE_SECONDS", "300")
+    inline_goal_validation = _boolean(
+        "QUANTBET_QUANTLAB_INLINE_GOAL_VALIDATION", "false"
+    )
     model_ready_audit_emitted = False
     try:
         server.start()
@@ -290,6 +293,8 @@ def main() -> None:
             log_cornerlab_historical_holdout(repository, LOGGER)
         except Exception:
             LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
+        else:
+            model_ready_audit_emitted = True
 
         _log_latest_goal_picks(repository)
         for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab")):
@@ -314,17 +319,18 @@ def main() -> None:
                     row.get("edge"),
                     row.get("expected_value"),
                 )
-        try:
-            ensure_latest_goal_model_validation(repository, LOGGER)
-        except Exception as exc:
-            sqlstate = getattr(exc, "sqlstate", None)
-            error_text = str(exc)
-            LOGGER.exception(
-                "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s error=%s",
-                type(exc).__name__,
-                sqlstate,
-                error_text,
-            )
+        if inline_goal_validation:
+            try:
+                ensure_latest_goal_model_validation(repository, LOGGER)
+            except Exception as exc:
+                sqlstate = getattr(exc, "sqlstate", None)
+                error_text = str(exc)
+                LOGGER.exception(
+                    "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s error=%s",
+                    type(exc).__name__,
+                    sqlstate,
+                    error_text,
+                )
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
@@ -347,17 +353,18 @@ def main() -> None:
                     repository.api_usage_today(),
                     api_daily_limit,
                 )
-                try:
-                    ensure_latest_goal_model_validation(repository, LOGGER)
-                except Exception as exc:
-                    sqlstate = getattr(exc, "sqlstate", None)
-                    error_text = str(exc)
-                    LOGGER.exception(
-                        "GoalLab DC+ validation failed error_class=%s sqlstate=%s error=%s",
-                        type(exc).__name__,
-                        sqlstate,
-                        error_text,
-                    )
+                if inline_goal_validation:
+                    try:
+                        ensure_latest_goal_model_validation(repository, LOGGER)
+                    except Exception as exc:
+                        sqlstate = getattr(exc, "sqlstate", None)
+                        error_text = str(exc)
+                        LOGGER.exception(
+                            "GoalLab DC+ validation failed error_class=%s sqlstate=%s error=%s",
+                            type(exc).__name__,
+                            sqlstate,
+                            error_text,
+                        )
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
                     bool(readiness["model_fit_eligible"])
