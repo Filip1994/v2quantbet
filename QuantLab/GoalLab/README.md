@@ -10,10 +10,10 @@ model activation state.
 The pick-producing research model family is:
 
 - model: **DC+ Pro Structural**
-- model prefix: `DC_PLUS_PRO_STRUCTURAL_V1:`
-- feature version: `GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1`
-- evaluation policy: `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2`
-- canonical pick policy: `GOALLAB_DC_PLUS_PICK_POLICY_V1`
+- model prefix: `DC_PLUS_PRO_STRUCTURAL_V2:`
+- feature version: `GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2`
+- evaluation policy: `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V3`
+- canonical pick policy: `GOALLAB_DC_PLUS_PICK_POLICY_V2`
 - settlement rule: `GOALLAB_SETTLEMENT_V1`
 
 Plain production Dixon-Coles remains a read-only control under
@@ -54,8 +54,20 @@ model identity; decision time alone never triggers a retrain.
 
 ## Structural feature contract
 
-The canonical 305-variable registry is in
-[DC_PLUS_PRO_V1.md](./DC_PLUS_PRO_V1.md).
+The full historical feature registry remains documented in
+[DC_PLUS_PRO_V1.md](./DC_PLUS_PRO_V1.md), but **V2 does not fit every generated column**.
+
+The V1 production-readiness review found 669 active columns for 792 current training
+examples. V2 therefore uses a pre-declared compact core contract: recent goal and shot
+form, venue/season goal production, rest/congestion, standings strength, availability,
+projected-player strength, opponent-adjusted form, league goal environment and a small
+set of matchup interactions. A feature must also have at least 60 observed training
+values. Feature selection never looks at holdout outcomes.
+
+V2 mean-imputes unavailable numeric inputs from the training fold and does not create a
+separate missing dummy for every column. Explicit coverage variables remain eligible
+where available. This prevents the V1 dimensionality explosion while keeping missingness
+auditable in the raw feature snapshot.
 
 Every model artifact persists:
 
@@ -224,7 +236,7 @@ Every settlement retains the exact result observation used.
 ## DC+ validation
 
 Each immutable model artifact may receive one
-`GOALLAB_CHRONOLOGICAL_HOLDOUT_V3` validation record. V1/V2 evidence remains immutable and queryable.
+`GOALLAB_CHRONOLOGICAL_HOLDOUT_V4` validation record. Earlier validation evidence remains immutable and queryable.
 
 The chronological holdout compares DC+ Structural against plain Dixon-Coles on the same
 common evaluation fixtures. It prefers league-specific controls and uses a pooled
@@ -242,7 +254,17 @@ and records:
 - leakage checklist;
 - DC+ minus DC metric deltas.
 
-No unrecorded automatic “winner” rule grants pick authority.
+V4 also records an objective promotion gate. A challenger is review-ready only when:
+
+- common evaluation size is at least 50;
+- leakage audit passes;
+- total-goals RMSE is no worse than control;
+- Over 2.5 Brier is no worse than control;
+- BTTS Brier is no worse than control;
+- exact-score mean log likelihood is not worse than control by more than 0.05.
+
+Passing that gate still does not auto-enable picks: the exact immutable model hash must be
+explicitly approved and pick authority must be ON.
 
 ## GoalLab dashboard
 
@@ -317,9 +339,9 @@ reconstructable active-variable table; the inline note shows the strongest numer
 contributors plus the plain-language context.
 
 
-## GoalLab V1 production-readiness lock
+## GoalLab active production-readiness lock
 
-GoalLab V1 is frozen by `GOALLAB_V1_LOCK_2026_09_28`.
+GoalLab V1 remains historical and immutable. The active successor is frozen by `GOALLAB_V2_LOCK_2026_09_28`.
 
 Startup now verifies the live runtime constants against the frozen contract and fails closed
 if an in-place semantic change is detected. A change to any of the following requires an
