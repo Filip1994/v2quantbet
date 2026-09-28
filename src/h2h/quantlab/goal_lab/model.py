@@ -1918,8 +1918,14 @@ def _artifact_from_row(row: dict[str, Any]) -> GoalStructuralModelArtifact:
 class GoalStructuralModelService:
     """Reuse immutable DC+ artifacts until the training evidence actually changes."""
 
-    def __init__(self, repository: Any) -> None:
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        artifact_model_version: str | None = None,
+    ) -> None:
         self._repository = repository
+        self._artifact_model_version = artifact_model_version
         self._cache_at: datetime | None = None
         self._training_fingerprint: str | None = None
         self._artifact: GoalStructuralModelArtifact | None = None
@@ -1971,6 +1977,51 @@ class GoalStructuralModelService:
             len(rows),
             history_loaded_at - started_at,
         )
+        if self._artifact_model_version is not None:
+            persisted = self._repository.goal_model_contract(
+                self._artifact_model_version
+            )
+            if persisted is None:
+                self._cache_at = now
+                self._artifact = None
+                self._fit_reason = "APPROVED_GOAL_MODEL_UNAVAILABLE"
+                self._fit_details = {
+                    "approved_model_version": self._artifact_model_version,
+                }
+                return
+            context_started_at = perf_counter()
+            histories, player_histories, pairs, _context_history_match_count = (
+                _build_scoring_context(rows)
+            )
+            artifact = _artifact_from_row(persisted)
+            self._cache_at = now
+            self._histories = histories
+            self._player_histories = player_histories
+            self._pairs = pairs
+            self._training_fingerprint = str(
+                artifact.training_payload.get("training_fingerprint") or ""
+            ) or None
+            self._artifact = artifact
+            self._fit_reason = "MODEL_READY"
+            self._fit_details = {
+                "history_match_count": artifact.history_match_count,
+                "training_sample_size": artifact.training_sample_size,
+                "active_feature_count": len(
+                    tuple(artifact.parameters.get("model_feature_names") or ())
+                ),
+                "artifact_reused": True,
+                "artifact_pinned": True,
+                "approved_model_version": self._artifact_model_version,
+            }
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=approved_artifact_loaded model_version=%s "
+                "training_sample=%d history_matches=%d scoring_context_seconds=%.3f",
+                artifact.model_version,
+                artifact.training_sample_size,
+                artifact.history_match_count,
+                perf_counter() - context_started_at,
+            )
+            return
         persisted = self._repository.goal_model_by_training_fingerprint(
             training_fingerprint
         )
