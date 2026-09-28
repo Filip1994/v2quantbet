@@ -187,7 +187,7 @@ def test_result_settlement_ledger_clv_performance_and_replay() -> None:
         _cleanup(account, (candidate,))
 
 
-def test_operator_state_defaults_played_and_excludes_skipped_from_actual_finances() -> None:
+def test_operator_state_defaults_pending_until_explicit_played_or_skipped() -> None:
     _migrate()
     candidate = _candidate()
     account = f"operator-{uuid4()}"
@@ -201,10 +201,21 @@ def test_operator_state_defaults_played_and_excludes_skipped_from_actual_finance
     settlement.settle_pick(pick.pick_id, result.result_observation_id, settled_at=settled_at)
     performance = PostgreSQLPerformanceRepository(database_url=DATABASE_URL)
 
-    assert operator.current_state(pick.pick_id) is OperatorPickState.PLAYED
+    assert operator.current_state(pick.pick_id) is OperatorPickState.PENDING
     assert operator.resolve_short_pick_id(pick.pick_id[-10:]) == pick.pick_id
-    actual_played = performance.operator_summary(account)
+    actual_pending = performance.operator_summary(account)
     system_before = performance.summary(account)
+    assert actual_pending.realized_pnl_minor == 0
+    assert actual_pending.total_staked_minor == 0
+
+    played_request = f"play-{pick.pick_id}"
+    operator.set_state(
+        pick.pick_id,
+        OperatorPickState.PLAYED,
+        played_request,
+        occurred_at=settled_at - timedelta(seconds=1),
+    )
+    actual_played = performance.operator_summary(account)
     assert actual_played.realized_pnl_minor == pick.stake_minor
     assert actual_played.total_staked_minor == pick.stake_minor
 
@@ -235,6 +246,7 @@ def test_operator_state_defaults_played_and_excludes_skipped_from_actual_finance
     )
     assert restored.state is OperatorPickState.PLAYED
     assert [event.state for event in operator.history(pick.pick_id)] == [
+        OperatorPickState.PLAYED,
         OperatorPickState.SKIPPED,
         OperatorPickState.PLAYED,
     ]
@@ -267,12 +279,10 @@ def test_skipped_pending_pick_releases_only_operator_exposure() -> None:
     performance = PostgreSQLPerformanceRepository(database_url=DATABASE_URL)
     operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
 
-    played = performance.operator_summary(account)
-    assert played.open_exposure_minor == pick.stake_minor
-    assert (
-        played.available_bankroll_minor
-        == _policy(account).initial_bankroll_minor - pick.stake_minor
-    )
+    pending = performance.operator_summary(account)
+    assert operator.current_state(pick.pick_id) is OperatorPickState.PENDING
+    assert pending.open_exposure_minor == pick.stake_minor
+    assert pending.available_bankroll_minor == _policy(account).initial_bankroll_minor
 
     operator.set_state(
         pick.pick_id,
