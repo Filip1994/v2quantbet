@@ -725,6 +725,55 @@ class PostgreSQLQuantLabRepository:
                 return tuple(rows)
             offset += len(batch)
 
+    def list_goal_decision_evidence(
+        self,
+        *,
+        limit: int = 5000,
+        offset: int = 0,
+        structural_only: bool = True,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read lightweight GoalLab decision evidence without fixture-context joins."""
+        if limit <= 0 or limit > 5000:
+            raise ValueError("limit must be between 1 and 5000")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        policy_filter = (
+            "WHERE policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+            if structural_only
+            else ""
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT decision_id, fixture_id, decision_at, policy_version, model_name, "
+                "model_version, decision, reason "
+                "FROM quantlab_goal_decisions "
+                + policy_filter
+                + "ORDER BY decision_at DESC, decision_id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            return _row_dicts(cursor)
+
+    def list_all_goal_decision_evidence(
+        self,
+        *,
+        batch_size: int = 5000,
+        structural_only: bool = True,
+    ) -> tuple[dict[str, Any], ...]:
+        if batch_size <= 0 or batch_size > 5000:
+            raise ValueError("batch_size must be between 1 and 5000")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = self.list_goal_decision_evidence(
+                limit=batch_size,
+                offset=offset,
+                structural_only=structural_only,
+            )
+            rows.extend(batch)
+            if len(batch) < batch_size:
+                return tuple(rows)
+            offset += len(batch)
+
     def goal_model_contract(self, model_version: str | None = None) -> dict[str, Any] | None:
         with self.connect() as connection, connection.cursor() as cursor:
             if model_version is None:
@@ -1301,34 +1350,48 @@ class PostgreSQLQuantLabRepository:
         end_at = now + timedelta(hours=lookahead_hours)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
+                "WITH latest AS ("
+                " SELECT DISTINCT ON (o.fixture_id) o.fixture_id, o.league_id, o.season, "
+                " o.home_team_id, o.away_team_id, o.home_team, o.away_team, "
+                " o.competition_name, o.country, o.competition_type, o.kickoff_at, "
+                " o.provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.kickoff_at >= %s AND o.kickoff_at < %s "
+                " ORDER BY o.fixture_id, o.captured_at DESC, o.fixture_observation_id DESC"
+                "), decisions AS ("
+                " SELECT DISTINCT ON (d.fixture_id) d.fixture_id, d.decision_at, d.decision, "
+                " d.reason, d.model_version, d.market_key, d.selection, d.bookmaker_name, "
+                " d.odds, d.edge, d.expected_value "
+                " FROM quantlab_goal_decisions d "
+                " JOIN latest l ON l.fixture_id = d.fixture_id "
+                " WHERE d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
+                " ORDER BY d.fixture_id, d.decision_at DESC, "
+                " (d.decision = 'PICK') DESC, d.decision_id DESC"
+                "), captures AS ("
+                " SELECT DISTINCT ON (c.fixture_id) c.fixture_id, c.captured_at "
+                " FROM quantlab_market_captures c "
+                " JOIN latest l ON l.fixture_id = c.fixture_id "
+                " ORDER BY c.fixture_id, c.captured_at DESC, c.market_capture_id DESC"
+                ") "
                 "SELECT f.fixture_id, latest.league_id, latest.season, latest.home_team_id, "
                 "latest.away_team_id, latest.home_team, latest.away_team, latest.competition_name, "
                 "latest.country, latest.competition_type, latest.kickoff_at, latest.provider_status, "
-                "capture.captured_at AS market_captured_at, decision.decision_at, "
-                "decision.decision, decision.reason, decision.model_version, decision.market_key, "
-                "decision.selection, decision.bookmaker_name, decision.odds, decision.edge, "
-                "decision.expected_value "
-                "FROM quantlab_fixtures f "
-                "JOIN LATERAL ("
-                " SELECT league_id, season, home_team_id, away_team_id, home_team, away_team, "
-                "        competition_name, country, competition_type, kickoff_at, provider_status "
-                " FROM quantlab_fixture_observations o WHERE o.fixture_id = f.fixture_id "
-                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
-                ") latest ON TRUE "
-                "LEFT JOIN LATERAL ("
-                " SELECT captured_at FROM quantlab_market_captures c WHERE c.fixture_id = f.fixture_id "
-                " ORDER BY captured_at DESC, market_capture_id DESC LIMIT 1"
-                ") capture ON TRUE "
-                "LEFT JOIN LATERAL ("
-                " SELECT decision_at, decision, reason, model_version, market_key, selection, "
-                "        bookmaker_name, odds, edge, expected_value "
-                " FROM quantlab_goal_decisions d WHERE d.fixture_id = f.fixture_id "
-                " AND d.policy_version LIKE 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_%' "
-                " ORDER BY decision_at DESC, (decision = 'PICK') DESC, decision_id DESC LIMIT 1"
-                ") decision ON TRUE "
-                "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
+                "captures.captured_at AS market_captured_at, decisions.decision_at, "
+                "decisions.decision, decisions.reason, decisions.model_version, "
+                "decisions.market_key, decisions.selection, decisions.bookmaker_name, "
+                "decisions.odds, decisions.edge, decisions.expected_value "
+                "FROM latest "
+                "JOIN quantlab_fixtures f ON f.fixture_id = latest.fixture_id "
+                "LEFT JOIN captures ON captures.fixture_id = f.fixture_id "
+                "LEFT JOIN decisions ON decisions.fixture_id = f.fixture_id "
+                "WHERE latest.league_id <> ALL(%s) "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
-                (now, end_at, limit),
+                (
+                    now,
+                    end_at,
+                    sorted(BLACKLISTED_API_FOOTBALL_LEAGUE_IDS),
+                    limit,
+                ),
             )
             return _row_dicts(cursor)
 
