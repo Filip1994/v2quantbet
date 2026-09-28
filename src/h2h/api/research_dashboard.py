@@ -1515,8 +1515,8 @@ main{{padding:14px}}header{{display:block}}}}
 <tbody>{rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
-    def render_analytics_html(self) -> str:
-        return render_research_analytics_html(self.analytics_snapshot())
+    def render_analytics_html(self, query: str = "") -> str:
+        return render_research_analytics_html(self.analytics_snapshot(), query)
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
@@ -2038,7 +2038,7 @@ class ResearchDashboardHTTPService:
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         league_id = int(params.get("league_id", ["0"])[0])
                         season = int(params.get("season", ["0"])[0])
-                        body = dashboard.render_league_html(league_id, season)
+                        body = dashboard.render_league_html(league_id, season, parsed.query)
                         content_type = "text/html; charset=utf-8"
                     elif parsed.path == "/research/analytics/model.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -2052,7 +2052,7 @@ class ResearchDashboardHTTPService:
                     elif parsed.path == "/research/analytics/model":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         model_version_id = params.get("model_version_id", [""])[0]
-                        body = dashboard.render_model_version_html(model_version_id)
+                        body = dashboard.render_model_version_html(model_version_id, parsed.query)
                         content_type = "text/html; charset=utf-8"
                     elif parsed.path == "/research/analytics/diagnostic.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -2071,7 +2071,7 @@ class ResearchDashboardHTTPService:
                         )
                         content_type = "application/json; charset=utf-8"
                     elif parsed.path == "/research/analytics":
-                        body = dashboard.render_analytics_html()
+                        body = dashboard.render_analytics_html(parsed.query)
                         content_type = "text/html; charset=utf-8"
                     else:
                         body = dashboard.render_html(parsed.query)
