@@ -9,6 +9,10 @@ from h2h.quantlab.goal_lab.audit import METHOD_VERSION
 from h2h.quantlab.goal_lab.model import FEATURE_VERSION, MODEL_PREFIX
 from h2h.quantlab.goal_lab.picks import (
     FLAT_STAKE_MINOR,
+    GOAL_RESULT_FINALITY_DELAY_SECONDS,
+    GOAL_RESULT_INITIAL_DELAY_SECONDS,
+    GOAL_RESULT_POSTPONED_REFRESH_SECONDS,
+    GOAL_RESULT_REFRESH_SECONDS,
     PICK_POLICY_VERSION,
     SETTLEMENT_RULE_VERSION,
 )
@@ -41,6 +45,10 @@ LOCKED_CONTRACT: dict[str, Any] = {
     "max_odds": 4.00,
     "max_quote_age_seconds": 13 * 60 * 60,
     "min_seconds_to_kickoff": 15 * 60,
+    "goal_result_initial_delay_seconds": 6_300,
+    "goal_result_refresh_seconds": 900,
+    "goal_result_postponed_refresh_seconds": 21_600,
+    "goal_result_finality_delay_seconds": 900,
     "canonical_markets": ("OU_25", "BTTS"),
 }
 
@@ -62,6 +70,10 @@ def assert_goallab_v1_contract() -> dict[str, Any]:
         "max_odds": MAX_ODDS,
         "max_quote_age_seconds": MAX_QUOTE_AGE_SECONDS,
         "min_seconds_to_kickoff": MIN_SECONDS_TO_KICKOFF,
+        "goal_result_initial_delay_seconds": GOAL_RESULT_INITIAL_DELAY_SECONDS,
+        "goal_result_refresh_seconds": GOAL_RESULT_REFRESH_SECONDS,
+        "goal_result_postponed_refresh_seconds": GOAL_RESULT_POSTPONED_REFRESH_SECONDS,
+        "goal_result_finality_delay_seconds": GOAL_RESULT_FINALITY_DELAY_SECONDS,
     }
     expected = {
         key: value
