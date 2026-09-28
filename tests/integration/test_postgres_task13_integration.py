@@ -296,6 +296,82 @@ def test_goallab_dashboard_queries_work_on_fresh_schema(isolated_database) -> No
     assert decisions[0]["competition_name"] == "Premier League"
 
 
+
+
+def test_goallab_dashboard_prefers_canonical_decision_over_better_price_pass(
+    isolated_database,
+) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        apply_migrations(connection, MIGRATION_DIR)
+
+    now = datetime.now(UTC)
+    fixture_id = "api-football:9900002"
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V3:" + "e" * 64
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO quantlab_fixtures "
+            "(fixture_id, provider_fixture_id, first_seen_at) VALUES (%s, %s, %s)",
+            (fixture_id, 9_900_002, now),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_fixture_observations ("
+            "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+            "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+            "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+            ") VALUES (%s, %s, %s, 39, 2026, 1, 2, 'Home', 'Away', "
+            "'Premier League', 'England', 'League', %s, 'NS', %s, '{}'::jsonb)",
+            (
+                "quantlab-fixture-v1:" + "f" * 64,
+                fixture_id,
+                9_900_002,
+                now + timedelta(hours=4),
+                now,
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_decisions ("
+            "decision_id, fixture_id, decision_at, policy_version, model_name, model_version, "
+            "bookmaker_id, bookmaker_name, provider_bet_id, provider_bet_name, market_key, "
+            "selection, line, quote_observed_at, odds, companion_odds, market_probability, "
+            "model_probability, edge, expected_value, decision, reason, evidence_fingerprint, "
+            "details"
+            ") VALUES "
+            "(%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5', "
+            "'DC+ Pro Structural', %s, 8, 'Book A', 5, 'Goals Over/Under', 'OU_25', "
+            "'OVER', 2.5, %s, 1.80, 2.00, 0.52, 0.57, 0.05, 0.026, "
+            "'PASS', 'BETTER_PRICE_AVAILABLE', %s, '{}'::jsonb), "
+            "(%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5', "
+            "'DC+ Pro Structural', %s, 9, 'Book B', 5, 'Goals Over/Under', 'OU_25', "
+            "'OVER', 2.5, %s, 1.90, 1.90, 0.50, 0.57, 0.07, 0.083, "
+            "'PASS', 'CANONICAL_FIXTURE_SIGNAL_ONLY', %s, '{}'::jsonb)",
+            (
+                "quantlab-goal-decision-v1:" + "1" * 64,
+                fixture_id,
+                now,
+                model_version,
+                now,
+                "2" * 64,
+                "quantlab-goal-decision-v1:" + "3" * 64,
+                fixture_id,
+                now,
+                model_version,
+                now,
+                "4" * 64,
+            ),
+        )
+
+    repository = PostgreSQLQuantLabRepository(connect=connect)
+    pipeline = repository.list_goal_fixture_status(now=now)
+
+    assert len(pipeline) == 1
+    assert pipeline[0]["fixture_id"] == fixture_id
+    assert pipeline[0]["reason"] == "CANONICAL_FIXTURE_SIGNAL_ONLY"
+    assert pipeline[0]["bookmaker_name"] == "Book B"
+    assert float(pipeline[0]["odds"]) == 1.90
+    assert float(pipeline[0]["expected_value"]) == pytest.approx(0.083)
+
+
 def test_goallab_pick_result_refresh_to_settlement_e2e(isolated_database) -> None:
     _schema, connect = isolated_database
     with connect() as connection:
