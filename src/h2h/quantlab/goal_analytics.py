@@ -412,6 +412,8 @@ def render_goal_model_html(
 ) -> str:
     validation = contract.get("validation")
     validation = validation if isinstance(validation, dict) else {}
+    training = contract.get("training_payload")
+    training = training if isinstance(training, dict) else {}
     metrics = goal_pick_metrics(picks)
     active = tuple(contract.get("active_feature_names") or ())
     feature_rows = "".join(
@@ -429,13 +431,15 @@ def render_goal_model_html(
         for row in picks
     ) or '<tr><td colspan="6" class="empty">No canonical picks for this model version yet.</td></tr>'
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>GoalLab model</title>
-<style>body{{background:#0b0d10;color:#e8edf2;font:14px system-ui;margin:0}}main{{max-width:1400px;margin:auto;padding:24px}}a{{color:#9bc7ff}}section{{background:#14181d;border:1px solid #29313a;border-radius:10px;padding:14px;margin:14px 0}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #29313a;text-align:left}}small,p{{color:#8e9aa6}}.cards{{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}}.cards div{{background:#14181d;border:1px solid #29313a;border-radius:8px;padding:10px}}@media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}}}</style></head>
+<style>body{{background:#0b0d10;color:#e8edf2;font:14px system-ui;margin:0}}main{{max-width:1400px;margin:auto;padding:24px}}a{{color:#9bc7ff}}section{{background:#14181d;border:1px solid #29313a;border-radius:10px;padding:14px;margin:14px 0}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #29313a;text-align:left}}small,p{{color:#8e9aa6}}.cards{{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}}.cards div{{background:#14181d;border:1px solid #29313a;border-radius:8px;padding:10px}}@media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}}}</style></head>
 <body><main><a href="/quantlab/goal/analytics">← GoalLab Analytics</a>
 <h1>DC+ model version</h1><p>{escape(str(contract.get("model_version") or "—"))}</p>
 <div class="cards">
 <div><small>Train N</small><b>{int(contract.get("training_sample_size") or 0)}</b></div>
 <div><small>History N</small><b>{int(contract.get("history_match_count") or 0)}</b></div>
 <div><small>Features</small><b>{int(contract.get("active_feature_count") or 0)}</b></div>
+<div><small>Latent teams</small><b>{int(training.get("latent_team_count") or 0)}</b></div>
+<div><small>Latent min N</small><b>{int(training.get("minimum_latent_team_matches") or 0)}</b></div>
 <div><small>ρ</small><b>{escape(str(contract.get("rho") or "—"))}</b></div>
 <div><small>Validation</small><b>{escape(str(validation.get("status") or "PENDING"))}</b></div>
 <div><small>Review</small><b>{escape(str(validation.get("authority_review_status") or "NOT_READY"))}</b></div>
