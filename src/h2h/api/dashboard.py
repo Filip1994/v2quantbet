@@ -735,7 +735,7 @@ class DashboardService:
             "MANUAL": '<small class="source-label manual">MANUAL</small>',
             "LIVE_PROXY": '<small class="source-label">LIVE PROXY</small>',
         }.get(closing_source, "")
-        operator_state = str(pick.get("operator_state") or "PLAYED")
+        operator_state = str(pick.get("operator_state") or "PENDING")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
         operator_controls = "".join(
             f'<form method="post" action="{action}">'
@@ -776,6 +776,9 @@ class DashboardService:
             f'<tr data-provenance="{escape(provenance)}">'
             f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
             f"{escape(self._short_id(pick.get('pick_id')))}</code></td>"
+            f'<td class="operator-cell"><span class="status operator-{operator_state.casefold()}">'
+            f'{escape(operator_state)}</span><div class="operator-controls">'
+            f"{operator_controls}</div></td>"
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick)}"
             f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
@@ -792,9 +795,6 @@ class DashboardService:
             f" · {escape(clv_label)} {escape(clv)}</small></td>"
             f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
             f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
-            f'<td><span class="status operator-{operator_state.casefold()}">'
-            f'{escape(operator_state)}</span><div class="operator-controls">'
-            f"{operator_controls}</div></td>"
             f"<td>{quality_html}</td>"
             "</tr>"
         )
@@ -824,7 +824,7 @@ class DashboardService:
         )
         if not history_rows:
             history_rows = (
-                '<tr><td class="empty" colspan="6"><strong>No finished picks yet.</strong>'
+                '<tr><td class="empty" colspan="8"><strong>No finished picks yet.</strong>'
                 "<br>Finished and settled picks will move here automatically.</td></tr>"
             )
         worker_rows = (
@@ -910,7 +910,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:var(--panel);border:1px solid var(--line)}}
 .overview .panel:first-child{{display:flex;flex-direction:column}}
 .panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line)}}h2{{font-size:14px;margin:0}}
-.scoreboard{{display:grid;grid-template-columns:repeat(7,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
+.scoreboard{{display:grid;grid-template-columns:repeat(8,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
 .score:last-child{{border:0}}.score span{{display:block;color:var(--muted)}}.score strong{{font-size:22px;font-variant-numeric:tabular-nums}}
 .won{{color:var(--green)}}.lost{{color:var(--red)}}.ops{{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}}
 .fact{{background:var(--panel2);padding:10px}}.fact span{{display:block;color:var(--muted);font-size:11px}}.fact strong{{display:block;margin-top:4px}}
@@ -945,15 +945,15 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
 .source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
 .source-label.manual{{color:var(--amber)!important}}
-.operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
-.operator-controls{{display:flex;gap:4px;margin-top:6px}}.operator-controls form{{margin:0}}.operator-button{{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:4px 7px;cursor:pointer;font:inherit;font-size:9px}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
+.operator-pending{{color:var(--muted);border-color:var(--line)}}.operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
+.operator-cell{{min-width:190px}}.operator-controls{{display:flex;gap:8px;margin-top:7px}}.operator-controls form{{margin:0;flex:1}}.operator-button{{width:100%;min-width:78px;background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:8px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:800}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
 .history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
-.history-fixture{{min-width:260px}}.history-operator{{display:flex;align-items:center;gap:5px;margin-top:5px}}
-.history-operator-form{{margin:0}}.history-operator-button{{background:transparent;color:var(--muted);border:0;padding:2px 3px;cursor:pointer;font:inherit;font-size:8px;text-decoration:underline}}
+.history-operator-cell{{min-width:190px}}.history-fixture{{min-width:260px}}.history-operator-actions{{display:flex;gap:8px;margin-top:7px}}
+.history-operator-form{{margin:0;flex:1}}.history-operator-button{{width:100%;min-width:78px;background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:8px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:800}}.history-operator-button:disabled{{opacity:.45;cursor:default}}.history-operator-button.played:not(:disabled){{border-color:#1f6a51}}.history-operator-button.skipped:not(:disabled){{border-color:#6c5425}}
 .history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
 .history-probability{{min-width:130px}}.history-probability strong{{white-space:nowrap}}
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
@@ -970,7 +970,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <section class="kpis">{cards_html}</section>
 <section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
 <div class="scoreboard"><div class="score"><span>System picks</span><strong>{counts["all"]}</strong></div>
-<div class="score"><span>Played</span><strong class="won">{counts["played"]}</strong></div><div class="score"><span>Skipped</span><strong>{counts["skipped"]}</strong></div>
+<div class="score"><span>Pending</span><strong>{counts["pending_operator"]}</strong></div><div class="score"><span>Played</span><strong class="won">{counts["played"]}</strong></div><div class="score"><span>Skipped</span><strong>{counts["skipped"]}</strong></div>
 <div class="score"><span>Active played</span><strong>{counts["active"]}</strong></div><div class="score"><span>Won</span><strong class="won">{counts["won"]}</strong></div>
 <div class="score"><span>Lost</span><strong class="lost">{counts["lost"]}</strong></div><div class="score"><span>Void</span><strong>{counts["void"]}</strong></div></div></article>
 <article class="panel"><div class="panel-head"><h2>Operational pulse</h2><span class="section-label">Evidence-backed</span></div><div class="ops">
@@ -980,10 +980,10 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="fact"><span>Provider budget</span><strong>{budget["used"]} / {budget["effective_limit"]} · {budget["remaining"]} left</strong></div>
 <div class="fact"><span>Recent item failures</span><strong>{ops["recent_failures"]}</strong></div><div class="fact"><span>Stale workers</span><strong>{escape(stale)}</strong></div>
 </div></article></section><section class="panel"><div class="panel-head"><h2>Active picks</h2><span class="section-label">Pre-match & live</span></div>
-<div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
-<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Operator</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
+<div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Decision</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
+<th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
 <section class="panel history"><div class="panel-head"><h2>History</h2><span class="section-label">{context["history_count"]} finished</span></div>
-<div class="table-wrap"><table><thead><tr><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">Probability</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">Probability</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
 <tbody>{context["history_rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
