@@ -295,7 +295,7 @@ def test_finished_closed_and_settled_picks_move_to_history(phase: str) -> None:
     assert "<h2>History</h2>" in html
     if phase == "SETTLED":
         assert '<div class="outcome-tile win">' in html
-    assert '<span class="outcome-state">WIN</span>' in html
+        assert '<span class="outcome-state">WIN</span>' in html
     else:
         assert f">{phase}</span>" in html
 
