@@ -26,7 +26,14 @@ from h2h.quantlab.coverage import (
     parse_league_coverage_flags,
 )
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
-from h2h.quantlab.goal_lab.picks import settle_goal_pick
+from h2h.quantlab.goal_lab.picks import (
+    GOAL_RESULT_FINALITY_DELAY_SECONDS,
+    GOAL_RESULT_INITIAL_DELAY_SECONDS,
+    GOAL_RESULT_POSTPONED_REFRESH_SECONDS,
+    GOAL_RESULT_REFRESH_SECONDS,
+    settle_goal_pick,
+    stable_goal_result_evidence,
+)
 from h2h.quantlab.market_collector import QuantLabMarketCollector
 from h2h.quantlab.scope import card_corner_scope, goal_scope
 
@@ -1271,6 +1278,33 @@ class QuantLabRuntime:
             picks += int(outcome.picks_inserted)
         return decisions, picks
 
+    def _refresh_goal_pick_results(self, now: datetime) -> int:
+        """Refresh post-match result evidence for unsettled GoalLab canonical picks."""
+        rows = self._repository.goal_pick_result_refresh_candidates(
+            now=now,
+            post_kickoff_delay_seconds=GOAL_RESULT_INITIAL_DELAY_SECONDS,
+            refresh_after_seconds=GOAL_RESULT_REFRESH_SECONDS,
+            postponed_refresh_seconds=GOAL_RESULT_POSTPONED_REFRESH_SECONDS,
+            limit=25,
+        )
+        refreshed = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            provider_fixture_id = int(fixture["provider_fixture_id"])
+            payload = self._provider.fetch_fixture(provider_fixture_id)
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            matching = tuple(
+                item for item in observations if str(item.fixture.fixture_id) == fixture_id
+            )
+            if not matching:
+                LOGGER.warning(
+                    "QuantLab GoalLab result refresh returned no matching fixture fixture=%s",
+                    fixture_id,
+                )
+                continue
+            refreshed += int(self._repository.save_fixture_observations(matching))
+        return refreshed
+
     def _settle_goal_picks(self, now: datetime) -> int:
         settled = 0
         rows = self._repository.goal_pick_settlement_candidates(limit=500)
@@ -1278,7 +1312,15 @@ class QuantLabRuntime:
             fixture_id = str(row.get("fixture_id") or "")
             goal_pick_id = str(row.get("goal_pick_id") or "")
             try:
-                settlement = settle_goal_pick(row, settled_at=now)
+                result_evidence = stable_goal_result_evidence(
+                    row,
+                    finality_delay_seconds=GOAL_RESULT_FINALITY_DELAY_SECONDS,
+                )
+                if result_evidence is None:
+                    continue
+                settlement_row = dict(row)
+                settlement_row.update(result_evidence)
+                settlement = settle_goal_pick(settlement_row, settled_at=now)
                 if settlement is None:
                     continue
                 settled += int(
