@@ -233,7 +233,76 @@ def test_runtime_isolates_one_goal_fixture_failure_and_continues(caplog) -> None
     assert "GoalLab fixture evaluation failed fixture=api-football:9201" in caplog.text
 
 
+def test_runtime_refreshes_goal_result_evidence_for_open_pick() -> None:
+    class Repo:
+        def goal_pick_result_refresh_candidates(self, **kwargs):
+            assert kwargs["limit"] == 25
+            return ({"fixture_id": "api-football:9302", "provider_fixture_id": 9302},)
+
+        def save_fixture_observations(self, observations):
+            items = tuple(observations)
+            assert len(items) == 1
+            assert items[0].fixture.fixture_id == "api-football:9302"
+            return 1
+
+    class Provider:
+        def fetch_fixture(self, provider_fixture_id):
+            assert provider_fixture_id == 9302
+            return {
+                "errors": [],
+                "response": [
+                    {
+                        "fixture": {
+                            "id": 9302,
+                            "date": "2026-09-28T08:00:00+00:00",
+                            "status": {"short": "FT"},
+                        },
+                        "league": {
+                            "id": 39,
+                            "season": 2026,
+                            "name": "Premier League",
+                            "country": "England",
+                            "type": "League",
+                        },
+                        "teams": {
+                            "home": {"id": 1, "name": "Home"},
+                            "away": {"id": 2, "name": "Away"},
+                        },
+                        "goals": {"home": 2, "away": 1},
+                        "score": {
+                            "fulltime": {"home": 2, "away": 1},
+                            "extratime": {"home": None, "away": None},
+                            "penalty": {"home": None, "away": None},
+                        },
+                    }
+                ],
+            }
+
+    runtime = QuantLabRuntime(Repo(), Provider())
+
+    assert runtime._refresh_goal_pick_results(NOW) == 1
+
+
 def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> None:
+    def payload(provider_fixture_id: int) -> dict[str, object]:
+        return {
+            "fixture": {
+                "id": provider_fixture_id,
+                "date": "2026-09-28T08:00:00+00:00",
+                "status": {"short": "FT"},
+            },
+            "teams": {
+                "home": {"id": 1, "name": "Home"},
+                "away": {"id": 2, "name": "Away"},
+            },
+            "goals": {"home": 2, "away": 1},
+            "score": {
+                "fulltime": {"home": 2, "away": 1},
+                "extratime": {"home": None, "away": None},
+                "penalty": {"home": None, "away": None},
+            },
+        }
+
     valid = {
         "goal_pick_id": "quantlab-goal-pick-v1:" + "b" * 64,
         "fixture_id": "api-football:9302",
@@ -242,15 +311,19 @@ def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> N
         "line": 2.5,
         "odds": 2.0,
         "stake_minor": 10_000,
-        "result_classification": "PLAYED_SETTLEABLE",
-        "regulation_home_goals": 2,
-        "regulation_away_goals": 1,
-        "result_observation_id": "result-2",
+        "latest_result_observation_id": "quantlab-fixture-v1:" + "d" * 64,
+        "latest_result_captured_at": NOW,
+        "latest_result_raw_payload": payload(9302),
+        "previous_result_observation_id": "quantlab-fixture-v1:" + "e" * 64,
+        "previous_result_captured_at": NOW - timedelta(minutes=15),
+        "previous_result_raw_payload": payload(9302),
     }
     invalid = dict(valid)
     invalid["goal_pick_id"] = "quantlab-goal-pick-v1:" + "c" * 64
     invalid["fixture_id"] = "api-football:9301"
     invalid["market_key"] = "UNSUPPORTED"
+    invalid["latest_result_raw_payload"] = payload(9301)
+    invalid["previous_result_raw_payload"] = payload(9301)
 
     class Repo:
         def goal_pick_settlement_candidates(self, *, limit):
@@ -267,3 +340,4 @@ def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> N
 
     assert settled == 1
     assert "GoalLab settlement failed fixture=api-football:9301" in caplog.text
+
