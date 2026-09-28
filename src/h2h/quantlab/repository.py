@@ -3080,6 +3080,33 @@ class PostgreSQLQuantLabRepository:
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
 
+    def corner_model_by_training_fingerprint(
+        self,
+        training_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        if not training_fingerprint:
+            raise ValueError("training_fingerprint must not be empty")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, ridge_penalty, coefficients, "
+                "feature_means, feature_scales, training_payload "
+                "FROM quantlab_corner_model_versions "
+                "WHERE training_payload ->> 'training_fingerprint' = %s "
+                "ORDER BY trained_at DESC, model_version DESC LIMIT 1",
+                (training_fingerprint,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        for key in ("coefficients", "feature_means", "feature_scales", "training_payload"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        return result
+
     def save_corner_model_version(self, item: Any) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
