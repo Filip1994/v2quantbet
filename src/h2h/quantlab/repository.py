@@ -1351,8 +1351,9 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") latest ON TRUE "
                 "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
+                "AND latest.league_id <> ALL(%s) "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
-                (start_at, end_at, limit),
+                (start_at, end_at, [72, 75, 236, 595], limit),
             )
             return _row_dicts(cursor)
 
