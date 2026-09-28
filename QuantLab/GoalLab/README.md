@@ -278,6 +278,35 @@ Product/UI rules:
 - filters are preserved across sorting so aggregate-to-row navigation remains reproducible.
 
 
+
+## Pick presentation and numeric notes
+
+The normal GoalLab page separates two operational views:
+
+- **Izabrani pikovi · aktivni** — canonical GoalLab picks still waiting for settlement;
+- **Sve analizirane utakmice · PASS + PICK** — every upcoming fixture with its latest
+  Structural GoalLab decision, candidate, model/market probability and value evidence.
+
+Every canonical pick exposes a 📝 note. The note is deterministic and is built only from
+persisted pre-match evidence for that exact pick. It includes model probability, de-vigged
+market probability, edge, EV, expected home/away goals and available numeric context such
+as recent goals/shots, venue form, standings, injuries/suspensions, rest/congestion, H2H
+and projected-player form.
+
+For the exact model artifact, GoalLab also reconstructs the standardized Structural DC+
+feature vector and coefficient contribution for each active input:
+
+- raw pre-match value;
+- training mean and scale;
+- standardized z-value;
+- contribution to home and away log goal intensity.
+
+Missing data is never rendered as a fabricated zero. Explicit missing-indicator features
+are shown as missing evidence. The detailed pick drilldown contains the complete
+reconstructable active-variable table; the inline note shows the strongest numeric
+contributors plus the plain-language context.
+
+
 ## GoalLab V1 production-readiness lock
 
 GoalLab V1 is frozen by `GOALLAB_V1_LOCK_2026_09_28`.

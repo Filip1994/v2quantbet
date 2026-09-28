@@ -22,6 +22,7 @@ from h2h.quantlab.goal_analytics import (
     render_goal_model_html,
     render_goal_pick_html,
 )
+from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import goal_scope
@@ -366,7 +367,8 @@ class QuantLabDashboardService:
         )
         if row is None:
             raise LookupError("goal pick not found")
-        return render_goal_pick_html(row)
+        contract = self._repository.goal_model_contract(str(row.get("model_version") or ""))
+        return render_goal_pick_html(row, contract)
 
     def render_html(self, raw_query: str = "") -> str:
         params = parse_qs(raw_query, keep_blank_values=True)
@@ -472,6 +474,27 @@ class QuantLabDashboardService:
         def field(name: str) -> str:
             return escape(params.get(name, [""])[0], quote=True)
 
+        goal_contract_cache: dict[str, dict[str, Any] | None] = {}
+
+        def goal_contract_for(row: dict[str, Any]) -> dict[str, Any] | None:
+            if lab_key != "goal":
+                return None
+            model_version = str(row.get("model_version") or "")
+            if not model_version:
+                return None
+            if model_version not in goal_contract_cache:
+                try:
+                    goal_contract_cache[model_version] = self._repository.goal_model_contract(
+                        model_version
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "GoalLab pick explanation model-contract query failed model=%s",
+                        model_version,
+                    )
+                    goal_contract_cache[model_version] = None
+            return goal_contract_cache[model_version]
+
         rows_html = ""
         for row in rows:
             pnl_minor = row.get("pnl_minor")
@@ -490,7 +513,19 @@ class QuantLabDashboardService:
                 match = match_text
             league_text = escape(str(row.get("competition_name") or "—"))
             line = "—" if row.get("line") is None else escape(str(row["line"]))
-            note_cell = _corner_pick_note(row) if lab_key == "corner" else "—"
+            if lab_key == "corner":
+                note_cell = _corner_pick_note(row)
+            elif lab_key == "goal" and row.get("goal_pick_id"):
+                note_href = "/quantlab/goal/pick?" + urlencode(
+                    {"goal_pick_id": str(row["goal_pick_id"])}
+                )
+                note_cell = render_goal_pick_note_html(
+                    row,
+                    goal_contract_for(row),
+                    detail_href=note_href,
+                )
+            else:
+                note_cell = "—"
             close_cell = (
                 f'<td>{_odd(row.get("closing_odds"))}<small>audit only</small></td>'
                 if lab_key == "corner"
@@ -538,6 +573,61 @@ class QuantLabDashboardService:
                 '<tr><td class="empty" colspan="15">'
                 f"{empty_text}"
                 "</td></tr>"
+            )
+
+        goal_selected_picks_html = ""
+        if lab_key == "goal":
+            active_goal_picks = tuple(
+                row
+                for row in rows
+                if str(row.get("outcome") or "PENDING").upper() == "PENDING"
+            )
+            selected_rows_html = ""
+            for row in active_goal_picks:
+                match_text = (
+                    f'{escape(str(row.get("home_team") or "?"))} – '
+                    f'{escape(str(row.get("away_team") or "?"))}'
+                )
+                pick_href = "/quantlab/goal/pick?" + urlencode(
+                    {"goal_pick_id": str(row.get("goal_pick_id") or "")}
+                )
+                line = "" if row.get("line") is None else f" {escape(str(row['line']))}"
+                pick_label = (
+                    f'{escape(str(row.get("market_key") or "—"))} '
+                    f'{escape(str(row.get("selection") or "—"))}{line}'
+                )
+                note = render_goal_pick_note_html(
+                    row,
+                    goal_contract_for(row),
+                    detail_href=pick_href,
+                )
+                selected_rows_html += (
+                    "<tr>"
+                    f'<td class="match"><b><a href="{escape(pick_href, quote=True)}">{match_text}</a></b>'
+                    f'<small>{escape(str(row.get("competition_name") or "—"))} · {_time(row.get("kickoff_at"))}</small></td>'
+                    f'<td><b>{pick_label}</b><small>{_bookmaker_badge(row.get("bookmaker_name"))}</small></td>'
+                    f"<td>{_pct(row.get('model_probability'))}<small>market {_pct(row.get('market_probability'))}</small></td>"
+                    f"<td>λH {_rate(row.get('expected_home_goals'))}<small>λA {_rate(row.get('expected_away_goals'))}</small></td>"
+                    f"<td>{_odd(row.get('odds'))}</td>"
+                    f"<td>{_pct(row.get('edge'))}<small>{_pct(row.get('expected_value'))} EV</small></td>"
+                    f"<td>{note}</td>"
+                    f"<td>{_time(row.get('decision_at'))}</td>"
+                    "</tr>"
+                )
+            if not selected_rows_html:
+                selected_rows_html = (
+                    '<tr><td class="empty" colspan="8">'
+                    "Trenutno nema aktivnih GoalLab pikova za izabrane filtere."
+                    "</td></tr>"
+                )
+            goal_selected_picks_html = (
+                '<section class="table-shell context-table selected-picks">'
+                '<div class="table-title"><b>Izabrani pikovi · aktivni</b>'
+                f'<span>{len(active_goal_picks)} aktivnih · 📝 otvara brojčano objašnjenje</span></div>'
+                '<div class="table"><table><thead><tr>'
+                '<th>Meč</th><th>Pik</th><th>Model / market</th><th>Očekivani golovi</th>'
+                '<th>Kvota</th><th>Edge / EV</th><th>Notes</th><th>Odluka</th>'
+                f'</tr></thead><tbody>{selected_rows_html}</tbody></table></div></section>'
             )
 
         corner_picks_html = ""
@@ -745,22 +835,23 @@ class QuantLabDashboardService:
                     f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
                     f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
                     f'<td>{latest_pick}</td>'
+                    f'<td>{_pct(item.get("model_probability"))}<small>market {_pct(item.get("market_probability"))}</small></td>'
                     f'<td>{_pct(item.get("edge"))}<small>{_pct(item.get("expected_value"))} EV</small></td>'
                     "</tr>"
                 )
             if not rendered_pipeline:
                 rendered_pipeline = (
-                    '<tr><td class="empty" colspan="7">'
+                    '<tr><td class="empty" colspan="8">'
                     'No upcoming QuantLab fixtures are stored in the current lookahead window.'
                     "</td></tr>"
                 )
             goal_pipeline_html = (
                 '<section class="table-shell context-table">'
-                '<div class="table-title"><b>Upcoming fixture / GoalLab decision pipeline</b>'
-                f'<span>{len(pipeline_rows)} fixtures</span></div>'
+                '<div class="table-title"><b>Sve analizirane utakmice · PASS + PICK</b>'
+                f'<span>{len(pipeline_rows)} mečeva u lookahead prozoru</span></div>'
                 '<div class="table"><table><thead><tr>'
-                '<th>Match</th><th>Goal scope</th><th>Last odds capture</th>'
-                '<th>Decision</th><th>Model</th><th>Candidate</th><th>Edge / EV</th>'
+                '<th>Meč</th><th>Goal scope</th><th>Poslednje kvote</th>'
+                '<th>Odluka</th><th>Model</th><th>Kandidat</th><th>Model / market</th><th>Edge / EV</th>'
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
@@ -1159,7 +1250,7 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
 .context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
-.pick-note{{position:relative}}.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}.pick-note summary::-webkit-details-marker{{display:none}}.note-popover{{position:absolute;z-index:8;right:0;top:35px;width:360px;max-width:75vw;padding:12px;border:1px solid #3b434a;border-radius:10px;background:#111518;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:normal;line-height:1.45}}.note-popover b,.note-popover span{{display:block}}.note-popover span{{margin-top:7px;color:#b3bbc2;font-size:11px}}.corner-model-guide{{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:8px;padding:12px}}.corner-model-guide div{{border:1px solid #2d343a;border-radius:9px;background:#15191c;padding:10px}}.corner-model-guide b{{display:block;font-size:11px;margin-bottom:5px}}.corner-model-guide span{{font-size:10px;line-height:1.45;color:var(--muted)}}
+.pick-note{{position:relative}}.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}.pick-note summary::-webkit-details-marker{{display:none}}.note-popover{{position:absolute;z-index:8;right:0;top:35px;width:360px;max-width:75vw;padding:12px;border:1px solid #3b434a;border-radius:10px;background:#111518;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:normal;line-height:1.45}}.note-popover b,.note-popover span{{display:block}}.note-popover span{{margin-top:7px;color:#b3bbc2;font-size:11px}}.goal-note-popover{{width:640px;max-width:min(86vw,640px);max-height:70vh;overflow:auto}}.goal-note-popover p{{white-space:normal;color:#b8c0c7;font-size:11px;line-height:1.55}}.goal-note-popover h4{{margin:11px 0 5px;font-size:11px}}.goal-note-popover ul{{margin:5px 0 8px;padding-left:18px;white-space:normal;color:#b8c0c7;font-size:11px;line-height:1.5}}.note-detail-link{{display:inline-block;margin-top:8px;color:#9bc7ff;text-decoration:none;font-weight:900;font-size:11px}}.selected-picks{{margin-bottom:12px}}.corner-model-guide{{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:8px;padding:12px}}.corner-model-guide div{{border:1px solid #2d343a;border-radius:9px;background:#15191c;padding:10px}}.corner-model-guide b{{display:block;font-size:11px;margin-bottom:5px}}.corner-model-guide span{{font-size:10px;line-height:1.45;color:var(--muted)}}
 .contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
 .feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
 .feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
@@ -1182,9 +1273,10 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <input name="model_version" placeholder="Exact model version" value="{field("model_version")}">
 <input name="policy_version" placeholder="Exact policy version" value="{field("policy_version")}">
 <button type="submit">Apply</button></form></section>
+{goal_selected_picks_html}
+{goal_pipeline_html}
 {goal_research_html}
 {goal_contract_html}
-{goal_pipeline_html}
 {corner_picks_html}
 {corner_contract_html}
 {card_context_html}

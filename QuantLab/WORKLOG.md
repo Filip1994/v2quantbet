@@ -982,3 +982,24 @@ Readiness changes:
 - documented V1 as locked: future semantic changes require a successor version.
 
 No production registered-pick, bankroll or production model-activation authority was added.
+
+
+## 2026-09-28 — GoalLab selected-pick explanations
+
+**Owner:** GoalLab dashboard + Structural DC+ audit UX
+
+Added a dedicated active-pick view and exact numeric notes:
+
+- separate `Izabrani pikovi · aktivni` from the all-fixture PASS/PICK analysis view;
+- add 📝 notes to every canonical GoalLab pick;
+- explain the value decision with actual model probability, market probability, edge, EV,
+  odds and λ home/away;
+- surface exact available L5 goal/shot form, venue form, standings, injuries, rest,
+  H2H and projected-player numbers rather than generic prose;
+- expose model means/scales so the UI can reconstruct z-scores and exact per-feature
+  home/away log-intensity contributions;
+- detailed pick drilldown exposes the full reconstructable active-variable decomposition;
+- missing values remain explicit and are never converted into invented narrative evidence.
+
+Odds remain outside the Structural DC+ probability model and are used only in the value
+decision layer.

@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.quantlab.goal_lab.explanations import build_goal_pick_explanation
 
 GOALLAB_ANALYTICS_CONTRACT_VERSION = "GOALLAB_ANALYTICS_V2"
 
@@ -560,7 +561,11 @@ def _flatten_features(
     return rows
 
 
-def render_goal_pick_html(row: dict[str, Any]) -> str:
+def render_goal_pick_html(
+    row: dict[str, Any],
+    contract: dict[str, Any] | None = None,
+) -> str:
+    explanation = build_goal_pick_explanation(row, contract)
     features = _flatten_features(row.get("feature_payload") or {})
     feature_rows = "".join(
         f"<tr><td><b>{escape(name)}</b></td><td>{escape(value)}</td></tr>"
@@ -571,25 +576,108 @@ def render_goal_pick_html(row: dict[str, Any]) -> str:
         f"<tr><td><b>{escape(name)}</b></td><td>{escape(value)}</td></tr>"
         for name, value in rank_rows
     ) or '<tr><td colspan="2" class="empty">No candidate-rank payload.</td></tr>'
+
+    context_html = "".join(
+        f"<li>{escape(str(line))}</li>"
+        for line in explanation["context_lines"]
+    ) or "<li>Nema dodatnih brojčanih context varijabli u ovom snapshot-u.</li>"
+
+    top_rows = "".join(
+        "<tr>"
+        f"<td><b>{escape(str(item['label']))}</b><small>{escape(str(item['feature']))}</small></td>"
+        f"<td>{'NEDOSTAJE' if item['missing'] else _fmt(item['raw_value'])}</td>"
+        f"<td>{_fmt(item['training_mean'])}</td>"
+        f"<td>{float(item['standardized']):+.2f}</td>"
+        f"<td>{float(item['home_eta_contribution']):+.3f}</td>"
+        f"<td>{float(item['away_eta_contribution']):+.3f}</td>"
+        "</tr>"
+        for item in explanation["top_contributions"]
+    ) or '<tr><td colspan="6" class="empty">Nema dostupnog coefficient decomposition-a za ovaj zapis.</td></tr>'
+
+    all_rows = "".join(
+        "<tr>"
+        f"<td>{index + 1}</td>"
+        f"<td><b>{escape(str(item['label']))}</b><small>{escape(str(item['feature']))}</small></td>"
+        f"<td>{'NEDOSTAJE' if item['missing'] else _fmt(item['raw_value'])}</td>"
+        f"<td>{_fmt(item['training_mean'])}</td>"
+        f"<td>{_fmt(item['training_scale'])}</td>"
+        f"<td>{float(item['standardized']):+.3f}</td>"
+        f"<td>{float(item['home_eta_contribution']):+.4f}</td>"
+        f"<td>{float(item['away_eta_contribution']):+.4f}</td>"
+        "</tr>"
+        for index, item in enumerate(explanation["all_contributions"])
+    ) or '<tr><td colspan="8" class="empty">Model-contract decomposition nije dostupan.</td></tr>'
+
+    note_lines = "".join(
+        f"<li>{escape(str(line))}</li>" for line in explanation["notes"]
+    )
+    ranking = (
+        ""
+        if not explanation["ranking"]
+        else f'<p><b>Rangiranje:</b> {escape(str(explanation["ranking"]))}</p>'
+    )
     match = f"{row.get('home_team') or '?'} – {row.get('away_team') or '?'}"
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>GoalLab pick</title>
-<style>body{{background:#0b0d10;color:#e8edf2;font:14px system-ui;margin:0}}main{{max-width:1300px;margin:auto;padding:24px}}a{{color:#9bc7ff}}section{{background:#14181d;border:1px solid #29313a;border-radius:10px;padding:14px;margin:14px 0}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #29313a;text-align:left;vertical-align:top}}small,p{{color:#8e9aa6}}.grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}}.grid div{{background:#14181d;border:1px solid #29313a;border-radius:8px;padding:10px}}@media(max-width:800px){{.grid{{grid-template-columns:repeat(2,1fr)}}}}</style>
-</head><body><main><a href="/quantlab/goal/analytics">← GoalLab Analytics</a>
+<style>
+body{{background:#0b0d10;color:#e8edf2;font:14px system-ui;margin:0}}
+main{{max-width:1500px;margin:auto;padding:24px}}a{{color:#9bc7ff}}
+section{{background:#14181d;border:1px solid #29313a;border-radius:10px;padding:14px;margin:14px 0}}
+table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #29313a;text-align:left;vertical-align:top}}
+small,p,li{{color:#a5afb8}}small{{display:block;margin-top:3px}}.grid{{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}}
+.grid div{{background:#14181d;border:1px solid #29313a;border-radius:8px;padding:10px}}
+.explain{{border-left:3px solid #d5aa61}}.explain h2{{margin-top:0}}.explain p{{line-height:1.6}}
+.explain li{{margin:5px 0;line-height:1.5}}.scroll{{overflow:auto;max-height:70vh}}
+.legend{{padding:10px;border-radius:8px;background:#101418;color:#aeb8c1;line-height:1.55}}
+@media(max-width:800px){{.grid{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}}}
+</style>
+</head><body><main><a href="/quantlab?lab=goal">← GoalLab</a>
 <h1>{escape(match)}</h1><p>{escape(str(row.get("competition_name") or "—"))} · {escape(str(row.get("model_version") or "—"))}</p>
 <div class="grid">
-<div><small>Pick</small><b>{escape(str(row.get("market_key") or "—"))} {escape(str(row.get("selection") or "—"))}</b></div>
-<div><small>Odds</small><b>{escape(str(row.get("odds") or "—"))}</b></div>
-<div><small>Closing</small><b>{escape(str(row.get("closing_odds") or "—"))}</b></div>
-<div><small>Realized CLV</small><b>{escape(_fmt(_realized_clv_pct(row), "%", signed=True))}</b></div>
-<div><small>Model p</small><b>{escape(str(row.get("model_probability") or "—"))}</b></div>
-<div><small>Market p</small><b>{escape(str(row.get("market_probability") or "—"))}</b></div>
-<div><small>Edge</small><b>{escape(str(row.get("edge") or "—"))}</b></div>
-<div><small>EV</small><b>{escape(str(row.get("expected_value") or "—"))}</b></div>
-<div><small>λ home / away</small><b>{escape(str(row.get("expected_home_goals") or "—"))} / {escape(str(row.get("expected_away_goals") or "—"))}</b></div>
+<div><small>Pik</small><b>{escape(str(row.get("market_key") or "—"))} {escape(str(row.get("selection") or "—"))}</b></div>
+<div><small>Kvota</small><b>{escape(str(row.get("odds") or "—"))}</b></div>
+<div><small>Model p</small><b>{_fmt(None if row.get("model_probability") is None else float(row["model_probability"]) * 100, "%")}</b></div>
+<div><small>Market p</small><b>{_fmt(None if row.get("market_probability") is None else float(row["market_probability"]) * 100, "%")}</b></div>
+<div><small>Edge</small><b>{_fmt(None if row.get("edge") is None else float(row["edge"]) * 100, "pp", signed=True)}</b></div>
+<div><small>EV</small><b>{_fmt(None if row.get("expected_value") is None else float(row["expected_value"]) * 100, "%", signed=True)}</b></div>
+<div><small>λ domaćin</small><b>{escape(str(row.get("expected_home_goals") or "—"))}</b></div>
+<div><small>λ gost</small><b>{escape(str(row.get("expected_away_goals") or "—"))}</b></div>
+<div><small>Closing / CLV</small><b>{escape(str(row.get("closing_odds") or "—"))} / {escape(_fmt(_realized_clv_pct(row), "%", signed=True))}</b></div>
 <div><small>Outcome / P&L</small><b>{escape(str(row.get("outcome") or "PENDING"))} / {escape(str(row.get("pnl_minor") or "—"))}</b></div>
 </div>
+
+<section class="explain">
+<h2>📝 Zašto je ovaj pik izabran</h2>
+<p><b>{escape(str(explanation["summary"]))}</b></p>
+<p>{escape(str(explanation["gate"]))}</p>
+{ranking}
+<h3>Brojevi koje je model video</h3>
+<ul>{context_html}</ul>
+<div class="legend">
+<b>Kako čitati doprinose:</b> „vrednost“ je stvarni broj pre meča. „Trening prosek“ je prosek na kojem je ovaj model treniran.
+z pokazuje koliko je vrednost iznad (+) ili ispod (−) tog proseka. Doprinos λH/λA je tačan doprinos te varijable
+log-intenzitetu očekivanih golova domaćina/gosta; + gura očekivanje naviše, − naniže. To nije direktan broj golova,
+već deo matematičke jednačine koja na kraju daje λ.
+</div>
+<ul>{note_lines}</ul>
+</section>
+
+<section><h2>Najveći numerički doprinosi modelu</h2>
+<div class="scroll"><table><thead><tr>
+<th>Varijabla</th><th>Vrednost</th><th>Trening prosek</th><th>z</th><th>Uticaj λH</th><th>Uticaj λA</th>
+</tr></thead><tbody>{top_rows}</tbody></table></div></section>
+
+<section><h2>Sve aktivne model varijable · {int(explanation["active_feature_count"])}</h2>
+<p>Ovo je kompletan audit svih numeričkih inputa koje možemo rekonstruisati za tačan model/pick snapshot.</p>
+<div class="scroll"><table><thead><tr>
+<th>#</th><th>Varijabla</th><th>Vrednost</th><th>Trening prosek</th><th>Trening σ</th><th>z</th><th>λH doprinos</th><th>λA doprinos</th>
+</tr></thead><tbody>{all_rows}</tbody></table></div></section>
+
+<details><summary>Raw feature payload</summary>
 <section><h2>Exact decision feature payload</h2><table><tbody>{feature_rows}</tbody></table></section>
+</details>
+<details><summary>Canonical candidate ranking payload</summary>
 <section><h2>Canonical candidate ranking payload</h2><table><tbody>{rank_html}</tbody></table></section>
+</details>
 </main></body></html>"""
 
 

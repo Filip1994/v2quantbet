@@ -51,10 +51,38 @@ class StubRepository:
                 "competition_name": "Premier League",
                 "country": "England",
                 "kickoff_at": NOW,
+                "feature_payload": {
+                    "raw_features": {
+                        "home_l5_goals_for": 2.10,
+                        "home_l5_goals_against": 1.00,
+                        "away_l5_goals_for": 1.20,
+                        "away_l5_goals_against": 1.60,
+                        "home_l5_shots_for": 14.0,
+                        "home_l5_sot_for": 5.4,
+                        "away_l5_shots_for": 10.2,
+                        "away_l5_sot_for": 3.6,
+                    },
+                    "model_feature_names": (
+                        "home_l5_goals_for",
+                        "away_l5_goals_against",
+                    ),
+                    "target_match_live_stats_used": False,
+                },
+                "selection_rank_payload": {
+                    "candidate_count": 2,
+                    "candidates": [
+                        {
+                            "rank": 1,
+                            "bookmaker_name": "Bet365",
+                            "market_key": "OU_25",
+                            "selection": "OVER",
+                        }
+                    ],
+                },
             },
         )
 
-    def goal_model_contract(self):
+    def goal_model_contract(self, model_version=None):
         return {
             "model_version": "DC_PLUS_PRO_STRUCTURAL_V1:" + "b" * 64,
             "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
@@ -62,7 +90,27 @@ class StubRepository:
             "history_match_count": 800,
             "rho": -0.05,
             "active_feature_count": 2,
-            "active_feature_names": ("home_l5_goals_for", "away_l5_goals_for"),
+            "active_feature_names": ("home_l5_goals_for", "away_l5_goals_against"),
+            "parameters": {
+                "model_feature_names": (
+                    "home_l5_goals_for",
+                    "away_l5_goals_against",
+                ),
+                "base_feature_names": (
+                    "home_l5_goals_for",
+                    "away_l5_goals_against",
+                ),
+                "beta_home": [0.20, 0.10],
+                "beta_away": [0.05, 0.30],
+            },
+            "feature_means": {
+                "home_l5_goals_for": 1.50,
+                "away_l5_goals_against": 1.20,
+            },
+            "feature_scales": {
+                "home_l5_goals_for": 0.50,
+                "away_l5_goals_against": 0.40,
+            },
             "training_payload": {
                 "contract_coverage": {
                     "B_RECENT_RESULT_GOAL_FORM": {
@@ -121,7 +169,7 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "GoalLab canonical picks" in html
     assert "DC+ model contract / active variables" in html
     assert "home_l5_goals_for" in html
-    assert "Upcoming fixture / GoalLab decision pipeline" in html
+    assert "Sve analizirane utakmice · PASS + PICK" in html
     assert "EDGE_BELOW_MINIMUM" in html
     assert "SHADOW ONLY" in html
     assert "GoalLab Research / Audit" in html
@@ -131,6 +179,12 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert 'title="Highest first"' in html
     assert "/quantlab/goal/pick?" in html
     assert "/quantlab/goal/model?" in html
+    assert "Izabrani pikovi · aktivni" in html
+    assert "Sve analizirane utakmice · PASS + PICK" in html
+    assert "📝" in html
+    assert "Model je za Home – Away izabrao" in html
+    assert "Forma golova L5: domaćin daje 2.10" in html
+    assert "trening prosek 1.50" in html
 
 
 def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
