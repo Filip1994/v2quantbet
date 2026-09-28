@@ -139,7 +139,8 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert 'class="num history-clv good"' in html
     assert "<strong>+5.00%</strong>" in html
     assert "GOOD · SAME-BOOK" in html
-    assert '<span class="status win">WIN</span>' in html
+    assert '<div class="outcome-tile win">' in html
+    assert '<span class="outcome-state">WIN</span>' in html
     assert "950.00 RSD" in html
     assert "Red &amp; &lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
@@ -293,7 +294,8 @@ def test_finished_closed_and_settled_picks_move_to_history(phase: str) -> None:
     assert "No active picks." in html
     assert "<h2>History</h2>" in html
     if phase == "SETTLED":
-        assert '<span class="status win">WIN</span>' in html
+        assert '<div class="outcome-tile win">' in html
+    assert '<span class="outcome-state">WIN</span>' in html
     else:
         assert f">{phase}</span>" in html
 
@@ -399,7 +401,8 @@ def test_loss_is_red_in_history_and_operator_toggle_remains_available() -> None:
         )
     ).render_html()
 
-    assert '<span class="status loss">LOSS</span>' in html
+    assert '<div class="outcome-tile loss">' in html
+    assert '<span class="outcome-state">LOSS</span>' in html
     assert "SKIPPED" in html
     assert 'value="PLAYED"' in html
     assert "-1 000.00 RSD" in html
