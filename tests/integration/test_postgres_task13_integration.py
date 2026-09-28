@@ -342,7 +342,7 @@ def test_goallab_dashboard_prefers_canonical_decision_over_better_price_pass(
             "'OVER', 2.5, %s, 1.80, 2.00, 0.52, 0.57, 0.05, 0.026, "
             "'PASS', 'BETTER_PRICE_AVAILABLE', %s, '{}'::jsonb), "
             "(%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5', "
-            "'DC+ Pro Structural', %s, 9, 'Book B', 5, 'Goals Over/Under', 'OU_25', "
+            "'DC+ Pro Structural', %s, 11, 'Book B', 5, 'Goals Over/Under', 'OU_25', "
             "'OVER', 2.5, %s, 1.90, 1.90, 0.50, 0.57, 0.07, 0.083, "
             "'PASS', 'CANONICAL_FIXTURE_SIGNAL_ONLY', %s, '{}'::jsonb)",
             (
