@@ -1024,3 +1024,31 @@ registered-pick, bankroll, model-activation, fixture, or result tables.
   settlement audit evidence;
 - PostgreSQL E2E coverage now proves canonical pick → result tracking → stable result →
   WIN settlement → P&L persistence → no further refresh/settlement work.
+
+
+## 2026-09-28 — GoalLab DC+ Structural V2 challenger
+
+**Reason:** V1 technical review found 669 active feature columns from 792 current training
+examples. Its chronological holdout was materially worse than the plain-DC control on
+exact-score likelihood, total-goals RMSE, O2.5 Brier and BTTS Brier. V1 was therefore not
+approved for pick authority.
+
+Introduced an explicitly versioned successor rather than mutating V1:
+
+- `DC_PLUS_PRO_STRUCTURAL_V2:`;
+- `GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2`;
+- `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V3`;
+- `GOALLAB_DC_PLUS_PICK_POLICY_V2`;
+- `GOALLAB_CHRONOLOGICAL_HOLDOUT_V4`.
+
+V2 uses a fixed domain-defined compact feature set, requires >=60 observed training
+values per retained feature, removes the per-column missing-indicator expansion, and uses
+stronger ridge penalties (team 2.5, ordinary feature 12.0, interaction 20.0).
+
+V4 review readiness now requires adequate common coverage, leakage PASS, non-worse
+total-goals RMSE, non-worse O2.5 and BTTS Brier, and exact-score mean log likelihood
+within 0.05 of control. There is still no automatic production/pick promotion: exact-hash
+approval plus the explicit authority switch remain required.
+
+Startup validation refuses to evaluate a historical V1 artifact under V2 semantics and
+returns `WAITING_ACTIVE_MODEL` until a V2 artifact exists.
