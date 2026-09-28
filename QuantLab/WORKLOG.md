@@ -881,3 +881,30 @@ ablation rather than an artificially small initial feature set.
 
 Production pick registration, bankroll and active production model state remain
 unchanged by this research-universe expansion.
+
+
+## 2026-09-28 — GoalLab core retrain/versioning closure
+
+**Owner:** QuantLab core + GoalLab
+
+GoalLab DC+ model lifecycle was tightened so a new runtime decision timestamp cannot by
+itself cause another optimizer fit.
+
+Core behavior:
+
+- the exact GoalLab training evidence and model/feature hyperparameters are hashed into a
+  `training_fingerprint`;
+- the fingerprint is part of the immutable DC+ model identity;
+- the fingerprint is persisted in the model artifact contract;
+- before fitting, GoalLab looks up an existing artifact with the same fingerprint and
+  reloads it when present;
+- a changed fingerprint is therefore the explicit retrain boundary;
+- unchanged evidence reuses the same immutable artifact across later evaluation cycles;
+- canonical pick dedupe remains one pick per fixture/pick-policy version at both engine
+  and database boundaries;
+- settlement and research metrics remain unchanged: WIN/LOSS/VOID, flat-stake P&L,
+  graded-stake ROI, win rate, expected win rate, calibration, average odds/edge/EV and
+  evidence sample band.
+
+A regression test makes optimizer invocation on an unchanged persisted training
+fingerprint a test failure.

@@ -46,8 +46,11 @@ Structural offsets are learned with ridge regularization. Bookmaker odds, API-Fo
 `/predictions`, target-match live statistics and hand-written football-effect
 coefficients are not DC+ Structural probability inputs.
 
-Model identity is data/feature/parameter driven rather than wall-clock driven. Unchanged
-training data therefore does not create a new model version every cycle.
+Model identity is data/feature/parameter driven rather than wall-clock driven. The exact
+training evidence plus model/feature hyperparameters is fingerprinted. If that fingerprint
+matches an existing immutable artifact, GoalLab reloads the artifact and does not run the
+optimizer again. A changed fingerprint is the explicit retrain boundary and produces a new
+model identity; decision time alone never triggers a retrain.
 
 ## Structural feature contract
 
