@@ -657,8 +657,10 @@ class DashboardService:
         }.get(closing_source, "unavailable")
         return (
             '<tr class="history-row">'
-            f'<td class="history-operator-cell"><span class="status operator-{operator_state.casefold()}">'
-            f"{escape(operator_state)}</span>{operator_control}</td>"
+            f'<td class="history-operator-cell"><div class="operator-panel history-panel">'
+            f'<div class="operator-panel-head"><span class="operator-label">Decision</span>'
+            f'<span class="status operator-{operator_state.casefold()}">{escape(operator_state)}</span></div>'
+            f"{operator_control}</div></td>"
             f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick)}</td>"
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
@@ -776,9 +778,12 @@ class DashboardService:
             f'<tr data-provenance="{escape(provenance)}">'
             f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
             f"{escape(self._short_id(pick.get('pick_id')))}</code></td>"
-            f'<td class="operator-cell"><span class="status operator-{operator_state.casefold()}">'
-            f'{escape(operator_state)}</span><div class="operator-controls">'
-            f"{operator_controls}</div></td>"
+            f'<td class="operator-cell"><div class="operator-panel">'
+            f'<div class="operator-panel-head"><span class="operator-label">Decision</span>'
+            f'<span class="status operator-{operator_state.casefold()}">{escape(operator_state)}</span></div>'
+            f'<div class="operator-controls">{operator_controls}</div>'
+            f'<small class="operator-hint">Confirm whether this pick was actually placed.</small>'
+            f'</div></td>'
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick)}"
             f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
@@ -945,15 +950,15 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
 .source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
 .source-label.manual{{color:var(--amber)!important}}
-.operator-pending{{color:var(--muted);border-color:var(--line)}}.operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
-.operator-cell{{min-width:122px;width:122px}}.operator-controls{{display:flex;flex-direction:column;gap:7px;margin-top:8px}}.operator-controls form{{margin:0;width:100%}}.operator-button{{width:100%;background:#1b2432;color:var(--text);border:1px solid #3a4a63;border-radius:5px;padding:9px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:850;letter-spacing:.04em;box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 1px 2px rgba(0,0,0,.25)}}.operator-button:hover:not(:disabled){{background:#222f42;border-color:#60789f}}.operator-button:active:not(:disabled){{transform:translateY(1px)}}.operator-button:disabled{{opacity:.5;cursor:default}}.operator-button.played:not(:disabled){{border-color:#2c8a68}}.operator-button.skipped:not(:disabled){{border-color:#8a6a2c}}
+.operator-pending{{color:#b7c2d3;border-color:#47556a;background:#182130}}.operator-played{{color:#9ef2ce;border-color:#2f8c6c;background:#123629}}.operator-skipped{{color:#ffd989;border-color:#8b6a2f;background:#3a2c12}}
+.operator-cell{{min-width:176px;width:176px;padding:9px!important}}.operator-panel{{background:linear-gradient(180deg,#161f2d 0%,#111823 100%);border:1px solid #2d3b50;border-radius:10px;padding:10px;box-shadow:0 10px 24px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.035) inset}}.operator-panel-head{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}}.operator-label{{color:#a9b6c8;font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase}}.operator-hint{{font-size:8px!important;line-height:1.3;margin:8px 1px 0!important;color:#718097!important}}.operator-controls{{display:flex;flex-direction:column;gap:8px}}.operator-controls form{{margin:0;width:100%}}.operator-button{{position:relative;width:100%;border:0;border-radius:7px;padding:10px 12px;cursor:pointer;font:inherit;font-size:10px;font-weight:900;letter-spacing:.055em;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease,background .12s ease;box-shadow:0 4px 10px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.10) inset}}.operator-button.played{{background:linear-gradient(180deg,#2f9b73 0%,#247a5c 100%);color:#f5fffb}}.operator-button.skipped{{background:linear-gradient(180deg,#735f36 0%,#5a492a 100%);color:#fff7e6}}.operator-button:hover:not(:disabled){{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 7px 16px rgba(0,0,0,.24),0 1px 0 rgba(255,255,255,.12) inset}}.operator-button:active:not(:disabled){{transform:translateY(1px);box-shadow:0 2px 6px rgba(0,0,0,.22) inset}}.operator-button:focus-visible{{outline:2px solid #76a9ff;outline-offset:2px}}.operator-button:disabled{{opacity:.42;cursor:default;filter:saturate(.55);box-shadow:none}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
 .history{{margin-top:12px}}.history table{{min-width:1220px}}.history th,.history td{{padding:11px 14px}}
-.history-operator-cell{{min-width:122px;width:122px}}.history-fixture{{min-width:310px}}.history-operator-actions{{display:flex;flex-direction:column;gap:7px;margin-top:8px}}
-.history-operator-form{{margin:0;width:100%}}.history-operator-button{{width:100%;background:#1b2432;color:var(--text);border:1px solid #3a4a63;border-radius:5px;padding:9px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:850;letter-spacing:.04em;box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 1px 2px rgba(0,0,0,.25)}}.history-operator-button:hover:not(:disabled){{background:#222f42;border-color:#60789f}}.history-operator-button:active:not(:disabled){{transform:translateY(1px)}}.history-operator-button:disabled{{opacity:.5;cursor:default}}.history-operator-button.played:not(:disabled){{border-color:#2c8a68}}.history-operator-button.skipped:not(:disabled){{border-color:#8a6a2c}}
+.history-operator-cell{{min-width:176px;width:176px;padding:9px!important}}.history-fixture{{min-width:310px}}.history-panel{{padding:9px}}.history-operator-actions{{display:flex;flex-direction:column;gap:8px}}
+.history-operator-form{{margin:0;width:100%}}.history-operator-button{{width:100%;border:0;border-radius:7px;padding:10px 12px;cursor:pointer;font:inherit;font-size:10px;font-weight:900;letter-spacing:.055em;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;box-shadow:0 4px 10px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.10) inset}}.history-operator-button.played{{background:linear-gradient(180deg,#2f9b73 0%,#247a5c 100%);color:#f5fffb}}.history-operator-button.skipped{{background:linear-gradient(180deg,#735f36 0%,#5a492a 100%);color:#fff7e6}}.history-operator-button:hover:not(:disabled){{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 7px 16px rgba(0,0,0,.24)}}.history-operator-button:active:not(:disabled){{transform:translateY(1px)}}.history-operator-button:focus-visible{{outline:2px solid #76a9ff;outline-offset:2px}}.history-operator-button:disabled{{opacity:.42;cursor:default;filter:saturate(.55);box-shadow:none}}
 .history-odds{{min-width:210px}}.history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
 .history-probability{{min-width:155px}}.history-probability strong{{white-space:nowrap}}
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
