@@ -700,11 +700,12 @@ class QuantLabDashboardService:
                     now=datetime.now(UTC)
                 )
             except Exception as exc:
-                LOGGER.exception(
+                LOGGER.error(
                     "GoalLab dashboard fixture-pipeline query failed "
                     "error_class=%s sqlstate=%s",
                     type(exc).__name__,
                     getattr(exc, "sqlstate", None),
+                    exc_info=True,
                 )
                 dashboard_warnings.append("Upcoming GoalLab pipeline temporarily unavailable.")
                 pipeline_rows = ()
@@ -838,11 +839,12 @@ class QuantLabDashboardService:
             try:
                 research_decisions = tuple(decision_loader()) if callable(decision_loader) else ()
             except Exception as exc:
-                LOGGER.exception(
+                LOGGER.error(
                     "GoalLab dashboard research decision query failed "
                     "error_class=%s sqlstate=%s",
                     type(exc).__name__,
                     getattr(exc, "sqlstate", None),
+                    exc_info=True,
                 )
                 dashboard_warnings.append("GoalLab research decision evidence temporarily unavailable.")
                 research_decisions = ()
