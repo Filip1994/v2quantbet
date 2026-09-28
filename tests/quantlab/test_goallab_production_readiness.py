@@ -110,7 +110,7 @@ class EngineRepo:
         }
 
     def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
-        assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V3"
+        assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
         return False
 
     def save_goal_decision(self, item):
@@ -204,7 +204,7 @@ def test_real_league_fixture_flows_to_one_canonical_pick(
     assert len(repo.picks) == 1
     assert repo.picks[0].fixture_id == fixture_id
     assert repo.picks[0].model_version == NEW_MODEL
-    assert repo.picks[0].pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V3"
+    assert repo.picks[0].pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
 
 
 def test_runtime_isolates_one_goal_fixture_failure_and_continues(caplog) -> None:
