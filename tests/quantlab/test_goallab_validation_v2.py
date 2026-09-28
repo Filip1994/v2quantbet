@@ -131,3 +131,42 @@ def test_validation_repository_lookup_is_method_specific() -> None:
     source = inspect.getsource(audit.ensure_latest_goal_model_validation)
 
     assert "method_version=METHOD_VERSION" in source
+
+
+
+def test_sparse_pooled_control_keeps_sparse_team_matches() -> None:
+    from types import SimpleNamespace
+
+    records = []
+    stable_teams = (1, 2, 3, 4)
+    for index in range(10):
+        records.append(
+            SimpleNamespace(
+                date=NOW - timedelta(days=110 - index),
+                home_id=stable_teams[index % 4],
+                away_id=stable_teams[(index + 1) % 4],
+                home_goals=index % 3,
+                away_goals=(index + 1) % 2,
+            )
+        )
+    for index in range(90):
+        records.append(
+            SimpleNamespace(
+                date=NOW - timedelta(days=100 - index),
+                home_id=1000 + index * 2,
+                away_id=1001 + index * 2,
+                home_goals=index % 4,
+                away_goals=(index + 2) % 3,
+            )
+        )
+
+    control = audit._fit_sparse_pooled_control(records, reference_time=NOW)
+
+    assert control.fitted_matches == 100
+    assert 1000 in control.team_ids
+    sparse_index = control.team_ids.index(1000)
+    assert control.attacks[sparse_index] == 0.0
+    assert control.defenses[sparse_index] == 0.0
+    lambda_home, lambda_away = control.expected_goals(1000, 1001)
+    assert lambda_home > 0.0
+    assert lambda_away > 0.0
