@@ -105,8 +105,19 @@ def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(mon
         }
         return params, 1.0
 
+    original_market_probabilities = audit._market_probabilities
+    market_calls = 0
+
+    def one_invalid_rho_row(lambda_home, lambda_away, rho):
+        nonlocal market_calls
+        market_calls += 1
+        if market_calls == 1:
+            raise ValueError("invalid DC+ rho correction")
+        return original_market_probabilities(lambda_home, lambda_away, rho)
+
     monkeypatch.setattr(audit, "_fit_sparse_pooled_control", fake_pooled_fit)
     monkeypatch.setattr(audit, "_fit_dc_plus", fake_dc_plus_fit)
+    monkeypatch.setattr(audit, "_market_probabilities", one_invalid_rho_row)
 
     validation = audit.build_goal_model_validation(
         Repo(),
@@ -121,6 +132,8 @@ def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(mon
     assert validation.comparison["control_leagues_fitted"] == []
     assert validation.comparison["pooled_control_fitted"] is True
     assert validation.comparison["control_scope_counts"]["pooled"] >= audit.MIN_COMMON_EVALUATION
+    assert validation.comparison["invalid_holdout_rows"] == 1
+    assert validation.comparison["valid_common_coverage_pct"] > 90.0
     assert pooled_fit_sizes
     assert min(pooled_fit_sizes) >= audit.CONTROL_MIN_MATCHES
 

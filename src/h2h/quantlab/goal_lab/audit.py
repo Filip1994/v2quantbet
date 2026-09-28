@@ -634,6 +634,7 @@ def build_goal_model_validation(
 
     dc_plus_rows: list[dict[str, float]] = []
     control_rows: list[dict[str, float]] = []
+    invalid_holdout_rows = 0
     for offset, raw_features in enumerate(holdout_features):
         index = train_n + offset
         home_id = int(home_ids[index])
@@ -676,13 +677,33 @@ def build_goal_model_validation(
 
         actual_home = int(y_home[index])
         actual_away = int(y_away[index])
-        for target, lambdas, rho, scope in (
-            (dc_plus_rows, dc_lambdas, float(dc_plus_params["rho"]), control_scope),
-            (control_rows, control_lambdas, float(control.rho), control_scope),
+        scored_rows: list[dict[str, float]] = []
+        invalid_holdout_reason: str | None = None
+        for lambdas, rho, scope in (
+            (dc_lambdas, float(dc_plus_params["rho"]), control_scope),
+            (control_lambdas, float(control.rho), control_scope),
         ):
             lambda_home, lambda_away = lambdas
-            over25, btts = _market_probabilities(lambda_home, lambda_away, rho)
-            target.append(
+            try:
+                over25, btts = _market_probabilities(
+                    lambda_home,
+                    lambda_away,
+                    rho,
+                )
+            except ValueError as exc:
+                invalid_holdout_reason = str(exc)
+                break
+            log_likelihood = _joint_log_likelihood(
+                actual_home,
+                actual_away,
+                lambda_home,
+                lambda_away,
+                rho,
+            )
+            if not math.isfinite(log_likelihood):
+                invalid_holdout_reason = "non-finite exact-score log likelihood"
+                break
+            scored_rows.append(
                 {
                     "home_goals": float(actual_home),
                     "away_goals": float(actual_away),
@@ -690,16 +711,15 @@ def build_goal_model_validation(
                     "lambda_away": float(lambda_away),
                     "over25_probability": over25,
                     "btts_probability": btts,
-                    "log_likelihood": _joint_log_likelihood(
-                        actual_home,
-                        actual_away,
-                        lambda_home,
-                        lambda_away,
-                        rho,
-                    ),
+                    "log_likelihood": log_likelihood,
                     "control_scope": scope,
                 }
             )
+        if invalid_holdout_reason is not None or len(scored_rows) != 2:
+            invalid_holdout_rows += 1
+            continue
+        dc_plus_rows.append(scored_rows[0])
+        control_rows.append(scored_rows[1])
 
     common_n = min(len(dc_plus_rows), len(control_rows))
     if common_n == 0:
@@ -750,6 +770,10 @@ def build_goal_model_validation(
             "league": sum(row.get("control_scope") == "league" for row in control_rows),
             "pooled": sum(row.get("control_scope") == "pooled" for row in control_rows),
         },
+        "invalid_holdout_rows": invalid_holdout_rows,
+        "valid_common_coverage_pct": (
+            0.0 if holdout_n == 0 else common_n / holdout_n * 100.0
+        ),
         "note": (
             "comparison is evidence for manual GoalLab pick-authority review; "
             "pooled sparse-latent plain Dixon-Coles is used only when league-specific "
