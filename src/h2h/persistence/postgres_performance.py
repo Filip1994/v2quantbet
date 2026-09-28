@@ -108,7 +108,7 @@ class PostgreSQLPerformanceRepository:
                 "ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC), "
                 "played_picks AS (SELECT r.* FROM registered_picks r "
                 "LEFT JOIN latest_operator operator_state ON operator_state.pick_id = r.pick_id "
-                "WHERE COALESCE(operator_state.state, 'PLAYED') = 'PLAYED'), "
+                "WHERE operator_state.state = 'PLAYED'), "
                 "effective AS (SELECT e.* FROM pick_settlement_events e WHERE NOT EXISTS ("
                 "SELECT 1 FROM pick_settlement_events n "
                 "WHERE n.prior_event_id = e.settlement_event_id)), "
