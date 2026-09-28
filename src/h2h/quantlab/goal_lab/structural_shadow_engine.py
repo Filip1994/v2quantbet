@@ -1,4 +1,4 @@
-"""GoalLab DC+ Pro Structural V2 market evaluation.
+"""GoalLab DC+ Pro Structural V3 market evaluation.
 
 The structural model owns probabilities. Bookmaker odds are used only for de-vig market
 probability, edge and expected value. Candidate evidence is always recorded. Canonical
@@ -27,7 +27,7 @@ from h2h.quantlab.goal_lab.shadow_engine import GoalDecision, GoalEngineResult
 from h2h.quantlab.scope import goal_scope
 
 
-POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V3"
+POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V4"
 MIN_EDGE = 0.03
 MIN_EXPECTED_VALUE = 0.03
 MIN_ODDS = 1.40
