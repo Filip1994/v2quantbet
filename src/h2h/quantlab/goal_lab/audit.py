@@ -678,7 +678,7 @@ def build_goal_model_validation(
         actual_home = int(y_home[index])
         actual_away = int(y_away[index])
         scored_rows: list[dict[str, float]] = []
-        invalid_holdout_reason: str | null = None
+        invalid_holdout_reason: str | None = None
         for lambdas, rho, scope in (
             (dc_lambdas, float(dc_plus_params["rho"]), control_scope),
             (control_lambdas, float(control.rho), control_scope),
