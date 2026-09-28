@@ -316,8 +316,12 @@ def main() -> None:
         server.start()
         try:
             ensure_latest_goal_model_validation(repository, LOGGER)
-        except Exception:
-            LOGGER.exception("GoalLab DC+ startup validation failed")
+        except Exception as exc:
+            LOGGER.exception(
+                "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s",
+                type(exc).__name__,
+                getattr(exc, "sqlstate", None),
+            )
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
@@ -342,8 +346,12 @@ def main() -> None:
                 )
                 try:
                     ensure_latest_goal_model_validation(repository, LOGGER)
-                except Exception:
-                    LOGGER.exception("GoalLab DC+ validation failed")
+                except Exception as exc:
+                    LOGGER.exception(
+                        "GoalLab DC+ validation failed error_class=%s sqlstate=%s",
+                        type(exc).__name__,
+                        getattr(exc, "sqlstate", None),
+                    )
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
                     bool(readiness["model_fit_eligible"])
