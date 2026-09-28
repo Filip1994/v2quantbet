@@ -2781,18 +2781,36 @@ class PostgreSQLQuantLabRepository:
             )
             return cursor.rowcount > 0
 
-    def goal_model_validation(self, model_version: str) -> dict[str, Any] | None:
+    def goal_model_validation(
+        self,
+        model_version: str,
+        *,
+        method_version: str | None = None,
+    ) -> dict[str, Any] | None:
         with self.connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT validation_id, model_version, evaluated_at, method_version, status, "
-                "train_start_at, train_end_at, holdout_start_at, holdout_end_at, "
-                "train_sample_size, holdout_sample_size, common_evaluation_size, "
-                "dc_plus_metrics, control_metrics, comparison, leakage_audit, "
-                "contract_snapshot, authority_review_status "
-                "FROM quantlab_goal_model_validations WHERE model_version = %s "
-                "ORDER BY evaluated_at DESC, validation_id DESC LIMIT 1",
-                (model_version,),
-            )
+            if method_version is None:
+                cursor.execute(
+                    "SELECT validation_id, model_version, evaluated_at, method_version, status, "
+                    "train_start_at, train_end_at, holdout_start_at, holdout_end_at, "
+                    "train_sample_size, holdout_sample_size, common_evaluation_size, "
+                    "dc_plus_metrics, control_metrics, comparison, leakage_audit, "
+                    "contract_snapshot, authority_review_status "
+                    "FROM quantlab_goal_model_validations WHERE model_version = %s "
+                    "ORDER BY evaluated_at DESC, validation_id DESC LIMIT 1",
+                    (model_version,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT validation_id, model_version, evaluated_at, method_version, status, "
+                    "train_start_at, train_end_at, holdout_start_at, holdout_end_at, "
+                    "train_sample_size, holdout_sample_size, common_evaluation_size, "
+                    "dc_plus_metrics, control_metrics, comparison, leakage_audit, "
+                    "contract_snapshot, authority_review_status "
+                    "FROM quantlab_goal_model_validations "
+                    "WHERE model_version = %s AND method_version = %s "
+                    "ORDER BY evaluated_at DESC, validation_id DESC LIMIT 1",
+                    (model_version, method_version),
+                )
             row = cursor.fetchone()
             if row is None:
                 return None
