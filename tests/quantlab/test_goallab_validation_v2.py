@@ -51,7 +51,7 @@ class Repo:
 
     def goal_model_history(self, *, before, limit):
         assert before == NOW
-        assert limit == 10_000
+        assert limit == 30_000
         return _history_rows()
 
 
