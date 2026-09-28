@@ -62,7 +62,7 @@ def test_goal_analytics_tracks_decision_funnel_and_model_cohorts() -> None:
     )
     snapshot = build_goal_analytics_snapshot((_pick(),), decisions, as_of=NOW)
 
-    assert snapshot["contract_version"] == "GOALLAB_ANALYTICS_V1"
+    assert snapshot["contract_version"] == "GOALLAB_ANALYTICS_V2"
     assert snapshot["windows"]["lifetime"]["wins"] == 1
     assert snapshot["windows"]["lifetime"]["roi_pct"] == 100.0
     assert snapshot["decision_funnel"][0]["rows"] == 1
@@ -114,3 +114,75 @@ def test_goal_model_drilldown_shows_active_features_and_picks() -> None:
     assert "Latent min N" in html
     assert "READY_FOR_MANUAL_REVIEW" in html
     assert "/quantlab/goal/pick?" in html
+
+
+def test_goal_analytics_v2_reports_scoring_clv_drawdown_and_calibration_bins() -> None:
+    first = _pick("WIN")
+    first["goal_pick_id"] = "quantlab-goal-pick-v1:" + "c" * 64
+    first["quote_observed_at"] = NOW - timedelta(days=1, hours=3)
+    first["closing_odds"] = 1.90
+    first["closing_observed_at"] = NOW - timedelta(days=1, hours=1)
+    first["model_probability"] = 0.60
+
+    second = _pick("LOSS")
+    second["goal_pick_id"] = "quantlab-goal-pick-v1:" + "d" * 64
+    second["fixture_id"] = "api-football:2"
+    second["kickoff_at"] = NOW
+    second["quote_observed_at"] = NOW - timedelta(hours=3)
+    second["closing_odds"] = 2.10
+    second["closing_observed_at"] = NOW - timedelta(hours=1)
+    second["model_probability"] = 0.70
+    second["pnl_minor"] = -10_000
+
+    snapshot = build_goal_analytics_snapshot((first, second), (), as_of=NOW)
+    metrics = snapshot["windows"]["lifetime"]
+
+    assert metrics["graded_n"] == 2
+    assert metrics["brier_score"] == 0.325
+    assert metrics["log_loss"] is not None
+    assert metrics["avg_clv_pct"] is not None
+    assert metrics["clv_n"] == 2
+    assert metrics["max_drawdown_minor"] == 10_000
+    assert snapshot["calibration_bins"]
+
+
+def test_goal_research_integrity_audit_detects_duplicate_canonical_keys() -> None:
+    first = _pick()
+    first["goal_pick_id"] = "quantlab-goal-pick-v1:" + "e" * 64
+    first["source_decision_id"] = "quantlab-goal-decision-v1:" + "a" * 64
+    second = dict(first)
+    second["goal_pick_id"] = "quantlab-goal-pick-v1:" + "f" * 64
+
+    decisions = (
+        {
+            "decision_id": first["source_decision_id"],
+            "fixture_id": first["fixture_id"],
+            "decision": "PICK",
+            "reason": "CANONICAL_FIXTURE_VALUE_PICK",
+            "model_version": MODEL,
+            "policy_version": "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2",
+        },
+    )
+    snapshot = build_goal_analytics_snapshot((first, second), decisions, as_of=NOW)
+    audit = snapshot["integrity_audit"]
+
+    assert audit["status"] == "FAIL"
+    assert audit["duplicate_canonical_keys"] == 1
+    assert audit["missing_source_decision"] == 0
+
+
+def test_goal_analytics_html_exposes_evaluation_matrix_and_integrity_audit() -> None:
+    row = _pick()
+    row["quote_observed_at"] = NOW - timedelta(days=1, hours=3)
+    row["closing_odds"] = 1.90
+    row["closing_observed_at"] = NOW - timedelta(days=1, hours=1)
+    snapshot = build_goal_analytics_snapshot((row,), (), as_of=NOW)
+
+    html = render_goal_analytics_html(snapshot)
+
+    assert "Research integrity audit" in html
+    assert "Calibration bins" in html
+    assert "Brier" in html
+    assert "Log loss" in html
+    assert "CLV" in html
+    assert "Max DD" in html
