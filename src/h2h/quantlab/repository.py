@@ -428,6 +428,7 @@ class PostgreSQLQuantLabRepository:
         if item.pick_policy_version not in {
             "GOALLAB_DC_PLUS_PICK_POLICY_V1",
             "GOALLAB_DC_PLUS_PICK_POLICY_V2",
+            "GOALLAB_DC_PLUS_PICK_POLICY_V3",
         }:
             raise ValueError("unsupported GoalLab pick policy")
         if item.qualifying_candidate_count <= 0 or item.stake_minor <= 0:
