@@ -247,6 +247,20 @@ The Goal tab is the operational surface for:
 - pending/WIN/LOSS/VOID settlement state;
 - P&L / ROI and model probabilities.
 
+GoalLab Analytics V2 is the read-only research/audit surface. It reports:
+
+- model, policy, market/selection, bookmaker, league and weekly cohorts;
+- selected-pick Brier score, binary log loss and calibration bins;
+- realized same-book/same-market pre-kickoff CLV where later immutable quotes exist;
+- flat-stake max drawdown;
+- canonical-pick integrity checks for duplicate fixture/policy keys, source-decision
+  provenance, feature payloads, model identity and valid probabilities;
+- exact model and pick drilldowns for reproducibility.
+
+Closing evidence is derived from the latest matching immutable GoalLab market observation
+after the entry quote and strictly before kickoff. It is research evidence only and is
+never a probability-model input.
+
 CornerLab and CardLab remain separate labs and are not part of GoalLab pick semantics.
 
 ## Scope
