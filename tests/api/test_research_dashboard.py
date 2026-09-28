@@ -174,6 +174,7 @@ class LeagueVersionRepository:
         retrain["away_team"] = "Retrain Away"
         retrain["kickoff_at"] = NOW + timedelta(hours=3)
         retrain["model_version_id"] = "dcm-json-v1:" + "3" * 64
+        retrain["odds"] = 1.50
         retrain["regulation_home_goals"] = 1
         retrain["regulation_away_goals"] = 0
 
@@ -190,6 +191,25 @@ class LeagueVersionRepository:
         other_league["model_version_id"] = "dcm-json-v1:" + "4" * 64
 
         return (first, retrain, other_league)
+
+
+class ModelSortRepository:
+    def list_signals(self, *, limit):
+        assert limit == 5000
+
+        high = signal_row()
+
+        low = signal_row()
+        low["research_signal_id"] = "research-signal-v1:" + "7" * 64
+        low["evaluation_id"] = "value-evaluation-v1:" + "7" * 64
+        low["fixture_id"] = "api-football:129"
+        low["provider_fixture_id"] = "129"
+        low["home_team"] = "Low Odds Home"
+        low["away_team"] = "Low Odds Away"
+        low["kickoff_at"] = NOW + timedelta(hours=3)
+        low["odds"] = 1.50
+
+        return (high, low)
 
 
 def test_counterfactual_result_pnl_and_clv_are_research_only_math() -> None:
@@ -284,7 +304,11 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'class="result-panel result-panel-loss"' in history_html
     assert '<div class="score">1 : 1</div>' in history_html
     assert '<div class="score">1 : 0</div>' in history_html
-    assert "<th>Match</th><th>Result</th><th>Pick</th>" in history_html
+    assert "Match" in history_html
+    assert "Result" in history_html
+    assert "Pick" in history_html
+    assert 'title="Lowest first"' in history_html
+    assert 'title="Highest first"' in history_html
     assert 'name="result"' in history_html
     assert "BLOCKED EXPOSURE" in history_html
     assert "SKIPPED" in history_html
@@ -431,6 +455,25 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     )
 
 
+def test_research_analytics_tables_sort_highest_and_lowest() -> None:
+    dashboard = ResearchDashboardService(LeagueVersionRepository())
+
+    highest = dashboard.render_analytics_html(
+        "sort_table=leagues&sort=roi_pct&dir=desc"
+    )
+    lowest = dashboard.render_analytics_html(
+        "sort_table=leagues&sort=roi_pct&dir=asc"
+    )
+
+    assert highest.index("Other League") < highest.index("Research League")
+    assert lowest.index("Research League") < lowest.index("Other League")
+    assert "sort_table=leagues&amp;sort=roi_pct&amp;dir=asc" in highest
+    assert "sort_table=leagues&amp;sort=roi_pct&amp;dir=desc" in highest
+    assert 'title="Lowest first"' in highest
+    assert 'title="Highest first"' in highest
+    assert "#table-leagues" in highest
+
+
 def test_research_model_version_drilldown_exposes_constituent_picks() -> None:
     dashboard = ResearchDashboardService(Repository())
     model_version_id = signal_row()["model_version_id"]
@@ -466,6 +509,25 @@ def test_research_model_version_drilldown_exposes_constituent_picks() -> None:
 
 
 
+def test_research_model_pick_table_sorts_every_direction() -> None:
+    dashboard = ResearchDashboardService(ModelSortRepository())
+    model_version_id = signal_row()["model_version_id"]
+
+    highest = dashboard.render_model_version_html(
+        model_version_id,
+        "sort=entry&dir=desc",
+    )
+    lowest = dashboard.render_model_version_html(
+        model_version_id,
+        "sort=entry&dir=asc",
+    )
+
+    assert highest.index("Home – Away") < highest.index("Low Odds Home – Low Odds Away")
+    assert lowest.index("Low Odds Home – Low Odds Away") < lowest.index("Home – Away")
+    assert "sort=entry&amp;dir=asc#picks" in highest
+    assert "sort=entry&amp;dir=desc#picks" in highest
+
+
 def test_research_league_drilldown_combines_retrains_and_preserves_model_audit() -> None:
     dashboard = ResearchDashboardService(LeagueVersionRepository())
 
@@ -498,3 +560,61 @@ def test_research_league_drilldown_combines_retrains_and_preserves_model_audit()
     assert "Other Home – Other Away" not in html
     assert "/research/analytics/model?model_version_id=" in html
     assert "/research/analytics/league.json?league_id=39&amp;season=2026" in html
+
+
+def test_research_league_tables_sort_models_and_picks_independently() -> None:
+    dashboard = ResearchDashboardService(LeagueVersionRepository())
+
+    model_high = dashboard.render_league_html(
+        39,
+        2026,
+        "sort_table=models&sort=roi_pct&dir=desc",
+    )
+    model_low = dashboard.render_league_html(
+        39,
+        2026,
+        "sort_table=models&sort=roi_pct&dir=asc",
+    )
+    high_models = model_high.split('<section id="picks"', 1)[0]
+    low_models = model_low.split('<section id="picks"', 1)[0]
+    assert high_models.index("dcm-json-v1:111111111111…") < high_models.index(
+        "dcm-json-v1:333333333333…"
+    )
+    assert low_models.index("dcm-json-v1:333333333333…") < low_models.index(
+        "dcm-json-v1:111111111111…"
+    )
+
+    pick_high = dashboard.render_league_html(
+        39,
+        2026,
+        "sort_table=picks&sort=entry&dir=desc",
+    )
+    pick_low = dashboard.render_league_html(
+        39,
+        2026,
+        "sort_table=picks&sort=entry&dir=asc",
+    )
+    high_picks = pick_high.split('<section id="picks"', 1)[1]
+    low_picks = pick_low.split('<section id="picks"', 1)[1]
+    assert high_picks.index("Home – Away") < high_picks.index(
+        "Retrain Home – Retrain Away"
+    )
+    assert low_picks.index("Retrain Home – Retrain Away") < low_picks.index(
+        "Home – Away"
+    )
+    assert "sort_table=models&amp;sort=roi_pct&amp;dir=asc#models" in model_high
+    assert "sort_table=picks&amp;sort=entry&amp;dir=desc#picks" in pick_high
+
+
+def test_research_board_history_sorts_highest_and_lowest() -> None:
+    dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
+
+    highest = dashboard.render_html("tab=history&sort=pnl&dir=desc")
+    lowest = dashboard.render_html("tab=history&sort=pnl&dir=asc")
+
+    assert highest.index("Home – Away") < highest.index("Loss Home – Loss Away")
+    assert lowest.index("Loss Home – Loss Away") < lowest.index("Home – Away")
+    assert "sort=pnl&amp;dir=asc" in highest
+    assert "sort=pnl&amp;dir=desc" in highest
+    assert 'title="Lowest first"' in highest
+    assert 'title="Highest first"' in highest

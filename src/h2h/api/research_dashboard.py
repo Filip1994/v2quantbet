@@ -226,6 +226,61 @@ def _parse_float(raw: str | None) -> float | None:
     return float(raw)
 
 
+def _sorted_for_display(
+    rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    *,
+    value,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    """Sort display rows while keeping missing values at the bottom."""
+    reverse = direction == "desc"
+    present: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for row in rows:
+        sort_value = value(row)
+        if sort_value is None:
+            missing.append(row)
+        else:
+            present.append(row)
+    present.sort(key=value, reverse=reverse)
+    return tuple(present + missing)
+
+
+def _sortable_th(
+    label: str,
+    key: str,
+    *,
+    path: str,
+    base_params: dict[str, Any],
+    active_key: str,
+    active_dir: str,
+    anchor: str = "",
+) -> str:
+    def href(direction: str) -> str:
+        params = {
+            name: str(value)
+            for name, value in base_params.items()
+            if value is not None and str(value) != ""
+        }
+        params["sort"] = key
+        params["dir"] = direction
+        suffix = f"#{anchor}" if anchor else ""
+        return path + "?" + urlencode(params) + suffix
+
+    low_active = active_key == key and active_dir == "asc"
+    high_active = active_key == key and active_dir == "desc"
+    return (
+        "<th><span class=\"th-wrap\"><span>"
+        + escape(label)
+        + "</span><span class=\"sort-tools\">"
+        + f'<a class="{"sort-active" if low_active else ""}" '
+        + f'href="{escape(href("asc"), quote=True)}" title="Lowest first">↑</a>'
+        + f'<a class="{"sort-active" if high_active else ""}" '
+        + f'href="{escape(href("desc"), quote=True)}" title="Highest first">↓</a>'
+        + "</span></span></th>"
+    )
+
+
 def _one_signal_per_fixture(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[dict[str, Any], ...]:
@@ -964,8 +1019,15 @@ class ResearchDashboardService:
             "rows": items,
         }
 
-    def render_league_html(self, league_id: int, season: int) -> str:
+    def render_league_html(self, league_id: int, season: int, query: str = "") -> str:
         """Render League -> model versions -> settled picks hierarchy."""
+        params = parse_qs(query, keep_blank_values=True)
+        sort_table = params.get("sort_table", [""])[0].strip().casefold()
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
         payload = self.league_details(league_id, season)
         league = payload["league"]
         summary = payload["summary"]
@@ -984,6 +1046,122 @@ class ResearchDashboardService:
                 return value if len(value) <= 24 else value[:23] + "…"
             prefix, digest = value.split(":", 1)
             return f"{prefix}:{digest[:12]}…" if len(digest) > 12 else value
+
+        def model_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "record":
+                return (
+                    int(row.get("wins") or 0),
+                    -int(row.get("losses") or 0),
+                    -int(row.get("voids") or 0),
+                )
+            if sort_key == "sample_band":
+                return {
+                    "SIGNAL_ONLY": 0,
+                    "MONITOR": 1,
+                    "PROVISIONAL_EVIDENCE": 2,
+                    "STABILITY_REVIEW": 3,
+                }.get(str(row.get("sample_band") or ""), -1)
+            value = row.get(sort_key)
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        def pick_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "WIN": 2}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            if sort_key == "entry":
+                return row.get("odds")
+            if sort_key == "model_probability":
+                return row.get("model_probability")
+            if sort_key == "expected_value":
+                return row.get("expected_value")
+            if sort_key == "close":
+                return row.get("closing_odds")
+            if sort_key == "clv":
+                return row.get("clv_pct")
+            if sort_key == "pnl":
+                return row.get("pnl_minor")
+            if sort_key == "model_version_id":
+                return str(row.get("model_version_id") or "").casefold()
+            if sort_key == "kickoff_at":
+                return str(row.get("kickoff_at") or "")
+            return None
+
+        if sort_table == "models" and sort_key:
+            model_versions = list(
+                _sorted_for_display(
+                    model_versions,
+                    value=model_sort_value,
+                    direction=sort_dir,
+                )
+            )
+        if sort_table == "picks" and sort_key:
+            rows = list(
+                _sorted_for_display(
+                    rows,
+                    value=pick_sort_value,
+                    direction=sort_dir,
+                )
+            )
+
+        base_params = {"league_id": league_id, "season": season}
+        model_headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/league",
+                base_params={**base_params, "sort_table": "models"},
+                active_key=sort_key if sort_table == "models" else "",
+                active_dir=sort_dir,
+                anchor="models",
+            )
+            for label, key in (
+                ("Model version", "model_version_id"),
+                ("N", "n"),
+                ("W-L-V", "record"),
+                ("Win%", "win_rate_pct"),
+                ("Expected", "expected_win_rate_pct"),
+                ("ROI", "roi_pct"),
+                ("Avg CLV", "avg_clv_pct"),
+                ("Evidence", "sample_band"),
+            )
+        )
+        pick_headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/league",
+                base_params={**base_params, "sort_table": "picks"},
+                active_key=sort_key if sort_table == "picks" else "",
+                active_dir=sort_dir,
+                anchor="picks",
+            )
+            for label, key in (
+                ("Match", "match"),
+                ("Result", "result"),
+                ("Pick", "pick"),
+                ("Entry", "entry"),
+                ("Model P", "model_probability"),
+                ("EV", "expected_value"),
+                ("Close", "close"),
+                ("CLV", "clv"),
+                ("P/L", "pnl"),
+                ("Model version", "model_version_id"),
+                ("Kickoff UTC", "kickoff_at"),
+            )
+        )
 
         cards = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -1075,7 +1253,7 @@ class ResearchDashboardService:
 
         competition_name = escape(str(league.get("competition_name") or f"League {league_id}"))
         country = escape(str(league.get("country") or "—"))
-        query = urlencode({"league_id": league_id, "season": season})
+        json_query = urlencode({"league_id": league_id, "season": season})
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1096,7 +1274,11 @@ p,small{{color:var(--muted)}}a{{color:#d8dcdf}}.meta{{color:var(--muted);font-si
 .scroll{{overflow:auto;max-height:65vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}
 th,td{{padding:9px 10px;border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;
 vertical-align:top}}th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;
-text-transform:uppercase;letter-spacing:.05em}}td.match{{min-width:240px}}td small{{display:block;
+text-transform:uppercase;letter-spacing:.05em}}.th-wrap{{display:flex;align-items:center;gap:6px}}
+.sort-tools{{display:inline-flex;gap:2px}}.sort-tools a{{display:inline-grid;place-items:center;width:17px;
+height:17px;border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;
+font-size:10px;line-height:1}}.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;
+border-color:#778089;background:#252b30}}td.match{{min-width:240px}}td small{{display:block;
 margin-top:4px}}.model-link{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
 text-decoration:none;border-bottom:1px dotted #778089}}.model-link:hover{{color:#fff;
 border-bottom-color:#fff}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;
@@ -1111,22 +1293,24 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
 <div class="meta">{country} · League ID {league_id} · all DC retrains combined</div>
 <p>League performance first; model versions remain available as the audit layer.</p></div>
 <div><a href="/research/analytics">← Analytics V2</a> ·
-<a href="/research/analytics/league.json?{escape(query, quote=True)}">JSON</a></div></header>
+<a href="/research/analytics/league.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
-<section class="panel"><h2>Model versions · retrain history</h2>
-<div class="scroll"><table><thead><tr>
-<th>Model version</th><th>N</th><th>W-L-V</th><th>Win%</th><th>Expected</th>
-<th>ROI</th><th>Avg CLV</th><th>Evidence</th>
-</tr></thead><tbody>{model_rows_html}</tbody></table></div></section>
-<section class="panel"><h2>All settled picks · all retrains</h2>
-<div class="scroll"><table><thead><tr>
-<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th><th>EV</th>
-<th>Close</th><th>CLV</th><th>P/L</th><th>Model version</th><th>Kickoff UTC</th>
-</tr></thead><tbody>{pick_rows_html}</tbody></table></div></section>
+<section id="models" class="panel"><h2>Model versions · retrain history</h2>
+<div class="scroll"><table><thead><tr>{model_headers}</tr></thead>
+<tbody>{model_rows_html}</tbody></table></div></section>
+<section id="picks" class="panel"><h2>All settled picks · all retrains</h2>
+<div class="scroll"><table><thead><tr>{pick_headers}</tr></thead>
+<tbody>{pick_rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
-    def render_model_version_html(self, model_version_id: str) -> str:
+    def render_model_version_html(self, model_version_id: str, query: str = "") -> str:
         """Render the exact settled picks behind one model-version analytics cohort."""
+        params = parse_qs(query, keep_blank_values=True)
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
         payload = self.model_version_details(model_version_id)
         summary = payload["summary"]
         rows = payload["rows"]
@@ -1137,6 +1321,82 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
             number = float(value)
             prefix = "+" if signed and number > 0 else ""
             return f"{prefix}{number:.2f}{suffix}"
+
+        def pick_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "WIN": 2}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            mapping = {
+                "entry": "odds",
+                "model_probability": "model_probability",
+                "fair_probability": "market_fair_probability",
+                "edge": "edge",
+                "expected_value": "expected_value",
+                "close": "closing_odds",
+                "clv": "clv_pct",
+                "pnl": "pnl_minor",
+                "route": "disposition",
+                "kickoff_at": "kickoff_at",
+                "qualified_at": "qualified_at",
+                "policy": "policy_config_fingerprint",
+            }
+            field = mapping.get(sort_key)
+            if field is None:
+                return None
+            value = row.get(field)
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        if sort_key:
+            rows = list(
+                _sorted_for_display(
+                    rows,
+                    value=pick_sort_value,
+                    direction=sort_dir,
+                )
+            )
+
+        header_base = {"model_version_id": model_version_id}
+        headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/model",
+                base_params=header_base,
+                active_key=sort_key,
+                active_dir=sort_dir,
+                anchor="picks",
+            )
+            for label, key in (
+                ("Match", "match"),
+                ("Result", "result"),
+                ("Pick", "pick"),
+                ("Entry", "entry"),
+                ("Model P", "model_probability"),
+                ("Fair P", "fair_probability"),
+                ("Edge", "edge"),
+                ("EV", "expected_value"),
+                ("Close", "close"),
+                ("CLV", "clv"),
+                ("P/L", "pnl"),
+                ("Route", "route"),
+                ("Kickoff UTC", "kickoff_at"),
+                ("Qualified UTC", "qualified_at"),
+                ("Policy config", "policy"),
+            )
+        )
 
         cards = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -1209,7 +1469,7 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
             '<tr><td colspan="15" class="empty">'
             "No settled Research picks belong to this model version.</td></tr>"
         )
-        query = urlencode({"model_version_id": model_version_id})
+        json_query = urlencode({"model_version_id": model_version_id})
         model_label = escape(model_version_id)
 
         return f"""<!doctype html>
@@ -1232,7 +1492,11 @@ grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0}}
 max-height:72vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
 border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;vertical-align:top}}
 th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;
-letter-spacing:.05em}}td.match{{min-width:240px}}td.policy{{max-width:360px;overflow:hidden;
+letter-spacing:.05em}}.th-wrap{{display:flex;align-items:center;gap:6px}}
+.sort-tools{{display:inline-flex;gap:2px}}.sort-tools a{{display:inline-grid;place-items:center;width:17px;
+height:17px;border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;
+font-size:10px;line-height:1}}.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;
+border-color:#778089;background:#252b30}}td.match{{min-width:240px}}td.policy{{max-width:360px;overflow:hidden;
 text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}td small{{display:block;
 margin-top:4px}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}}
 .result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}.result-void{{color:var(--void)}}
@@ -1245,17 +1509,14 @@ main{{padding:14px}}header{{display:block}}}}
 <h1>Model version picks</h1><span class="model-id">{model_label}</span>
 <p>Exact settled Research rows behind this Analytics V2 model cohort.</p></div>
 <div><a href="/research/analytics">← Analytics V2</a> ·
-<a href="/research/analytics/model.json?{escape(query, quote=True)}">JSON</a></div></header>
+<a href="/research/analytics/model.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
-<section class="panel"><div class="scroll"><table><thead><tr>
-<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th>
-<th>Fair P</th><th>Edge</th><th>EV</th><th>Close</th><th>CLV</th><th>P/L</th>
-<th>Route</th><th>Kickoff UTC</th><th>Qualified UTC</th><th>Policy config</th>
-</tr></thead><tbody>{rows_html}</tbody></table></div></section>
+<section id="picks" class="panel"><div class="scroll"><table><thead><tr>{headers}</tr></thead>
+<tbody>{rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
-    def render_analytics_html(self) -> str:
-        return render_research_analytics_html(self.analytics_snapshot())
+    def render_analytics_html(self, query: str = "") -> str:
+        return render_research_analytics_html(self.analytics_snapshot(), query)
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
@@ -1266,7 +1527,7 @@ main{{padding:14px}}header{{display:block}}}}
         metric_params = {
             key: value
             for key, value in params.items()
-            if key not in {"tab", "result"}
+            if key not in {"tab", "result", "sort", "dir"}
         }
         filtered = self.signals(metric_params)
 
@@ -1322,6 +1583,71 @@ main{{padding:14px}}header{{display:block}}}}
             rows = awaiting_rows
         else:
             rows = active_rows
+
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
+        def board_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("competition_name") or "").casefold(),
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "PENDING": 2, "WIN": 3}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            mapping = {
+                "kickoff": "kickoff_at",
+                "model": "model_probability",
+                "odds": "odds",
+                "route": "disposition",
+                "edge": "edge",
+                "ev": "expected_value",
+                "bookmaker": "bookmaker",
+                "qualified": "qualified_at",
+                "exposure": "last_open_exposure_minor",
+                "status": "result_phase",
+                "entry": "odds",
+                "close": "closing_odds",
+                "clv": "clv_ppm",
+                "pnl": "pnl_minor",
+            }
+            field = mapping.get(sort_key)
+            if field is None:
+                return None
+            value = row.get(field)
+            if sort_key == "status":
+                return (
+                    str(row.get("outcome") or "").casefold(),
+                    str(row.get("result_phase") or "").casefold(),
+                    str(row.get("result_provider_status") or "").casefold(),
+                )
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        if sort_key:
+            rows = _sorted_for_display(
+                rows,
+                value=board_sort_value,
+                direction=sort_dir,
+            )
+
+        sort_base_params = {
+            key: value[0]
+            for key, value in params.items()
+            if value and value[0] and key not in {"sort", "dir", "tab"}
+        }
+        sort_base_params["tab"] = tab
 
         settled = history_rows
         wins = sum(row["outcome"] == "WIN" for row in settled)
@@ -1384,6 +1710,19 @@ main{{padding:14px}}header{{display:block}}}}
             label = value.replace("_", " ")
             return f'<span class="mini-badge freshness-{css}">{escape(label)}</span>'
 
+        def board_headers(columns: tuple[tuple[str, str], ...]) -> str:
+            return "".join(
+                _sortable_th(
+                    label,
+                    key,
+                    path="/research",
+                    base_params=sort_base_params,
+                    active_key=sort_key,
+                    active_dir=sort_dir,
+                )
+                for label, key in columns
+            )
+
         body_rows: list[str] = []
         if tab in {"active", "awaiting"}:
             for row in rows:
@@ -1426,10 +1765,21 @@ main{{padding:14px}}header{{display:block}}}}
                     )
                     + "</td></tr>"
                 )
-            headers = (
-                "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
-                "<th>Odds</th><th>Route</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
-                "<th>Qualified</th><th>Exposure</th><th>Status</th>"
+            headers = board_headers(
+                (
+                    ("Match", "match"),
+                    ("Kickoff", "kickoff"),
+                    ("Pick", "pick"),
+                    ("Model", "model"),
+                    ("Odds", "odds"),
+                    ("Route", "route"),
+                    ("Edge", "edge"),
+                    ("EV", "ev"),
+                    ("Bookmaker", "bookmaker"),
+                    ("Qualified", "qualified"),
+                    ("Exposure", "exposure"),
+                    ("Status", "status"),
+                )
             )
             empty_text = (
                 "No awaiting-result research picks match these filters."
@@ -1486,10 +1836,22 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
-            headers = (
-                "<th>Match</th><th>Result</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
-                "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
-                "<th>Route</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
+            headers = board_headers(
+                (
+                    ("Match", "match"),
+                    ("Result", "result"),
+                    ("Pick", "pick"),
+                    ("Kickoff", "kickoff"),
+                    ("Entry", "entry"),
+                    ("Research close", "close"),
+                    ("CLV", "clv"),
+                    ("Model", "model"),
+                    ("EV", "ev"),
+                    ("Route", "route"),
+                    ("P/L", "pnl"),
+                    ("Bookmaker", "bookmaker"),
+                    ("Qualified", "qualified"),
+                )
             )
             empty_text = "No historical research picks match these filters."
             colspan = 13
@@ -1532,6 +1894,12 @@ main{{padding:14px}}header{{display:block}}}}
         awaiting_href = escape(tab_href("awaiting"), quote=True)
         history_href = escape(tab_href("history"), quote=True)
         clear_href = f"/research?tab={tab}"
+        sort_hidden = ""
+        if sort_key:
+            sort_hidden = (
+                f'<input type="hidden" name="sort" value="{escape(sort_key, quote=True)}">'
+                f'<input type="hidden" name="dir" value="{escape(sort_dir, quote=True)}">'
+            )
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1562,6 +1930,10 @@ button{{background:#d4d8dc;color:#17191b;border-color:#d4d8dc;font-weight:900;cu
 .table-title b{{font-size:14px}}.table-title span{{font-size:12px;color:var(--muted)}}.table{{overflow:auto;max-height:70vh}}
 table{{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line-soft);text-align:left;white-space:nowrap;vertical-align:middle}}
 th{{position:sticky;top:0;z-index:3;background:#1b1f23;color:#959da5;text-transform:uppercase;letter-spacing:.06em;font-size:10px;font-weight:900}}
+.th-wrap{{display:flex;align-items:center;gap:6px}}.sort-tools{{display:inline-flex;gap:2px}}
+.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid #343b42;
+border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
+.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#20252a}}tbody tr:last-child td{{border-bottom:0}}
 td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
@@ -1601,6 +1973,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="toolbar">
 <form method="get">
 <input type="hidden" name="tab" value="{tab}">
+{sort_hidden}
 <select name="market" aria-label="Market filter"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
 <select name="disposition" aria-label="Route filter"><option value="">All routes</option>{option_list("disposition", ("PLAYED","SKIPPED","BLOCKED_EXPOSURE"))}</select>
 <select name="p_bucket" aria-label="Probability bucket"><option value="">All p buckets</option>{option_list("p_bucket", ("40–45%","45–50%","50–55%","55–60%","60–65%","65–70%","70–75%","75%+"))}</select>
@@ -1665,7 +2038,7 @@ class ResearchDashboardHTTPService:
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         league_id = int(params.get("league_id", ["0"])[0])
                         season = int(params.get("season", ["0"])[0])
-                        body = dashboard.render_league_html(league_id, season)
+                        body = dashboard.render_league_html(league_id, season, parsed.query)
                         content_type = "text/html; charset=utf-8"
                     elif parsed.path == "/research/analytics/model.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -1679,7 +2052,7 @@ class ResearchDashboardHTTPService:
                     elif parsed.path == "/research/analytics/model":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         model_version_id = params.get("model_version_id", [""])[0]
-                        body = dashboard.render_model_version_html(model_version_id)
+                        body = dashboard.render_model_version_html(model_version_id, parsed.query)
                         content_type = "text/html; charset=utf-8"
                     elif parsed.path == "/research/analytics/diagnostic.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -1698,7 +2071,7 @@ class ResearchDashboardHTTPService:
                         )
                         content_type = "application/json; charset=utf-8"
                     elif parsed.path == "/research/analytics":
-                        body = dashboard.render_analytics_html()
+                        body = dashboard.render_analytics_html(parsed.query)
                         content_type = "text/html; charset=utf-8"
                     else:
                         body = dashboard.render_html(parsed.query)

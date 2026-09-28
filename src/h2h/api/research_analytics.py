@@ -9,7 +9,7 @@ from html import escape
 from math import sqrt
 from statistics import mean, median
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
@@ -417,11 +417,131 @@ def _metric_class(value: Any) -> str:
     return "metric-neutral"
 
 
+def _bucket_sort_value(value: Any) -> float:
+    text = str(value or "").strip().replace("%", "")
+    if not text or text == "—":
+        return float("-inf")
+    if text.startswith("<"):
+        try:
+            return float(text[1:]) - 0.001
+        except ValueError:
+            return float("-inf")
+    if text.endswith("+"):
+        try:
+            return float(text[:-1])
+        except ValueError:
+            return float("-inf")
+    for separator in ("–", "-"):
+        if separator in text:
+            try:
+                return float(text.split(separator, 1)[0])
+            except ValueError:
+                return float("-inf")
+    try:
+        return float(text)
+    except ValueError:
+        return float("-inf")
+
+
+def _analytics_sort_value(row: dict[str, Any], key: str) -> Any:
+    if key == "record":
+        return (
+            int(row.get("wins") or 0),
+            -int(row.get("losses") or 0),
+            -int(row.get("voids") or 0),
+        )
+    if key == "sample_band":
+        return {
+            "SIGNAL_ONLY": 0,
+            "MONITOR": 1,
+            "PROVISIONAL_EVIDENCE": 2,
+            "STABILITY_REVIEW": 3,
+        }.get(str(row.get(key) or ""), -1)
+    if key in {
+        "probability_bucket",
+        "market_fair_probability_bucket",
+        "ev_bucket",
+        "odds_bucket",
+    }:
+        return _bucket_sort_value(row.get(key))
+    if key in {"league_id", "season"}:
+        try:
+            return int(row.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.casefold()
+    return value
+
+
+def _sorted_analytics_rows(
+    rows: Sequence[dict[str, Any]],
+    *,
+    key: str,
+    direction: str,
+) -> list[dict[str, Any]]:
+    if direction not in {"asc", "desc"}:
+        direction = "desc"
+    present: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for row in rows:
+        value = _analytics_sort_value(row, key)
+        if value is None:
+            missing.append(row)
+        else:
+            present.append(row)
+    present.sort(
+        key=lambda row: _analytics_sort_value(row, key),
+        reverse=direction == "desc",
+    )
+    return present + missing
+
+
+def _sort_header(
+    label: str,
+    key: str,
+    *,
+    table_id: str,
+    active_table: str,
+    active_key: str,
+    active_dir: str,
+) -> str:
+    def href(direction: str) -> str:
+        query = urlencode(
+            {
+                "sort_table": table_id,
+                "sort": key,
+                "dir": direction,
+            }
+        )
+        return f"/research/analytics?{query}#table-{table_id}"
+
+    active_low = active_table == table_id and active_key == key and active_dir == "asc"
+    active_high = active_table == table_id and active_key == key and active_dir == "desc"
+    return (
+        "<th><span class=\"th-wrap\"><span>"
+        + escape(label)
+        + "</span><span class=\"sort-tools\">"
+        + f'<a class="{"sort-active" if active_low else ""}" '
+        + f'href="{escape(href("asc"), quote=True)}" title="Lowest first">↑</a>'
+        + f'<a class="{"sort-active" if active_high else ""}" '
+        + f'href="{escape(href("desc"), quote=True)}" title="Highest first">↓</a>'
+        + "</span></span></th>"
+    )
+
+
 def _metrics_table(
     title: str,
     rows: Sequence[dict[str, Any]],
     dimensions: tuple[str, ...],
     *,
+    table_id: str,
+    active_sort_table: str = "",
+    active_sort_key: str = "",
+    active_sort_dir: str = "desc",
     dimension_links: dict[str, str] | None = None,
     dimension_link_params: dict[str, tuple[str, ...]] | None = None,
     dimension_labels: dict[str, str] | None = None,
@@ -429,13 +549,50 @@ def _metrics_table(
     row_link_params: dict[str, str] | None = None,
     row_link_fixed: dict[str, str] | None = None,
 ) -> str:
+    visible_rows = list(rows)
+    if active_sort_table == table_id and active_sort_key:
+        visible_rows = _sorted_analytics_rows(
+            visible_rows,
+            key=active_sort_key,
+            direction=active_sort_dir,
+        )
+
     dimension_headers = "".join(
-        f"<th>{escape((dimension_labels or {}).get(name, name))}</th>"
+        _sort_header(
+            (dimension_labels or {}).get(name, name),
+            name,
+            table_id=table_id,
+            active_table=active_sort_table,
+            active_key=active_sort_key,
+            active_dir=active_sort_dir,
+        )
         for name in dimensions
+    )
+    metric_headers = "".join(
+        _sort_header(
+            label,
+            key,
+            table_id=table_id,
+            active_table=active_sort_table,
+            active_key=active_sort_key,
+            active_dir=active_sort_dir,
+        )
+        for label, key in (
+            ("N", "n"),
+            ("W-L-V", "record"),
+            ("Win%", "win_rate_pct"),
+            ("Exp%", "expected_win_rate_pct"),
+            ("Cal gap", "calibration_gap_pp"),
+            ("ROI", "roi_pct"),
+            ("Avg CLV", "avg_clv_pct"),
+            ("Med CLV", "median_clv_pct"),
+            ("+CLV%", "positive_clv_rate_pct"),
+            ("Evidence", "sample_band"),
+        )
     )
     action_header = "<th class=\"action-col\">Picks</th>" if row_link_path else ""
     body = []
-    for row in rows:
+    for row in visible_rows:
         row_href = None
         if row_link_path:
             query = dict(row_link_fixed or {})
@@ -500,12 +657,12 @@ def _metrics_table(
             'class="empty">No settled rows.</td></tr>'
         )
     return (
-        '<section class="panel"><h3>'
+        f'<section id="table-{escape(table_id, quote=True)}" class="panel">'
+        + "<h3>"
         + escape(title)
         + '</h3><div class="scroll"><table><thead><tr>'
         + dimension_headers
-        + "<th>N</th><th>W-L-V</th><th>Win%</th><th>Exp%</th><th>Cal gap</th>"
-        + "<th>ROI</th><th>Avg CLV</th><th>Med CLV</th><th>+CLV%</th><th>Evidence</th>"
+        + metric_headers
         + action_header
         + "</tr></thead><tbody>"
         + "".join(body)
@@ -513,7 +670,14 @@ def _metrics_table(
     )
 
 
-def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
+def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") -> str:
+    params = parse_qs(query, keep_blank_values=True)
+    active_sort_table = params.get("sort_table", [""])[0].strip()
+    active_sort_key = params.get("sort", [""])[0].strip()
+    active_sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+    if active_sort_dir not in {"asc", "desc"}:
+        active_sort_dir = "desc"
+
     windows = snapshot["windows"]
     lifetime = windows["lifetime"]
     version_summary = snapshot["version_summary"]
@@ -554,6 +718,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Leagues · all retrains combined",
         snapshot["cohorts"]["league_season"],
         ("competition_name", "league_id", "season"),
+        table_id="leagues",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_links={"competition_name": "/research/analytics/league"},
         dimension_link_params={"competition_name": ("league_id", "season")},
         dimension_labels={
@@ -568,6 +736,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Market × selection",
         snapshot["cohorts"]["market_selection"],
         ("market", "selection"),
+        table_id="markets",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"market": "Market", "selection": "Pick"},
         row_link_path="/research",
         row_link_params={"market": "market", "selection": "selection"},
@@ -577,6 +749,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Low-scoring diagnostic",
         snapshot["diagnostics"],
         ("diagnostic",),
+        table_id="diagnostics",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"diagnostic": "Diagnostic"},
         row_link_path="/research",
         row_link_params={"diagnostic": "diagnostic"},
@@ -586,6 +762,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Weekly stability",
         snapshot["weekly"],
         ("week",),
+        table_id="weekly",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"week": "Week"},
         row_link_path="/research",
         row_link_params={"week": "week"},
@@ -596,6 +776,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Model probability",
         snapshot["cohorts"]["model_probability_bucket"],
         ("probability_bucket",),
+        table_id="model-p",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"probability_bucket": "Model P"},
         row_link_path="/research",
         row_link_params={"probability_bucket": "p_bucket"},
@@ -605,6 +789,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Market fair probability",
         snapshot["cohorts"]["market_fair_probability_bucket"],
         ("market_fair_probability_bucket",),
+        table_id="fair-p",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"market_fair_probability_bucket": "Fair P"},
         row_link_path="/research",
         row_link_params={"market_fair_probability_bucket": "fair_bucket"},
@@ -614,6 +802,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Expected value",
         snapshot["cohorts"]["ev_bucket"],
         ("ev_bucket",),
+        table_id="ev",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"ev_bucket": "EV"},
         row_link_path="/research",
         row_link_params={"ev_bucket": "ev_bucket"},
@@ -623,6 +815,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Entry odds",
         snapshot["cohorts"]["odds_bucket"],
         ("odds_bucket",),
+        table_id="odds",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"odds_bucket": "Odds"},
         row_link_path="/research",
         row_link_params={"odds_bucket": "odds_bucket"},
@@ -633,6 +829,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Policy configurations",
         snapshot["cohorts"]["policy_config"],
         ("policy_config_fingerprint",),
+        table_id="policy",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={"policy_config_fingerprint": "Policy"},
         row_link_path="/research",
         row_link_params={"policy_config_fingerprint": "policy_config"},
@@ -642,6 +842,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         "Model × policy",
         snapshot["cohorts"]["model_policy"],
         ("model_version_id", "policy_config_fingerprint"),
+        table_id="model-policy",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_links={"model_version_id": "/research/analytics/model"},
         dimension_labels={
             "model_version_id": "Model version",
@@ -663,6 +867,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "devig_method_version",
             "policy_config_fingerprint",
         ),
+        table_id="decision-contract",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_links={"model_version_id": "/research/analytics/model"},
         dimension_labels={
             "model_version_id": "Model version",
@@ -690,6 +898,10 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "ev_bucket",
             "odds_bucket",
         ),
+        table_id="filter-cube",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
         dimension_labels={
             "market": "Market",
             "selection": "Pick",
@@ -742,6 +954,10 @@ gap:12px;padding:0 2px 7px}}.group-head p{{margin:0;font-size:12px}}
 table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
 border-bottom:1px solid #272c31;white-space:nowrap;text-align:left}}th{{position:sticky;top:0;
 background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;letter-spacing:.05em}}
+.th-wrap{{display:flex;align-items:center;gap:6px}}.sort-tools{{display:inline-flex;gap:2px}}
+.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid #343b42;
+border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
+.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 tbody tr:hover{{background:#1d2226}}.action-col{{text-align:right}}.metric-strong{{font-weight:700}}
 .metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}
 .metric-neutral{{color:inherit}}.empty{{color:var(--muted);text-align:center}}
