@@ -169,7 +169,7 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "GoalLab canonical picks" in html
     assert "DC+ model contract / active variables" in html
     assert "home_l5_goals_for" in html
-    assert "Upcoming fixture / GoalLab decision pipeline" in html
+    assert "Sve analizirane utakmice · PASS + PICK" in html
     assert "EDGE_BELOW_MINIMUM" in html
     assert "SHADOW ONLY" in html
     assert "GoalLab Research / Audit" in html
