@@ -507,29 +507,90 @@ class PostgreSQLQuantLabRepository:
             )
             return cursor.rowcount > 0
 
+    def goal_pick_result_refresh_candidates(
+        self,
+        *,
+        now: datetime,
+        post_kickoff_delay_seconds: int = 6300,
+        refresh_after_seconds: int = 900,
+        postponed_refresh_seconds: int = 21600,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return unsettled GoalLab fixtures whose QuantLab-owned result needs refreshing."""
+        if (
+            post_kickoff_delay_seconds <= 0
+            or refresh_after_seconds <= 0
+            or postponed_refresh_seconds <= 0
+            or limit <= 0
+        ):
+            raise ValueError("GoalLab result refresh settings and limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (p.fixture_id) p.fixture_id, f.provider_fixture_id, "
+                "latest.kickoff_at, latest.provider_status, latest.captured_at "
+                "FROM quantlab_goal_picks p "
+                "JOIN quantlab_fixtures f ON f.fixture_id = p.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE NOT EXISTS ("
+                " SELECT 1 FROM quantlab_goal_pick_settlements s "
+                " WHERE s.goal_pick_id = p.goal_pick_id"
+                ") "
+                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
+                "AND latest.captured_at <= %s - ("
+                " CASE WHEN latest.provider_status = 'PST' THEN %s ELSE %s END"
+                " * interval '1 second') "
+                "ORDER BY p.fixture_id, p.decision_at ASC LIMIT %s",
+                (
+                    now,
+                    post_kickoff_delay_seconds,
+                    now,
+                    postponed_refresh_seconds,
+                    refresh_after_seconds,
+                    limit,
+                ),
+            )
+            return _row_dicts(cursor)
+
     def goal_pick_settlement_candidates(
         self,
         *,
         limit: int = 500,
     ) -> tuple[dict[str, Any], ...]:
+        """Return GoalLab picks with the two newest QuantLab-owned result snapshots."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT p.goal_pick_id, p.fixture_id, p.market_key, p.selection, p.line, "
                 "p.odds, p.stake_minor, p.model_version, p.decision_at, p.kickoff_at, "
-                "r.result_observation_id, r.provider_status, r.result_classification, "
-                "r.regulation_home_goals, r.regulation_away_goals, r.first_acquired_at "
+                "latest.fixture_observation_id AS latest_result_observation_id, "
+                "latest.captured_at AS latest_result_captured_at, "
+                "latest.raw_payload AS latest_result_raw_payload, "
+                "previous.fixture_observation_id AS previous_result_observation_id, "
+                "previous.captured_at AS previous_result_captured_at, "
+                "previous.raw_payload AS previous_result_raw_payload "
                 "FROM quantlab_goal_picks p "
-                "JOIN fixture_result_acquisition_states state "
-                "  ON state.fixture_id = p.fixture_id AND state.phase = 'COMPLETE' "
-                "JOIN fixture_result_observations r "
-                "  ON r.result_observation_id = state.current_observation_id "
-                " AND r.fixture_id = p.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.fixture_observation_id, o.captured_at, o.raw_payload "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.fixture_observation_id, o.captured_at, o.raw_payload "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC "
+                " LIMIT 1 OFFSET 1"
+                ") previous ON TRUE "
                 "LEFT JOIN quantlab_goal_pick_settlements s "
-                "  ON s.goal_pick_id = p.goal_pick_id "
+                " ON s.goal_pick_id = p.goal_pick_id "
                 "WHERE s.goal_pick_id IS NULL "
-                "AND r.result_classification IN ('PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE') "
                 "ORDER BY p.kickoff_at ASC, p.goal_pick_id ASC LIMIT %s",
                 (limit,),
             )
