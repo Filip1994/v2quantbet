@@ -132,18 +132,6 @@ def main() -> None:
         goal_contract["validation_method_version"],
     )
 
-    try:
-        log_cardlab_v5_audit(repository, LOGGER)
-    except Exception:
-        LOGGER.exception("QuantLab CardLab V5 startup audit failed")
-
-    try:
-        log_cornerlab_v2_audit(repository, LOGGER)
-        log_cornerlab_v2_readiness(repository, LOGGER)
-        log_cornerlab_historical_holdout(repository, LOGGER)
-    except Exception:
-        LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
-
     api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
     api_key = os.getenv("API_FOOTBALL_KEY", "").strip()
     if not api_key:
@@ -287,41 +275,55 @@ def main() -> None:
         dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
     )
     cycle_seconds = _positive_integer("QUANTBET_QUANTLAB_CYCLE_SECONDS", "300")
-    _log_latest_goal_picks(repository)
-    for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab")):
-        for row in repository.list_bets(lab, limit=20):
-            LOGGER.info(
-                "QuantLab %s shadow pick fixture=%s match=%s vs %s league=%s "
-                "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
-                "model_p=%s market_p=%s edge=%s ev=%s",
-                label,
-                row.get("fixture_id"),
-                row.get("home_team"),
-                row.get("away_team"),
-                row.get("competition_name"),
-                row.get("kickoff_at"),
-                row.get("bookmaker_name"),
-                row.get("market_key"),
-                row.get("selection"),
-                row.get("line"),
-                row.get("odds"),
-                row.get("model_probability"),
-                row.get("market_probability"),
-                row.get("edge"),
-                row.get("expected_value"),
-            )
-
     model_ready_audit_emitted = False
     try:
         server.start()
+        LOGGER.info("QuantLab dashboard listening; startup audits continue asynchronously from healthcheck perspective")
+        try:
+            log_cardlab_v5_audit(repository, LOGGER)
+        except Exception:
+            LOGGER.exception("QuantLab CardLab V5 startup audit failed")
+
+        try:
+            log_cornerlab_v2_audit(repository, LOGGER)
+            log_cornerlab_v2_readiness(repository, LOGGER)
+            log_cornerlab_historical_holdout(repository, LOGGER)
+        except Exception:
+            LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
+
+        _log_latest_goal_picks(repository)
+        for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab")):
+            for row in repository.list_bets(lab, limit=20):
+                LOGGER.info(
+                    "QuantLab %s shadow pick fixture=%s match=%s vs %s league=%s "
+                    "kickoff=%s bookmaker=%s market=%s selection=%s line=%s odds=%s "
+                    "model_p=%s market_p=%s edge=%s ev=%s",
+                    label,
+                    row.get("fixture_id"),
+                    row.get("home_team"),
+                    row.get("away_team"),
+                    row.get("competition_name"),
+                    row.get("kickoff_at"),
+                    row.get("bookmaker_name"),
+                    row.get("market_key"),
+                    row.get("selection"),
+                    row.get("line"),
+                    row.get("odds"),
+                    row.get("model_probability"),
+                    row.get("market_probability"),
+                    row.get("edge"),
+                    row.get("expected_value"),
+                )
         try:
             ensure_latest_goal_model_validation(repository, LOGGER)
         except Exception as exc:
             sqlstate = getattr(exc, "sqlstate", None)
+            error_text = str(exc)
             LOGGER.exception(
-                "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s",
+                "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s error=%s",
                 type(exc).__name__,
                 sqlstate,
+                error_text,
             )
         while not stop.is_set():
             try:
@@ -349,10 +351,12 @@ def main() -> None:
                     ensure_latest_goal_model_validation(repository, LOGGER)
                 except Exception as exc:
                     sqlstate = getattr(exc, "sqlstate", None)
+                    error_text = str(exc)
                     LOGGER.exception(
-                        "GoalLab DC+ validation failed error_class=%s sqlstate=%s",
+                        "GoalLab DC+ validation failed error_class=%s sqlstate=%s error=%s",
                         type(exc).__name__,
                         sqlstate,
+                        error_text,
                     )
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
