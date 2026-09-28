@@ -16,6 +16,8 @@ from scipy.stats import poisson
 from h2h.quant.dixon_coles import DixonColesFitError, DixonColesModel, dixon_coles_tau
 from h2h.quantlab.goal_lab.model import (
     CONTRACT_COVERAGE_V1,
+    FEATURE_VERSION,
+    MODEL_PREFIX,
     MIN_TRAINING_EXAMPLES,
     RECENCY_XI,
     _build_training,
@@ -466,6 +468,10 @@ def build_goal_model_validation(
     contract = repository.goal_model_contract(model_version)
     if contract is None:
         raise ValueError("GoalLab model artifact does not exist")
+    if not str(model_version).startswith(MODEL_PREFIX):
+        raise ValueError("GoalLab validation model is not the active model family")
+    if str(contract.get("feature_version") or "") != FEATURE_VERSION:
+        raise ValueError("GoalLab validation feature version is not active")
     cutoff = contract["training_cutoff"]
     if not isinstance(cutoff, datetime):
         raise TypeError("training_cutoff must be datetime")
@@ -836,6 +842,23 @@ def ensure_latest_goal_model_validation(
     if contract is None:
         return {"status": "NO_MODEL"}
     model_version = str(contract["model_version"])
+    feature_version = str(contract.get("feature_version") or "")
+    if not model_version.startswith(MODEL_PREFIX) or feature_version != FEATURE_VERSION:
+        logger.info(
+            "GoalLab DC+ validation waiting for active artifact latest_model=%s "
+            "latest_feature=%s active_prefix=%s active_feature=%s",
+            model_version,
+            feature_version,
+            MODEL_PREFIX,
+            FEATURE_VERSION,
+        )
+        return {
+            "status": "WAITING_ACTIVE_MODEL",
+            "model_version": model_version,
+            "feature_version": feature_version,
+            "active_model_prefix": MODEL_PREFIX,
+            "active_feature_version": FEATURE_VERSION,
+        }
     existing = repository.goal_model_validation(
         model_version,
         method_version=METHOD_VERSION,
