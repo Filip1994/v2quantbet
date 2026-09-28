@@ -933,3 +933,26 @@ Added read-only research evidence:
 GoalLab closing prices are derived at read time from immutable
 quantlab_market_observations. Closing odds remain forbidden as Structural DC+ model
 features and do not alter pick decisions.
+
+
+## 2026-09-28 — GoalLab Product / UI closure
+
+**Owner:** QuantLab dashboard + GoalLab
+
+GoalLab was consolidated into one normal operating page instead of requiring a separate
+analytics navigation layer.
+
+UI behavior:
+
+- embedded Research / Audit summary and cohort breakdowns into the main GoalLab page;
+- retained the old analytics URL only as a compatibility/read-only route;
+- added Lowest/Highest sorting links to every GoalLab research cohort header and every
+  canonical-pick ledger header;
+- research cohort labels drill into the exact underlying filtered canonical picks;
+- canonical-pick match labels open the exact pick feature/ranking evidence;
+- model versions link to the immutable model/version drilldown;
+- added explicit selection filtering alongside bookmaker/outcome/league/market/model/policy;
+- kept missing values last during ascending or descending sorting;
+- preserved filters while changing sort order.
+
+No model, pick-authority, settlement or production-write semantics changed.
