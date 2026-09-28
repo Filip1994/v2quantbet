@@ -8,7 +8,7 @@ from h2h.quantlab.goal_lab import audit
 
 
 NOW = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
-MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V1:" + "e" * 64
+MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V2:" + "e" * 64
 
 
 def _history_rows() -> tuple[dict[str, object], ...]:
@@ -43,7 +43,7 @@ class Repo:
         return {
             "model_version": MODEL_VERSION,
             "training_cutoff": NOW,
-            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
+            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2",
             "training_sample_size": 700,
             "history_match_count": 1000,
             "training_payload": {"contract_coverage": {"A_BASE_DC": {"status": "FULL"}}},
@@ -71,7 +71,7 @@ class FakeControl:
         return 1.35, 1.10
 
 
-def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
+def test_validation_v4_uses_sparse_pooled_control_and_blocks_weak_challenger(monkeypatch) -> None:
     pooled_fit_sizes: list[int] = []
 
     def fake_pooled_fit(records, **_kwargs):
@@ -125,10 +125,13 @@ def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(mon
         evaluated_at=NOW,
     )
 
-    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
+    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
-    assert validation.authority_review_status == "READY_FOR_MANUAL_REVIEW"
+    assert validation.authority_review_status == "NOT_READY"
+    assert validation.comparison["promotion_gate"]["common_evaluation_ok"] is True
+    assert validation.comparison["promotion_gate"]["leakage_ok"] is True
+    assert not all(validation.comparison["promotion_gate"].values())
     assert validation.comparison["control_leagues_fitted"] == []
     assert validation.comparison["pooled_control_fitted"] is True
     assert validation.comparison["control_scope_counts"]["pooled"] >= audit.MIN_COMMON_EVALUATION
@@ -183,3 +186,26 @@ def test_sparse_pooled_control_keeps_sparse_team_matches() -> None:
     lambda_home, lambda_away = control.expected_goals(1000, 1001)
     assert lambda_home > 0.0
     assert lambda_away > 0.0
+
+
+def test_validation_waits_for_active_v2_artifact() -> None:
+    class HistoricalRepo:
+        def goal_model_contract(self, model_version=None):
+            assert model_version is None
+            return {
+                "model_version": "DC_PLUS_PRO_STRUCTURAL_V1:" + "f" * 64,
+                "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
+            }
+
+        def goal_model_validation(self, *_args, **_kwargs):
+            raise AssertionError("historical artifact must not enter V4 validation")
+
+    class Logger:
+        def info(self, *_args, **_kwargs):
+            return None
+
+    result = audit.ensure_latest_goal_model_validation(HistoricalRepo(), Logger())
+
+    assert result["status"] == "WAITING_ACTIVE_MODEL"
+    assert result["active_model_prefix"] == "DC_PLUS_PRO_STRUCTURAL_V2:"
+    assert result["active_feature_version"] == "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2"

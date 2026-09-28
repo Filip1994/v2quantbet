@@ -10,7 +10,7 @@ from h2h.quantlab.goal_lab.audit import (
 
 
 NOW = datetime(2026, 9, 27, 0, 0, tzinfo=UTC)
-MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V1:" + "d" * 64
+MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V2:" + "d" * 64
 
 
 def _row(index: int) -> dict[str, object]:
@@ -33,7 +33,7 @@ class Repo:
         return {
             "model_version": MODEL_VERSION,
             "training_cutoff": NOW,
-            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
+            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2",
             "training_sample_size": 5,
             "history_match_count": 10,
             "training_payload": {"contract_coverage": {"A_BASE_DC": {"status": "FULL"}}},

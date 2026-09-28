@@ -11,7 +11,7 @@ from typing import Any
 from h2h.domain.fixture_result import ApiFootballSettlementResultNormalizer
 
 
-PICK_POLICY_VERSION = "GOALLAB_DC_PLUS_PICK_POLICY_V1"
+PICK_POLICY_VERSION = "GOALLAB_DC_PLUS_PICK_POLICY_V2"
 SETTLEMENT_RULE_VERSION = "GOALLAB_SETTLEMENT_V1"
 FLAT_STAKE_MINOR = 10_000
 

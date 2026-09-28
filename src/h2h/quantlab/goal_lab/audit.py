@@ -16,6 +16,8 @@ from scipy.stats import poisson
 from h2h.quant.dixon_coles import DixonColesFitError, DixonColesModel, dixon_coles_tau
 from h2h.quantlab.goal_lab.model import (
     CONTRACT_COVERAGE_V1,
+    FEATURE_VERSION,
+    MODEL_PREFIX,
     MIN_TRAINING_EXAMPLES,
     RECENCY_XI,
     _build_training,
@@ -26,7 +28,7 @@ from h2h.quantlab.goal_lab.model import (
 )
 
 
-METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
+METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
 HOLDOUT_FRACTION = 0.30
 MIN_COMMON_EVALUATION = 50
 CONTROL_RIDGE = 0.01
@@ -466,6 +468,10 @@ def build_goal_model_validation(
     contract = repository.goal_model_contract(model_version)
     if contract is None:
         raise ValueError("GoalLab model artifact does not exist")
+    if not str(model_version).startswith(MODEL_PREFIX):
+        raise ValueError("GoalLab validation model is not the active model family")
+    if str(contract.get("feature_version") or "") != FEATURE_VERSION:
+        raise ValueError("GoalLab validation feature version is not active")
     cutoff = contract["training_cutoff"]
     if not isinstance(cutoff, datetime):
         raise TypeError("training_cutoff must be datetime")
@@ -781,7 +787,27 @@ def build_goal_model_validation(
         ),
     }
     leakage = _leakage_audit()
-    ready = common_n >= MIN_COMMON_EVALUATION and leakage["status"] == "PASS"
+    promotion_gate = {
+        "common_evaluation_ok": common_n >= MIN_COMMON_EVALUATION,
+        "leakage_ok": leakage["status"] == "PASS",
+        "total_goals_rmse_non_worse": (
+            comparison["dc_plus_minus_control_total_goals_rmse"] <= 0.0
+        ),
+        "over25_brier_non_worse": (
+            comparison["dc_plus_minus_control_over25_brier"] <= 0.0
+        ),
+        "btts_brier_non_worse": (
+            comparison["dc_plus_minus_control_btts_brier"] <= 0.0
+        ),
+        "exact_score_log_likelihood_not_materially_worse": (
+            comparison["dc_plus_minus_control_exact_score_mean_log_likelihood"] >= -0.05
+        ),
+    }
+    comparison["promotion_gate"] = promotion_gate
+    comparison["automatic_promotion_rule"] = (
+        "all promotion_gate checks must pass; authority still requires exact-hash approval"
+    )
+    ready = all(promotion_gate.values())
     return GoalModelValidation(
         model_version=model_version,
         evaluated_at=evaluated_at.astimezone(UTC),
@@ -816,6 +842,23 @@ def ensure_latest_goal_model_validation(
     if contract is None:
         return {"status": "NO_MODEL"}
     model_version = str(contract["model_version"])
+    feature_version = str(contract.get("feature_version") or "")
+    if not model_version.startswith(MODEL_PREFIX) or feature_version != FEATURE_VERSION:
+        logger.info(
+            "GoalLab DC+ validation waiting for active artifact latest_model=%s "
+            "latest_feature=%s active_prefix=%s active_feature=%s",
+            model_version,
+            feature_version,
+            MODEL_PREFIX,
+            FEATURE_VERSION,
+        )
+        return {
+            "status": "WAITING_ACTIVE_MODEL",
+            "model_version": model_version,
+            "feature_version": feature_version,
+            "active_model_prefix": MODEL_PREFIX,
+            "active_feature_version": FEATURE_VERSION,
+        }
     existing = repository.goal_model_validation(
         model_version,
         method_version=METHOD_VERSION,

@@ -121,7 +121,7 @@ def main() -> None:
 
     goal_contract = assert_goallab_v1_contract()
     LOGGER.info(
-        "GoalLab V1 lock verified lock=%s model_prefix=%s feature=%s "
+        "GoalLab active lock verified lock=%s model_prefix=%s feature=%s "
         "evaluation_policy=%s pick_policy=%s settlement=%s validation=%s",
         goal_contract["lock_version"],
         goal_contract["model_prefix"],
