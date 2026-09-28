@@ -10,7 +10,7 @@ from h2h.quantlab.goal_lab.audit import (
 
 
 NOW = datetime(2026, 9, 27, 0, 0, tzinfo=UTC)
-MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V2:" + "d" * 64
+MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V3:" + "d" * 64
 
 
 def _row(index: int) -> dict[str, object]:
@@ -41,7 +41,7 @@ class Repo:
 
     def goal_model_history(self, *, before, limit):
         assert before == NOW
-        assert limit == 10_000
+        assert limit == 30_000
         return tuple(_row(index) for index in range(10))
 
 
