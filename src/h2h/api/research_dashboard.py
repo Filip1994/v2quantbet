@@ -1527,7 +1527,7 @@ main{{padding:14px}}header{{display:block}}}}
         metric_params = {
             key: value
             for key, value in params.items()
-            if key not in {"tab", "result"}
+            if key not in {"tab", "result", "sort", "dir"}
         }
         filtered = self.signals(metric_params)
 
@@ -1583,6 +1583,71 @@ main{{padding:14px}}header{{display:block}}}}
             rows = awaiting_rows
         else:
             rows = active_rows
+
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
+        def board_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("competition_name") or "").casefold(),
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "PENDING": 2, "WIN": 3}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            mapping = {
+                "kickoff": "kickoff_at",
+                "model": "model_probability",
+                "odds": "odds",
+                "route": "disposition",
+                "edge": "edge",
+                "ev": "expected_value",
+                "bookmaker": "bookmaker",
+                "qualified": "qualified_at",
+                "exposure": "last_open_exposure_minor",
+                "status": "result_phase",
+                "entry": "odds",
+                "close": "closing_odds",
+                "clv": "clv_ppm",
+                "pnl": "pnl_minor",
+            }
+            field = mapping.get(sort_key)
+            if field is None:
+                return None
+            value = row.get(field)
+            if sort_key == "status":
+                return (
+                    str(row.get("outcome") or "").casefold(),
+                    str(row.get("result_phase") or "").casefold(),
+                    str(row.get("result_provider_status") or "").casefold(),
+                )
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        if sort_key:
+            rows = _sorted_for_display(
+                rows,
+                value=board_sort_value,
+                direction=sort_dir,
+            )
+
+        sort_base_params = {
+            key: value[0]
+            for key, value in params.items()
+            if value and value[0] and key not in {"sort", "dir", "tab"}
+        }
+        sort_base_params["tab"] = tab
 
         settled = history_rows
         wins = sum(row["outcome"] == "WIN" for row in settled)
@@ -1645,6 +1710,19 @@ main{{padding:14px}}header{{display:block}}}}
             label = value.replace("_", " ")
             return f'<span class="mini-badge freshness-{css}">{escape(label)}</span>'
 
+        def board_headers(columns: tuple[tuple[str, str], ...]) -> str:
+            return "".join(
+                _sortable_th(
+                    label,
+                    key,
+                    path="/research",
+                    base_params=sort_base_params,
+                    active_key=sort_key,
+                    active_dir=sort_dir,
+                )
+                for label, key in columns
+            )
+
         body_rows: list[str] = []
         if tab in {"active", "awaiting"}:
             for row in rows:
@@ -1687,10 +1765,21 @@ main{{padding:14px}}header{{display:block}}}}
                     )
                     + "</td></tr>"
                 )
-            headers = (
-                "<th>Match</th><th>Kickoff</th><th>Pick</th><th>Model</th>"
-                "<th>Odds</th><th>Route</th><th>Edge</th><th>EV</th><th>Bookmaker</th>"
-                "<th>Qualified</th><th>Exposure</th><th>Status</th>"
+            headers = board_headers(
+                (
+                    ("Match", "match"),
+                    ("Kickoff", "kickoff"),
+                    ("Pick", "pick"),
+                    ("Model", "model"),
+                    ("Odds", "odds"),
+                    ("Route", "route"),
+                    ("Edge", "edge"),
+                    ("EV", "ev"),
+                    ("Bookmaker", "bookmaker"),
+                    ("Qualified", "qualified"),
+                    ("Exposure", "exposure"),
+                    ("Status", "status"),
+                )
             )
             empty_text = (
                 "No awaiting-result research picks match these filters."
@@ -1747,10 +1836,22 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<td>{_time(row["qualified_at"])}</td>'
                     "</tr>"
                 )
-            headers = (
-                "<th>Match</th><th>Result</th><th>Pick</th><th>Kickoff</th><th>Entry</th>"
-                "<th>Research close</th><th>CLV</th><th>Model</th><th>EV</th>"
-                "<th>Route</th><th>P/L</th><th>Bookmaker</th><th>Qualified</th>"
+            headers = board_headers(
+                (
+                    ("Match", "match"),
+                    ("Result", "result"),
+                    ("Pick", "pick"),
+                    ("Kickoff", "kickoff"),
+                    ("Entry", "entry"),
+                    ("Research close", "close"),
+                    ("CLV", "clv"),
+                    ("Model", "model"),
+                    ("EV", "ev"),
+                    ("Route", "route"),
+                    ("P/L", "pnl"),
+                    ("Bookmaker", "bookmaker"),
+                    ("Qualified", "qualified"),
+                )
             )
             empty_text = "No historical research picks match these filters."
             colspan = 13
@@ -1793,6 +1894,12 @@ main{{padding:14px}}header{{display:block}}}}
         awaiting_href = escape(tab_href("awaiting"), quote=True)
         history_href = escape(tab_href("history"), quote=True)
         clear_href = f"/research?tab={tab}"
+        sort_hidden = ""
+        if sort_key:
+            sort_hidden = (
+                f'<input type="hidden" name="sort" value="{escape(sort_key, quote=True)}">'
+                f'<input type="hidden" name="dir" value="{escape(sort_dir, quote=True)}">'
+            )
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1823,6 +1930,10 @@ button{{background:#d4d8dc;color:#17191b;border-color:#d4d8dc;font-weight:900;cu
 .table-title b{{font-size:14px}}.table-title span{{font-size:12px;color:var(--muted)}}.table{{overflow:auto;max-height:70vh}}
 table{{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line-soft);text-align:left;white-space:nowrap;vertical-align:middle}}
 th{{position:sticky;top:0;z-index:3;background:#1b1f23;color:#959da5;text-transform:uppercase;letter-spacing:.06em;font-size:10px;font-weight:900}}
+.th-wrap{{display:flex;align-items:center;gap:6px}}.sort-tools{{display:inline-flex;gap:2px}}
+.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid #343b42;
+border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
+.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#20252a}}tbody tr:last-child td{{border-bottom:0}}
 td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
@@ -1862,6 +1973,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="toolbar">
 <form method="get">
 <input type="hidden" name="tab" value="{tab}">
+{sort_hidden}
 <select name="market" aria-label="Market filter"><option value="">All markets</option><option {"selected" if field("market")=="BTTS" else ""}>BTTS</option><option {"selected" if field("market")=="OU_25" else ""}>OU_25</option></select>
 <select name="disposition" aria-label="Route filter"><option value="">All routes</option>{option_list("disposition", ("PLAYED","SKIPPED","BLOCKED_EXPOSURE"))}</select>
 <select name="p_bucket" aria-label="Probability bucket"><option value="">All p buckets</option>{option_list("p_bucket", ("40–45%","45–50%","50–55%","55–60%","60–65%","65–70%","70–75%","75%+"))}</select>
