@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,10 @@ from h2h.persistence.migrations import apply_migrations
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.persistence.pick_registration import BankrollBootstrapConflictError
+from h2h.quantlab.goal_lab.picks import (
+    settle_goal_pick,
+    stable_goal_result_evidence,
+)
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 from tests.test_config import registration_environment
@@ -289,3 +294,210 @@ def test_goallab_dashboard_queries_work_on_fresh_schema(isolated_database) -> No
     assert len(decisions) == 1
     assert decisions[0]["fixture_id"] == fixture_id
     assert decisions[0]["competition_name"] == "Premier League"
+
+
+def test_goallab_pick_result_refresh_to_settlement_e2e(isolated_database) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        apply_migrations(connection, MIGRATION_DIR)
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    kickoff = now - timedelta(hours=3)
+    decision_at = kickoff - timedelta(hours=2)
+    quote_at = decision_at - timedelta(minutes=5)
+    first_terminal = kickoff + timedelta(hours=2)
+    second_terminal = first_terminal + timedelta(minutes=15)
+    fixture_id = "api-football:9900101"
+    provider_fixture_id = 9_900_101
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V1:" + "1" * 64
+    feature_snapshot_id = "quantlab-goal-features-v1:" + "2" * 64
+    selected_observation_id = "quantlab-market-v1:" + "3" * 64
+    companion_observation_id = "quantlab-market-v1:" + "4" * 64
+    decision_id = "quantlab-goal-decision-v1:" + "5" * 64
+    goal_pick_id = "quantlab-goal-pick-v1:" + "6" * 64
+
+    def provider_payload(status: str, home: int | None, away: int | None) -> dict:
+        return {
+            "fixture": {
+                "id": provider_fixture_id,
+                "date": kickoff.isoformat(),
+                "status": {"short": status},
+            },
+            "teams": {
+                "home": {"id": 101, "name": "Home"},
+                "away": {"id": 202, "name": "Away"},
+            },
+            "goals": {"home": home, "away": away},
+            "score": {
+                "fulltime": {"home": home, "away": away},
+                "extratime": {"home": None, "away": None},
+                "penalty": {"home": None, "away": None},
+            },
+        }
+
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO quantlab_fixtures "
+            "(fixture_id, provider_fixture_id, first_seen_at) VALUES (%s, %s, %s)",
+            (fixture_id, provider_fixture_id, decision_at - timedelta(hours=1)),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_fixture_observations ("
+            "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+            "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+            "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+            ") VALUES (%s, %s, %s, 39, 2026, 101, 202, 'Home', 'Away', "
+            "'Premier League', 'England', 'League', %s, 'NS', %s, %s::jsonb)",
+            (
+                "quantlab-fixture-v1:" + "7" * 64,
+                fixture_id,
+                provider_fixture_id,
+                kickoff,
+                decision_at - timedelta(hours=1),
+                json.dumps(provider_payload("NS", None, None)),
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_model_versions ("
+            "model_version, trained_at, training_cutoff, feature_version, "
+            "training_sample_size, history_match_count, team_count, league_count, "
+            "ridge_team, ridge_feature, rho, intercept, home_advantage, parameters, "
+            "feature_means, feature_scales, training_payload"
+            ") VALUES (%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1', "
+            "100, 120, 20, 2, 1, 1, -0.04, 0.1, 0.2, '{}'::jsonb, '{}'::jsonb, "
+            "'{}'::jsonb, '{}'::jsonb)",
+            (model_version, decision_at - timedelta(days=1), decision_at - timedelta(days=1)),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_feature_snapshots ("
+            "feature_snapshot_id, fixture_id, decision_at, model_version, "
+            "expected_home_goals, expected_away_goals, home_history_size, "
+            "away_history_size, feature_payload"
+            ") VALUES (%s, %s, %s, %s, 1.80, 1.10, 10, 10, '{}'::jsonb)",
+            (feature_snapshot_id, fixture_id, decision_at, model_version),
+        )
+        for observation_id, raw_selection, odds in (
+            (selected_observation_id, "Over 2.5", 1.95),
+            (companion_observation_id, "Under 2.5", 1.85),
+        ):
+            cursor.execute(
+                "INSERT INTO quantlab_market_observations ("
+                "market_observation_id, fixture_id, provider_fixture_id, bookmaker_id, "
+                "bookmaker_name, provider_bet_id, provider_bet_name, raw_selection, "
+                "parsed_line, odds, captured_at, lab_owner, classifier_version, raw_payload"
+                ") VALUES (%s, %s, %s, 8, 'Bet365', 5, 'Goals Over/Under', %s, "
+                "2.5, %s, %s, 'GOAL', 'MARKET_CLASSIFIER_V1', '{}'::jsonb)",
+                (
+                    observation_id,
+                    fixture_id,
+                    provider_fixture_id,
+                    raw_selection,
+                    odds,
+                    quote_at,
+                ),
+            )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_decisions ("
+            "decision_id, fixture_id, decision_at, policy_version, model_name, model_version, "
+            "bookmaker_id, bookmaker_name, provider_bet_id, provider_bet_name, market_key, "
+            "selection, line, selected_observation_id, companion_observation_id, "
+            "quote_observed_at, odds, companion_odds, market_probability, model_probability, "
+            "edge, expected_value, decision, reason, evidence_fingerprint, details"
+            ") VALUES (%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2', "
+            "'DC+ Pro Structural', %s, 8, 'Bet365', 5, 'Goals Over/Under', 'OU_25', "
+            "'OVER', 2.5, %s, %s, %s, 1.95, 1.85, 0.52, 0.60, 0.08, 0.17, "
+            "'PICK', 'CANONICAL_FIXTURE_PICK', %s, '{}'::jsonb)",
+            (
+                decision_id,
+                fixture_id,
+                decision_at,
+                model_version,
+                selected_observation_id,
+                companion_observation_id,
+                quote_at,
+                "8" * 64,
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_picks ("
+            "goal_pick_id, fixture_id, source_decision_id, feature_snapshot_id, "
+            "pick_policy_version, model_name, model_version, bookmaker_id, bookmaker_name, "
+            "provider_bet_id, provider_bet_name, market_key, selection, line, "
+            "selected_observation_id, companion_observation_id, quote_observed_at, "
+            "decision_at, kickoff_at, odds, companion_odds, market_probability, "
+            "model_probability, edge, expected_value, expected_home_goals, "
+            "expected_away_goals, rho, stake_minor, qualifying_candidate_count, "
+            "selection_rank_payload"
+            ") VALUES (%s, %s, %s, %s, 'GOALLAB_DC_PLUS_PICK_POLICY_V1', "
+            "'DC+ Pro Structural', %s, 8, 'Bet365', 5, 'Goals Over/Under', 'OU_25', "
+            "'OVER', 2.5, %s, %s, %s, %s, %s, 1.95, 1.85, 0.52, 0.60, 0.08, 0.17, "
+            "1.80, 1.10, -0.04, 10000, 2, '{}'::jsonb)",
+            (
+                goal_pick_id,
+                fixture_id,
+                decision_id,
+                feature_snapshot_id,
+                model_version,
+                selected_observation_id,
+                companion_observation_id,
+                quote_at,
+                decision_at,
+                kickoff,
+            ),
+        )
+
+    repository = PostgreSQLQuantLabRepository(connect=connect)
+
+    refresh_due = repository.goal_pick_result_refresh_candidates(
+        now=kickoff + timedelta(hours=2),
+    )
+    assert tuple(row["fixture_id"] for row in refresh_due) == (fixture_id,)
+
+    with connect() as connection, connection.cursor() as cursor:
+        for suffix, captured_at in (("9", first_terminal), ("a", second_terminal)):
+            cursor.execute(
+                "INSERT INTO quantlab_fixture_observations ("
+                "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+                "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+                "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+                ") VALUES (%s, %s, %s, 39, 2026, 101, 202, 'Home', 'Away', "
+                "'Premier League', 'England', 'League', %s, 'FT', %s, %s::jsonb)",
+                (
+                    "quantlab-fixture-v1:" + suffix * 64,
+                    fixture_id,
+                    provider_fixture_id,
+                    kickoff,
+                    captured_at,
+                    json.dumps(provider_payload("FT", 2, 1)),
+                ),
+            )
+
+    candidates = repository.goal_pick_settlement_candidates(limit=10)
+    assert len(candidates) == 1
+    evidence = stable_goal_result_evidence(candidates[0])
+    assert evidence is not None
+    settlement_row = dict(candidates[0])
+    settlement_row.update(evidence)
+    settlement = settle_goal_pick(
+        settlement_row,
+        settled_at=second_terminal + timedelta(minutes=1),
+    )
+    assert settlement is not None
+    assert settlement.outcome == "WIN"
+    assert settlement.pnl_minor == 9_500
+    assert repository.save_goal_pick_settlement(settlement) is True
+
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT outcome, pnl_minor, result_classification, regulation_home_goals, "
+            "regulation_away_goals, result_detail ->> 'result_confirmation_count' "
+            "FROM quantlab_goal_pick_settlements WHERE goal_pick_id = %s",
+            (goal_pick_id,),
+        )
+        stored = cursor.fetchone()
+
+    assert stored == ("WIN", 9_500, "PLAYED_SETTLEABLE", 2, 1, "2")
+    assert repository.goal_pick_settlement_candidates(limit=10) == ()
+    assert repository.goal_pick_result_refresh_candidates(
+        now=second_terminal + timedelta(hours=1),
+    ) == ()
