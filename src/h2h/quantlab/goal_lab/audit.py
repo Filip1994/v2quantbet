@@ -439,7 +439,11 @@ def build_goal_model_validation(
         league_id = int(league_ids[index])
         control = controls.get(league_id)
         control_scope = "league"
-        if control is None or home_id not in set(control.team_ids) or away_id not in set(control.team_ids):
+        if (
+            control is None
+            or home_id not in set(control.team_ids)
+            or away_id not in set(control.team_ids)
+        ):
             control = pooled_control
             control_scope = "pooled"
         if control is None:
