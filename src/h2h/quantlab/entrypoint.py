@@ -300,6 +300,10 @@ def main() -> None:
     model_ready_audit_emitted = False
     try:
         server.start()
+        try:
+            ensure_latest_goal_model_validation(repository, LOGGER)
+        except Exception:
+            LOGGER.exception("GoalLab DC+ startup validation failed")
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
