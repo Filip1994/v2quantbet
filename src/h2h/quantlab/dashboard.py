@@ -178,6 +178,60 @@ def _drawdown(rows: tuple[dict[str, Any], ...]) -> int:
     return max_drawdown
 
 
+def _sort_value(value: Any) -> tuple[int, Any]:
+    if value is None:
+        return (1, "")
+    if isinstance(value, datetime):
+        return (0, value.timestamp())
+    if isinstance(value, (int, float, Decimal)):
+        return (0, float(value))
+    return (0, str(value).casefold())
+
+
+def _sort_rows(
+    rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    key: str,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    reverse = direction == "desc"
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (_sort_value(row.get(key)), str(row.get("goal_pick_id") or row.get("fixture_id") or "")),
+            reverse=reverse,
+        )
+    )
+
+
+def _sortable_th(
+    label: str,
+    key: str,
+    *,
+    base_params: dict[str, str],
+    sort_param: str,
+    dir_param: str,
+    active_key: str,
+    active_dir: str,
+    anchor: str,
+) -> str:
+    def href(direction: str) -> str:
+        params = {name: value for name, value in base_params.items() if value != ""}
+        params[sort_param] = key
+        params[dir_param] = direction
+        return "/quantlab?" + urlencode(params) + f"#{anchor}"
+
+    return (
+        '<th><span class="th-wrap"><span>'
+        + escape(label)
+        + '</span><span class="sort-tools">'
+        + f'<a class="{"sort-active" if active_key == key and active_dir == "asc" else ""}" '
+        + f'href="{escape(href("asc"), quote=True)}" title="Lowest first">↑</a>'
+        + f'<a class="{"sort-active" if active_key == key and active_dir == "desc" else ""}" '
+        + f'href="{escape(href("desc"), quote=True)}" title="Highest first">↓</a>'
+        + "</span></span></th>"
+    )
+
+
 class QuantLabDashboardService:
     def __init__(
         self,
@@ -201,6 +255,7 @@ class QuantLabDashboardService:
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         market = params.get("market", [""])[0].strip().casefold()
+        selection = params.get("selection", [""])[0].strip().casefold()
         model_version = params.get("model_version", [""])[0].strip()
         policy_version = params.get("policy_version", [""])[0].strip()
 
@@ -212,6 +267,8 @@ class QuantLabDashboardService:
             if league and league not in str(row.get("competition_name") or "").casefold():
                 return False
             if market and market not in str(row.get("market_key") or "").casefold():
+                return False
+            if selection and selection != str(row.get("selection") or "").casefold():
                 return False
             if model_version and str(row.get("model_version") or "") != model_version:
                 return False
@@ -312,6 +369,31 @@ class QuantLabDashboardService:
             dashboard_warnings.append("Canonical pick ledger temporarily unavailable.")
             rows = ()
             metric_rows = ()
+        ledger_sort = params.get("ledger_sort", ["decision_at"])[0].strip()
+        ledger_dir = params.get("ledger_dir", ["desc"])[0].strip().casefold()
+        ledger_keys = {
+            "match", "bookmaker_name", "market_key", "selection", "line", "model_version",
+            "model_probability", "odds", "edge", "expected_value", "closing_odds", "outcome",
+            "pnl_minor", "decision_at",
+        }
+        if ledger_sort not in ledger_keys:
+            ledger_sort = "decision_at"
+        if ledger_dir not in {"asc", "desc"}:
+            ledger_dir = "desc"
+        if ledger_sort == "match":
+            rows = tuple(
+                sorted(
+                    rows,
+                    key=lambda row: (
+                        str(row.get("home_team") or "").casefold(),
+                        str(row.get("away_team") or "").casefold(),
+                    ),
+                    reverse=ledger_dir == "desc",
+                )
+            )
+        else:
+            rows = _sort_rows(rows, ledger_sort, ledger_dir)
+
         settled = tuple(
             row for row in metric_rows if row.get("outcome") in {"WIN", "LOSS", "VOID"}
         )
@@ -380,7 +462,12 @@ class QuantLabDashboardService:
                 "LOSS": "result-loss",
                 "VOID": "result-void",
             }.get(outcome, "result-pending")
-            match = f'{escape(str(row.get("home_team") or "?"))} – {escape(str(row.get("away_team") or "?"))}'
+            match_text = f'{escape(str(row.get("home_team") or "?"))} – {escape(str(row.get("away_team") or "?"))}'
+            if lab_key == "goal" and row.get("goal_pick_id"):
+                pick_href = "/quantlab/goal/pick?" + urlencode({"goal_pick_id": str(row["goal_pick_id"])})
+                match = f'<a href="{escape(pick_href, quote=True)}">{match_text}</a>'
+            else:
+                match = match_text
             league_text = escape(str(row.get("competition_name") or "—"))
             line = "—" if row.get("line") is None else escape(str(row["line"]))
             note_cell = _corner_pick_note(row) if lab_key == "corner" else "—"
@@ -398,7 +485,11 @@ class QuantLabDashboardService:
                 f'<td>{escape(str(row.get("selection") or "—"))}</td>'
                 f"<td>{line}</td>"
                 f'<td>{escape(str(row.get("model_name") or "—"))}'
-                f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                + (
+                    f'<small><a href="{escape("/quantlab/goal/model?" + urlencode({"model_version": str(row.get("model_version") or "")}), quote=True)}">{escape(str(row.get("model_version") or "—"))}</a></small>'
+                    if lab_key == "goal" and row.get("model_version")
+                    else f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                )
                 + (
                     f'<small>λH {_rate(row.get("expected_home_goals"))} · '
                     f'λA {_rate(row.get("expected_away_goals"))}</small>'
@@ -813,6 +904,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}">
+<input name="selection" placeholder="Selection" value="{field("selection")}">
 <input name="model_version" placeholder="Exact model version" value="{field("model_version")}">
 <input name="policy_version" placeholder="Exact policy version" value="{field("policy_version")}">
 <button type="submit">Apply</button></form></section>
