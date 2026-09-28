@@ -247,7 +247,11 @@ The Goal tab is the operational surface for:
 - pending/WIN/LOSS/VOID settlement state;
 - P&L / ROI and model probabilities.
 
-GoalLab Analytics V2 is the read-only research/audit surface. It reports:
+GoalLab Research / Audit is now embedded directly in the main GoalLab page. The legacy
+`/quantlab/goal/analytics` route remains read-only for compatibility, but normal operation
+does not require a second navigation layer.
+
+The same-page research surface reports:
 
 - model, policy, market/selection, bookmaker, league and weekly cohorts;
 - selected-pick Brier score, binary log loss and calibration bins;
@@ -262,6 +266,16 @@ after the entry quote and strictly before kickoff. It is research evidence only 
 never a probability-model input.
 
 CornerLab and CardLab remain separate labs and are not part of GoalLab pick semantics.
+
+Product/UI rules:
+
+- one main GoalLab page owns KPIs, filters, research cohorts, model contract, upcoming pipeline and canonical picks;
+- all research-table headers expose Lowest/Highest sorting controls;
+- canonical-pick ledger headers expose the same two-way sorting contract;
+- cohort values drill directly into the underlying filtered canonical picks;
+- a canonical-pick match opens its exact pick/evidence drilldown;
+- a model version opens its immutable model contract / feature drilldown;
+- filters are preserved across sorting so aggregate-to-row navigation remains reproducible.
 
 ## Scope
 
