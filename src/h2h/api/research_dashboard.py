@@ -226,6 +226,61 @@ def _parse_float(raw: str | None) -> float | None:
     return float(raw)
 
 
+def _sorted_for_display(
+    rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    *,
+    value,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    """Sort display rows while keeping missing values at the bottom."""
+    reverse = direction == "desc"
+    present: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for row in rows:
+        sort_value = value(row)
+        if sort_value is None:
+            missing.append(row)
+        else:
+            present.append(row)
+    present.sort(key=value, reverse=reverse)
+    return tuple(present + missing)
+
+
+def _sortable_th(
+    label: str,
+    key: str,
+    *,
+    path: str,
+    base_params: dict[str, Any],
+    active_key: str,
+    active_dir: str,
+    anchor: str = "",
+) -> str:
+    def href(direction: str) -> str:
+        params = {
+            name: str(value)
+            for name, value in base_params.items()
+            if value is not None and str(value) != ""
+        }
+        params["sort"] = key
+        params["dir"] = direction
+        suffix = f"#{anchor}" if anchor else ""
+        return path + "?" + urlencode(params) + suffix
+
+    low_active = active_key == key and active_dir == "asc"
+    high_active = active_key == key and active_dir == "desc"
+    return (
+        "<th><span class=\"th-wrap\"><span>"
+        + escape(label)
+        + "</span><span class=\"sort-tools\">"
+        + f'<a class="{"sort-active" if low_active else ""}" '
+        + f'href="{escape(href("asc"), quote=True)}" title="Lowest first">↑</a>'
+        + f'<a class="{"sort-active" if high_active else ""}" '
+        + f'href="{escape(href("desc"), quote=True)}" title="Highest first">↓</a>'
+        + "</span></span></th>"
+    )
+
+
 def _one_signal_per_fixture(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[dict[str, Any], ...]:
