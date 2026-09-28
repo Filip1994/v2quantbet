@@ -242,8 +242,7 @@ def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> N
         "line": 2.5,
         "odds": 2.0,
         "stake_minor": 10_000,
-        "result_phase": "COMPLETE",
-        "result_classification": "PLAYED",
+        "result_classification": "PLAYED_SETTLEABLE",
         "regulation_home_goals": 2,
         "regulation_away_goals": 1,
         "result_observation_id": "result-2",
@@ -251,7 +250,7 @@ def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> N
     invalid = dict(valid)
     invalid["goal_pick_id"] = "quantlab-goal-pick-v1:" + "c" * 64
     invalid["fixture_id"] = "api-football:9301"
-    invalid["odds"] = 1.0
+    invalid["market_key"] = "UNSUPPORTED"
 
     class Repo:
         def goal_pick_settlement_candidates(self, *, limit):
