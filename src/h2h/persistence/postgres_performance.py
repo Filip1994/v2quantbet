@@ -7,6 +7,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
+from h2h.persistence.postgres_operator_risk import effective_played_open_exposure
 from h2h.read_models.performance import (
     BankrollCurvePoint,
     PerformanceGroup,
@@ -133,6 +134,7 @@ class PostgreSQLPerformanceRepository:
                 (bankroll_account_id, bankroll_account_id),
             )
             row = cursor.fetchone()
+            reserved_open_exposure = effective_played_open_exposure(cursor, bankroll_account_id)
         if row is None:
             raise LookupError(f"bankroll account {bankroll_account_id!r} does not exist")
         initial = int(row[1])
@@ -144,7 +146,7 @@ class PostgreSQLPerformanceRepository:
             currency=row[0],
             initial_bankroll_minor=initial,
             available_bankroll_minor=initial - total_staked + gross_returns,
-            open_exposure_minor=pending,
+            open_exposure_minor=reserved_open_exposure,
             total_staked_minor=total_staked,
             resolved_stake_minor=int(row[4]),
             gross_returns_minor=gross_returns,
