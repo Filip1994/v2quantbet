@@ -16,6 +16,7 @@ from h2h.persistence.migrations import apply_migrations
 from h2h.persistence.postgres_pick_registration import PostgreSQLPickRegistrationRepository
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.persistence.pick_registration import BankrollBootstrapConflictError
+from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 from tests.test_config import registration_environment
 
@@ -233,3 +234,58 @@ def test_stale_complete_market_retry_is_exact_and_restart_safe(isolated_database
     )
     assert waiting.due_fixtures == ()
     assert retry.due_fixtures[0].stale_retry is True
+
+
+def test_goallab_dashboard_queries_work_on_fresh_schema(isolated_database) -> None:
+    _schema, connect = isolated_database
+    with connect() as connection:
+        apply_migrations(connection, MIGRATION_DIR)
+
+    now = datetime.now(UTC)
+    fixture_id = "api-football:9900001"
+    with connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO quantlab_fixtures "
+            "(fixture_id, provider_fixture_id, first_seen_at) VALUES (%s, %s, %s)",
+            (fixture_id, 9_900_001, now),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_fixture_observations ("
+            "fixture_observation_id, fixture_id, provider_fixture_id, league_id, season, "
+            "home_team_id, away_team_id, home_team, away_team, competition_name, country, "
+            "competition_type, kickoff_at, provider_status, captured_at, raw_payload"
+            ") VALUES (%s, %s, %s, 39, 2026, 1, 2, 'Home', 'Away', "
+            "'Premier League', 'England', 'League', %s, 'NS', %s, '{}'::jsonb)",
+            (
+                "quantlab-fixture-v1:" + "a" * 64,
+                fixture_id,
+                9_900_001,
+                now + timedelta(hours=4),
+                now,
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO quantlab_goal_decisions ("
+            "decision_id, fixture_id, decision_at, policy_version, model_name, model_version, "
+            "decision, reason, evidence_fingerprint, details"
+            ") VALUES (%s, %s, %s, 'GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2', "
+            "'DC+ Pro Structural', %s, 'PASS', 'EDGE_BELOW_MINIMUM', %s, '{}'::jsonb)",
+            (
+                "quantlab-goal-decision-v1:" + "b" * 64,
+                fixture_id,
+                now,
+                "DC_PLUS_PRO_STRUCTURAL_V1:" + "c" * 64,
+                "d" * 64,
+            ),
+        )
+
+    repository = PostgreSQLQuantLabRepository(connect=connect)
+    pipeline = repository.list_goal_fixture_status(now=now)
+    decisions = repository.list_all_goal_decisions()
+
+    assert len(pipeline) == 1
+    assert pipeline[0]["fixture_id"] == fixture_id
+    assert pipeline[0]["reason"] == "EDGE_BELOW_MINIMUM"
+    assert len(decisions) == 1
+    assert decisions[0]["fixture_id"] == fixture_id
+    assert decisions[0]["competition_name"] == "Premier League"
