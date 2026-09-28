@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+from scipy.optimize import minimize
+from scipy.special import gammaln
 from scipy.stats import poisson
 
 from h2h.quant.dixon_coles import DixonColesFitError, DixonColesModel, dixon_coles_tau
@@ -24,7 +26,7 @@ from h2h.quantlab.goal_lab.model import (
 )
 
 
-METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V2"
+METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
 HOLDOUT_FRACTION = 0.30
 MIN_COMMON_EVALUATION = 50
 CONTROL_RIDGE = 0.01
@@ -181,6 +183,217 @@ def _dc_plus_lambda(
     return (
         math.exp(max(-6.0, min(4.0, eta_home))),
         math.exp(max(-6.0, min(4.0, eta_away))),
+    )
+
+
+def _fit_sparse_pooled_control(
+    records: list[Any],
+    *,
+    reference_time: datetime,
+) -> DixonColesModel:
+    """Fit a feature-free pooled DC control with neutral effects for sparse teams."""
+    records = [record for record in records if record.date < reference_time]
+    if len(records) < CONTROL_MIN_MATCHES:
+        raise DixonColesFitError(
+            f"insufficient pooled training sample {len(records)} < {CONTROL_MIN_MATCHES}"
+        )
+
+    team_counts = DixonColesModel.team_match_counts(records)
+    team_ids = tuple(
+        sorted(
+            {int(record.home_id) for record in records}
+            | {int(record.away_id) for record in records}
+        )
+    )
+    latent_team_ids = tuple(
+        team_id
+        for team_id in team_ids
+        if team_counts[team_id] >= CONTROL_MIN_TEAM_APPEARANCES
+    )
+    latent_index = {team_id: index for index, team_id in enumerate(latent_team_ids)}
+
+    n = len(records)
+    nt = len(latent_team_ids)
+    home_ids = np.asarray([int(record.home_id) for record in records], dtype=np.int64)
+    away_ids = np.asarray([int(record.away_id) for record in records], dtype=np.int64)
+    home_goals = np.asarray([int(record.home_goals) for record in records], dtype=float)
+    away_goals = np.asarray([int(record.away_goals) for record in records], dtype=float)
+    dates = np.asarray([record.date for record in records], dtype=object)
+
+    home_idx = np.asarray(
+        [latent_index.get(int(team_id), -1) for team_id in home_ids], dtype=np.int64
+    )
+    away_idx = np.asarray(
+        [latent_index.get(int(team_id), -1) for team_id in away_ids], dtype=np.int64
+    )
+    home_valid = home_idx >= 0
+    away_valid = away_idx >= 0
+    home_safe = np.where(home_valid, home_idx, 0)
+    away_safe = np.where(away_valid, away_idx, 0)
+
+    attack_slice = slice(0, nt)
+    defense_slice = slice(nt, 2 * nt)
+    intercept_index = 2 * nt
+    home_adv_index = intercept_index + 1
+    rho_index = intercept_index + 2
+    size = rho_index + 1
+
+    mean_goals = max(0.2, float(np.mean(np.concatenate([home_goals, away_goals]))))
+    initial = np.zeros(size, dtype=float)
+    initial[intercept_index] = math.log(mean_goals)
+    initial[home_adv_index] = 0.10
+    initial[rho_index] = -0.05
+
+    ages = np.asarray(
+        [
+            max(0.0, (reference_time - item).total_seconds() / 86_400.0)
+            for item in dates
+        ],
+        dtype=float,
+    )
+    weights = np.exp(-RECENCY_XI * ages)
+
+    def objective(params: np.ndarray) -> tuple[float, np.ndarray]:
+        attacks = params[attack_slice]
+        defenses = params[defense_slice]
+        intercept = float(params[intercept_index])
+        home_adv = float(params[home_adv_index])
+        rho = float(params[rho_index])
+
+        if nt:
+            home_attack = np.where(home_valid, attacks[home_safe], 0.0)
+            away_attack = np.where(away_valid, attacks[away_safe], 0.0)
+            home_defense = np.where(home_valid, defenses[home_safe], 0.0)
+            away_defense = np.where(away_valid, defenses[away_safe], 0.0)
+        else:
+            home_attack = away_attack = np.zeros(n, dtype=float)
+            home_defense = away_defense = np.zeros(n, dtype=float)
+
+        eta_home_raw = intercept + home_adv + home_attack + away_defense
+        eta_away_raw = intercept + away_attack + home_defense
+        eta_home = np.clip(eta_home_raw, -5.0, 3.0)
+        eta_away = np.clip(eta_away_raw, -5.0, 3.0)
+        lambda_home = np.exp(eta_home)
+        lambda_away = np.exp(eta_away)
+
+        tau = np.ones(n, dtype=float)
+        dlogtau_home = np.zeros(n, dtype=float)
+        dlogtau_away = np.zeros(n, dtype=float)
+        dlogtau_rho = np.zeros(n, dtype=float)
+        mask00 = (home_goals == 0) & (away_goals == 0)
+        mask01 = (home_goals == 0) & (away_goals == 1)
+        mask10 = (home_goals == 1) & (away_goals == 0)
+        mask11 = (home_goals == 1) & (away_goals == 1)
+
+        tau[mask00] = 1.0 - lambda_home[mask00] * lambda_away[mask00] * rho
+        tau[mask01] = 1.0 + lambda_home[mask01] * rho
+        tau[mask10] = 1.0 + lambda_away[mask10] * rho
+        tau[mask11] = 1.0 - rho
+        if np.any(tau <= 1e-10) or not np.all(np.isfinite(tau)):
+            return 1e12, np.zeros_like(params)
+
+        dlogtau_home[mask00] = (
+            -lambda_home[mask00] * lambda_away[mask00] * rho / tau[mask00]
+        )
+        dlogtau_away[mask00] = dlogtau_home[mask00]
+        dlogtau_rho[mask00] = (
+            -lambda_home[mask00] * lambda_away[mask00] / tau[mask00]
+        )
+        dlogtau_home[mask01] = lambda_home[mask01] * rho / tau[mask01]
+        dlogtau_rho[mask01] = lambda_home[mask01] / tau[mask01]
+        dlogtau_away[mask10] = lambda_away[mask10] * rho / tau[mask10]
+        dlogtau_rho[mask10] = lambda_away[mask10] / tau[mask10]
+        dlogtau_rho[mask11] = -1.0 / tau[mask11]
+
+        neg_ll = (
+            lambda_home
+            - home_goals * eta_home
+            + gammaln(home_goals + 1.0)
+            + lambda_away
+            - away_goals * eta_away
+            + gammaln(away_goals + 1.0)
+            - np.log(tau)
+        )
+        value = float(
+            np.dot(weights, neg_ll)
+            + CONTROL_RIDGE
+            * (np.dot(attacks, attacks) + np.dot(defenses, defenses))
+        )
+
+        grad_eta_home = weights * (lambda_home - home_goals - dlogtau_home)
+        grad_eta_away = weights * (lambda_away - away_goals - dlogtau_away)
+        grad_eta_home *= (eta_home_raw > -5.0) & (eta_home_raw < 3.0)
+        grad_eta_away *= (eta_away_raw > -5.0) & (eta_away_raw < 3.0)
+
+        grad = np.zeros_like(params)
+        if nt:
+            np.add.at(
+                grad[attack_slice], home_idx[home_valid], grad_eta_home[home_valid]
+            )
+            np.add.at(
+                grad[attack_slice], away_idx[away_valid], grad_eta_away[away_valid]
+            )
+            np.add.at(
+                grad[defense_slice], away_idx[away_valid], grad_eta_home[away_valid]
+            )
+            np.add.at(
+                grad[defense_slice], home_idx[home_valid], grad_eta_away[home_valid]
+            )
+            grad[attack_slice] += 2.0 * CONTROL_RIDGE * attacks
+            grad[defense_slice] += 2.0 * CONTROL_RIDGE * defenses
+        grad[intercept_index] = float(np.sum(grad_eta_home + grad_eta_away))
+        grad[home_adv_index] = float(np.sum(grad_eta_home))
+        grad[rho_index] = float(np.sum(weights * (-dlogtau_rho)))
+        return value, grad
+
+    bounds = (
+        [(-3.0, 3.0)] * nt
+        + [(-3.0, 3.0)] * nt
+        + [(-2.0, 2.0), (-1.0, 1.0), (-0.20, 0.20)]
+    )
+    result = minimize(
+        objective,
+        initial,
+        method="L-BFGS-B",
+        jac=True,
+        bounds=bounds,
+        options={"maxiter": 2_000, "ftol": 1e-10, "gtol": 1e-6},
+    )
+    if not result.success or not np.isfinite(result.fun):
+        gradient_norm = (
+            None
+            if result.jac is None
+            else float(np.linalg.norm(np.asarray(result.jac, dtype=float), ord=np.inf))
+        )
+        raise DixonColesFitError(
+            "sparse pooled optimization did not converge: "
+            f"status={getattr(result, 'status', None)} "
+            f"message={getattr(result, 'message', None)} "
+            f"nit={getattr(result, 'nit', None)} "
+            f"gradient_inf_norm={gradient_norm}"
+        )
+
+    latent_attacks = result.x[attack_slice]
+    latent_defenses = result.x[defense_slice]
+    all_attacks = np.zeros(len(team_ids), dtype=float)
+    all_defenses = np.zeros(len(team_ids), dtype=float)
+    all_index = {team_id: index for index, team_id in enumerate(team_ids)}
+    for team_id, latent_position in latent_index.items():
+        position = all_index[team_id]
+        all_attacks[position] = float(latent_attacks[latent_position])
+        all_defenses[position] = float(latent_defenses[latent_position])
+
+    return DixonColesModel(
+        team_ids=team_ids,
+        team_id_namespace="api-football",
+        attacks=all_attacks,
+        defenses=all_defenses,
+        intercept=float(result.x[intercept_index]),
+        home_advantage=float(result.x[home_adv_index]),
+        rho=float(result.x[rho_index]),
+        xi=RECENCY_XI,
+        fitted_matches=len(records),
+        objective=float(result.fun),
     )
 
 
@@ -375,7 +588,7 @@ def build_goal_model_validation(
         except DixonColesFitError as exc:
             control_fit_errors[str(league_id)] = str(exc)
 
-    pooled_records_all = [
+    pooled_records = [
         SimpleNamespace(
             date=dates[index],
             home_id=int(home_ids[index]),
@@ -385,32 +598,20 @@ def build_goal_model_validation(
         )
         for index in range(train_n)
     ]
-    pooled_team_counts = DixonColesModel.team_match_counts(pooled_records_all)
-    pooled_records = [
-        record
-        for record in pooled_records_all
-        if pooled_team_counts[record.home_id] >= CONTROL_MIN_TEAM_APPEARANCES
-        and pooled_team_counts[record.away_id] >= CONTROL_MIN_TEAM_APPEARANCES
-    ]
+    pooled_team_counts = DixonColesModel.team_match_counts(pooled_records)
+    pooled_latent_team_count = sum(
+        appearances >= CONTROL_MIN_TEAM_APPEARANCES
+        for appearances in pooled_team_counts.values()
+    )
     pooled_control: DixonColesModel | None = None
     pooled_control_error: str | None = None
-    if len(pooled_records) >= CONTROL_MIN_MATCHES:
-        try:
-            pooled_control = DixonColesModel.fit(
-                pooled_records,
-                team_id_namespace="api-football",
-                reference_time=dates[train_n],
-                xi=RECENCY_XI,
-                ridge=CONTROL_RIDGE,
-                min_matches=CONTROL_MIN_MATCHES,
-            )
-        except DixonColesFitError as exc:
-            pooled_control_error = str(exc)
-    else:
-        pooled_control_error = (
-            f"insufficient pooled stable-team training sample {len(pooled_records)} < "
-            f"{CONTROL_MIN_MATCHES}"
+    try:
+        pooled_control = _fit_sparse_pooled_control(
+            pooled_records,
+            reference_time=dates[train_n],
         )
+    except DixonColesFitError as exc:
+        pooled_control_error = str(exc)
 
     if not controls and pooled_control is None:
         return _empty_validation(
@@ -425,6 +626,7 @@ def build_goal_model_validation(
                 "control_fit_errors": control_fit_errors,
                 "pooled_control_error": pooled_control_error,
                 "pooled_control_training_matches": len(pooled_records),
+                "pooled_control_latent_team_count": pooled_latent_team_count,
                 "control_min_team_appearances": CONTROL_MIN_TEAM_APPEARANCES,
             },
             reason="no league-specific or pooled stable-team Dixon-Coles control could be fitted",
@@ -542,6 +744,7 @@ def build_goal_model_validation(
         "pooled_control_team_count": (
             0 if pooled_control is None else len(pooled_control.team_ids)
         ),
+        "pooled_control_latent_team_count": pooled_latent_team_count,
         "pooled_control_error": pooled_control_error,
         "control_scope_counts": {
             "league": sum(row.get("control_scope") == "league" for row in control_rows),
@@ -549,8 +752,8 @@ def build_goal_model_validation(
         },
         "note": (
             "comparison is evidence for manual GoalLab pick-authority review; "
-            "pooled plain Dixon-Coles is used only when league-specific control coverage "
-            "is unavailable"
+            "pooled sparse-latent plain Dixon-Coles is used only when league-specific "
+            "control coverage is unavailable; sparse teams receive neutral latent effects"
         ),
     }
     leakage = _leakage_audit()
