@@ -233,7 +233,7 @@ class PostgreSQLResearchSignalRepository:
                 "rs.first_open_exposure_minor, rs.last_open_exposure_minor, "
                 "rs.exposure_cap_minor, rs.qualified_at, rs.production_pick_id, "
                 "CASE WHEN rs.production_pick_id IS NULL THEN 'BLOCKED_EXPOSURE' "
-                "ELSE COALESCE(operator_state.state, 'PLAYED') END, "
+                "ELSE COALESCE(operator_state.state, 'PENDING') END, "
                 "latest.home_team, latest.away_team, "
                 "latest.competition_name, latest.country, latest.kickoff_at, "
                 "latest.provider_status, e.market, e.selected_selection, e.bookmaker_key, "
