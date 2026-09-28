@@ -27,9 +27,9 @@ from h2h.quantlab.goal_lab.shadow_engine import GoalDecision, GoalEngineResult
 from h2h.quantlab.scope import goal_scope
 
 
-POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V4"
-MIN_EDGE = 0.03
-MIN_EXPECTED_VALUE = 0.03
+POLICY_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5"
+MIN_EDGE: float | None = None
+MIN_EXPECTED_VALUE = 0.0
 MIN_ODDS = 1.40
 MAX_ODDS = 4.00
 MAX_QUOTE_AGE_SECONDS = 13 * 60 * 60
@@ -52,7 +52,7 @@ def _fingerprint(payload: object) -> str:
 
 @dataclass(frozen=True, slots=True)
 class StructuralGoalPolicy:
-    min_edge: float = MIN_EDGE
+    min_edge: float | None = MIN_EDGE
     min_expected_value: float = MIN_EXPECTED_VALUE
     min_odds: float = MIN_ODDS
     max_odds: float = MAX_ODDS
@@ -248,10 +248,8 @@ class GoalLabStructuralShadowEngine:
                     reason = "STALE_QUOTE"
                 elif not self._policy.min_odds <= odds <= self._policy.max_odds:
                     reason = "ODDS_OUTSIDE_RANGE"
-                elif edge < self._policy.min_edge:
-                    reason = "EDGE_BELOW_MINIMUM"
-                elif expected_value < self._policy.min_expected_value:
-                    reason = "EV_BELOW_MINIMUM"
+                elif expected_value <= self._policy.min_expected_value:
+                    reason = "EV_NOT_POSITIVE"
 
                 evaluated.append(
                     {

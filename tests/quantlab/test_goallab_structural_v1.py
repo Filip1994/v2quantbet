@@ -237,7 +237,7 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
             }
 
         def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
-            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V3"
+            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
             return False
 
         def save_goal_pick(self, item):
@@ -402,3 +402,147 @@ def test_structural_model_reuses_persisted_artifact_for_unchanged_training(
     assert readiness["training_sample_size"] == 300
     assert readiness["history_match_count"] == 300
     assert readiness["training_fingerprint"] == repo.fingerprints[0]
+
+
+def test_positive_ev_qualifies_even_when_edge_is_below_three_points() -> None:
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V3:" + "e" * 64
+
+    class Repo:
+        def __init__(self) -> None:
+            self.decisions = []
+            self.picks = []
+
+        def goal_market_pairs(self, _fixture_id, *, decision_at):
+            assert decision_at == NOW
+            return (_pair(),)
+
+        def goal_model_validation(self, _model_version):
+            return {
+                "status": "OK",
+                "authority_review_status": "READY_FOR_MANUAL_REVIEW",
+                "leakage_audit": {"status": "PASS"},
+            }
+
+        def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
+            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
+            return False
+
+        def save_goal_decision(self, item):
+            self.decisions.append(item)
+            return True
+
+        def save_goal_pick(self, item):
+            self.picks.append(item)
+            return True
+
+    class Model:
+        def estimate(self, _fixture, *, decision_at):
+            assert decision_at == NOW
+            artifact = SimpleNamespace(
+                model_version=model_version,
+                rho=-0.04,
+                feature_version=FEATURE_VERSION,
+                training_sample_size=14_245,
+                history_match_count=30_000,
+            )
+            snapshot = SimpleNamespace(home_history_size=30, away_history_size=30)
+            estimate = SimpleNamespace(
+                expected_home_goals=1.5,
+                expected_away_goals=1.2,
+                model=artifact,
+                snapshot=snapshot,
+                market_probabilities=lambda: {
+                    "OVER_2_5": 0.501,
+                    "UNDER_2_5": 0.499,
+                    "BTTS_YES": 0.50,
+                },
+            )
+            return SimpleNamespace(estimate=estimate, reason="MODEL_READY", details={})
+
+    repo = Repo()
+    engine = GoalLabStructuralShadowEngine(
+        repo,
+        policy=StructuralGoalPolicy(
+            pick_authority=True,
+            approved_model_version=model_version,
+        ),
+    )
+    engine._model = Model()
+
+    result = engine.run_fixture(_fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 1
+    assert len(repo.picks) == 1
+    assert repo.picks[0].selection == "OVER"
+    assert repo.picks[0].expected_value == pytest.approx(0.002)
+    assert repo.picks[0].edge < 0.03
+
+
+def test_zero_ev_does_not_qualify() -> None:
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V3:" + "f" * 64
+
+    class Repo:
+        def __init__(self) -> None:
+            self.decisions = []
+
+        def goal_market_pairs(self, _fixture_id, *, decision_at):
+            assert decision_at == NOW
+            return (_pair(),)
+
+        def goal_model_validation(self, _model_version):
+            return {
+                "status": "OK",
+                "authority_review_status": "READY_FOR_MANUAL_REVIEW",
+                "leakage_audit": {"status": "PASS"},
+            }
+
+        def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
+            return False
+
+        def save_goal_decision(self, item):
+            self.decisions.append(item)
+            return True
+
+        def save_goal_pick(self, _item):
+            raise AssertionError("EV=0 must not create a pick")
+
+    class Model:
+        def estimate(self, _fixture, *, decision_at):
+            artifact = SimpleNamespace(
+                model_version=model_version,
+                rho=-0.04,
+                feature_version=FEATURE_VERSION,
+                training_sample_size=14_245,
+                history_match_count=30_000,
+            )
+            snapshot = SimpleNamespace(home_history_size=30, away_history_size=30)
+            estimate = SimpleNamespace(
+                expected_home_goals=1.5,
+                expected_away_goals=1.2,
+                model=artifact,
+                snapshot=snapshot,
+                market_probabilities=lambda: {
+                    "OVER_2_5": 0.50,
+                    "UNDER_2_5": 0.50,
+                    "BTTS_YES": 0.50,
+                },
+            )
+            return SimpleNamespace(estimate=estimate, reason="MODEL_READY", details={})
+
+    repo = Repo()
+    engine = GoalLabStructuralShadowEngine(
+        repo,
+        policy=StructuralGoalPolicy(
+            pick_authority=True,
+            approved_model_version=model_version,
+        ),
+    )
+    engine._model = Model()
+
+    result = engine.run_fixture(_fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 0
+    assert any(
+        item.selection == "OVER" and item.reason == "EV_NOT_POSITIVE"
+        for item in repo.decisions
+    )

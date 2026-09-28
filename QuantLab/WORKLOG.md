@@ -1052,3 +1052,20 @@ approval plus the explicit authority switch remain required.
 
 Startup validation refuses to evaluate a historical V1 artifact under V2 semantics and
 returns `WAITING_ACTIVE_MODEL` until a V2 artifact exists.
+
+
+## 2026-09-28 — GoalLab positive-EV qualification policy
+
+After the deep-history V3 model passed the V5 chronological holdout against control,
+GoalLab value qualification was simplified:
+
+- edge is no longer a hard candidate gate;
+- expected value must be strictly greater than zero;
+- odds, quote-age and kickoff-distance gates remain unchanged;
+- edge remains persisted and is still used after EV as a ranking/audit signal;
+- evaluation policy is `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5`;
+- canonical pick policy is `GOALLAB_DC_PLUS_PICK_POLICY_V4`;
+- active policy lock is `GOALLAB_V4_LOCK_2026_09_28`.
+
+The model family remains `DC_PLUS_PRO_STRUCTURAL_V3`; this is a policy successor, not
+a silent model mutation. Historical policy versions remain queryable and reproducible.
