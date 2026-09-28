@@ -148,6 +148,30 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "Market close" not in html
 
 
+@pytest.mark.parametrize(
+    ("realized_pnl_minor", "expected_css", "expected_value"),
+    [
+        (95_000, "pnl-positive", "950.00 RSD"),
+        (-42_000, "pnl-negative", "-420.00 RSD"),
+        (0, "pnl-zero", "0.00 RSD"),
+    ],
+)
+def test_realized_pnl_kpi_color_tracks_sign(
+    realized_pnl_minor: int, expected_css: str, expected_value: str
+) -> None:
+    snapshot = _snapshot([_pick()])
+    bankroll = snapshot["bankroll"]
+    assert isinstance(bankroll, dict)
+    bankroll["realized_pnl_minor"] = realized_pnl_minor
+
+    html = RenderingDashboard(snapshot).render_html()
+
+    assert (
+        f'<article class="kpi {expected_css}"><span>Realized P/L</span>'
+        f"<strong>{expected_value}</strong></article>"
+    ) in html
+
+
 def test_country_flag_is_shown_beside_league_metadata() -> None:
     html = RenderingDashboard(
         _snapshot(
