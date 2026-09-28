@@ -908,3 +908,28 @@ Core behavior:
 
 A regression test makes optimizer invocation on an unchanged persisted training
 fingerprint a test failure.
+
+
+## 2026-09-28 — GoalLab Research / Audit V2
+
+**Owner:** QuantLab core + GoalLab
+
+GoalLab research reporting was aligned with the DC+ evaluation matrix without changing
+production prediction, registration, bankroll or model-promotion authority.
+
+Added read-only research evidence:
+
+- selected-pick Brier score and binary log loss;
+- 10-point calibration bins comparing model probability with realized WIN/LOSS outcomes;
+- realized same-book/same-market CLV using the latest immutable matching quote strictly
+  after entry and before kickoff;
+- flat-stake maximum drawdown;
+- CLV sample size / coverage alongside ROI, edge, EV and calibration;
+- integrity audit for duplicate canonical fixture/policy keys, exact source-decision
+  provenance, feature payload presence, model-version presence and probability validity;
+- Analytics contract version bumped to GOALLAB_ANALYTICS_V2;
+- model and pick drilldowns expose the same research metrics / closing evidence.
+
+GoalLab closing prices are derived at read time from immutable
+quantlab_market_observations. Closing odds remain forbidden as Structural DC+ model
+features and do not alter pick decisions.
