@@ -32,6 +32,7 @@ class ScopedFixtureDiscovery:
                     level=None,
                     home_team=fixture.home_team,
                     away_team=fixture.away_team,
+                    league_id=fixture.competition_id,
                 )
             )
             if decision.eligible:

@@ -14,6 +14,7 @@ class RejectionReason:
     GERMAN_TIER = "EXCLUDED_GERMAN_TIER_4_OR_LOWER"
     CUP = "EXCLUDED_CUP_COMPETITION"
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
+    BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
     AMBIGUOUS = "AMBIGUOUS_COMPETITION_METADATA"
 
 
@@ -27,6 +28,7 @@ class CompetitionMetadata:
     level: int | None = None
     home_team: str | None = None
     away_team: str | None = None
+    league_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,20 @@ def _normalise(value: str | None) -> str:
 def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
     padded = f" {value} "
     return any(f" {phrase} " in padded for phrase in phrases)
+
+
+BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
+
+
+def is_blacklisted_league_id(league_id: object) -> bool:
+    """Return True for globally disabled API-Football league IDs."""
+    if isinstance(league_id, bool):
+        return False
+    try:
+        parsed = int(league_id)
+    except (TypeError, ValueError):
+        return False
+    return parsed in BLACKLISTED_API_FOOTBALL_LEAGUE_IDS
 
 
 _WOMEN_MARKERS = (
@@ -117,6 +133,9 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     country = _normalise(metadata.country)
     name = _normalise(metadata.name)
     competition_type = _normalise(metadata.type)
+
+    if is_blacklisted_league_id(metadata.league_id):
+        return ScopeDecision(False, RejectionReason.BLACKLISTED_LEAGUE)
 
     if is_womens_football(
         competition_name=metadata.name,

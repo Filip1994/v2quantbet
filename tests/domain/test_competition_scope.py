@@ -138,3 +138,18 @@ def test_rejects_womens_football_globally(metadata: CompetitionMetadata) -> None
 
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.WOMEN
+
+
+@pytest.mark.parametrize("league_id", [72, 75, 236, 595])
+def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
+    decision = classify_phase_i(
+        CompetitionMetadata(
+            country="Brazil",
+            name="Senior League",
+            type="league",
+            league_id=league_id,
+        )
+    )
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.BLACKLISTED_LEAGUE
