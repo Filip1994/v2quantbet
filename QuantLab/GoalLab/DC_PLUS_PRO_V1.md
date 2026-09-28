@@ -516,12 +516,17 @@ Use:
 
 - league-level baseline;
 - team attack/defence shrinkage;
+- fit explicit latent team attack/defence coefficients only after at least five
+  training-target appearances for that team;
+- keep lower-support teams in the model with neutral zero latent effects while their
+  rolling/statistical/player covariates remain active;
 - feature normalization by league/season where appropriate;
 - minimum sample weighting;
 - optional country/competition random effects.
 
-Do not let a five-match obscure-league sample produce the same parameter confidence as a
-large mature league sample.
+Do not let a one- or two-target latent team parameter consume the same model freedom as a
+well-observed team. Sparse teams remain forecastable through the structural feature layer;
+the five-appearance rule governs only the additional team-specific latent DC effect.
 
 ### 4. Feature selection by evidence, not by initial scarcity
 

@@ -96,6 +96,10 @@ def test_goal_model_drilldown_shows_active_features_and_picks() -> None:
         "active_feature_count": 2,
         "active_feature_names": ("home_l5_goals_for", "away_l5_goals_for"),
         "rho": -0.05,
+        "training_payload": {
+            "latent_team_count": 120,
+            "minimum_latent_team_matches": 5,
+        },
         "validation": {
             "status": "OK",
             "authority_review_status": "READY_FOR_MANUAL_REVIEW",
@@ -105,5 +109,8 @@ def test_goal_model_drilldown_shows_active_features_and_picks() -> None:
 
     assert "1277" in html
     assert "home_l5_goals_for" in html
+    assert "Latent teams" in html
+    assert "120" in html
+    assert "Latent min N" in html
     assert "READY_FOR_MANUAL_REVIEW" in html
     assert "/quantlab/goal/pick?" in html
