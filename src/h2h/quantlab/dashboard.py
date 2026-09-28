@@ -125,6 +125,20 @@ def _clv_text(ppm: int | None) -> str:
     return "—" if ppm is None else f"{ppm / 10_000:+.2f}%"
 
 
+def _metric_text(
+    value: Any,
+    *,
+    suffix: str = "",
+    digits: int = 2,
+    signed: bool = False,
+) -> str:
+    if value is None:
+        return "—"
+    number = float(value)
+    sign = "+" if signed and number > 0 else ""
+    return f"{sign}{number:.{digits}f}{suffix}"
+
+
 def _corner_pick_note(row: dict[str, Any]) -> str:
     expected = _number(row.get("expected_total_corners"))
     line = _number(row.get("line"))
@@ -178,6 +192,63 @@ def _drawdown(rows: tuple[dict[str, Any], ...]) -> int:
     return max_drawdown
 
 
+def _sort_value(value: Any) -> tuple[int, Any]:
+    if value is None:
+        return (1, "")
+    if isinstance(value, datetime):
+        return (0, value.timestamp())
+    if isinstance(value, (int, float, Decimal)):
+        return (0, float(value))
+    return (0, str(value).casefold())
+
+
+def _sort_rows(
+    rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    key: str,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    reverse = direction == "desc"
+    present = [row for row in rows if row.get(key) is not None]
+    missing = [row for row in rows if row.get(key) is None]
+    present.sort(
+        key=lambda row: (
+            _sort_value(row.get(key))[1],
+            str(row.get("goal_pick_id") or row.get("fixture_id") or ""),
+        ),
+        reverse=reverse,
+    )
+    return tuple(present + missing)
+
+
+def _sortable_th(
+    label: str,
+    key: str,
+    *,
+    base_params: dict[str, str],
+    sort_param: str,
+    dir_param: str,
+    active_key: str,
+    active_dir: str,
+    anchor: str,
+) -> str:
+    def href(direction: str) -> str:
+        params = {name: value for name, value in base_params.items() if value != ""}
+        params[sort_param] = key
+        params[dir_param] = direction
+        return "/quantlab?" + urlencode(params) + f"#{anchor}"
+
+    return (
+        '<th><span class="th-wrap"><span>'
+        + escape(label)
+        + '</span><span class="sort-tools">'
+        + f'<a class="{"sort-active" if active_key == key and active_dir == "asc" else ""}" '
+        + f'href="{escape(href("asc"), quote=True)}" title="Lowest first">↑</a>'
+        + f'<a class="{"sort-active" if active_key == key and active_dir == "desc" else ""}" '
+        + f'href="{escape(href("desc"), quote=True)}" title="Highest first">↓</a>'
+        + "</span></span></th>"
+    )
+
+
 class QuantLabDashboardService:
     def __init__(
         self,
@@ -201,6 +272,7 @@ class QuantLabDashboardService:
         outcome = params.get("outcome", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         market = params.get("market", [""])[0].strip().casefold()
+        selection = params.get("selection", [""])[0].strip().casefold()
         model_version = params.get("model_version", [""])[0].strip()
         policy_version = params.get("policy_version", [""])[0].strip()
 
@@ -212,6 +284,8 @@ class QuantLabDashboardService:
             if league and league not in str(row.get("competition_name") or "").casefold():
                 return False
             if market and market not in str(row.get("market_key") or "").casefold():
+                return False
+            if selection and selection != str(row.get("selection") or "").casefold():
                 return False
             if model_version and str(row.get("model_version") or "") != model_version:
                 return False
@@ -312,6 +386,31 @@ class QuantLabDashboardService:
             dashboard_warnings.append("Canonical pick ledger temporarily unavailable.")
             rows = ()
             metric_rows = ()
+        ledger_sort = params.get("ledger_sort", ["decision_at"])[0].strip()
+        ledger_dir = params.get("ledger_dir", ["desc"])[0].strip().casefold()
+        ledger_keys = {
+            "match", "bookmaker_name", "market_key", "selection", "line", "model_version",
+            "model_probability", "odds", "edge", "expected_value", "closing_odds", "outcome",
+            "pnl_minor", "decision_at", "qualifying_candidate_count",
+        }
+        if ledger_sort not in ledger_keys:
+            ledger_sort = "decision_at"
+        if ledger_dir not in {"asc", "desc"}:
+            ledger_dir = "desc"
+        if ledger_sort == "match":
+            rows = tuple(
+                sorted(
+                    rows,
+                    key=lambda row: (
+                        str(row.get("home_team") or "").casefold(),
+                        str(row.get("away_team") or "").casefold(),
+                    ),
+                    reverse=ledger_dir == "desc",
+                )
+            )
+        else:
+            rows = _sort_rows(rows, ledger_sort, ledger_dir)
+
         settled = tuple(
             row for row in metric_rows if row.get("outcome") in {"WIN", "LOSS", "VOID"}
         )
@@ -380,7 +479,12 @@ class QuantLabDashboardService:
                 "LOSS": "result-loss",
                 "VOID": "result-void",
             }.get(outcome, "result-pending")
-            match = f'{escape(str(row.get("home_team") or "?"))} – {escape(str(row.get("away_team") or "?"))}'
+            match_text = f'{escape(str(row.get("home_team") or "?"))} – {escape(str(row.get("away_team") or "?"))}'
+            if lab_key == "goal" and row.get("goal_pick_id"):
+                pick_href = "/quantlab/goal/pick?" + urlencode({"goal_pick_id": str(row["goal_pick_id"])})
+                match = f'<a href="{escape(pick_href, quote=True)}">{match_text}</a>'
+            else:
+                match = match_text
             league_text = escape(str(row.get("competition_name") or "—"))
             line = "—" if row.get("line") is None else escape(str(row["line"]))
             note_cell = _corner_pick_note(row) if lab_key == "corner" else "—"
@@ -398,7 +502,11 @@ class QuantLabDashboardService:
                 f'<td>{escape(str(row.get("selection") or "—"))}</td>'
                 f"<td>{line}</td>"
                 f'<td>{escape(str(row.get("model_name") or "—"))}'
-                f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                + (
+                    f'<small><a href="{escape("/quantlab/goal/model?" + urlencode({"model_version": str(row.get("model_version") or "")}), quote=True)}">{escape(str(row.get("model_version") or "—"))}</a></small>'
+                    if lab_key == "goal" and row.get("model_version")
+                    else f'<small>{escape(str(row.get("model_version") or "—"))}</small>'
+                )
                 + (
                     f'<small>λH {_rate(row.get("expected_home_goals"))} · '
                     f'λA {_rate(row.get("expected_away_goals"))}</small>'
@@ -712,6 +820,207 @@ class QuantLabDashboardService:
                 f'</tr></thead><tbody>{rendered_context}</tbody></table></div></section>'
             )
 
+        goal_research_html = ""
+        if lab_key == "goal":
+            decision_loader = getattr(self._repository, "list_all_goal_decisions", None)
+            try:
+                research_decisions = tuple(decision_loader()) if callable(decision_loader) else ()
+            except Exception:
+                LOGGER.exception("GoalLab dashboard research decision query failed")
+                dashboard_warnings.append("GoalLab research decision evidence temporarily unavailable.")
+                research_decisions = ()
+            snapshot = build_goal_analytics_snapshot(metric_rows, research_decisions)
+            lifetime = snapshot["windows"]["lifetime"]
+            audit = snapshot["integrity_audit"]
+            research_table = params.get("research_table", ["model_version"])[0].strip()
+            research_sort = params.get("research_sort", ["graded_n"])[0].strip()
+            research_dir = params.get("research_dir", ["desc"])[0].strip().casefold()
+            if research_dir not in {"asc", "desc"}:
+                research_dir = "desc"
+
+            research_specs = {
+                "model_version": ("Model versions", snapshot["cohorts"]["model_version"], ("model_version",)),
+                "policy_version": ("Policy versions", snapshot["cohorts"]["policy_version"], ("policy_version",)),
+                "market_selection": ("Markets / selections", snapshot["cohorts"]["market_selection"], ("market_key", "selection")),
+                "league": ("Leagues", snapshot["cohorts"]["league"], ("competition_name",)),
+                "bookmaker": ("Bookmakers", snapshot["cohorts"]["bookmaker"], ("bookmaker_name",)),
+            }
+            if research_table not in {*research_specs, "calibration"}:
+                research_table = "model_version"
+            sortable_metrics = {
+                "n", "graded_n", "wins", "losses", "voids", "win_rate_pct",
+                "expected_win_rate_pct", "calibration_gap_pp", "brier_score", "log_loss",
+                "roi_pct", "avg_clv_pct", "clv_n", "max_drawdown_minor", "avg_edge_pct",
+                "avg_ev_pct", "sample_band", "model_version", "policy_version", "market_key",
+                "selection", "competition_name", "bookmaker_name",
+            }
+            if research_sort not in sortable_metrics:
+                research_sort = "graded_n"
+
+            current_params = {
+                key: values[0]
+                for key, values in params.items()
+                if values and key not in {"research_table", "research_sort", "research_dir"}
+            }
+            current_params["lab"] = "goal"
+
+            def cohort_link(row: dict[str, Any], dimensions: tuple[str, ...]) -> str:
+                drill = dict(current_params)
+                drill.pop("ledger_sort", None)
+                drill.pop("ledger_dir", None)
+                if dimensions == ("model_version",):
+                    drill["model_version"] = str(row.get("model_version") or "")
+                elif dimensions == ("policy_version",):
+                    drill["policy_version"] = str(row.get("policy_version") or "")
+                elif dimensions == ("market_key", "selection"):
+                    drill["market"] = str(row.get("market_key") or "")
+                    drill["selection"] = str(row.get("selection") or "")
+                elif dimensions == ("competition_name",):
+                    drill["league"] = str(row.get("competition_name") or "")
+                elif dimensions == ("bookmaker_name",):
+                    drill["bookmaker"] = str(row.get("bookmaker_name") or "")
+                return "/quantlab?" + urlencode({k: v for k, v in drill.items() if v}) + "#canonical-picks"
+
+            research_tables: list[str] = []
+            for table_key, (table_title, table_rows_raw, dimensions) in research_specs.items():
+                table_rows = tuple(table_rows_raw)
+                active_key = research_sort if research_table == table_key else "graded_n"
+                active_dir = research_dir if research_table == table_key else "desc"
+                if active_key not in sortable_metrics:
+                    active_key = "graded_n"
+                table_rows = _sort_rows(table_rows, active_key, active_dir)
+                base = dict(current_params)
+                base["research_table"] = table_key
+                dim_headers = "".join(
+                    _sortable_th(
+                        dimension.replace("_", " ").title(),
+                        dimension,
+                        base_params=base,
+                        sort_param="research_sort",
+                        dir_param="research_dir",
+                        active_key=active_key,
+                        active_dir=active_dir,
+                        anchor=f"research-{table_key}",
+                    )
+                    for dimension in dimensions
+                )
+                metric_headers = "".join(
+                    _sortable_th(
+                        label,
+                        key,
+                        base_params=base,
+                        sort_param="research_sort",
+                        dir_param="research_dir",
+                        active_key=active_key,
+                        active_dir=active_dir,
+                        anchor=f"research-{table_key}",
+                    )
+                    for label, key in (
+                        ("N", "graded_n"),
+                        ("Win%", "win_rate_pct"),
+                        ("ROI", "roi_pct"),
+                        ("CLV", "avg_clv_pct"),
+                        ("Brier", "brier_score"),
+                        ("Log loss", "log_loss"),
+                        ("Cal gap", "calibration_gap_pp"),
+                        ("Avg edge", "avg_edge_pct"),
+                        ("Avg EV", "avg_ev_pct"),
+                        ("Evidence", "sample_band"),
+                    )
+                )
+                rendered = ""
+                for item in table_rows:
+                    href = cohort_link(item, dimensions)
+                    dim_cells = "".join(
+                        f'<td><b><a href="{escape(href, quote=True)}">{escape(str(item.get(dimension) or "—"))}</a></b></td>'
+                        for dimension in dimensions
+                    )
+                    rendered += (
+                        "<tr>" + dim_cells
+                        + f"<td>{item['graded_n']}</td>"
+                        + f"<td>{_metric_text(item['win_rate_pct'], suffix='%')}</td>"
+                        + f"<td>{_metric_text(item['roi_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_clv_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['brier_score'], digits=3)}</td>"
+                        + f"<td>{_metric_text(item['log_loss'], digits=3)}</td>"
+                        + f"<td>{_metric_text(item['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_edge_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_ev_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{escape(str(item['sample_band']))}</td>"
+                        + "</tr>"
+                    )
+                if not rendered:
+                    rendered = f'<tr><td class="empty" colspan="{len(dimensions) + 10}">No settled picks for this breakdown.</td></tr>'
+                research_tables.append(
+                    f'<section class="research-table" id="research-{table_key}">'
+                    f'<div class="table-title"><b>{escape(table_title)}</b><span>click a value → underlying picks</span></div>'
+                    f'<div class="table"><table><thead><tr>{dim_headers}{metric_headers}</tr></thead>'
+                    f'<tbody>{rendered}</tbody></table></div></section>'
+                )
+
+            calibration_active_key = research_sort if research_table == "calibration" else "bin"
+            calibration_active_dir = research_dir if research_table == "calibration" else "asc"
+            if calibration_active_key not in {"bin", "n", "expected_pct", "observed_pct", "gap_pp"}:
+                calibration_active_key = "bin"
+            calibration = _sort_rows(
+                tuple(snapshot["calibration_bins"]),
+                calibration_active_key,
+                calibration_active_dir,
+            )
+            calibration_base = dict(current_params)
+            calibration_base["research_table"] = "calibration"
+            calibration_headers = "".join(
+                _sortable_th(
+                    label,
+                    key,
+                    base_params=calibration_base,
+                    sort_param="research_sort",
+                    dir_param="research_dir",
+                    active_key=calibration_active_key,
+                    active_dir=calibration_active_dir,
+                    anchor="research-calibration",
+                )
+                for label, key in (
+                    ("Bin", "bin"),
+                    ("N", "n"),
+                    ("Expected", "expected_pct"),
+                    ("Observed", "observed_pct"),
+                    ("Gap", "gap_pp"),
+                )
+            )
+            calibration_rows = "".join(
+                "<tr>"
+                f"<td><b>{escape(str(item['bin']))}</b></td><td>{item['n']}</td>"
+                f"<td>{_metric_text(item['expected_pct'], suffix='%')}</td>"
+                f"<td>{_metric_text(item['observed_pct'], suffix='%')}</td>"
+                f"<td>{_metric_text(item['gap_pp'], suffix='pp', signed=True)}</td></tr>"
+                for item in calibration
+            ) or '<tr><td class="empty" colspan="5">No graded picks for calibration yet.</td></tr>'
+
+            research_cards = "".join(
+                f'<div class="mini-stat"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
+                for label, value in (
+                    ("Audit", str(audit["status"])),
+                    ("Brier", _metric_text(lifetime["brier_score"], digits=3)),
+                    ("Log loss", _metric_text(lifetime["log_loss"], digits=3)),
+                    ("Calibration", _metric_text(lifetime["calibration_gap_pp"], suffix="pp", signed=True)),
+                    ("CLV N", str(lifetime["clv_n"])),
+                    ("Violations", str(audit["violations"])),
+                )
+            )
+            open_attr = " open" if params.get("research_table") else ""
+            goal_research_html = (
+                '<section class="research-shell" id="research-overview">'
+                '<div class="table-title"><b>GoalLab Research / Audit</b><span>same-page research view · sortable · drillable</span></div>'
+                f'<div class="mini-stats">{research_cards}</div>'
+                f'<details class="research-details"{open_attr}><summary>Research breakdowns and calibration</summary>'
+                + "".join(research_tables)
+                + '<section class="research-table" id="research-calibration"><div class="table-title"><b>Calibration bins</b><span>selected-pick probability</span></div>'
+                + f'<div class="table"><table><thead><tr>{calibration_headers}</tr></thead>'
+                + f'<tbody>{calibration_rows}</tbody></table></div></section>'
+                + '</details></section>'
+            )
+
         api_pct = min(100.0, api_used / self._api_limit * 100)
         cards = (
             (
@@ -760,6 +1069,42 @@ class QuantLabDashboardService:
                 else f"{title} shadow ledger"
             )
         )
+        header_params = {
+            key: values[0]
+            for key, values in params.items()
+            if values and key not in {"ledger_sort", "ledger_dir"}
+        }
+        header_params["lab"] = lab_key
+        ledger_headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                base_params=header_params,
+                sort_param="ledger_sort",
+                dir_param="ledger_dir",
+                active_key=ledger_sort,
+                active_dir=ledger_dir,
+                anchor="canonical-picks",
+            )
+            for label, key in (
+                ("Match", "match"),
+                ("Bookmaker", "bookmaker_name"),
+                ("Market", "market_key"),
+                ("Selection", "selection"),
+                ("Line", "line"),
+                ("Model", "model_version"),
+                ("Model p", "model_probability"),
+                ("Odds", "odds"),
+                ("Edge", "edge"),
+                ("EV", "expected_value"),
+                ("Close audit", "closing_odds"),
+                ("Why", "qualifying_candidate_count"),
+                ("Result", "outcome"),
+                ("P/L", "pnl_minor"),
+                ("Decision", "decision_at"),
+            )
+        )
+
         warning_html = "".join(
             '<p class="dashboard-warning">'
             + escape(message)
@@ -799,13 +1144,14 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
 .feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
 .feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
+.th-wrap{{display:flex;align-items:center;justify-content:space-between;gap:7px}}.sort-tools{{display:inline-flex;gap:3px}}.sort-tools a{{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid #3a4249;border-radius:5px;color:#9ca5ad;text-decoration:none;font-size:10px}}.sort-tools a.sort-active{{background:#e1e4e6;color:#17191b}}
+.research-shell{{overflow:hidden;border:1px solid var(--line);border-radius:13px;background:var(--panel);margin-bottom:12px}}.mini-stats{{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;padding:12px}}.mini-stat{{padding:10px;border:1px solid #2d343a;border-radius:9px;background:#15191c}}.mini-stat small{{text-transform:uppercase;letter-spacing:.06em}}.mini-stat b{{display:block;margin-top:6px;font-size:16px}}.research-details{{border-top:1px solid var(--line)}}.research-details>summary{{cursor:pointer;padding:12px 14px;font-weight:900}}.research-table{{border-top:1px solid var(--line)}}.research-table .table{{max-height:42vh}}
 footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
-{('<p class="lab-note"><a href="/quantlab/goal/analytics"><b>Open GoalLab Analytics V2 →</b></a> · model/version cohorts · decision funnel · exact feature drilldown</p>' if lab_key == "goal" else "")}
 {warning_html}
 {version_notice_html}
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
@@ -813,16 +1159,18 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <select name="bookmaker"><option value="">All bookmakers</option><option {"selected" if field("bookmaker").casefold()=="bet365" else ""}>Bet365</option><option {"selected" if field("bookmaker").casefold()=="1xbet" else ""}>1xBet</option></select>
 <select name="outcome"><option value="">All outcomes</option>{''.join(f'<option {"selected" if field("outcome")==item else ""}>{item}</option>' for item in ("PENDING","WIN","LOSS","VOID"))}</select>
 <input name="league" placeholder="League" value="{field("league")}"><input name="market" placeholder="Market" value="{field("market")}">
+<input name="selection" placeholder="Selection" value="{field("selection")}">
 <input name="model_version" placeholder="Exact model version" value="{field("model_version")}">
 <input name="policy_version" placeholder="Exact policy version" value="{field("policy_version")}">
 <button type="submit">Apply</button></form></section>
+{goal_research_html}
 {goal_contract_html}
 {goal_pipeline_html}
 {corner_picks_html}
 {corner_contract_html}
 {card_context_html}
-<section class="table-shell"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown</span></div><div class="table"><table><thead><tr>
-<th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Model</th><th>Model p</th><th>Odds</th><th>Edge</th><th>EV</th><th>Close audit</th><th>Why</th><th>Result</th><th>P/L</th><th>Decision</th>
+<section class="table-shell" id="canonical-picks"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown · click match for exact pick evidence</span></div><div class="table"><table><thead><tr>
+{ledger_headers}
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
 <footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; CardLab = card/referee models. Times are Europe/Belgrade.</footer>
 </main></body></html>"""
