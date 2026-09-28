@@ -322,6 +322,8 @@ class DashboardService:
                 settlement.outcome AS settlement_outcome,
                 settlement.gross_return_minor, settlement.realized_pnl_minor,
                 settlement.occurred_at AS settled_at,
+                settlement_result.regulation_home_goals AS result_home_goals,
+                settlement_result.regulation_away_goals AS result_away_goals,
                 clv.clv_ppm, clv.method_version AS clv_method_version,
                 COALESCE(operator_state.state, 'PENDING') AS operator_state
             FROM registered_picks r
@@ -375,6 +377,8 @@ class DashboardService:
             LEFT JOIN pick_live_close_observations proxy_observation
                 ON proxy_observation.observation_id = proxy_close.observation_id
             LEFT JOIN effective_settlement settlement ON settlement.pick_id = r.pick_id
+            LEFT JOIN fixture_result_observations settlement_result
+                ON settlement_result.result_observation_id = settlement.result_observation_id
             LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
             LEFT JOIN LATERAL (
                 SELECT state FROM pick_operator_state_events operator_event
@@ -634,6 +638,22 @@ class DashboardService:
             status = phase
             status_class = "void" if phase == "CLOSED" else "active"
 
+        result_home = pick.get("result_home_goals")
+        result_away = pick.get("result_away_goals")
+        final_score = (
+            f"{result_home} – {result_away}"
+            if result_home is not None and result_away is not None
+            else "—"
+        )
+        pick_market = str(pick.get("market") or "—")
+        pick_selection = str(pick.get("selection") or "—")
+        outcome_tile_class = (
+            "win" if status == "WIN"
+            else "loss" if status == "LOSS"
+            else "void" if status == "VOID"
+            else "pending"
+        )
+
         clv, clv_css, clv_verdict, clv_source = self._clv_summary(pick)
         operator_state = str(pick.get("operator_state") or "PENDING")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
@@ -661,10 +681,14 @@ class DashboardService:
             f'<div class="operator-panel-head"><span class="operator-label">Decision</span>'
             f'<span class="status operator-{operator_state.casefold()}">{escape(operator_state)}</span></div>'
             f"{operator_control}</div></td>"
+            f'<td class="history-outcome-cell"><div class="outcome-tile {outcome_tile_class}">'
+            f'<div class="outcome-top"><span class="outcome-state">{escape(status)}</span>'
+            f'<strong class="outcome-score">{escape(final_score)}</strong></div>'
+            f'<div class="outcome-pick"><span>{escape(pick_market)}</span>'
+            f'<strong>{escape(pick_selection)}</strong></div>'
+            f'<small>{escape(self._dt(pick.get("settled_at")))}</small></div></td>'
             f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick)}</td>"
-            f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
-            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
             f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
             f"<small>Pick → Closing · {escape(close_source)}</small>"
@@ -673,8 +697,6 @@ class DashboardService:
             f"<small>Market fair {escape(self._pct(pick.get('devig_probability')))}</small></td>"
             f'<td class="num history-clv {escape(clv_css)}"><strong>{escape(clv)}</strong>'
             f"<small>{escape(clv_verdict)} · {escape(clv_source)}</small></td>"
-            f'<td><span class="status {escape(status_class)}">{escape(status)}</span>'
-            f"<small>{escape(self._dt(pick.get('settled_at')))}</small></td>"
             f'<td class="num"><strong>{escape(self._money(pick.get("realized_pnl_minor"), currency))}'
             "</strong></td>"
             "</tr>"
@@ -829,7 +851,7 @@ class DashboardService:
         )
         if not history_rows:
             history_rows = (
-                '<tr><td class="empty" colspan="8"><strong>No finished picks yet.</strong>'
+                '<tr><td class="empty" colspan="7"><strong>No finished picks yet.</strong>'
                 "<br>Finished and settled picks will move here automatically.</td></tr>"
             )
         worker_rows = (
@@ -956,7 +978,8 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
-.history{{margin-top:12px}}.history table{{min-width:1220px}}.history th,.history td{{padding:11px 14px}}
+.history{{margin-top:12px}}.history table{{min-width:1280px}}.history th,.history td{{padding:11px 14px}}
+.history-outcome-cell{{min-width:190px;width:190px;padding:9px!important}}.outcome-tile{{border:1px solid #334157;border-radius:10px;padding:11px 12px;background:linear-gradient(180deg,#17202d 0%,#111822 100%);box-shadow:0 8px 20px rgba(0,0,0,.16),0 1px 0 rgba(255,255,255,.035) inset}}.outcome-tile.win{{border-color:#2f8769;background:linear-gradient(180deg,rgba(31,112,82,.34) 0%,rgba(15,48,37,.72) 100%)}}.outcome-tile.loss{{border-color:#9a4656;background:linear-gradient(180deg,rgba(128,45,62,.34) 0%,rgba(57,22,30,.72) 100%)}}.outcome-tile.void{{border-color:#6f7784}}.outcome-tile.pending{{border-color:#47556a}}.outcome-top{{display:flex;align-items:center;justify-content:space-between;gap:10px}}.outcome-state{{font-size:11px;font-weight:950;letter-spacing:.08em}}.outcome-tile.win .outcome-state,.outcome-tile.win .outcome-score{{color:#83ebbd}}.outcome-tile.loss .outcome-state,.outcome-tile.loss .outcome-score{{color:#ff93a4}}.outcome-tile.void .outcome-state,.outcome-tile.pending .outcome-state{{color:#c0c9d6}}.outcome-score{{font-size:17px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-.02em}}.outcome-pick{{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(255,255,255,.07);margin-top:8px;padding-top:8px}}.outcome-pick span{{color:#8f9db0;font-size:9px;font-weight:800;letter-spacing:.08em}}.outcome-pick strong{{font-size:11px;color:#eef3fb}}.outcome-tile small{{font-size:8px!important;color:#718097!important;margin-top:7px!important}}
 .history-operator-cell{{min-width:176px;width:176px;padding:9px!important}}.history-fixture{{min-width:310px}}.history-panel{{padding:9px}}.history-operator-actions{{display:flex;flex-direction:column;gap:8px}}
 .history-operator-form{{margin:0;width:100%}}.history-operator-button{{width:100%;border:0;border-radius:7px;padding:10px 12px;cursor:pointer;font:inherit;font-size:10px;font-weight:900;letter-spacing:.055em;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;box-shadow:0 4px 10px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.10) inset}}.history-operator-button.played{{background:linear-gradient(180deg,#2f9b73 0%,#247a5c 100%);color:#f5fffb}}.history-operator-button.skipped{{background:linear-gradient(180deg,#735f36 0%,#5a492a 100%);color:#fff7e6}}.history-operator-button:hover:not(:disabled){{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 7px 16px rgba(0,0,0,.24)}}.history-operator-button:active:not(:disabled){{transform:translateY(1px)}}.history-operator-button:focus-visible{{outline:2px solid #76a9ff;outline-offset:2px}}.history-operator-button:disabled{{opacity:.42;cursor:default;filter:saturate(.55);box-shadow:none}}
 .history-odds{{min-width:210px}}.history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
@@ -988,7 +1011,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <div class="table-wrap"><table><thead><tr><th>Pick ID</th><th>Decision</th><th>Fixture</th><th>Market</th><th>Odds lifecycle</th><th class="num">Probability</th>
 <th class="num">Edge</th><th class="num">Accounting</th><th>System status</th><th>Quality</th></tr></thead><tbody>{context["active_rows"]}</tbody></table></div></section>
 <section class="panel history"><div class="panel-head"><h2>History</h2><span class="section-label">{context["history_count"]} finished</span></div>
-<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Fixture</th><th>Pick</th><th class="num">Odds</th><th class="num">Probability</th><th class="num">CLV</th><th>Result</th><th class="num">P/L</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Outcome</th><th>Fixture</th><th class="num">Odds</th><th class="num">Probability</th><th class="num">CLV</th><th class="num">P/L</th></tr></thead>
 <tbody>{context["history_rows"]}</tbody></table></div></section>
 <section class="panel workers" style="margin-top:12px"><div class="panel-head"><h2>Worker status</h2><span class="section-label">Durable heartbeat</span></div>
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
