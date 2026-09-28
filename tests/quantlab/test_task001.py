@@ -1048,3 +1048,19 @@ def test_quantlab_discovery_drops_womens_fixtures_before_persistence() -> None:
     rows = parse_fixture_discovery_response(payload, captured_at=NOW)
 
     assert [row.fixture.provider_fixture_id for row in rows] == ["1001"]
+
+
+def test_quantlab_fixture_discovery_drops_globally_blacklisted_leagues() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(1001, 72, "Serie B", "Brazil"),
+            _fixture_payload(1002, 75, "Serie C", "Brazil"),
+            _fixture_payload(1003, 236, "First League", "Russia"),
+            _fixture_payload(1004, 595, "Division 2 - Södra Svealand", "Sweden"),
+            _fixture_payload(1005, 39, "Premier League", "England"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.competition_id for row in rows] == [39]
