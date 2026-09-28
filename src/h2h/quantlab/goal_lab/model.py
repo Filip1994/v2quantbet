@@ -1971,6 +1971,7 @@ class GoalStructuralModelService:
         params["base_feature_names"] = base_feature_names
         identity = {
             "feature_version": FEATURE_VERSION,
+            "training_fingerprint": training_fingerprint,
             "training_reference": training_reference.isoformat(),
             "training_sample_size": len(y_home),
             "history_match_count": history_match_count,
