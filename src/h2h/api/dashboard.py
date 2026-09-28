@@ -851,6 +851,14 @@ class DashboardService:
         budget = context["budget"]
         ops = context["ops"]
         currency = bankroll["currency"]
+        realized_pnl_minor = bankroll["realized_pnl_minor"]
+        pnl_css = (
+            "pnl-positive"
+            if realized_pnl_minor > 0
+            else "pnl-negative"
+            if realized_pnl_minor < 0
+            else "pnl-zero"
+        )
         cards = [
             ("Current bankroll", self._money(bankroll["available_minor"], currency), "primary"),
             ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
@@ -862,7 +870,7 @@ class DashboardService:
                 ),
                 "warn",
             ),
-            ("Realized P/L", self._money(bankroll["realized_pnl_minor"], currency), "value"),
+            ("Realized P/L", self._money(realized_pnl_minor, currency), pnl_css),
             ("Total staked", self._money(bankroll["total_staked_minor"], currency), ""),
             ("Settled stakes", self._money(bankroll["settled_stake_minor"], currency), ""),
             ("Gross returns", self._money(bankroll["gross_returns_minor"], currency), ""),
@@ -891,6 +899,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .kpi{{background:var(--panel);border:1px solid var(--line);padding:13px 14px;min-height:76px}}
 .kpi span{{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}}.kpi strong{{font-size:17px;font-variant-numeric:tabular-nums}}
 .kpi.primary{{border-top:2px solid var(--blue)}}.kpi.value strong,.value strong{{color:var(--green)}}.kpi.warn strong{{color:var(--amber)}}
+.kpi.pnl-positive strong{{color:var(--green)}}.kpi.pnl-negative strong{{color:var(--red)}}.kpi.pnl-zero strong{{color:var(--muted)}}
 .overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:var(--panel);border:1px solid var(--line)}}
 .overview .panel:first-child{{display:flex;flex-direction:column}}
 .panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line)}}h2{{font-size:14px;margin:0}}
