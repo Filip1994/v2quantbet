@@ -1,4 +1,4 @@
-"""GoalLab DC+ Pro Structural V1.
+"""GoalLab DC+ Pro Structural V2.
 
 This model keeps Dixon-Coles score semantics (two goal intensities plus rho low-score
 correction) and learns regularized pre-match structural covariate offsets. Bookmaker
@@ -40,17 +40,17 @@ from h2h.quantlab.goal_lab.standings import build_goal_standings_features
 
 LOGGER = logging.getLogger("quantbet.quantlab.goallab.model")
 
-FEATURE_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1"
+FEATURE_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2"
 MODEL_NAME = "DC+ Pro Structural"
-MODEL_PREFIX = "DC_PLUS_PRO_STRUCTURAL_V1:"
-RIDGE_TEAM = 1.5
-RIDGE_FEATURE = 4.0
-RIDGE_INTERACTION = 8.0
+MODEL_PREFIX = "DC_PLUS_PRO_STRUCTURAL_V2:"
+RIDGE_TEAM = 2.5
+RIDGE_FEATURE = 12.0
+RIDGE_INTERACTION = 20.0
 RECENCY_XI = 0.0015
 MIN_TEAM_HISTORY = 5
 MIN_LATENT_TEAM_MATCHES = 5
 MIN_TRAINING_EXAMPLES = 300
-MIN_FEATURE_OBSERVATIONS = 20
+MIN_FEATURE_OBSERVATIONS = 60
 HISTORY_LIMIT = 10_000
 SHORT_REST_DAYS = 4.0
 OPTIMIZER_MAXITER = 1400
@@ -1373,12 +1373,80 @@ def _build_training(
     )
 
 
+def _v2_core_feature_names() -> tuple[str, ...]:
+    """Pre-declared compact feature contract; no holdout-driven feature selection."""
+    side_suffixes = (
+        "l5_goals_for",
+        "l5_goals_against",
+        "l10_goals_for",
+        "l10_goals_against",
+        "l5_shots_for",
+        "l5_shots_against",
+        "l5_sot_for",
+        "l5_sot_against",
+        "venue_l5_goals_for",
+        "venue_l5_goals_against",
+        "venue_l5_shots_for",
+        "venue_l5_sot_for",
+        "season_goals_for",
+        "season_goals_against",
+        "season_shots_for",
+        "season_shots_against",
+        "season_sot_for",
+        "season_sot_against",
+        "rest_days",
+        "matches_last_7d",
+        "standings_ppg",
+        "standings_goal_difference",
+        "unavailable_player_count",
+        "projected_xi_rolling_rating",
+        "projected_xi_goals_assists_per90",
+        "attack_opponent_adjusted_l5",
+        "defence_opponent_adjusted_l5",
+        "sot_opponent_adjusted_l5",
+    )
+    names = [f"{side}_{suffix}" for side in ("home", "away") for suffix in side_suffixes]
+    names.extend(
+        (
+            "standings_ppg_differential",
+            "standings_goal_difference_differential",
+            "unavailable_count_differential",
+            "player_quality_differential",
+            "matchup_goal_attack_x_defence_home",
+            "matchup_goal_attack_x_defence_away",
+            "matchup_sot_attack_x_defence_home",
+            "matchup_sot_attack_x_defence_away",
+            "league_season_goals_per_team_match",
+            "injury_coverage_flag",
+            "standings_coverage_flag",
+            "player_stats_coverage_flag",
+        )
+    )
+    return tuple(names)
+
+
+V2_CORE_FEATURE_NAMES = _v2_core_feature_names()
+
+
 def _prepare_features(
     rows: list[dict[str, float]],
 ) -> tuple[np.ndarray, tuple[str, ...], dict[str, float], dict[str, float], tuple[str, ...]]:
+    """Prepare the V2 compact, training-only feature matrix.
+
+    V1 admitted every sufficiently observed generated feature plus one missing dummy per
+    feature, which produced 669 active columns from 792 current training examples. V2
+    uses a fixed domain contract and mean imputation. Coverage flags remain explicit
+    model inputs where available, but per-feature missing dummies are intentionally
+    removed to prevent dimensionality explosion.
+    """
     if not rows:
         return np.empty((0, 0)), (), {}, {}, ()
-    candidate_names = tuple(sorted({name for row in rows for name in row}))
+
+    available = {name for row in rows for name in row}
+    candidate_names = tuple(name for name in V2_CORE_FEATURE_NAMES if name in available)
+    if not candidate_names:
+        return np.empty((len(rows), 0)), (), {}, {}, ()
+
     raw = np.asarray(
         [[row.get(name, float("nan")) for name in candidate_names] for row in rows],
         dtype=float,
@@ -1403,18 +1471,6 @@ def _prepare_features(
     scales_arr = np.where(scales_arr < 1e-8, 1.0, scales_arr)
     standardized = (imputed - means_arr) / scales_arr
 
-    missing_names: list[str] = []
-    missing_columns: list[np.ndarray] = []
-    for index, name in enumerate(base_names):
-        if not np.all(observed[:, index]):
-            missing_names.append(f"{name}__missing")
-            missing_columns.append((~observed[:, index]).astype(float))
-    if missing_columns:
-        x = np.column_stack([standardized, *missing_columns])
-    else:
-        x = standardized
-
-    model_names = base_names + tuple(missing_names)
     means = {
         name: float(value)
         for name, value in zip(base_names, means_arr, strict=True)
@@ -1423,7 +1479,7 @@ def _prepare_features(
         name: float(value)
         for name, value in zip(base_names, scales_arr, strict=True)
     }
-    return x, model_names, means, scales, base_names
+    return standardized, base_names, means, scales, base_names
 
 
 def _transform_feature_row(
