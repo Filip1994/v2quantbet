@@ -805,7 +805,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
 <nav class="tabs">{tabs}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
-{('<p class="lab-note"><a href="/quantlab/goal/analytics"><b>Open GoalLab Analytics V1 →</b></a> · model/version cohorts · decision funnel · exact feature drilldown</p>' if lab_key == "goal" else "")}
+{('<p class="lab-note"><a href="/quantlab/goal/analytics"><b>Open GoalLab Analytics V2 →</b></a> · model/version cohorts · decision funnel · exact feature drilldown</p>' if lab_key == "goal" else "")}
 {warning_html}
 {version_notice_html}
 <section class="cards">{cards_html}</section><div class="api-bar" title="QuantLab API budget used today"><span></span></div>
