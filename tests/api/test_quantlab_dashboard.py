@@ -124,8 +124,13 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "Upcoming fixture / GoalLab decision pipeline" in html
     assert "EDGE_BELOW_MINIMUM" in html
     assert "SHADOW ONLY" in html
-    assert "Open GoalLab Analytics V2" in html
-    assert "/quantlab/goal/analytics" in html
+    assert "GoalLab Research / Audit" in html
+    assert "same-page research view" in html
+    assert "Open GoalLab Analytics V2" not in html
+    assert 'title="Lowest first"' in html
+    assert 'title="Highest first"' in html
+    assert "/quantlab/goal/pick?" in html
+    assert "/quantlab/goal/model?" in html
 
 
 def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
@@ -326,3 +331,63 @@ def test_quantlab_kpis_flag_mixed_versions_and_can_filter_exact_regime() -> None
     assert "SINGLE VERSION KPI" in filtered_html
     assert '<div class="card"><small>Canonical picks</small><b>1</b></div>' in filtered_html
     assert '<div class="card"><small>ROI</small><b>+100.00%</b></div>' in filtered_html
+
+
+def test_goallab_same_page_research_cohort_drills_into_underlying_picks() -> None:
+    class ResearchRepository(StubRepository):
+        def list_all_goal_picks(self):
+            first = dict(StubRepository.list_goal_picks(self)[0])
+            first["feature_payload"] = {"raw_features": {"x": 1.0}}
+            first["source_decision_id"] = "quantlab-goal-decision-v1:" + "1" * 64
+            return (first,)
+
+        def list_all_goal_decisions(self):
+            return (
+                {
+                    "decision_id": "quantlab-goal-decision-v1:" + "1" * 64,
+                    "fixture_id": "api-football:123",
+                    "decision": "PICK",
+                    "reason": "CANONICAL_FIXTURE_VALUE_PICK",
+                    "model_version": "DC_PLUS_PRO_STRUCTURAL_V1:" + "b" * 64,
+                    "policy_version": "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V2",
+                },
+            )
+
+    html = QuantLabDashboardService(ResearchRepository()).render_html(
+        "lab=goal&research_table=league&research_sort=roi_pct&research_dir=desc"
+    )
+
+    assert 'id="research-overview"' in html
+    assert 'id="research-league"' in html
+    assert "click a value → underlying picks" in html
+    assert "league=Premier+League" in html
+    assert "#canonical-picks" in html
+    assert "sort-active" in html
+
+
+def test_goallab_ledger_sorting_highest_and_lowest() -> None:
+    class SortRepository(StubRepository):
+        def list_goal_picks(self):
+            first = dict(StubRepository.list_goal_picks(self)[0])
+            first["home_team"] = "Low"
+            first["away_team"] = "Odds"
+            first["odds"] = 1.60
+            second = dict(first)
+            second["goal_pick_id"] = "quantlab-goal-pick-v1:" + "7" * 64
+            second["fixture_id"] = "api-football:999"
+            second["home_team"] = "High"
+            second["away_team"] = "Odds"
+            second["odds"] = 2.40
+            return (first, second)
+
+        def list_all_goal_picks(self):
+            return self.list_goal_picks()
+
+    dashboard = QuantLabDashboardService(SortRepository())
+    highest = dashboard.render_html("lab=goal&ledger_sort=odds&ledger_dir=desc")
+    lowest = dashboard.render_html("lab=goal&ledger_sort=odds&ledger_dir=asc")
+
+    assert highest.index("High – Odds") < highest.index("Low – Odds")
+    assert lowest.index("Low – Odds") < lowest.index("High – Odds")
+    assert 'ledger_sort=odds' in highest
+    assert 'title="Highest first"' in highest
