@@ -22,7 +22,7 @@ from h2h.quantlab.goal_analytics import (
     render_goal_model_html,
     render_goal_pick_html,
 )
-from h2h.quantlab.goal_lab.explanations import build_goal_pick_explanation
+from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import goal_scope
