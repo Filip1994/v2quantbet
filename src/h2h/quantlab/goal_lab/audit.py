@@ -18,6 +18,7 @@ from h2h.quantlab.goal_lab.model import (
     CONTRACT_COVERAGE_V1,
     FEATURE_VERSION,
     MODEL_PREFIX,
+    HISTORY_LIMIT,
     MIN_TRAINING_EXAMPLES,
     RECENCY_XI,
     _build_training,
@@ -28,7 +29,7 @@ from h2h.quantlab.goal_lab.model import (
 )
 
 
-METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
+METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V5"
 HOLDOUT_FRACTION = 0.30
 MIN_COMMON_EVALUATION = 50
 CONTROL_RIDGE = 0.01
@@ -476,7 +477,7 @@ def build_goal_model_validation(
     if not isinstance(cutoff, datetime):
         raise TypeError("training_cutoff must be datetime")
 
-    history = repository.goal_model_history(before=cutoff, limit=10_000)
+    history = repository.goal_model_history(before=cutoff, limit=HISTORY_LIMIT)
     (
         feature_rows,
         y_home,
@@ -505,6 +506,7 @@ def build_goal_model_validation(
             else CONTRACT_COVERAGE_V1
         ),
         "holdout_fraction": HOLDOUT_FRACTION,
+        "history_limit": HISTORY_LIMIT,
         "minimum_common_evaluation": MIN_COMMON_EVALUATION,
         "automatic_pick_authority": False,
     }
