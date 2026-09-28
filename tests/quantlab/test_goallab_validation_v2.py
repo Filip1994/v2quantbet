@@ -14,10 +14,10 @@ MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V1:" + "e" * 64
 def _history_rows() -> tuple[dict[str, object], ...]:
     rows: list[dict[str, object]] = []
     index = 0
-    for league_offset in range(20):
-        league_id = 1000 + league_offset
-        teams = [league_id * 10 + offset for offset in range(4)]
-        for match_index in range(50):
+    for match_index in range(50):
+        for league_offset in range(20):
+            league_id = 1000 + league_offset
+            teams = [league_id * 10 + offset for offset in range(4)]
             home_team = teams[match_index % 4]
             away_team = teams[(match_index + 1) % 4]
             rows.append(
