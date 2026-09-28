@@ -268,6 +268,32 @@ def _build_training(
     return x, np.asarray(targets, dtype=float), histories, usable_matches
 
 
+def _build_histories(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[int, list[TeamMatchSample]], int]:
+    """Build only scoring context when an identical fitted artifact already exists."""
+    histories: dict[int, list[TeamMatchSample]] = {}
+    usable_matches = 0
+    for row in rows:
+        home_id = _safe_id(row.get("home_team_id"))
+        away_id = _safe_id(row.get("away_team_id"))
+        home_corners = _number(row.get("home_corner_kicks"))
+        away_corners = _number(row.get("away_corner_kicks"))
+        if (
+            home_id is None
+            or away_id is None
+            or home_id == away_id
+            or home_corners is None
+            or away_corners is None
+        ):
+            continue
+        home_sample, away_sample = _team_samples(row)
+        histories.setdefault(home_id, []).append(home_sample)
+        histories.setdefault(away_id, []).append(away_sample)
+        usable_matches += 1
+    return histories, usable_matches
+
+
 def _fit_poisson(
     x: np.ndarray,
     y: np.ndarray,
@@ -320,6 +346,41 @@ def _json_hash(payload: dict[str, Any]) -> str:
     return sha256(encoded).hexdigest()
 
 
+def _training_fingerprint(rows: tuple[dict[str, Any], ...]) -> str:
+    payload = {
+        "feature_version": FEATURE_VERSION,
+        "history_rows": rows,
+        "ridge_penalty": RIDGE_PENALTY,
+        "minimum_team_history": MIN_TEAM_HISTORY,
+        "minimum_training_examples": MIN_TRAINING_EXAMPLES,
+        "history_limit": HISTORY_LIMIT,
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+        allow_nan=False,
+    ).encode()
+    return sha256(encoded).hexdigest()
+
+
+def _artifact_from_row(row: dict[str, Any]) -> CornerModelArtifact:
+    return CornerModelArtifact(
+        model_version=str(row["model_version"]),
+        trained_at=row["trained_at"],
+        training_cutoff=row["training_cutoff"],
+        feature_version=str(row["feature_version"]),
+        training_sample_size=int(row["training_sample_size"]),
+        history_match_count=int(row["history_match_count"]),
+        ridge_penalty=float(row["ridge_penalty"]),
+        coefficients={str(k): float(v) for k, v in dict(row["coefficients"]).items()},
+        feature_means={str(k): float(v) for k, v in dict(row["feature_means"]).items()},
+        feature_scales={str(k): float(v) for k, v in dict(row["feature_scales"]).items()},
+        training_payload=dict(row["training_payload"]),
+    )
+
+
 def _payload_vector(vector: np.ndarray) -> dict[str, float | None]:
     return {
         name: (float(value) if isfinite(float(value)) else None)
@@ -328,7 +389,7 @@ def _payload_vector(vector: np.ndarray) -> dict[str, float | None]:
 
 
 class CornerPressureModelService:
-    """Fit once per decision timestamp and estimate total corners per target fixture."""
+    """Reuse immutable fitted artifacts whenever the training evidence is unchanged."""
 
     def __init__(self, repository: Any) -> None:
         self._repository = repository
@@ -338,12 +399,49 @@ class CornerPressureModelService:
         self._fit_reason = "NOT_FITTED"
         self._fit_details: dict[str, Any] = {}
 
+    def readiness(self, *, decision_at: datetime | None = None) -> dict[str, Any]:
+        if decision_at is not None:
+            self._prepare(decision_at)
+        return {
+            "reason": self._fit_reason,
+            **self._fit_details,
+            "model_version": (
+                None if self._artifact is None else self._artifact.model_version
+            ),
+        }
+
     def _prepare(self, decision_at: datetime) -> None:
         now = decision_at.astimezone(UTC)
         if self._cache_at == now:
             return
 
         rows = self._repository.corner_model_history(before=now, limit=HISTORY_LIMIT)
+        training_fingerprint = _training_fingerprint(rows)
+        persisted_lookup = getattr(
+            self._repository,
+            "corner_model_by_training_fingerprint",
+            None,
+        )
+        persisted = (
+            persisted_lookup(training_fingerprint)
+            if callable(persisted_lookup)
+            else None
+        )
+        if persisted is not None:
+            histories, history_match_count = _build_histories(rows)
+            artifact = _artifact_from_row(persisted)
+            self._cache_at = now
+            self._histories = histories
+            self._artifact = artifact
+            self._fit_reason = "MODEL_READY"
+            self._fit_details = {
+                "history_match_count": history_match_count,
+                "training_sample_size": artifact.training_sample_size,
+                "artifact_reused": True,
+                "training_fingerprint": training_fingerprint,
+            }
+            return
+
         x, y, histories, history_match_count = _build_training(rows)
         fitted = _fit_poisson(x, y)
         self._cache_at = now
@@ -377,7 +475,7 @@ class CornerPressureModelService:
         }
         identity = {
             "feature_version": FEATURE_VERSION,
-            "training_cutoff": now.isoformat(),
+            "training_fingerprint": training_fingerprint,
             "training_sample_size": len(y),
             "history_match_count": history_match_count,
             "ridge_penalty": RIDGE_PENALTY,
@@ -403,6 +501,7 @@ class CornerPressureModelService:
                 "minimum_team_history": MIN_TEAM_HISTORY,
                 "minimum_training_examples": MIN_TRAINING_EXAMPLES,
                 "history_limit": HISTORY_LIMIT,
+                "training_fingerprint": training_fingerprint,
                 "structural_only": True,
                 "bookmaker_features_used": False,
             },
@@ -413,6 +512,8 @@ class CornerPressureModelService:
         self._fit_details = {
             "history_match_count": history_match_count,
             "training_sample_size": len(y),
+            "artifact_reused": False,
+            "training_fingerprint": training_fingerprint,
         }
 
     def estimate(

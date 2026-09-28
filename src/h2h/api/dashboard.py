@@ -632,11 +632,9 @@ class DashboardService:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         outcome = str(pick.get("settlement_outcome") or "").upper()
         if outcome:
-            status, status_class = outcome, outcome.casefold()
+            status = outcome
         else:
-            phase = str(pick.get("dashboard_phase") or "FINISHED").upper()
-            status = phase
-            status_class = "void" if phase == "CLOSED" else "active"
+            status = str(pick.get("dashboard_phase") or "FINISHED").upper()
 
         result_home = pick.get("result_home_goals")
         result_away = pick.get("result_away_goals")

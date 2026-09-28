@@ -2842,6 +2842,87 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
+    def goal_scoring_history(
+        self,
+        *,
+        before: datetime,
+        limit: int = 30_000,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return only the historical fields required for live GoalLab scoring context."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH fixture_candidates AS ("
+                " SELECT DISTINCT ON (o.fixture_id) "
+                " o.fixture_id, o.fixture_observation_id, o.league_id, o.season, "
+                " o.home_team_id, o.away_team_id, o.kickoff_at, o.captured_at, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'home')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'home')::INTEGER"
+                " ) AS home_goals, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'away')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'away')::INTEGER"
+                " ) AS away_goals "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.captured_at <= %s AND o.kickoff_at < %s "
+                " AND o.league_id IS NOT NULL AND o.home_team_id IS NOT NULL "
+                " AND o.away_team_id IS NOT NULL "
+                " AND (o.raw_payload->'fixture'->'status'->>'short') IN ('FT', 'AET', 'PEN') "
+                " AND ("
+                "  (jsonb_typeof(o.raw_payload->'score'->'fulltime'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'score'->'fulltime'->'away') = 'number') "
+                "  OR (jsonb_typeof(o.raw_payload->'goals'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'goals'->'away') = 'number')"
+                " ) "
+                " ORDER BY o.fixture_id, o.captured_at DESC, o.fixture_observation_id DESC"
+                "), fixture_rows AS ("
+                " SELECT * FROM fixture_candidates "
+                " ORDER BY kickoff_at DESC, fixture_id DESC LIMIT %s"
+                ") "
+                "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
+                "f.home_team_id, f.away_team_id, f.kickoff_at, "
+                "f.captured_at AS fixture_available_at, f.home_goals, f.away_goals, "
+                "s.statistics_observation_id, s.available_at AS statistics_available_at, "
+                "pc.player_capture_id, pc.available_at AS player_available_at, "
+                "pc.status AS player_status, pc.reason AS player_reason, "
+                "pc.source AS player_source, pc.raw_payload AS player_payload, "
+                "s.home_fouls, s.away_fouls, "
+                "s.home_yellow_cards, s.away_yellow_cards, "
+                "s.home_red_cards, s.away_red_cards, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_shots_off_goal, s.away_shots_off_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_shots_outsidebox, s.away_shots_outsidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_goalkeeper_saves, s.away_goalkeeper_saves, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM fixture_rows f "
+                "LEFT JOIN LATERAL ("
+                " SELECT s.* FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = f.fixture_id AND s.available_at <= %s "
+                " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
+                ") s ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT p.player_capture_id, p.available_at, p.status, p.reason, "
+                "        p.source, p.raw_payload "
+                " FROM quantlab_goal_player_captures p "
+                " WHERE p.fixture_id = f.fixture_id AND p.available_at <= %s "
+                " ORDER BY p.available_at DESC, p.player_capture_id DESC LIMIT 1"
+                ") pc ON TRUE "
+                "ORDER BY f.kickoff_at DESC, f.fixture_id DESC",
+                (before, before, limit, before, before),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
     def goal_model_by_training_fingerprint(
         self,
         training_fingerprint: str,
@@ -3079,6 +3160,33 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
+
+    def corner_model_by_training_fingerprint(
+        self,
+        training_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        if not training_fingerprint:
+            raise ValueError("training_fingerprint must not be empty")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT model_version, trained_at, training_cutoff, feature_version, "
+                "training_sample_size, history_match_count, ridge_penalty, coefficients, "
+                "feature_means, feature_scales, training_payload "
+                "FROM quantlab_corner_model_versions "
+                "WHERE training_payload ->> 'training_fingerprint' = %s "
+                "ORDER BY trained_at DESC, model_version DESC LIMIT 1",
+                (training_fingerprint,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            result = dict(zip(columns, row, strict=True))
+        for key in ("coefficients", "feature_means", "feature_scales", "training_payload"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        return result
 
     def save_corner_model_version(self, item: Any) -> bool:
         with self.connect() as connection, connection.cursor() as cursor:

@@ -3,7 +3,7 @@ import inspect
 from h2h.quantlab import entrypoint
 
 
-def test_goallab_validation_preflight_runs_after_dashboard_start_and_before_cycle() -> None:
+def test_goallab_heavy_validation_is_opt_in_on_collector_hot_path() -> None:
     source = inspect.getsource(entrypoint.main)
 
     server_start = source.index("server.start()")
@@ -11,6 +11,8 @@ def test_goallab_validation_preflight_runs_after_dashboard_start_and_before_cycl
     cycle = source.index("runtime.run_once()")
 
     assert server_start < preflight < cycle
+    assert '"QUANTBET_QUANTLAB_INLINE_GOAL_VALIDATION", "false"' in source
+    assert source.count("if inline_goal_validation:") == 2
     assert "GoalLab DC+ startup validation failed" in source
 
 
