@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from html import escape
 from typing import Any
 
 
@@ -455,3 +456,65 @@ def build_goal_pick_explanation(
         "active_feature_count": len(model_feature_names) or len(contributions),
         "notes": notes,
     }
+
+
+def render_goal_pick_note_html(
+    row: dict[str, Any],
+    contract: dict[str, Any] | None,
+    *,
+    detail_href: str,
+) -> str:
+    """Render a compact notes popover from exact persisted evidence."""
+    explanation = build_goal_pick_explanation(row, contract)
+    context = "".join(
+        f"<li>{escape(str(line))}</li>"
+        for line in explanation["context_lines"][:7]
+    )
+    contribution_rows: list[str] = []
+    for item in explanation["top_contributions"][:6]:
+        if item["missing"]:
+            detail = "podatak nedostaje; model koristi eksplicitni missing flag"
+        else:
+            detail = (
+                f"vrednost {_fmt(item['raw_value'])}; "
+                f"trening prosek {_fmt(item['training_mean'])}; "
+                f"z={float(item['standardized']):+.2f}; "
+                f"uticaj λH {float(item['home_eta_contribution']):+.3f}, "
+                f"λA {float(item['away_eta_contribution']):+.3f}"
+            )
+        contribution_rows.append(
+            f"<li><b>{escape(str(item['label']))}</b>: {escape(detail)}</li>"
+        )
+    contributions = "".join(contribution_rows)
+    ranking = (
+        ""
+        if not explanation["ranking"]
+        else f'<p class="note-ranking">{escape(str(explanation["ranking"]))}</p>'
+    )
+    return (
+        '<details class="pick-note goal-pick-note">'
+        '<summary title="Brojčano objašnjenje zašto je pik izabran">📝</summary>'
+        '<div class="note-popover goal-note-popover">'
+        '<b>Zašto je izabran ovaj pik</b>'
+        f'<p>{escape(str(explanation["summary"]))}</p>'
+        f'<p>{escape(str(explanation["gate"]))}</p>'
+        f"{ranking}"
+        + (
+            '<h4>Brojevi koje je model video</h4><ul>' + context + "</ul>"
+            if context
+            else ""
+        )
+        + (
+            '<h4>Najveći numerički doprinosi modelu</h4><ul>'
+            + contributions
+            + "</ul>"
+            if contributions
+            else (
+                "<p>Za ovaj zapis nema dovoljno model-contract podataka "
+                "za tačan decomposition.</p>"
+            )
+        )
+        + f'<a class="note-detail-link" href="{escape(detail_href, quote=True)}">'
+        "Otvori sve brojke i sve varijable →</a>"
+        + "</div></details>"
+    )
