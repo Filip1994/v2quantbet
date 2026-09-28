@@ -104,6 +104,12 @@ QuantLab owns its fixture universe independently from production Phase-I discove
 `quantlab_fixture_observations` and `quantlab_fixture_discovery_shards`. Production fixture
 and result tables remain read-only historical fallbacks only.
 
+GoalLab canonical-pick result acquisition follows the same isolation boundary. Open
+GoalLab picks refresh API-Football fixture state into `quantlab_fixture_observations`;
+settlement requires two matching terminal QuantLab observations separated by the frozen
+finality delay. GoalLab never seeds or mutates production `fixtures`,
+`fixture_result_observations`, or `fixture_result_acquisition_states`.
+
 QuantLab-owned Task 001 observation/snapshot tables are append-only:
 
 - quantlab_fixture_observations
