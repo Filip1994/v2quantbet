@@ -594,6 +594,18 @@ def ensure_latest_goal_model_validation(
         method_version=METHOD_VERSION,
     )
     if existing is not None:
+        logger.info(
+            "GoalLab DC+ validation existing model=%s method=%s status=%s common_n=%s "
+            "authority_review=%s comparison=%s leakage=%s contract=%s",
+            model_version,
+            existing.get("method_version"),
+            existing.get("status"),
+            existing.get("common_evaluation_size"),
+            existing.get("authority_review_status"),
+            existing.get("comparison"),
+            existing.get("leakage_audit"),
+            existing.get("contract_snapshot"),
+        )
         return existing
 
     now = (evaluated_at or datetime.now(UTC)).astimezone(UTC)
