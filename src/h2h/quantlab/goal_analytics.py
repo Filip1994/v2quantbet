@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+import math
 from html import escape
 from statistics import mean
 from typing import Any
 from urllib.parse import urlencode
 
-GOALLAB_ANALYTICS_CONTRACT_VERSION = "GOALLAB_ANALYTICS_V1"
+from h2h.domain.settlement import realized_clv_ppm
+
+GOALLAB_ANALYTICS_CONTRACT_VERSION = "GOALLAB_ANALYTICS_V2"
 
 
 def _event_time(row: dict[str, Any]) -> datetime | None:
@@ -40,6 +44,85 @@ def _sample_band(n: int) -> str:
     return "STABILITY_REVIEW"
 
 
+def _max_drawdown_minor(rows: Sequence[dict[str, Any]]) -> int:
+    ordered = sorted(
+        (row for row in rows if row.get("outcome") in {"WIN", "LOSS", "VOID"}),
+        key=lambda row: (_event_time(row) or datetime.min.replace(tzinfo=UTC), str(row.get("goal_pick_id") or "")),
+    )
+    equity = 0
+    peak = 0
+    max_drawdown = 0
+    for row in ordered:
+        equity += int(row.get("pnl_minor") or 0)
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    return max_drawdown
+
+
+def _realized_clv_pct(row: dict[str, Any]) -> float | None:
+    closing = row.get("closing_odds")
+    closing_at = row.get("closing_observed_at")
+    entry_at = row.get("quote_observed_at")
+    odds = row.get("odds")
+    if (
+        closing is None
+        or odds is None
+        or not isinstance(closing_at, datetime)
+        or not isinstance(entry_at, datetime)
+        or closing_at <= entry_at
+    ):
+        return None
+    return realized_clv_ppm(Decimal(str(odds)), Decimal(str(closing))) / 10_000.0
+
+
+def _binary_scoring(rows: Sequence[dict[str, Any]]) -> tuple[float | None, float | None]:
+    scored: list[tuple[float, float]] = []
+    for row in rows:
+        if row.get("outcome") not in {"WIN", "LOSS"}:
+            continue
+        raw_probability = row.get("model_probability")
+        if raw_probability is None:
+            continue
+        probability = min(1.0 - 1e-12, max(1e-12, float(raw_probability)))
+        observed = 1.0 if row.get("outcome") == "WIN" else 0.0
+        scored.append((probability, observed))
+    if not scored:
+        return None, None
+    brier = mean((probability - observed) ** 2 for probability, observed in scored)
+    log_loss = -mean(
+        observed * math.log(probability)
+        + (1.0 - observed) * math.log(1.0 - probability)
+        for probability, observed in scored
+    )
+    return brier, log_loss
+
+
+def calibration_bins(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for row in rows:
+        if row.get("outcome") not in {"WIN", "LOSS"} or row.get("model_probability") is None:
+            continue
+        probability = min(1.0, max(0.0, float(row["model_probability"])))
+        observed = 1.0 if row.get("outcome") == "WIN" else 0.0
+        bucket = min(9, int(probability * 10))
+        buckets[bucket].append((probability, observed))
+    output = []
+    for bucket in sorted(buckets):
+        values = buckets[bucket]
+        expected = mean(probability for probability, _observed in values)
+        observed = mean(result for _probability, result in values)
+        output.append(
+            {
+                "bin": f"{bucket / 10:.1f}–{(bucket + 1) / 10:.1f}",
+                "n": len(values),
+                "expected_pct": _pct(expected),
+                "observed_pct": _pct(observed),
+                "gap_pp": _pct(observed - expected),
+            }
+        )
+    return output
+
+
 def goal_pick_metrics(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     settled = tuple(row for row in rows if row.get("outcome") in {"WIN", "LOSS", "VOID"})
     graded = tuple(row for row in settled if row.get("outcome") in {"WIN", "LOSS"})
@@ -56,6 +139,12 @@ def goal_pick_metrics(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         if row.get("model_probability") is not None
     ]
     expected = _mean(model_probabilities)
+    brier, log_loss = _binary_scoring(graded)
+    clv_values = [
+        value
+        for row in rows
+        if (value := _realized_clv_pct(row)) is not None
+    ]
     return {
         "n": len(settled),
         "graded_n": graded_n,
@@ -69,8 +158,14 @@ def goal_pick_metrics(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             if observed is not None and expected is not None
             else None
         ),
+        "brier_score": brier,
+        "log_loss": log_loss,
         "pnl_minor": pnl_minor,
         "roi_pct": _pct(pnl_minor / risked) if risked else None,
+        "max_drawdown_minor": _max_drawdown_minor(settled),
+        "clv_n": len(clv_values),
+        "avg_clv_pct": _mean(clv_values),
+        "closing_coverage_pct": _pct(len(clv_values) / len(rows)) if rows else None,
         "avg_odds": _mean(
             [float(row["odds"]) for row in settled if row.get("odds") is not None]
         ),
@@ -177,6 +272,55 @@ def _decision_models(decisions: Sequence[dict[str, Any]]) -> list[dict[str, Any]
     )
 
 
+def _research_integrity_audit(
+    picks: Sequence[dict[str, Any]],
+    decisions: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    decision_ids = {str(row.get("decision_id") or "") for row in decisions}
+    canonical_keys: set[tuple[str, str]] = set()
+    duplicate_keys: set[tuple[str, str]] = set()
+    missing_feature_payload = 0
+    missing_source_decision = 0
+    missing_model_version = 0
+    invalid_probability = 0
+    for row in picks:
+        key = (
+            str(row.get("fixture_id") or ""),
+            str(row.get("policy_version") or row.get("pick_policy_version") or ""),
+        )
+        if key in canonical_keys:
+            duplicate_keys.add(key)
+        canonical_keys.add(key)
+        if not isinstance(row.get("feature_payload"), dict) or not row.get("feature_payload"):
+            missing_feature_payload += 1
+        source_decision_id = str(row.get("source_decision_id") or "")
+        if source_decision_id and source_decision_id not in decision_ids:
+            missing_source_decision += 1
+        if not row.get("model_version"):
+            missing_model_version += 1
+        probability = row.get("model_probability")
+        if probability is None or not 0.0 < float(probability) < 1.0:
+            invalid_probability += 1
+    violations = (
+        len(duplicate_keys)
+        + missing_feature_payload
+        + missing_source_decision
+        + missing_model_version
+        + invalid_probability
+    )
+    return {
+        "status": "PASS" if violations == 0 else "FAIL",
+        "pick_count": len(picks),
+        "decision_count": len(decisions),
+        "duplicate_canonical_keys": len(duplicate_keys),
+        "missing_feature_payload": missing_feature_payload,
+        "missing_source_decision": missing_source_decision,
+        "missing_model_version": missing_model_version,
+        "invalid_model_probability": invalid_probability,
+        "violations": violations,
+    }
+
+
 def build_goal_analytics_snapshot(
     picks: Sequence[dict[str, Any]],
     decisions: Sequence[dict[str, Any]],
@@ -217,6 +361,8 @@ def build_goal_analytics_snapshot(
             {"week": week, **goal_pick_metrics(weekly[week])}
             for week in sorted(weekly, reverse=True)
         ],
+        "calibration_bins": calibration_bins(picks),
+        "integrity_audit": _research_integrity_audit(picks, decisions),
         "cohorts": {
             "model_version": _cohorts(picks, ("model_version",)),
             "policy_version": _cohorts(picks, ("policy_version",)),
