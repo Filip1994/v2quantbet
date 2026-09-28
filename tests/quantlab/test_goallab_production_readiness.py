@@ -131,7 +131,7 @@ def test_goallab_v1_contract_is_frozen() -> None:
 
 
 def test_goallab_v1_lock_fails_closed_on_semantic_drift(monkeypatch) -> None:
-    import h2h.quantlab.goal_lab.readiness as readiness
+    from h2h.quantlab.goal_lab import readiness
 
     monkeypatch.setattr(readiness, "MIN_EDGE", 0.031)
 
