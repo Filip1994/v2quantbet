@@ -141,3 +141,51 @@ def test_corner_pressure_model_is_fitted_once_per_decision_cycle():
     assert second.estimate is not None
     assert repo.history_calls == 1
     assert first.estimate.model.model_version == second.estimate.model.model_version
+
+
+def test_corner_pressure_model_reuses_identical_persisted_training(monkeypatch):
+    import h2h.quantlab.corner_lab.model as model_module
+
+    class ReuseRepo(Repo):
+        def __init__(self):
+            super().__init__()
+            self.lookups = []
+
+        def corner_model_by_training_fingerprint(self, fingerprint):
+            self.lookups.append(fingerprint)
+            if not self.models:
+                return None
+            artifact = self.models[-1]
+            if artifact.training_payload.get("training_fingerprint") != fingerprint:
+                return None
+            return {
+                "model_version": artifact.model_version,
+                "trained_at": artifact.trained_at,
+                "training_cutoff": artifact.training_cutoff,
+                "feature_version": artifact.feature_version,
+                "training_sample_size": artifact.training_sample_size,
+                "history_match_count": artifact.history_match_count,
+                "ridge_penalty": artifact.ridge_penalty,
+                "coefficients": artifact.coefficients,
+                "feature_means": artifact.feature_means,
+                "feature_scales": artifact.feature_scales,
+                "training_payload": artifact.training_payload,
+            }
+
+    repo = ReuseRepo()
+    fixture = {"fixture_id": "api-football:a", "home_team_id": 1, "away_team_id": 2}
+    first = CornerPressureModelService(repo).estimate(fixture, decision_at=NOW)
+    assert first.estimate is not None
+    assert len(repo.models) == 1
+
+    def unexpected_fit(*_args, **_kwargs):
+        raise AssertionError("identical CornerLab evidence must not refit")
+
+    monkeypatch.setattr(model_module, "_fit_poisson", unexpected_fit)
+    second_service = CornerPressureModelService(repo)
+    second = second_service.estimate(fixture, decision_at=NOW)
+
+    assert second.estimate is not None
+    assert second.estimate.model.model_version == first.estimate.model.model_version
+    assert len(repo.models) == 1
+    assert second_service._fit_details["artifact_reused"] is True
