@@ -329,7 +329,10 @@ class QuantLabDashboardService:
 
     def render_goal_analytics(self) -> str:
         picks = tuple(self._repository.list_all_goal_picks())
-        decisions = tuple(self._repository.list_all_goal_decisions())
+        loader = getattr(self._repository, "list_all_goal_decision_evidence", None)
+        decisions = tuple(
+            loader() if callable(loader) else self._repository.list_all_goal_decisions()
+        )
         snapshot = build_goal_analytics_snapshot(picks, decisions)
         return render_goal_analytics_html(snapshot)
 
@@ -696,8 +699,13 @@ class QuantLabDashboardService:
                 pipeline_rows = self._repository.list_goal_fixture_status(
                     now=datetime.now(UTC)
                 )
-            except Exception:
-                LOGGER.exception("GoalLab dashboard fixture-pipeline query failed")
+            except Exception as exc:
+                LOGGER.exception(
+                    "GoalLab dashboard fixture-pipeline query failed "
+                    "error_class=%s sqlstate=%s",
+                    type(exc).__name__,
+                    getattr(exc, "sqlstate", None),
+                )
                 dashboard_warnings.append("Upcoming GoalLab pipeline temporarily unavailable.")
                 pipeline_rows = ()
             rendered_pipeline = ""
@@ -822,11 +830,20 @@ class QuantLabDashboardService:
 
         goal_research_html = ""
         if lab_key == "goal":
-            decision_loader = getattr(self._repository, "list_all_goal_decisions", None)
+            decision_loader = getattr(
+                self._repository,
+                "list_all_goal_decision_evidence",
+                getattr(self._repository, "list_all_goal_decisions", None),
+            )
             try:
                 research_decisions = tuple(decision_loader()) if callable(decision_loader) else ()
-            except Exception:
-                LOGGER.exception("GoalLab dashboard research decision query failed")
+            except Exception as exc:
+                LOGGER.exception(
+                    "GoalLab dashboard research decision query failed "
+                    "error_class=%s sqlstate=%s",
+                    type(exc).__name__,
+                    getattr(exc, "sqlstate", None),
+                )
                 dashboard_warnings.append("GoalLab research decision evidence temporarily unavailable.")
                 research_decisions = ()
             snapshot = build_goal_analytics_snapshot(metric_rows, research_decisions)
