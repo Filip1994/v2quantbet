@@ -124,7 +124,7 @@ def test_quantlab_dashboard_renders_three_labs_and_goal_metrics() -> None:
     assert "Upcoming fixture / GoalLab decision pipeline" in html
     assert "EDGE_BELOW_MINIMUM" in html
     assert "SHADOW ONLY" in html
-    assert "Open GoalLab Analytics V1" in html
+    assert "Open GoalLab Analytics V2" in html
     assert "/quantlab/goal/analytics" in html
 
 
