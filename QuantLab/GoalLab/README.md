@@ -197,8 +197,18 @@ The table is append-only.
 Settlements live in the separate append-only
 `quantlab_goal_pick_settlements` table.
 
-Settlement uses the shared stable result pipeline only when
-`fixture_result_acquisition_states.phase = COMPLETE`.
+Settlement is fully QuantLab-owned. An unsettled GoalLab canonical pick enters
+post-match result refresh after 6,300 seconds from kickoff. QuantLab then refreshes the
+fixture from API-Football into immutable `quantlab_fixture_observations`.
+
+A result is settleable only after **two matching terminal provider snapshots** at least
+900 seconds apart. Both snapshots are normalized with the same strict
+`API_FOOTBALL_SETTLEMENT_RESULT_V1` semantics used by the production result normalizer.
+If the score/status changes between confirmations, settlement waits for a new matching pair.
+
+Postponed (`PST`) is non-terminal and is refreshed on a six-hour cadence; it is **not**
+automatically voided. Void settlement is limited to the normalizer's terminal voidable
+statuses (`CANC`, `ABD`, `AWD`, `WO`).
 
 Rules:
 
@@ -318,6 +328,7 @@ explicitly versioned successor contract rather than silently mutating V1:
 - model prefix and Structural feature version;
 - evaluation policy and canonical pick policy;
 - settlement rule and chronological validation method;
+- GoalLab result refresh/finality timing;
 - flat stake;
 - edge / EV / odds / quote-age / kickoff gates;
 - canonical market set (O/U 2.5 and BTTS).

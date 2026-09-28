@@ -1003,3 +1003,24 @@ Added a dedicated active-pick view and exact numeric notes:
 
 Odds remain outside the Structural DC+ probability model and are used only in the value
 decision layer.
+
+
+## 2026-09-28 — GoalLab autonomous result acquisition + settlement E2E
+
+**Owner:** GoalLab runtime / settlement
+
+Closed the remaining canonical-pick settlement gap without writing to production
+registered-pick, bankroll, model-activation, fixture, or result tables.
+
+- unsettled GoalLab canonical picks now trigger their own post-match API-Football fixture
+  refresh into append-only `quantlab_fixture_observations`;
+- first refresh is due 6,300 seconds after kickoff, then every 900 seconds while unsettled;
+- postponed fixtures use a 21,600-second refresh cadence and remain non-terminal;
+- settlement requires two matching terminal snapshots at least 900 seconds apart;
+- both confirmations use the strict shared `API_FOOTBALL_SETTLEMENT_RESULT_V1`
+  normalizer, preserving FT/AET/PEN regulation-score semantics and CANC/ABD/AWD/WO voids;
+- changed/conflicting terminal results do not settle until a later matching pair exists;
+- confirmation count, timestamps and settlement fingerprint are retained in GoalLab
+  settlement audit evidence;
+- PostgreSQL E2E coverage now proves canonical pick → result tracking → stable result →
+  WIN settlement → P&L persistence → no further refresh/settlement work.

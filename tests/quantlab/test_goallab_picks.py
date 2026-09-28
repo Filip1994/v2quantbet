@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from h2h.quantlab.goal_lab.picks import (
     choose_canonical_candidate,
     settle_goal_pick,
+    stable_goal_result_evidence,
 )
 
 
@@ -154,3 +155,100 @@ def test_non_played_terminal_fixture_voids_goal_pick() -> None:
     assert settlement is not None
     assert settlement.outcome == "VOID"
     assert settlement.pnl_minor == 0
+
+
+def _provider_result_payload(
+    *,
+    status: str,
+    fulltime: tuple[int | None, int | None],
+    goals: tuple[int | None, int | None] | None = None,
+) -> dict[str, object]:
+    result_goals = fulltime if goals is None else goals
+    return {
+        "fixture": {
+            "id": 9001,
+            "date": "2026-09-27T18:00:00+00:00",
+            "status": {"short": status},
+        },
+        "teams": {
+            "home": {"id": 1, "name": "Home"},
+            "away": {"id": 2, "name": "Away"},
+        },
+        "goals": {"home": result_goals[0], "away": result_goals[1]},
+        "score": {
+            "fulltime": {"home": fulltime[0], "away": fulltime[1]},
+            "extratime": {"home": None, "away": None},
+            "penalty": {"home": None, "away": None},
+        },
+    }
+
+
+def test_goal_result_requires_two_matching_terminal_confirmations() -> None:
+    first = NOW + timedelta(hours=2)
+    second = first + timedelta(minutes=15)
+    row = {
+        "fixture_id": "api-football:9001",
+        "latest_result_observation_id": "quantlab-fixture-v1:" + "1" * 64,
+        "latest_result_captured_at": second,
+        "latest_result_raw_payload": _provider_result_payload(
+            status="FT",
+            fulltime=(2, 1),
+        ),
+        "previous_result_observation_id": "quantlab-fixture-v1:" + "2" * 64,
+        "previous_result_captured_at": first,
+        "previous_result_raw_payload": _provider_result_payload(
+            status="FT",
+            fulltime=(2, 1),
+        ),
+    }
+
+    evidence = stable_goal_result_evidence(row)
+
+    assert evidence is not None
+    assert evidence["result_classification"] == "PLAYED_SETTLEABLE"
+    assert evidence["regulation_home_goals"] == 2
+    assert evidence["regulation_away_goals"] == 1
+    assert evidence["result_confirmation_count"] == 2
+
+
+def test_goal_result_does_not_settle_on_changed_terminal_score() -> None:
+    first = NOW + timedelta(hours=2)
+    second = first + timedelta(minutes=15)
+    row = {
+        "fixture_id": "api-football:9001",
+        "latest_result_observation_id": "quantlab-fixture-v1:" + "3" * 64,
+        "latest_result_captured_at": second,
+        "latest_result_raw_payload": _provider_result_payload(
+            status="FT",
+            fulltime=(2, 1),
+        ),
+        "previous_result_observation_id": "quantlab-fixture-v1:" + "4" * 64,
+        "previous_result_captured_at": first,
+        "previous_result_raw_payload": _provider_result_payload(
+            status="FT",
+            fulltime=(1, 1),
+        ),
+    }
+
+    assert stable_goal_result_evidence(row) is None
+
+
+def test_goal_result_postponed_is_not_voidable() -> None:
+    first = NOW + timedelta(hours=2)
+    second = first + timedelta(hours=6)
+    postponed = _provider_result_payload(
+        status="PST",
+        fulltime=(None, None),
+        goals=(None, None),
+    )
+    row = {
+        "fixture_id": "api-football:9001",
+        "latest_result_observation_id": "quantlab-fixture-v1:" + "5" * 64,
+        "latest_result_captured_at": second,
+        "latest_result_raw_payload": postponed,
+        "previous_result_observation_id": "quantlab-fixture-v1:" + "6" * 64,
+        "previous_result_captured_at": first,
+        "previous_result_raw_payload": postponed,
+    }
+
+    assert stable_goal_result_evidence(row) is None
