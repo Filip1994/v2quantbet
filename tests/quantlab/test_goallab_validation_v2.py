@@ -71,11 +71,11 @@ class FakeControl:
         return 1.35, 1.10
 
 
-def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
-    control_fit_sizes: list[int] = []
+def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
+    pooled_fit_sizes: list[int] = []
 
-    def fake_control_fit(records, **_kwargs):
-        control_fit_sizes.append(len(records))
+    def fake_pooled_fit(records, **_kwargs):
+        pooled_fit_sizes.append(len(records))
         return FakeControl(records)
 
     def fake_dc_plus_fit(
@@ -105,7 +105,7 @@ def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatc
         }
         return params, 1.0
 
-    monkeypatch.setattr(audit.DixonColesModel, "fit", staticmethod(fake_control_fit))
+    monkeypatch.setattr(audit, "_fit_sparse_pooled_control", fake_pooled_fit)
     monkeypatch.setattr(audit, "_fit_dc_plus", fake_dc_plus_fit)
 
     validation = audit.build_goal_model_validation(
@@ -114,15 +114,15 @@ def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatc
         evaluated_at=NOW,
     )
 
-    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V2"
+    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
     assert validation.authority_review_status == "READY_FOR_MANUAL_REVIEW"
     assert validation.comparison["control_leagues_fitted"] == []
     assert validation.comparison["pooled_control_fitted"] is True
     assert validation.comparison["control_scope_counts"]["pooled"] >= audit.MIN_COMMON_EVALUATION
-    assert control_fit_sizes
-    assert min(control_fit_sizes) >= audit.CONTROL_MIN_MATCHES
+    assert pooled_fit_sizes
+    assert min(pooled_fit_sizes) >= audit.CONTROL_MIN_MATCHES
 
 
 def test_validation_repository_lookup_is_method_specific() -> None:
@@ -131,3 +131,42 @@ def test_validation_repository_lookup_is_method_specific() -> None:
     source = inspect.getsource(audit.ensure_latest_goal_model_validation)
 
     assert "method_version=METHOD_VERSION" in source
+
+
+
+def test_sparse_pooled_control_keeps_sparse_team_matches() -> None:
+    from types import SimpleNamespace
+
+    records = []
+    stable_teams = (1, 2, 3, 4)
+    for index in range(10):
+        records.append(
+            SimpleNamespace(
+                date=NOW - timedelta(days=110 - index),
+                home_id=stable_teams[index % 4],
+                away_id=stable_teams[(index + 1) % 4],
+                home_goals=index % 3,
+                away_goals=(index + 1) % 2,
+            )
+        )
+    for index in range(90):
+        records.append(
+            SimpleNamespace(
+                date=NOW - timedelta(days=100 - index),
+                home_id=1000 + index * 2,
+                away_id=1001 + index * 2,
+                home_goals=index % 4,
+                away_goals=(index + 2) % 3,
+            )
+        )
+
+    control = audit._fit_sparse_pooled_control(records, reference_time=NOW)
+
+    assert control.fitted_matches == 100
+    assert 1000 in control.team_ids
+    sparse_index = control.team_ids.index(1000)
+    assert control.attacks[sparse_index] == 0.0
+    assert control.defenses[sparse_index] == 0.0
+    lambda_home, lambda_away = control.expected_goals(1000, 1001)
+    assert lambda_home > 0.0
+    assert lambda_away > 0.0
