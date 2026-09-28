@@ -406,6 +406,17 @@ def _fmt(value: Any, suffix: str = "", signed: bool = False) -> str:
     return f"{value}{suffix}"
 
 
+def _metric_class(value: Any) -> str:
+    if value is None:
+        return "metric-neutral"
+    number = float(value)
+    if number > 0:
+        return "metric-positive"
+    if number < 0:
+        return "metric-negative"
+    return "metric-neutral"
+
+
 def _metrics_table(
     title: str,
     rows: Sequence[dict[str, Any]],
@@ -414,13 +425,24 @@ def _metrics_table(
     dimension_links: dict[str, str] | None = None,
     dimension_link_params: dict[str, tuple[str, ...]] | None = None,
     dimension_labels: dict[str, str] | None = None,
+    row_link_path: str | None = None,
+    row_link_params: dict[str, str] | None = None,
+    row_link_fixed: dict[str, str] | None = None,
 ) -> str:
     dimension_headers = "".join(
         f"<th>{escape((dimension_labels or {}).get(name, name))}</th>"
         for name in dimensions
     )
+    action_header = "<th class=\"action-col\">Picks</th>" if row_link_path else ""
     body = []
     for row in rows:
+        row_href = None
+        if row_link_path:
+            query = dict(row_link_fixed or {})
+            for row_name, query_name in (row_link_params or {}).items():
+                query[query_name] = str(row.get(row_name, "—"))
+            row_href = row_link_path + ("?" + urlencode(query) if query else "")
+
         cells = []
         for name in dimensions:
             raw_value = str(row.get(name, "—"))
@@ -438,9 +460,20 @@ def _metrics_table(
                     f'<td><b><a class="dimension-link" href="{escape(href, quote=True)}">'
                     f"{value}</a></b></td>"
                 )
+            elif row_href:
+                cells.append(
+                    f'<td><b><a class="dimension-link" href="{escape(row_href, quote=True)}">'
+                    f"{value}</a></b></td>"
+                )
             else:
                 cells.append(f"<td><b>{value}</b></td>")
         dims = "".join(cells)
+        action = (
+            f'<td class="action-col"><a class="row-action" '
+            f'href="{escape(row_href, quote=True)}">View →</a></td>'
+            if row_href
+            else ""
+        )
         body.append(
             "<tr>"
             + dims
@@ -448,25 +481,32 @@ def _metrics_table(
             + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
             + f"<td>{_fmt(row['win_rate_pct'], '%')}</td>"
             + f"<td>{_fmt(row['expected_win_rate_pct'], '%')}</td>"
-            + f"<td>{_fmt(row['calibration_gap_pp'], 'pp', signed=True)}</td>"
-            + f"<td>{_fmt(row['roi_pct'], '%', signed=True)}</td>"
-            + f"<td>{_fmt(row['avg_clv_pct'], '%', signed=True)}</td>"
-            + f"<td>{_fmt(row['median_clv_pct'], '%', signed=True)}</td>"
+            + f'<td class="{_metric_class(row["calibration_gap_pp"])}">'
+            + f"{_fmt(row['calibration_gap_pp'], 'pp', signed=True)}</td>"
+            + f'<td class="metric-strong {_metric_class(row["roi_pct"])}">'
+            + f"{_fmt(row['roi_pct'], '%', signed=True)}</td>"
+            + f'<td class="{_metric_class(row["avg_clv_pct"])}">'
+            + f"{_fmt(row['avg_clv_pct'], '%', signed=True)}</td>"
+            + f'<td class="{_metric_class(row["median_clv_pct"])}">'
+            + f"{_fmt(row['median_clv_pct'], '%', signed=True)}</td>"
             + f"<td>{_fmt(row['positive_clv_rate_pct'], '%')}</td>"
             + f"<td>{escape(str(row['sample_band']))}</td>"
+            + action
             + "</tr>"
         )
     if not body:
         body.append(
-            f'<tr><td colspan="{len(dimensions) + 10}" class="empty">No settled rows.</td></tr>'
+            f'<tr><td colspan="{len(dimensions) + 10 + (1 if row_link_path else 0)}" '
+            'class="empty">No settled rows.</td></tr>'
         )
     return (
-        '<section class="panel"><h2>'
+        '<section class="panel"><h3>'
         + escape(title)
-        + '</h2><div class="scroll"><table><thead><tr>'
+        + '</h3><div class="scroll"><table><thead><tr>'
         + dimension_headers
         + "<th>N</th><th>W-L-V</th><th>Win%</th><th>Exp%</th><th>Cal gap</th>"
         + "<th>ROI</th><th>Avg CLV</th><th>Med CLV</th><th>+CLV%</th><th>Evidence</th>"
+        + action_header
         + "</tr></thead><tbody>"
         + "".join(body)
         + "</tbody></table></div></section>"
@@ -487,7 +527,7 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         f'<span>model versions={version_summary["model_version_count"]} · '
         f'policy configs={version_summary["policy_config_count"]} · '
         f'unrecorded policy rows={version_summary["unrecorded_policy_n"]}. '
-        'Use the version cohorts below before interpreting lifetime performance.</span></div>'
+        'League rows combine retrains; the audit tables preserve version detail.</span></div>'
         if mixed_versions
         else '<div class="version-ok"><b>SINGLE VERSION REGIME</b>'
         '<span>Lifetime cards represent one recorded model/policy regime.</span></div>'
@@ -508,12 +548,8 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
         )
     )
 
-    weekly = _metrics_table("Weekly stability", snapshot["weekly"], ("week",))
-    diagnostics = _metrics_table(
-        "Low-scoring extreme-value diagnostic",
-        snapshot["diagnostics"],
-        ("diagnostic",),
-    )
+    history = {"tab": "history"}
+
     league_seasons = _metrics_table(
         "Leagues · all retrains combined",
         snapshot["cohorts"]["league_season"],
@@ -525,26 +561,101 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "league_id": "League ID",
             "season": "Season",
         },
+        row_link_path="/research/analytics/league",
+        row_link_params={"league_id": "league_id", "season": "season"},
     )
-    model_versions = _metrics_table(
-        "Model versions · individual retrains",
-        snapshot["cohorts"]["model_version"],
-        ("model_version_id",),
-        dimension_links={"model_version_id": "/research/analytics/model"},
+    market_selection = _metrics_table(
+        "Market × selection",
+        snapshot["cohorts"]["market_selection"],
+        ("market", "selection"),
+        dimension_labels={"market": "Market", "selection": "Pick"},
+        row_link_path="/research",
+        row_link_params={"market": "market", "selection": "selection"},
+        row_link_fixed=history,
     )
+    diagnostics = _metrics_table(
+        "Low-scoring diagnostic",
+        snapshot["diagnostics"],
+        ("diagnostic",),
+        dimension_labels={"diagnostic": "Diagnostic"},
+        row_link_path="/research",
+        row_link_params={"diagnostic": "diagnostic"},
+        row_link_fixed=history,
+    )
+    weekly = _metrics_table(
+        "Weekly stability",
+        snapshot["weekly"],
+        ("week",),
+        dimension_labels={"week": "Week"},
+        row_link_path="/research",
+        row_link_params={"week": "week"},
+        row_link_fixed=history,
+    )
+
+    model_probability = _metrics_table(
+        "Model probability",
+        snapshot["cohorts"]["model_probability_bucket"],
+        ("probability_bucket",),
+        dimension_labels={"probability_bucket": "Model P"},
+        row_link_path="/research",
+        row_link_params={"probability_bucket": "p_bucket"},
+        row_link_fixed=history,
+    )
+    fair_probability = _metrics_table(
+        "Market fair probability",
+        snapshot["cohorts"]["market_fair_probability_bucket"],
+        ("market_fair_probability_bucket",),
+        dimension_labels={"market_fair_probability_bucket": "Fair P"},
+        row_link_path="/research",
+        row_link_params={"market_fair_probability_bucket": "fair_bucket"},
+        row_link_fixed=history,
+    )
+    ev = _metrics_table(
+        "Expected value",
+        snapshot["cohorts"]["ev_bucket"],
+        ("ev_bucket",),
+        dimension_labels={"ev_bucket": "EV"},
+        row_link_path="/research",
+        row_link_params={"ev_bucket": "ev_bucket"},
+        row_link_fixed=history,
+    )
+    odds = _metrics_table(
+        "Entry odds",
+        snapshot["cohorts"]["odds_bucket"],
+        ("odds_bucket",),
+        dimension_labels={"odds_bucket": "Odds"},
+        row_link_path="/research",
+        row_link_params={"odds_bucket": "odds_bucket"},
+        row_link_fixed=history,
+    )
+
     policy_configs = _metrics_table(
         "Policy configurations",
         snapshot["cohorts"]["policy_config"],
         ("policy_config_fingerprint",),
+        dimension_labels={"policy_config_fingerprint": "Policy"},
+        row_link_path="/research",
+        row_link_params={"policy_config_fingerprint": "policy_config"},
+        row_link_fixed=history,
     )
     model_policy = _metrics_table(
-        "Model × policy regimes",
+        "Model × policy",
         snapshot["cohorts"]["model_policy"],
         ("model_version_id", "policy_config_fingerprint"),
         dimension_links={"model_version_id": "/research/analytics/model"},
+        dimension_labels={
+            "model_version_id": "Model version",
+            "policy_config_fingerprint": "Policy",
+        },
+        row_link_path="/research",
+        row_link_params={
+            "model_version_id": "model_version",
+            "policy_config_fingerprint": "policy_config",
+        },
+        row_link_fixed=history,
     )
     decision_contract = _metrics_table(
-        "Full decision contract",
+        "Decision contract",
         snapshot["cohorts"]["decision_contract"],
         (
             "model_version_id",
@@ -553,34 +664,23 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "policy_config_fingerprint",
         ),
         dimension_links={"model_version_id": "/research/analytics/model"},
-    )
-    market_selection = _metrics_table(
-        "Market × selection",
-        snapshot["cohorts"]["market_selection"],
-        ("market", "selection"),
-    )
-    model_probability = _metrics_table(
-        "Model probability buckets",
-        snapshot["cohorts"]["model_probability_bucket"],
-        ("probability_bucket",),
-    )
-    fair_probability = _metrics_table(
-        "Market fair probability buckets",
-        snapshot["cohorts"]["market_fair_probability_bucket"],
-        ("market_fair_probability_bucket",),
-    )
-    ev = _metrics_table(
-        "EV buckets",
-        snapshot["cohorts"]["ev_bucket"],
-        ("ev_bucket",),
-    )
-    odds = _metrics_table(
-        "Odds buckets",
-        snapshot["cohorts"]["odds_bucket"],
-        ("odds_bucket",),
+        dimension_labels={
+            "model_version_id": "Model version",
+            "prediction_method_version": "Prediction",
+            "devig_method_version": "De-vig",
+            "policy_config_fingerprint": "Policy",
+        },
+        row_link_path="/research",
+        row_link_params={
+            "model_version_id": "model_version",
+            "prediction_method_version": "prediction_method",
+            "devig_method_version": "devig_method",
+            "policy_config_fingerprint": "policy_config",
+        },
+        row_link_fixed=history,
     )
     cube = _metrics_table(
-        "Production-filter evidence cube",
+        "Production filter cube",
         snapshot["cohorts"]["production_filter_cube"],
         (
             "market",
@@ -590,6 +690,24 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
             "ev_bucket",
             "odds_bucket",
         ),
+        dimension_labels={
+            "market": "Market",
+            "selection": "Pick",
+            "probability_bucket": "Model P",
+            "market_fair_probability_bucket": "Fair P",
+            "ev_bucket": "EV",
+            "odds_bucket": "Odds",
+        },
+        row_link_path="/research",
+        row_link_params={
+            "market": "market",
+            "selection": "selection",
+            "probability_bucket": "p_bucket",
+            "market_fair_probability_bucket": "fair_bucket",
+            "ev_bucket": "ev_bucket",
+            "odds_bucket": "odds_bucket",
+        },
+        row_link_fixed=history,
     )
 
     return f"""<!doctype html>
@@ -597,37 +715,72 @@ def render_research_analytics_html(snapshot: dict[str, Any]) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantBet Research Analytics V2</title>
 <style>
-:root{{--bg:#111315;--panel:#181b1f;--line:#30363d;--text:#eceff1;--muted:#9299a1}}
-*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);
-font-family:Inter,ui-sans-serif,system-ui,sans-serif}}main{{max-width:1920px;margin:auto;padding:24px}}
-header{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}}
-h1{{margin:0;font-size:25px}}h2{{font-size:15px;margin:0 0 12px}}p,small{{color:var(--muted)}}
-a{{color:#d8dcdf}}.dimension-link{{text-decoration:none;border-bottom:1px dotted #778089}}
-.dimension-link:hover{{color:#fff;border-bottom-color:#fff}}.cards{{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));
-gap:9px;margin:15px 0}}.card,.panel{{background:var(--panel);border:1px solid var(--line);
-border-radius:12px}}.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;
-letter-spacing:.08em}}.card b{{display:block;font-size:20px;margin-top:7px}}.panel{{padding:14px;
-margin:12px 0}}.scroll{{overflow:auto;max-height:62vh}}table{{width:100%;
-border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;border-bottom:1px solid #272c31;
-white-space:nowrap;text-align:left}}th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;
-font-size:10px;text-transform:uppercase;letter-spacing:.05em}}.empty{{color:var(--muted);
-text-align:center}}.definition{{padding:12px 14px;border:1px solid var(--line);
-border-radius:10px;color:var(--muted);font-size:12px}}.version-warning,.version-ok{{
-display:flex;gap:10px;align-items:center;padding:11px 14px;margin:12px 0;border-radius:10px;
-border:1px solid var(--line);font-size:12px}}.version-warning{{background:#2a2117}}
+:root{{--bg:#111315;--panel:#181b1f;--panel2:#15181b;--line:#30363d;--text:#eceff1;
+--muted:#9299a1;--positive:#79c995;--negative:#e06f78}}
+*{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:var(--bg);
+color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
+main{{max-width:1920px;margin:auto;padding:24px}}
+header{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}}
+h1{{margin:0;font-size:25px}}h2{{font-size:18px;margin:0}}h3{{font-size:15px;margin:0 0 12px}}
+p,small{{color:var(--muted)}}a{{color:#d8dcdf}}
+.section-nav{{position:sticky;top:0;z-index:20;display:flex;gap:8px;overflow:auto;
+padding:9px 0;background:rgba(17,19,21,.96);border-bottom:1px solid #24292e}}
+.section-nav a{{text-decoration:none;white-space:nowrap;padding:7px 10px;border:1px solid var(--line);
+border-radius:999px;font-size:12px;color:#bfc5ca}}.section-nav a:hover{{color:#fff;border-color:#5b636b}}
+.definition{{margin-top:12px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;
+color:var(--muted);font-size:12px;background:var(--panel2)}}
+.dimension-link{{text-decoration:none;border-bottom:1px dotted #778089}}
+.dimension-link:hover{{color:#fff;border-bottom-color:#fff}}.row-action{{font-weight:650;
+text-decoration:none;white-space:nowrap}}.cards{{display:grid;
+grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0 18px}}
+.card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px}}
+.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;letter-spacing:.08em}}
+.card b{{display:block;font-size:20px;margin-top:7px}}.analytics-group{{scroll-margin-top:58px;
+margin:20px 0 26px}}.group-head{{display:flex;align-items:end;justify-content:space-between;
+gap:12px;padding:0 2px 7px}}.group-head p{{margin:0;font-size:12px}}
+.panel{{padding:14px;margin:10px 0}}.scroll{{overflow:auto;max-height:62vh}}
+table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
+border-bottom:1px solid #272c31;white-space:nowrap;text-align:left}}th{{position:sticky;top:0;
+background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;letter-spacing:.05em}}
+tbody tr:hover{{background:#1d2226}}.action-col{{text-align:right}}.metric-strong{{font-weight:700}}
+.metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}
+.metric-neutral{{color:inherit}}.empty{{color:var(--muted);text-align:center}}
+.version-warning,.version-ok{{display:flex;gap:10px;align-items:center;padding:11px 14px;margin:12px 0;
+border-radius:10px;border:1px solid var(--line);font-size:12px}}.version-warning{{background:#2a2117}}
 .version-warning b{{color:#f0b36a}}.version-ok{{background:#17251d}}.version-ok b{{color:#79c995}}
 .version-warning span,.version-ok span{{color:var(--muted)}}@media(max-width:900px){{
-.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}}}
+.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}
+.group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}}}
 </style></head><body><main>
 <header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
-<p>Continuous settled-performance matrix. Read-only; no Production selection changes.</p></div>
+<p>Settled performance. Every aggregate row links back to its constituent picks.</p></div>
 <div><a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
+<nav class="section-nav">
+<a href="#overview">Overview</a><a href="#core">Core performance</a>
+<a href="#calibration">Calibration & price</a><a href="#audit">Audit</a>
+</nav>
+<section id="overview" class="analytics-group">
 <div class="definition">Universe: {escape(snapshot['definitions']['universe'])}
 ROI: {escape(snapshot['definitions']['roi'])}<br>
 Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 {version_notice}
 <section class="cards">{cards}</section>
-{league_seasons}{model_versions}{policy_configs}{model_policy}{decision_contract}
-{diagnostics}{market_selection}{model_probability}{fair_probability}{ev}{odds}{weekly}{cube}
+</section>
+<section id="core" class="analytics-group">
+<div class="group-head"><div><h2>Core performance</h2>
+<p>League, market, diagnostic and time stability.</p></div></div>
+{league_seasons}{market_selection}{diagnostics}{weekly}
+</section>
+<section id="calibration" class="analytics-group">
+<div class="group-head"><div><h2>Calibration & price</h2>
+<p>Probability, fair-price, EV and entry-odds cohorts.</p></div></div>
+{model_probability}{fair_probability}{ev}{odds}
+</section>
+<section id="audit" class="analytics-group">
+<div class="group-head"><div><h2>Audit</h2>
+<p>Policy and decision-contract detail. Model versions remain available inside league drilldowns.</p>
+</div></div>
+{policy_configs}{model_policy}{decision_contract}{cube}
+</section>
 </main></body></html>"""
