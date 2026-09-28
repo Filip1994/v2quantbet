@@ -32,8 +32,9 @@ def test_dc_plus_keeps_sparse_team_coverage_with_neutral_latent_effect(
 
     captured = {}
 
-    def fake_minimize(_objective, initial, **_kwargs):
+    def fake_minimize(_objective, initial, **kwargs):
         captured["parameter_count"] = len(initial)
+        captured["options"] = kwargs["options"]
         return SimpleNamespace(
             success=True,
             fun=1.0,
@@ -65,3 +66,10 @@ def test_dc_plus_keeps_sparse_team_coverage_with_neutral_latent_effect(
     assert params["defenses"]["3"] == 0.0
     assert params["team_training_appearances"]["3"] == 1
     assert captured["parameter_count"] == 10
+    assert captured["options"] == {
+        "maxiter": model.OPTIMIZER_MAXITER,
+        "ftol": model.OPTIMIZER_FTOL,
+        "gtol": model.OPTIMIZER_GTOL,
+    }
+    assert model.OPTIMIZER_MAXITER == 1400
+    assert model.OPTIMIZER_GTOL == 1e-5
