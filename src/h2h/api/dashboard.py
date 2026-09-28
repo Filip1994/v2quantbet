@@ -970,7 +970,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <section class="kpis">{cards_html}</section>
 <section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
 <div class="scoreboard"><div class="score"><span>System picks</span><strong>{counts["all"]}</strong></div>
-<div class="score"><span>Pending</span><strong>{counts["pending_operator"]}</strong></div><div class="score"><span>Played</span><strong class="won">{counts["played"]}</strong></div><div class="score"><span>Skipped</span><strong>{counts["skipped"]}</strong></div>
+<div class="score"><span>Pending</span><strong>{counts.get("pending_operator", 0)}</strong></div><div class="score"><span>Played</span><strong class="won">{counts["played"]}</strong></div><div class="score"><span>Skipped</span><strong>{counts["skipped"]}</strong></div>
 <div class="score"><span>Active played</span><strong>{counts["active"]}</strong></div><div class="score"><span>Won</span><strong class="won">{counts["won"]}</strong></div>
 <div class="score"><span>Lost</span><strong class="lost">{counts["lost"]}</strong></div><div class="score"><span>Void</span><strong>{counts["void"]}</strong></div></div></article>
 <article class="panel"><div class="panel-head"><h2>Operational pulse</h2><span class="section-label">Evidence-backed</span></div><div class="ops">
