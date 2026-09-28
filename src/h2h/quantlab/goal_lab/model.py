@@ -1460,6 +1460,19 @@ def _feature_penalties(names: tuple[str, ...]) -> np.ndarray:
     )
 
 
+def _eligible_team_values(
+    home_ids: np.ndarray,
+    away_ids: np.ndarray,
+) -> tuple[int, ...]:
+    observations = np.concatenate([home_ids, away_ids])
+    team_ids_unique, team_counts = np.unique(observations, return_counts=True)
+    return tuple(
+        int(team_id)
+        for team_id, count in zip(team_ids_unique, team_counts, strict=True)
+        if int(count) >= MIN_TEAM_HISTORY
+    )
+
+
 def _fit_dc_plus(
     x: np.ndarray,
     y_home: np.ndarray,
@@ -1476,12 +1489,16 @@ def _fit_dc_plus(
     if n < MIN_TRAINING_EXAMPLES or x.shape[1] == 0:
         return None
 
-    team_values = tuple(sorted(set(home_ids.tolist()) | set(away_ids.tolist())))
+    team_values = _eligible_team_values(home_ids, away_ids)
     league_values = tuple(sorted(set(league_ids.tolist())))
     team_index = {team_id: index for index, team_id in enumerate(team_values)}
     league_index = {league_id: index for index, league_id in enumerate(league_values)}
-    h_idx = np.asarray([team_index[int(value)] for value in home_ids], dtype=np.int64)
-    a_idx = np.asarray([team_index[int(value)] for value in away_ids], dtype=np.int64)
+    h_idx = np.asarray(
+        [team_index.get(int(value), -1) for value in home_ids], dtype=np.int64
+    )
+    a_idx = np.asarray(
+        [team_index.get(int(value), -1) for value in away_ids], dtype=np.int64
+    )
     l_idx = np.asarray([league_index[int(value)] for value in league_ids], dtype=np.int64)
 
     nt = len(team_values)
@@ -1523,18 +1540,29 @@ def _fit_dc_plus(
         beta_home = params[beta_home_slice]
         beta_away = params[beta_away_slice]
 
+        home_attack = np.zeros(n, dtype=float)
+        away_attack = np.zeros(n, dtype=float)
+        home_defense = np.zeros(n, dtype=float)
+        away_defense = np.zeros(n, dtype=float)
+        h_valid = h_idx >= 0
+        a_valid = a_idx >= 0
+        home_attack[h_valid] = attacks[h_idx[h_valid]]
+        home_defense[h_valid] = defenses[h_idx[h_valid]]
+        away_attack[a_valid] = attacks[a_idx[a_valid]]
+        away_defense[a_valid] = defenses[a_idx[a_valid]]
+
         eta_home_raw = (
             intercept
             + home_adv
-            + attacks[h_idx]
-            + defenses[a_idx]
+            + home_attack
+            + away_defense
             + leagues[l_idx]
             + x @ beta_home
         )
         eta_away_raw = (
             intercept
-            + attacks[a_idx]
-            + defenses[h_idx]
+            + away_attack
+            + home_defense
             + leagues[l_idx]
             + x @ beta_away
         )
@@ -1597,10 +1625,10 @@ def _fit_dc_plus(
         grad_eta_away *= ((eta_away_raw > -6.0) & (eta_away_raw < 4.0))
 
         grad = np.zeros_like(params)
-        np.add.at(grad[attack_slice], h_idx, grad_eta_home)
-        np.add.at(grad[attack_slice], a_idx, grad_eta_away)
-        np.add.at(grad[defense_slice], a_idx, grad_eta_home)
-        np.add.at(grad[defense_slice], h_idx, grad_eta_away)
+        np.add.at(grad[attack_slice], h_idx[h_valid], grad_eta_home[h_valid])
+        np.add.at(grad[attack_slice], a_idx[a_valid], grad_eta_away[a_valid])
+        np.add.at(grad[defense_slice], a_idx[a_valid], grad_eta_home[a_valid])
+        np.add.at(grad[defense_slice], h_idx[h_valid], grad_eta_away[h_valid])
         np.add.at(grad[league_slice], l_idx, grad_eta_home + grad_eta_away)
         grad[intercept_index] = float(np.sum(grad_eta_home + grad_eta_away))
         grad[home_adv_index] = float(np.sum(grad_eta_home))
@@ -1658,6 +1686,8 @@ def _fit_dc_plus(
     params = result.x
     payload = {
         "team_ids": team_values,
+        "team_effect_min_appearances": MIN_TEAM_HISTORY,
+        "rare_team_effect_strategy": "NEUTRAL_ZERO_SHRINKAGE",
         "league_ids": league_values,
         "attacks": {
             str(team_id): float(params[attack_slice][index])
@@ -1943,17 +1973,16 @@ class GoalStructuralModelService:
         attacks = params["attacks"]
         defenses = params["defenses"]
         leagues = params["league_effects"]
-        if (
-            str(home_id) not in attacks
-            or str(away_id) not in attacks
-            or str(home_id) not in defenses
-            or str(away_id) not in defenses
-            or str(league_id) not in leagues
-        ):
+        if str(league_id) not in leagues:
             return GoalStructuralEstimateResult(
                 None,
                 "GOAL_MODEL_TEAM_OR_LEAGUE_UNCOVERED",
-                {"home_team_id": home_id, "away_team_id": away_id, "league_id": league_id},
+                {
+                    "home_team_id": home_id,
+                    "away_team_id": away_id,
+                    "league_id": league_id,
+                    "uncovered_component": "league",
+                },
             )
 
         kickoff = kickoff.astimezone(UTC)
@@ -2030,15 +2059,15 @@ class GoalStructuralModelService:
         eta_home = (
             self._artifact.intercept
             + self._artifact.home_advantage
-            + float(attacks[str(home_id)])
-            + float(defenses[str(away_id)])
+            + float(attacks.get(str(home_id), 0.0))
+            + float(defenses.get(str(away_id), 0.0))
             + float(leagues[str(league_id)])
             + float(np.dot(vector, beta_home))
         )
         eta_away = (
             self._artifact.intercept
-            + float(attacks[str(away_id)])
-            + float(defenses[str(home_id)])
+            + float(attacks.get(str(away_id), 0.0))
+            + float(defenses.get(str(home_id), 0.0))
             + float(leagues[str(league_id)])
             + float(np.dot(vector, beta_away))
         )
@@ -2099,6 +2128,14 @@ class GoalStructuralModelService:
                 "home_history_size": len(home_history),
                 "away_history_size": len(away_history),
                 "league_id": league_id,
+                "team_effect_min_appearances": params.get(
+                    "team_effect_min_appearances", MIN_TEAM_HISTORY
+                ),
+                "rare_team_effect_strategy": params.get(
+                    "rare_team_effect_strategy", "LEGACY_EXPLICIT_ONLY"
+                ),
+                "home_team_effect_available": str(home_id) in attacks,
+                "away_team_effect_available": str(away_id) in attacks,
                 "rho": self._artifact.rho,
                 "contract_blocks_pending_acquisition": self._artifact.training_payload[
                     "contract_blocks_pending_acquisition"
