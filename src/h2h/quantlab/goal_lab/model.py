@@ -1203,6 +1203,65 @@ def _history_coach_capture(
     }
 
 
+def _build_scoring_context(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[
+    dict[int, list[TeamMatchSample]],
+    dict[int, list[PlayerMatchSample]],
+    list[PairMatchSample],
+    int,
+]:
+    """Build only the historical context needed to score fixtures with a reused artifact."""
+    histories: dict[int, list[TeamMatchSample]] = {}
+    player_histories: dict[int, list[PlayerMatchSample]] = {}
+    pairs: list[PairMatchSample] = []
+    usable_matches = 0
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            row.get("kickoff_at") or datetime.min.replace(tzinfo=UTC),
+            str(row.get("fixture_id") or ""),
+        ),
+    )
+    for row in ordered:
+        home_id = _safe_id(row.get("home_team_id"))
+        away_id = _safe_id(row.get("away_team_id"))
+        league_id = _safe_id(row.get("league_id"))
+        home_goals = _safe_nonnegative_int(row.get("home_goals"))
+        away_goals = _safe_nonnegative_int(row.get("away_goals"))
+        kickoff = row.get("kickoff_at")
+        samples = _team_samples(row)
+        if (
+            home_id is None
+            or away_id is None
+            or league_id is None
+            or home_id == away_id
+            or home_goals is None
+            or away_goals is None
+            or not isinstance(kickoff, datetime)
+            or samples is None
+        ):
+            continue
+        kickoff = kickoff.astimezone(UTC)
+        usable_matches += 1
+        home_sample, away_sample = samples
+        histories.setdefault(home_id, []).append(home_sample)
+        histories.setdefault(away_id, []).append(away_sample)
+        pairs.append(PairMatchSample(kickoff, home_id, away_id, home_goals, away_goals))
+        player_payload = row.get("player_payload")
+        if isinstance(player_payload, str):
+            player_payload = json.loads(player_payload)
+        if row.get("player_status") == "AVAILABLE" and isinstance(player_payload, dict):
+            for player_sample in parse_goal_player_match_samples(
+                player_payload,
+                fixture_id=str(row.get("fixture_id") or ""),
+                kickoff_at=kickoff,
+                eligible_team_ids={home_id, away_id},
+            ):
+                player_histories.setdefault(player_sample.team_id, []).append(player_sample)
+    return histories, player_histories, pairs, usable_matches
+
+
 def _build_training(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[
@@ -1912,6 +1971,41 @@ class GoalStructuralModelService:
             len(rows),
             history_loaded_at - started_at,
         )
+        persisted = self._repository.goal_model_by_training_fingerprint(
+            training_fingerprint
+        )
+        if persisted is not None:
+            context_started_at = perf_counter()
+            histories, player_histories, pairs, history_match_count = (
+                _build_scoring_context(rows)
+            )
+            artifact = _artifact_from_row(persisted)
+            self._cache_at = now
+            self._histories = histories
+            self._player_histories = player_histories
+            self._pairs = pairs
+            self._training_fingerprint = training_fingerprint
+            self._artifact = artifact
+            self._fit_reason = "MODEL_READY"
+            self._fit_details = {
+                "history_match_count": history_match_count,
+                "training_sample_size": artifact.training_sample_size,
+                "active_feature_count": len(
+                    tuple(artifact.parameters.get("model_feature_names") or ())
+                ),
+                "artifact_reused": True,
+                "training_fingerprint": training_fingerprint,
+            }
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=artifact_reused model_version=%s "
+                "training_sample=%d history_matches=%d scoring_context_seconds=%.3f",
+                artifact.model_version,
+                artifact.training_sample_size,
+                history_match_count,
+                perf_counter() - context_started_at,
+            )
+            return
+
         (
             feature_rows,
             y_home,
@@ -1962,31 +2056,6 @@ class GoalStructuralModelService:
             return
 
         training_reference = max(dates).astimezone(UTC)
-        persisted = self._repository.goal_model_by_training_fingerprint(
-            training_fingerprint
-        )
-        if persisted is not None:
-            artifact = _artifact_from_row(persisted)
-            self._artifact = artifact
-            self._fit_reason = "MODEL_READY"
-            self._fit_details = {
-                "history_match_count": history_match_count,
-                "training_sample_size": len(y_home),
-                "active_feature_count": len(
-                    tuple(artifact.parameters.get("model_feature_names") or ())
-                ),
-                "artifact_reused": True,
-                "training_fingerprint": training_fingerprint,
-            }
-            LOGGER.info(
-                "GoalLab DC+ prepare stage=artifact_reused model_version=%s "
-                "training_sample=%d history_matches=%d",
-                artifact.model_version,
-                len(y_home),
-                history_match_count,
-            )
-            return
-
         LOGGER.info(
             "GoalLab DC+ prepare stage=fit_started training_sample=%d active_features=%d",
             len(y_home),
