@@ -70,8 +70,15 @@ class GoalLabStructuralShadowEngine:
 
     def __init__(self, repository: Any, *, policy: StructuralGoalPolicy | None = None) -> None:
         self._repository = repository
-        self._model = GoalStructuralModelService(repository)
         self._policy = policy or StructuralGoalPolicy()
+        self._model = GoalStructuralModelService(
+            repository,
+            artifact_model_version=(
+                self._policy.approved_model_version
+                if self._policy.pick_authority
+                else None
+            ),
+        )
 
     def readiness(self, *, decision_at: datetime | None = None) -> dict[str, Any]:
         return self._model.readiness(decision_at=decision_at)
