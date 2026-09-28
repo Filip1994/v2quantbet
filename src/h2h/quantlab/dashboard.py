@@ -208,13 +208,16 @@ def _sort_rows(
     direction: str,
 ) -> tuple[dict[str, Any], ...]:
     reverse = direction == "desc"
-    return tuple(
-        sorted(
-            rows,
-            key=lambda row: (_sort_value(row.get(key)), str(row.get("goal_pick_id") or row.get("fixture_id") or "")),
-            reverse=reverse,
-        )
+    present = [row for row in rows if row.get(key) is not None]
+    missing = [row for row in rows if row.get(key) is None]
+    present.sort(
+        key=lambda row: (
+            _sort_value(row.get(key))[1],
+            str(row.get("goal_pick_id") or row.get("fixture_id") or ""),
+        ),
+        reverse=reverse,
     )
+    return tuple(present + missing)
 
 
 def _sortable_th(
