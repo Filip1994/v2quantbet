@@ -1255,7 +1255,18 @@ class QuantLabRuntime:
         for fixture in fixtures:
             if not goal_scope(**self._scope_kwargs(fixture)).allowed:
                 continue
-            outcome = self._goal_engine.run_fixture(fixture, decision_at=now)
+            fixture_id = str(fixture.get("fixture_id") or "")
+            try:
+                outcome = self._goal_engine.run_fixture(fixture, decision_at=now)
+            except ApiBudgetExceededError:
+                raise
+            except Exception as exc:
+                LOGGER.exception(
+                    "GoalLab fixture evaluation failed fixture=%s error_class=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                )
+                continue
             decisions += int(outcome.decisions_inserted)
             picks += int(outcome.picks_inserted)
         return decisions, picks
@@ -1264,10 +1275,23 @@ class QuantLabRuntime:
         settled = 0
         rows = self._repository.goal_pick_settlement_candidates(limit=500)
         for row in rows:
-            settlement = settle_goal_pick(row, settled_at=now)
-            if settlement is None:
-                continue
-            settled += int(bool(self._repository.save_goal_pick_settlement(settlement)))
+            fixture_id = str(row.get("fixture_id") or "")
+            goal_pick_id = str(row.get("goal_pick_id") or "")
+            try:
+                settlement = settle_goal_pick(row, settled_at=now)
+                if settlement is None:
+                    continue
+                settled += int(
+                    bool(self._repository.save_goal_pick_settlement(settlement))
+                )
+            except Exception as exc:
+                LOGGER.exception(
+                    "GoalLab settlement failed fixture=%s goal_pick_id=%s "
+                    "error_class=%s",
+                    fixture_id,
+                    goal_pick_id,
+                    type(exc).__name__,
+                )
         return settled
 
     def _refresh_corner_pick_results(self, now: datetime) -> int:

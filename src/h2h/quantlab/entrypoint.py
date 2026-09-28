@@ -26,6 +26,7 @@ from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboa
 from h2h.quantlab.goal_lab.audit import ensure_latest_goal_model_validation
 from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
+from h2h.quantlab.goal_lab.readiness import assert_goallab_v1_contract
 from h2h.quantlab.goal_lab.shadow_engine import GoalLabShadowPickEngine
 from h2h.quantlab.goal_lab.structural_shadow_engine import (
     GoalLabStructuralShadowEngine,
@@ -117,6 +118,19 @@ def main() -> None:
         raise RuntimeError("QuantLab schema is unavailable")
 
     LOGGER.info("QuantLab migration runner=%s", MIGRATION_RUNNER_VERSION)
+
+    goal_contract = assert_goallab_v1_contract()
+    LOGGER.info(
+        "GoalLab V1 lock verified lock=%s model_prefix=%s feature=%s "
+        "evaluation_policy=%s pick_policy=%s settlement=%s validation=%s",
+        goal_contract["lock_version"],
+        goal_contract["model_prefix"],
+        goal_contract["feature_version"],
+        goal_contract["evaluation_policy_version"],
+        goal_contract["pick_policy_version"],
+        goal_contract["settlement_rule_version"],
+        goal_contract["validation_method_version"],
+    )
 
     try:
         log_cardlab_v5_audit(repository, LOGGER)
