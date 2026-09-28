@@ -1491,6 +1491,7 @@ class QuantLabRuntime:
             "card_snapshots": 0,
             "goal_decisions": 0,
             "goal_picks": 0,
+            "goal_result_refreshes": 0,
             "goal_settlements": 0,
             "corner_decisions": 0,
             "corner_picks": 0,
@@ -1510,6 +1511,20 @@ class QuantLabRuntime:
             result["goal_picks"] = goal_picks
         except Exception:
             LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+
+        try:
+            result["goal_result_refreshes"] = self._refresh_goal_pick_results(now)
+            if result["goal_result_refreshes"]:
+                LOGGER.info(
+                    "QuantLab GoalLab post-match result observations refreshed=%d",
+                    result["goal_result_refreshes"],
+                )
+        except ApiBudgetExceededError:
+            LOGGER.warning(
+                "Shared football API daily budget reached; GoalLab result refresh skipped"
+            )
+        except Exception:
+            LOGGER.exception("QuantLab GoalLab post-match result refresh failed")
 
         try:
             result["goal_settlements"] = self._settle_goal_picks(now)
@@ -1669,7 +1684,8 @@ class QuantLabRuntime:
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "card_referee_scopes_refreshed=%d card_referee_statistics_backfilled=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
-            "goal_settlements=%d corner_decisions=%d corner_picks=%d corner_settlements=%d "
+            "goal_result_refreshes=%d goal_settlements=%d corner_decisions=%d "
+            "corner_picks=%d corner_settlements=%d "
             "card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
             result["history_backfilled"],
@@ -1684,6 +1700,7 @@ class QuantLabRuntime:
             result["card_snapshots"],
             result["goal_decisions"],
             result["goal_picks"],
+            result["goal_result_refreshes"],
             result["goal_settlements"],
             result["corner_decisions"],
             result["corner_picks"],
