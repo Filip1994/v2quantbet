@@ -367,7 +367,8 @@ class QuantLabDashboardService:
         )
         if row is None:
             raise LookupError("goal pick not found")
-        return render_goal_pick_html(row)
+        contract = self._repository.goal_model_contract(str(row.get("model_version") or ""))
+        return render_goal_pick_html(row, contract)
 
     def render_html(self, raw_query: str = "") -> str:
         params = parse_qs(raw_query, keep_blank_values=True)
