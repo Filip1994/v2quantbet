@@ -278,23 +278,27 @@ def main() -> None:
     inline_goal_validation = _boolean(
         "QUANTBET_QUANTLAB_INLINE_GOAL_VALIDATION", "false"
     )
-    model_ready_audit_emitted = False
+    inline_research_audits = _boolean(
+        "QUANTBET_QUANTLAB_INLINE_RESEARCH_AUDITS", "false"
+    )
+    model_ready_audit_emitted = not inline_research_audits
     try:
         server.start()
         LOGGER.info("QuantLab dashboard listening; startup audits continue asynchronously from healthcheck perspective")
-        try:
-            log_cardlab_v5_audit(repository, LOGGER)
-        except Exception:
-            LOGGER.exception("QuantLab CardLab V5 startup audit failed")
+        if inline_research_audits:
+            try:
+                log_cardlab_v5_audit(repository, LOGGER)
+            except Exception:
+                LOGGER.exception("QuantLab CardLab V5 startup audit failed")
 
-        try:
-            log_cornerlab_v2_audit(repository, LOGGER)
-            log_cornerlab_v2_readiness(repository, LOGGER)
-            log_cornerlab_historical_holdout(repository, LOGGER)
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
-        else:
-            model_ready_audit_emitted = True
+            try:
+                log_cornerlab_v2_audit(repository, LOGGER)
+                log_cornerlab_v2_readiness(repository, LOGGER)
+                log_cornerlab_historical_holdout(repository, LOGGER)
+            except Exception:
+                LOGGER.exception("QuantLab CornerLab V2 startup audit failed")
+            else:
+                model_ready_audit_emitted = True
 
         _log_latest_goal_picks(repository)
         for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab")):
@@ -334,7 +338,9 @@ def main() -> None:
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
-                if cycle_result.get("card_decisions") or cycle_result.get("card_picks"):
+                if inline_research_audits and (
+                    cycle_result.get("card_decisions") or cycle_result.get("card_picks")
+                ):
                     try:
                         log_cardlab_v5_audit(repository, LOGGER)
                     except Exception:
@@ -365,20 +371,21 @@ def main() -> None:
                             sqlstate,
                             error_text,
                         )
-                readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
-                if (
-                    bool(readiness["model_fit_eligible"])
-                    and not model_ready_audit_emitted
-                ):
-                    try:
-                        log_cornerlab_v2_audit(repository, LOGGER)
-                        log_cornerlab_v2_readiness(repository, LOGGER)
-                    except Exception:
-                        LOGGER.exception(
-                            "QuantLab CornerLab V2 model-ready transition audit failed"
-                        )
-                    else:
-                        model_ready_audit_emitted = True
+                if inline_research_audits:
+                    readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
+                    if (
+                        bool(readiness["model_fit_eligible"])
+                        and not model_ready_audit_emitted
+                    ):
+                        try:
+                            log_cornerlab_v2_audit(repository, LOGGER)
+                            log_cornerlab_v2_readiness(repository, LOGGER)
+                        except Exception:
+                            LOGGER.exception(
+                                "QuantLab CornerLab V2 model-ready transition audit failed"
+                            )
+                        else:
+                            model_ready_audit_emitted = True
             except Exception as exc:
                 error_text = str(exc)
                 LOGGER.exception(
