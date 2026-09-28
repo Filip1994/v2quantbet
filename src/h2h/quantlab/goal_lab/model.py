@@ -1778,12 +1778,35 @@ def _score_matrix(
     return matrix / total
 
 
+def _artifact_from_row(row: dict[str, Any]) -> GoalStructuralModelArtifact:
+    return GoalStructuralModelArtifact(
+        model_version=str(row["model_version"]),
+        trained_at=row["trained_at"],
+        training_cutoff=row["training_cutoff"],
+        feature_version=str(row["feature_version"]),
+        training_sample_size=int(row["training_sample_size"]),
+        history_match_count=int(row["history_match_count"]),
+        team_count=int(row["team_count"]),
+        league_count=int(row["league_count"]),
+        ridge_team=float(row["ridge_team"]),
+        ridge_feature=float(row["ridge_feature"]),
+        rho=float(row["rho"]),
+        intercept=float(row["intercept"]),
+        home_advantage=float(row["home_advantage"]),
+        parameters=dict(row["parameters"]),
+        feature_means={str(k): float(v) for k, v in dict(row["feature_means"]).items()},
+        feature_scales={str(k): float(v) for k, v in dict(row["feature_scales"]).items()},
+        training_payload=dict(row["training_payload"]),
+    )
+
+
 class GoalStructuralModelService:
-    """Fit once per decision timestamp and estimate DC+ goal intensities."""
+    """Reuse immutable DC+ artifacts until the training evidence actually changes."""
 
     def __init__(self, repository: Any) -> None:
         self._repository = repository
         self._cache_at: datetime | None = None
+        self._training_fingerprint: str | None = None
         self._artifact: GoalStructuralModelArtifact | None = None
         self._histories: dict[int, list[TeamMatchSample]] = {}
         self._player_histories: dict[int, list[PlayerMatchSample]] = {}
@@ -1808,6 +1831,24 @@ class GoalStructuralModelService:
             return
         started_at = perf_counter()
         rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
+        training_fingerprint = _json_hash(
+            {
+                "model_prefix": MODEL_PREFIX,
+                "feature_version": FEATURE_VERSION,
+                "history_rows": rows,
+                "ridge_team": RIDGE_TEAM,
+                "ridge_feature": RIDGE_FEATURE,
+                "ridge_interaction": RIDGE_INTERACTION,
+                "recency_xi": RECENCY_XI,
+                "minimum_team_history": MIN_TEAM_HISTORY,
+                "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
+                "minimum_training_examples": MIN_TRAINING_EXAMPLES,
+                "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
+                "optimizer_maxiter": OPTIMIZER_MAXITER,
+                "optimizer_ftol": OPTIMIZER_FTOL,
+                "optimizer_gtol": OPTIMIZER_GTOL,
+            }
+        )
         history_loaded_at = perf_counter()
         LOGGER.info(
             "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
@@ -1850,6 +1891,7 @@ class GoalStructuralModelService:
         self._histories = histories
         self._player_histories = player_histories
         self._pairs = pairs
+        self._training_fingerprint = training_fingerprint
 
         if len(y_home) < MIN_TRAINING_EXAMPLES or x.shape[1] == 0:
             self._artifact = None
@@ -1863,6 +1905,31 @@ class GoalStructuralModelService:
             return
 
         training_reference = max(dates).astimezone(UTC)
+        persisted = self._repository.goal_model_by_training_fingerprint(
+            training_fingerprint
+        )
+        if persisted is not None:
+            artifact = _artifact_from_row(persisted)
+            self._artifact = artifact
+            self._fit_reason = "MODEL_READY"
+            self._fit_details = {
+                "history_match_count": history_match_count,
+                "training_sample_size": len(y_home),
+                "active_feature_count": len(
+                    tuple(artifact.parameters.get("model_feature_names") or ())
+                ),
+                "artifact_reused": True,
+                "training_fingerprint": training_fingerprint,
+            }
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=artifact_reused model_version=%s "
+                "training_sample=%d history_matches=%d",
+                artifact.model_version,
+                len(y_home),
+                history_match_count,
+            )
+            return
+
         LOGGER.info(
             "GoalLab DC+ prepare stage=fit_started training_sample=%d active_features=%d",
             len(y_home),
@@ -1953,6 +2020,7 @@ class GoalStructuralModelService:
                 "history_limit": HISTORY_LIMIT,
                 "recency_xi": RECENCY_XI,
                 "training_reference": training_reference.isoformat(),
+                "training_fingerprint": training_fingerprint,
                 "artifact_identity_uses_wall_clock": False,
                 "structural_only": True,
                 "bookmaker_features_used": False,
@@ -1979,6 +2047,8 @@ class GoalStructuralModelService:
             "history_match_count": history_match_count,
             "training_sample_size": len(y_home),
             "active_feature_count": len(model_feature_names),
+            "artifact_reused": False,
+            "training_fingerprint": training_fingerprint,
         }
 
     def estimate(
