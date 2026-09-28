@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-
 import numpy as np
 
-import h2h.quantlab.goal_lab.audit as audit
+from h2h.quantlab.goal_lab import audit
 
 
 NOW = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
