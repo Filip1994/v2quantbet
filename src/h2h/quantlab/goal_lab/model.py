@@ -1460,6 +1460,19 @@ def _feature_penalties(names: tuple[str, ...]) -> np.ndarray:
     )
 
 
+def _eligible_team_values(
+    home_ids: np.ndarray,
+    away_ids: np.ndarray,
+) -> tuple[int, ...]:
+    observations = np.concatenate([home_ids, away_ids])
+    team_ids_unique, team_counts = np.unique(observations, return_counts=True)
+    return tuple(
+        int(team_id)
+        for team_id, count in zip(team_ids_unique, team_counts, strict=True)
+        if int(count) >= MIN_TEAM_HISTORY
+    )
+
+
 def _fit_dc_plus(
     x: np.ndarray,
     y_home: np.ndarray,
@@ -1476,13 +1489,7 @@ def _fit_dc_plus(
     if n < MIN_TRAINING_EXAMPLES or x.shape[1] == 0:
         return None
 
-    team_observations = np.concatenate([home_ids, away_ids])
-    team_ids_unique, team_counts = np.unique(team_observations, return_counts=True)
-    team_values = tuple(
-        int(team_id)
-        for team_id, count in zip(team_ids_unique, team_counts, strict=True)
-        if int(count) >= MIN_TEAM_HISTORY
-    )
+    team_values = _eligible_team_values(home_ids, away_ids)
     league_values = tuple(sorted(set(league_ids.tolist())))
     team_index = {team_id: index for index, team_id in enumerate(team_values)}
     league_index = {league_id: index for index, league_id in enumerate(league_values)}
