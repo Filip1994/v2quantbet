@@ -1303,8 +1303,14 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
 <tbody>{pick_rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
-    def render_model_version_html(self, model_version_id: str) -> str:
+    def render_model_version_html(self, model_version_id: str, query: str = "") -> str:
         """Render the exact settled picks behind one model-version analytics cohort."""
+        params = parse_qs(query, keep_blank_values=True)
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
         payload = self.model_version_details(model_version_id)
         summary = payload["summary"]
         rows = payload["rows"]
@@ -1315,6 +1321,82 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
             number = float(value)
             prefix = "+" if signed and number > 0 else ""
             return f"{prefix}{number:.2f}{suffix}"
+
+        def pick_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "WIN": 2}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            mapping = {
+                "entry": "odds",
+                "model_probability": "model_probability",
+                "fair_probability": "market_fair_probability",
+                "edge": "edge",
+                "expected_value": "expected_value",
+                "close": "closing_odds",
+                "clv": "clv_pct",
+                "pnl": "pnl_minor",
+                "route": "disposition",
+                "kickoff_at": "kickoff_at",
+                "qualified_at": "qualified_at",
+                "policy": "policy_config_fingerprint",
+            }
+            field = mapping.get(sort_key)
+            if field is None:
+                return None
+            value = row.get(field)
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        if sort_key:
+            rows = list(
+                _sorted_for_display(
+                    rows,
+                    value=pick_sort_value,
+                    direction=sort_dir,
+                )
+            )
+
+        header_base = {"model_version_id": model_version_id}
+        headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/model",
+                base_params=header_base,
+                active_key=sort_key,
+                active_dir=sort_dir,
+                anchor="picks",
+            )
+            for label, key in (
+                ("Match", "match"),
+                ("Result", "result"),
+                ("Pick", "pick"),
+                ("Entry", "entry"),
+                ("Model P", "model_probability"),
+                ("Fair P", "fair_probability"),
+                ("Edge", "edge"),
+                ("EV", "expected_value"),
+                ("Close", "close"),
+                ("CLV", "clv"),
+                ("P/L", "pnl"),
+                ("Route", "route"),
+                ("Kickoff UTC", "kickoff_at"),
+                ("Qualified UTC", "qualified_at"),
+                ("Policy config", "policy"),
+            )
+        )
 
         cards = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -1387,7 +1469,7 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
             '<tr><td colspan="15" class="empty">'
             "No settled Research picks belong to this model version.</td></tr>"
         )
-        query = urlencode({"model_version_id": model_version_id})
+        json_query = urlencode({"model_version_id": model_version_id})
         model_label = escape(model_version_id)
 
         return f"""<!doctype html>
@@ -1410,7 +1492,11 @@ grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0}}
 max-height:72vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
 border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;vertical-align:top}}
 th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;
-letter-spacing:.05em}}td.match{{min-width:240px}}td.policy{{max-width:360px;overflow:hidden;
+letter-spacing:.05em}}.th-wrap{{display:flex;align-items:center;gap:6px}}
+.sort-tools{{display:inline-flex;gap:2px}}.sort-tools a{{display:inline-grid;place-items:center;width:17px;
+height:17px;border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;
+font-size:10px;line-height:1}}.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;
+border-color:#778089;background:#252b30}}td.match{{min-width:240px}}td.policy{{max-width:360px;overflow:hidden;
 text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}td small{{display:block;
 margin-top:4px}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}}
 .result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}.result-void{{color:var(--void)}}
@@ -1423,13 +1509,10 @@ main{{padding:14px}}header{{display:block}}}}
 <h1>Model version picks</h1><span class="model-id">{model_label}</span>
 <p>Exact settled Research rows behind this Analytics V2 model cohort.</p></div>
 <div><a href="/research/analytics">← Analytics V2</a> ·
-<a href="/research/analytics/model.json?{escape(query, quote=True)}">JSON</a></div></header>
+<a href="/research/analytics/model.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
-<section class="panel"><div class="scroll"><table><thead><tr>
-<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th>
-<th>Fair P</th><th>Edge</th><th>EV</th><th>Close</th><th>CLV</th><th>P/L</th>
-<th>Route</th><th>Kickoff UTC</th><th>Qualified UTC</th><th>Policy config</th>
-</tr></thead><tbody>{rows_html}</tbody></table></div></section>
+<section id="picks" class="panel"><div class="scroll"><table><thead><tr>{headers}</tr></thead>
+<tbody>{rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
     def render_analytics_html(self) -> str:
