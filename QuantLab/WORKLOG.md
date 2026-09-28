@@ -956,3 +956,29 @@ UI behavior:
 - preserved filters while changing sort order.
 
 No model, pick-authority, settlement or production-write semantics changed.
+
+
+## 2026-09-28 — GoalLab V1 production-readiness lock
+
+**Owner:** QuantLab core + GoalLab
+
+GoalLab closure item #4 was completed without granting automatic production authority.
+
+Readiness changes:
+
+- added frozen runtime contract `GOALLAB_V1_LOCK_2026_09_28`;
+- startup fails closed if GoalLab V1 model/features/policies/settlement/validation/stake or
+  candidate gates drift without a new version;
+- confirmed retrain behavior: approval is exact-model-hash scoped, so a new model hash
+  remains signal-only until separately approved;
+- isolated GoalLab evaluation exceptions per fixture so one malformed evidence row does not
+  abort the remaining GoalLab cycle;
+- isolated settlement exceptions per pick so one malformed settlement candidate does not
+  block later candidates;
+- preserved API budget exhaustion as a propagated global stop;
+- added regression coverage using Premier League, La Liga and Serie A metadata through the
+  canonical GoalLab PICK path;
+- added explicit old-approved-model/new-model-hash authority regression test;
+- documented V1 as locked: future semantic changes require a successor version.
+
+No production registered-pick, bankroll or production model-activation authority was added.
