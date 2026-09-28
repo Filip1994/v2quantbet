@@ -388,10 +388,13 @@ def test_authority_mode_loads_exact_approved_artifact_without_training(monkeypat
     approved = "DC_PLUS_PRO_STRUCTURAL_V3:" + "9" * 64
 
     class Repo:
-        def goal_model_history(self, *, before, limit):
+        def goal_scoring_history(self, *, before, limit):
             assert before == NOW
             assert limit == model_module.HISTORY_LIMIT
             return ()
+
+        def goal_model_history(self, **_kwargs):
+            raise AssertionError("authority scoring must not load full training payload history")
 
         def goal_model_contract(self, model_version):
             assert model_version == approved
