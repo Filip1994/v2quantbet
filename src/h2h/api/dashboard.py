@@ -144,7 +144,8 @@ class DashboardService:
         usage = self._application.budget.usage_by_category()
         used = sum(usage.values())
         played = sum(pick.get("operator_state") == "PLAYED" for pick in picks)
-        skipped = len(picks) - played
+        skipped = sum(pick.get("operator_state") == "SKIPPED" for pick in picks)
+        pending = sum(pick.get("operator_state") == "PENDING" for pick in picks)
         return {
             "generated_at": generated_at,
             "bankroll": {
@@ -163,6 +164,7 @@ class DashboardService:
             },
             "counts": {
                 "all": len(picks),
+                "pending_operator": pending,
                 "played": played,
                 "skipped": skipped,
                 "active": performance.pending_count,
@@ -321,7 +323,7 @@ class DashboardService:
                 settlement.gross_return_minor, settlement.realized_pnl_minor,
                 settlement.occurred_at AS settled_at,
                 clv.clv_ppm, clv.method_version AS clv_method_version,
-                COALESCE(operator_state.state, 'PLAYED') AS operator_state
+                COALESCE(operator_state.state, 'PENDING') AS operator_state
             FROM registered_picks r
             JOIN pick_decisions decision ON decision.decision_id = r.decision_id
             JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
@@ -633,14 +635,19 @@ class DashboardService:
             status_class = "void" if phase == "CLOSED" else "active"
 
         clv, clv_css, clv_verdict, clv_source = self._clv_summary(pick)
-        operator_state = str(pick.get("operator_state") or "PLAYED")
+        operator_state = str(pick.get("operator_state") or "PENDING")
         action = f"/api/picks/{quote(str(pick.get('pick_id') or ''), safe='')}/operator-state"
-        alternate_state = "SKIPPED" if operator_state == "PLAYED" else "PLAYED"
         operator_control = (
+            '<div class="history-operator-actions">'
             f'<form class="history-operator-form" method="post" action="{action}">'
             f'<input type="hidden" name="request_id" value="dashboard:{uuid4().hex}">'
-            f'<button name="state" value="{alternate_state}" class="history-operator-button">'
-            f"{'Skip' if alternate_state == 'SKIPPED' else 'Play'}</button></form>"
+            f'<button name="state" value="PLAYED" class="history-operator-button played"'
+            f'{" disabled" if operator_state == "PLAYED" else ""}>PLAYED</button></form>'
+            f'<form class="history-operator-form" method="post" action="{action}">'
+            f'<input type="hidden" name="request_id" value="dashboard:{uuid4().hex}">'
+            f'<button name="state" value="SKIPPED" class="history-operator-button skipped"'
+            f'{" disabled" if operator_state == "SKIPPED" else ""}>SKIPPED</button></form>'
+            '</div>'
         )
         closing_source = str(pick.get("display_closing_source") or "UNAVAILABLE").upper()
         close_source = {
@@ -650,12 +657,12 @@ class DashboardService:
         }.get(closing_source, "unavailable")
         return (
             '<tr class="history-row">'
+            f'<td class="history-operator-cell"><span class="status operator-{operator_state.casefold()}">'
+            f"{escape(operator_state)}</span>{operator_control}</td>"
             f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick)}</td>"
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
-            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong>"
-            f'<div class="history-operator"><span class="status operator-{operator_state.casefold()}">'
-            f"{escape(operator_state)}</span>{operator_control}</div></td>"
+            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
             f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
             f"<small>Pick → Closing · {escape(close_source)}</small>"
