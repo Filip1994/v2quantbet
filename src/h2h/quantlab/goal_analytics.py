@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-import math
 from html import escape
 from statistics import mean
 from typing import Any
