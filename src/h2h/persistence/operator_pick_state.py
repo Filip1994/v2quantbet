@@ -53,6 +53,8 @@ class PostgreSQLOperatorPickStateRepository:
     ) -> OperatorPickStateEvent:
         if not isinstance(state, OperatorPickState):
             raise TypeError("state must be an OperatorPickState")
+        if state is OperatorPickState.PENDING:
+            raise ValueError("PENDING is derived before the first operator action")
         if not isinstance(request_id, str) or not request_id.strip():
             raise ValueError("request_id must be a non-empty string")
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
@@ -129,13 +131,13 @@ class PostgreSQLOperatorPickStateRepository:
             )
             latest = cursor.fetchone()
             effective_before = (
-                OperatorPickState.PLAYED if latest is None else OperatorPickState(latest[0])
+                OperatorPickState.PENDING if latest is None else OperatorPickState(latest[0])
             )
             becomes_latest = latest is None or occurred >= latest[1]
             effective_after = state if becomes_latest else effective_before
 
             if (
-                effective_before != effective_after
+                effective_before is OperatorPickState.SKIPPED
                 and effective_after is OperatorPickState.PLAYED
                 and has_unresolved_reservation(cursor, pick_id)
             ):
@@ -175,7 +177,7 @@ class PostgreSQLOperatorPickStateRepository:
                 (pick_id,),
             )
             row = cursor.fetchone()
-        return OperatorPickState.PLAYED if row is None else OperatorPickState(row[0])
+        return OperatorPickState.PENDING if row is None else OperatorPickState(row[0])
 
     def history(self, pick_id: str) -> tuple[OperatorPickStateEvent, ...]:
         with self.connect() as connection, connection.cursor() as cursor:
