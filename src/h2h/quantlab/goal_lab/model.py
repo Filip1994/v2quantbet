@@ -1952,25 +1952,6 @@ class GoalStructuralModelService:
             return
         started_at = perf_counter()
         rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
-        training_fingerprint = _json_hash(
-            {
-                "model_prefix": MODEL_PREFIX,
-                "feature_version": FEATURE_VERSION,
-                "history_rows": rows,
-                "ridge_team": RIDGE_TEAM,
-                "ridge_feature": RIDGE_FEATURE,
-                "ridge_interaction": RIDGE_INTERACTION,
-                "recency_xi": RECENCY_XI,
-                "minimum_team_history": MIN_TEAM_HISTORY,
-                "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
-                "minimum_training_examples": MIN_TRAINING_EXAMPLES,
-                "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
-                "history_limit": HISTORY_LIMIT,
-                "optimizer_maxiter": OPTIMIZER_MAXITER,
-                "optimizer_ftol": OPTIMIZER_FTOL,
-                "optimizer_gtol": OPTIMIZER_GTOL,
-            }
-        )
         history_loaded_at = perf_counter()
         LOGGER.info(
             "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
@@ -2022,6 +2003,26 @@ class GoalStructuralModelService:
                 perf_counter() - context_started_at,
             )
             return
+
+        training_fingerprint = _json_hash(
+            {
+                "model_prefix": MODEL_PREFIX,
+                "feature_version": FEATURE_VERSION,
+                "history_rows": rows,
+                "ridge_team": RIDGE_TEAM,
+                "ridge_feature": RIDGE_FEATURE,
+                "ridge_interaction": RIDGE_INTERACTION,
+                "recency_xi": RECENCY_XI,
+                "minimum_team_history": MIN_TEAM_HISTORY,
+                "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
+                "minimum_training_examples": MIN_TRAINING_EXAMPLES,
+                "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
+                "history_limit": HISTORY_LIMIT,
+                "optimizer_maxiter": OPTIMIZER_MAXITER,
+                "optimizer_ftol": OPTIMIZER_FTOL,
+                "optimizer_gtol": OPTIMIZER_GTOL,
+            }
+        )
         persisted = self._repository.goal_model_by_training_fingerprint(
             training_fingerprint
         )
