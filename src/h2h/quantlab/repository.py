@@ -9,6 +9,8 @@ from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
+from h2h.domain.competition_scope import BLACKLISTED_API_FOOTBALL_LEAGUE_IDS
+
 
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
@@ -1353,7 +1355,12 @@ class PostgreSQLQuantLabRepository:
                 "WHERE latest.kickoff_at >= %s AND latest.kickoff_at < %s "
                 "AND latest.league_id <> ALL(%s) "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
-                (start_at, end_at, [72, 75, 236, 595], limit),
+                (
+                    start_at,
+                    end_at,
+                    sorted(BLACKLISTED_API_FOOTBALL_LEAGUE_IDS),
+                    limit,
+                ),
             )
             return _row_dicts(cursor)
 
