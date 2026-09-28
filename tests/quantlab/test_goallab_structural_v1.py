@@ -237,7 +237,7 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
             }
 
         def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
-            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V3"
+            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
             return False
 
         def save_goal_pick(self, item):
