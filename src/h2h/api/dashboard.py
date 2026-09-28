@@ -914,13 +914,13 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .score:last-child{{border:0}}.score span{{display:block;color:var(--muted)}}.score strong{{font-size:22px;font-variant-numeric:tabular-nums}}
 .won{{color:var(--green)}}.lost{{color:var(--red)}}.ops{{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}}
 .fact{{background:var(--panel2);padding:10px}}.fact span{{display:block;color:var(--muted);font-size:11px}}.fact strong{{display:block;margin-top:4px}}
-.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1450px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}}
+.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1680px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}}
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
 .league-meta{{display:flex;align-items:center;gap:5px}}.country-flag{{display:inline-flex;font-size:11px;line-height:1;flex:0 0 auto}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
-.odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(82px,1fr));gap:5px;font-variant-numeric:tabular-nums}}
-.odds-grid>span{{background:var(--panel2);padding:7px 6px;text-align:center;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}}
+.odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(108px,1fr));gap:7px;font-variant-numeric:tabular-nums;min-width:455px}}
+.odds-grid>span{{background:var(--panel2);padding:9px 8px;text-align:center;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border:1px solid #202a3a}}
 .odds-grid>span>b{{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;margin-bottom:2px}}
 .quote-age{{font-size:7px;line-height:1.1;margin-top:3px;color:#dfff63;font-weight:600}}
 .check-age{{font-size:7px!important;line-height:1.1;margin-top:2px!important;color:var(--muted)!important;font-weight:500}}
@@ -946,23 +946,23 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 .source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
 .source-label.manual{{color:var(--amber)!important}}
 .operator-pending{{color:var(--muted);border-color:var(--line)}}.operator-played{{color:var(--green);border-color:#1f6a51}}.operator-skipped{{color:var(--amber);border-color:#6c5425}}
-.operator-cell{{min-width:190px}}.operator-controls{{display:flex;gap:8px;margin-top:7px}}.operator-controls form{{margin:0;flex:1}}.operator-button{{width:100%;min-width:78px;background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:8px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:800}}.operator-button:disabled{{opacity:.45;cursor:default}}.operator-button.played:not(:disabled){{border-color:#1f6a51}}.operator-button.skipped:not(:disabled){{border-color:#6c5425}}
+.operator-cell{{min-width:122px;width:122px}}.operator-controls{{display:flex;flex-direction:column;gap:7px;margin-top:8px}}.operator-controls form{{margin:0;width:100%}}.operator-button{{width:100%;background:#1b2432;color:var(--text);border:1px solid #3a4a63;border-radius:5px;padding:9px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:850;letter-spacing:.04em;box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 1px 2px rgba(0,0,0,.25)}}.operator-button:hover:not(:disabled){{background:#222f42;border-color:#60789f}}.operator-button:active:not(:disabled){{transform:translateY(1px)}}.operator-button:disabled{{opacity:.5;cursor:default}}.operator-button.played:not(:disabled){{border-color:#2c8a68}}.operator-button.skipped:not(:disabled){{border-color:#8a6a2c}}
 .timestamps{{font-size:9px}}code{{color:#a9c5ff}}.muted{{color:var(--muted)}}
 .glossary{{margin-top:12px;padding:15px}}.glossary dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 18px;margin:12px 0 0}}.glossary dt{{font-weight:800}}.glossary dd{{margin:0;color:var(--muted)}}
 .empty{{text-align:center!important;color:var(--muted);padding:36px!important}}footer{{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;padding:16px 2px}}
 .workers table{{min-width:0}}.workers th,.workers td{{padding:8px 10px}}
-.history{{margin-top:12px}}.history table{{min-width:900px}}.history th,.history td{{padding:9px 12px}}
-.history-operator-cell{{min-width:190px}}.history-fixture{{min-width:260px}}.history-operator-actions{{display:flex;gap:8px;margin-top:7px}}
-.history-operator-form{{margin:0;flex:1}}.history-operator-button{{width:100%;min-width:78px;background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:8px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:800}}.history-operator-button:disabled{{opacity:.45;cursor:default}}.history-operator-button.played:not(:disabled){{border-color:#1f6a51}}.history-operator-button.skipped:not(:disabled){{border-color:#6c5425}}
-.history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
-.history-probability{{min-width:130px}}.history-probability strong{{white-space:nowrap}}
+.history{{margin-top:12px}}.history table{{min-width:1220px}}.history th,.history td{{padding:11px 14px}}
+.history-operator-cell{{min-width:122px;width:122px}}.history-fixture{{min-width:310px}}.history-operator-actions{{display:flex;flex-direction:column;gap:7px;margin-top:8px}}
+.history-operator-form{{margin:0;width:100%}}.history-operator-button{{width:100%;background:#1b2432;color:var(--text);border:1px solid #3a4a63;border-radius:5px;padding:9px 10px;cursor:pointer;font:inherit;font-size:10px;font-weight:850;letter-spacing:.04em;box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 1px 2px rgba(0,0,0,.25)}}.history-operator-button:hover:not(:disabled){{background:#222f42;border-color:#60789f}}.history-operator-button:active:not(:disabled){{transform:translateY(1px)}}.history-operator-button:disabled{{opacity:.5;cursor:default}}.history-operator-button.played:not(:disabled){{border-color:#2c8a68}}.history-operator-button.skipped:not(:disabled){{border-color:#8a6a2c}}
+.history-odds{{min-width:210px}}.history-odds strong,.history-probability strong,.history-clv strong{{font-variant-numeric:tabular-nums}}
+.history-probability{{min-width:155px}}.history-probability strong{{white-space:nowrap}}
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
 .history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
 .history-clv.flat strong{{color:var(--muted)}}.history-clv.unavailable strong{{color:var(--muted)}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
-.odds-grid{{grid-template-columns:repeat(4,minmax(82px,1fr))}}.odds-grid>span{{min-height:68px;padding:7px 5px}}.pick-book{{margin-top:7px}}}}
+.odds-grid{{grid-template-columns:repeat(4,minmax(100px,1fr));min-width:430px}}.odds-grid>span{{min-height:68px;padding:8px 6px}}.pick-book{{margin-top:7px}}}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
