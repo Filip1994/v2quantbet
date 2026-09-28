@@ -2,10 +2,11 @@
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
     "preDeployCommand": "python -m h2h.migrate",
-    "startCommand": "python -m h2h.quantlab.entrypoint",
+    "startCommand": "timeout 8m python -m h2h.quantlab.entrypoint",
     "healthcheckPath": "/livez",
     "healthcheckTimeout": 120,
-    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyType": "NEVER",
+    "cronSchedule": "0 */12 * * *",
     "numReplicas": 1
   }
 }
