@@ -1,4 +1,4 @@
-"""GoalLab DC+ Pro Structural V2.
+"""GoalLab DC+ Pro Structural V3.
 
 This model keeps Dixon-Coles score semantics (two goal intensities plus rho low-score
 correction) and learns regularized pre-match structural covariate offsets. Bookmaker
@@ -42,7 +42,7 @@ LOGGER = logging.getLogger("quantbet.quantlab.goallab.model")
 
 FEATURE_VERSION = "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2"
 MODEL_NAME = "DC+ Pro Structural"
-MODEL_PREFIX = "DC_PLUS_PRO_STRUCTURAL_V2:"
+MODEL_PREFIX = "DC_PLUS_PRO_STRUCTURAL_V3:"
 RIDGE_TEAM = 2.5
 RIDGE_FEATURE = 12.0
 RIDGE_INTERACTION = 20.0
@@ -51,7 +51,7 @@ MIN_TEAM_HISTORY = 5
 MIN_LATENT_TEAM_MATCHES = 5
 MIN_TRAINING_EXAMPLES = 300
 MIN_FEATURE_OBSERVATIONS = 60
-HISTORY_LIMIT = 10_000
+HISTORY_LIMIT = 30_000
 SHORT_REST_DAYS = 4.0
 OPTIMIZER_MAXITER = 1400
 OPTIMIZER_FTOL = 1e-9
@@ -1900,6 +1900,7 @@ class GoalStructuralModelService:
                 "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
                 "minimum_training_examples": MIN_TRAINING_EXAMPLES,
                 "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
+                "history_limit": HISTORY_LIMIT,
                 "optimizer_maxiter": OPTIMIZER_MAXITER,
                 "optimizer_ftol": OPTIMIZER_FTOL,
                 "optimizer_gtol": OPTIMIZER_GTOL,
