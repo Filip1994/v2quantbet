@@ -313,6 +313,35 @@ def test_research_history_result_filter_and_sportsbook_palette() -> None:
     assert "Research universe" in html
 
 
+def test_research_dashboard_supports_exact_analytics_cohort_filters() -> None:
+    dashboard = ResearchDashboardService(Repository())
+    row = signal_row()
+    week_year, week_number, _ = row["kickoff_at"].isocalendar()
+    week = f"{week_year}-W{week_number:02d}"
+
+    filters = {
+        "market": ["BTTS"],
+        "selection": ["YES"],
+        "bookmaker": ["bet365"],
+        "p_bucket": ["60–65%"],
+        "fair_bucket": ["45–50%"],
+        "ev_bucket": ["30%+"],
+        "odds_bucket": ["2.01–2.50"],
+        "model_version": [row["model_version_id"]],
+        "policy_config": [row["policy_config_fingerprint"]],
+        "prediction_method": [row["prediction_method_version"]],
+        "devig_method": [row["devig_method_version"]],
+        "freshness": ["FRESH"],
+        "diagnostic": ["OTHER_EXTREME"],
+        "week": [week],
+    }
+
+    assert len(dashboard.signals(filters)) == 1
+    assert dashboard.signals({**filters, "selection": ["NO"]}) == ()
+    assert dashboard.signals({**filters, "fair_bucket": ["50–55%"]}) == ()
+    assert dashboard.signals({**filters, "diagnostic": ["LOW_SCORING_EXTREME"]}) == ()
+
+
 def test_research_dashboard_can_filter_by_production_route() -> None:
     dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
 
@@ -381,10 +410,21 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
 
     html = dashboard.render_analytics_html()
     assert "Research Analytics V2" in html
-    assert "Production-filter evidence cube" in html
-    assert "Low-scoring extreme-value diagnostic" in html
+    assert "Core performance" in html
+    assert "Calibration & price" in html
+    assert "Audit" in html
+    assert "Production filter cube" in html
+    assert "Low-scoring diagnostic" in html
     assert "Leagues · all retrains combined" in html
+    assert "Model versions · individual retrains" not in html
     assert "/research/analytics/league?league_id=39&amp;season=2026" in html
+    assert "/research?tab=history&amp;market=BTTS&amp;selection=YES" in html
+    assert "/research?tab=history&amp;diagnostic=OTHER_EXTREME" in html
+    assert "/research?tab=history&amp;p_bucket=60%E2%80%9365%25" in html
+    assert "/research?tab=history&amp;fair_bucket=45%E2%80%9350%25" in html
+    assert "/research?tab=history&amp;ev_bucket=30%25%2B" in html
+    assert "/research?tab=history&amp;odds_bucket=2.01%E2%80%932.50" in html
+    assert "/research?tab=history&amp;policy_config=pick-policy-config-v1%3A" in html
     assert (
         "/research/analytics/model?model_version_id=dcm-json-v1%3A"
         in html

@@ -545,18 +545,43 @@ class ResearchDashboardService:
         canonical = _one_signal_per_fixture(self._all_signal_rows())
         rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
+        selection = params.get("selection", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
         result = params.get("result", [""])[0].strip().upper()
         disposition = params.get("disposition", [""])[0].strip().upper()
+        bookmaker = params.get("bookmaker", [""])[0].strip().casefold()
         p_bucket = params.get("p_bucket", [""])[0].strip()
+        fair_bucket = params.get("fair_bucket", [""])[0].strip()
         ev_bucket = params.get("ev_bucket", [""])[0].strip()
         odds_bucket = params.get("odds_bucket", [""])[0].strip()
+        model_version = params.get("model_version", [""])[0].strip()
+        policy_config = params.get("policy_config", [""])[0].strip()
+        prediction_method = params.get("prediction_method", [""])[0].strip()
+        devig_method = params.get("devig_method", [""])[0].strip()
+        freshness = params.get("freshness", [""])[0].strip().upper()
+        diagnostic = params.get("diagnostic", [""])[0].strip().upper()
+        week = params.get("week", [""])[0].strip().upper()
         p_min = _parse_fraction(params.get("p_min", [""])[0])
         p_max = _parse_fraction(params.get("p_max", [""])[0])
         ev_min = _parse_fraction(params.get("ev_min", [""])[0])
         ev_max = _parse_fraction(params.get("ev_max", [""])[0])
         odds_min = _parse_float(params.get("odds_min", [""])[0])
         odds_max = _parse_float(params.get("odds_max", [""])[0])
+
+        def version_value(row: dict[str, Any], key: str, missing: str) -> str:
+            value = str(row.get(key) or "").strip()
+            return value or missing
+
+        def row_week(row: dict[str, Any]) -> str:
+            event_at = row.get("kickoff_at") or row.get("qualified_at")
+            if not isinstance(event_at, datetime):
+                return ""
+            if event_at.tzinfo is None or event_at.utcoffset() is None:
+                event_at = event_at.replace(tzinfo=UTC)
+            else:
+                event_at = event_at.astimezone(UTC)
+            iso_year, iso_week, _ = event_at.isocalendar()
+            return f"{iso_year}-W{iso_week:02d}"
 
         def keep(row: dict[str, Any]) -> bool:
             p, ev, odds = (
@@ -566,17 +591,43 @@ class ResearchDashboardService:
             )
             if market and row["market"].upper() != market:
                 return False
+            if selection and str(row.get("selection") or "").upper() != selection:
+                return False
             if league and league not in (row.get("competition_name") or "").casefold():
                 return False
             if result and row["outcome"] != result:
                 return False
             if disposition and row.get("disposition") != disposition:
                 return False
+            if bookmaker and str(row.get("bookmaker") or "").casefold() != bookmaker:
+                return False
             if p_bucket and row["probability_bucket"] != p_bucket:
+                return False
+            if fair_bucket and row["market_fair_probability_bucket"] != fair_bucket:
                 return False
             if ev_bucket and row["ev_bucket"] != ev_bucket:
                 return False
             if odds_bucket and row["odds_bucket"] != odds_bucket:
+                return False
+            if model_version and version_value(
+                row, "model_version_id", "UNRECORDED_MODEL"
+            ) != model_version:
+                return False
+            if policy_config and version_value(
+                row, "policy_config_fingerprint", "LEGACY_UNRECORDED_POLICY"
+            ) != policy_config:
+                return False
+            if prediction_method and str(
+                row.get("prediction_method_version") or "—"
+            ) != prediction_method:
+                return False
+            if devig_method and str(row.get("devig_method_version") or "—") != devig_method:
+                return False
+            if freshness and str(row.get("freshness") or "").upper() != freshness:
+                return False
+            if diagnostic and diagnostic_bucket(row) != diagnostic:
+                return False
+            if week and row_week(row) != week:
                 return False
             if p_min is not None and p < p_min:
                 return False
