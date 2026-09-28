@@ -1019,8 +1019,15 @@ class ResearchDashboardService:
             "rows": items,
         }
 
-    def render_league_html(self, league_id: int, season: int) -> str:
+    def render_league_html(self, league_id: int, season: int, query: str = "") -> str:
         """Render League -> model versions -> settled picks hierarchy."""
+        params = parse_qs(query, keep_blank_values=True)
+        sort_table = params.get("sort_table", [""])[0].strip().casefold()
+        sort_key = params.get("sort", [""])[0].strip()
+        sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
         payload = self.league_details(league_id, season)
         league = payload["league"]
         summary = payload["summary"]
@@ -1039,6 +1046,122 @@ class ResearchDashboardService:
                 return value if len(value) <= 24 else value[:23] + "…"
             prefix, digest = value.split(":", 1)
             return f"{prefix}:{digest[:12]}…" if len(digest) > 12 else value
+
+        def model_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "record":
+                return (
+                    int(row.get("wins") or 0),
+                    -int(row.get("losses") or 0),
+                    -int(row.get("voids") or 0),
+                )
+            if sort_key == "sample_band":
+                return {
+                    "SIGNAL_ONLY": 0,
+                    "MONITOR": 1,
+                    "PROVISIONAL_EVIDENCE": 2,
+                    "STABILITY_REVIEW": 3,
+                }.get(str(row.get("sample_band") or ""), -1)
+            value = row.get(sort_key)
+            if isinstance(value, str):
+                return value.casefold()
+            return value
+
+        def pick_sort_value(row: dict[str, Any]) -> Any:
+            if sort_key == "match":
+                return (
+                    str(row.get("home_team") or "").casefold(),
+                    str(row.get("away_team") or "").casefold(),
+                )
+            if sort_key == "result":
+                return {"LOSS": 0, "VOID": 1, "WIN": 2}.get(
+                    str(row.get("outcome") or ""), -1
+                )
+            if sort_key == "pick":
+                return (
+                    str(row.get("market") or "").casefold(),
+                    str(row.get("selection") or "").casefold(),
+                )
+            if sort_key == "entry":
+                return row.get("odds")
+            if sort_key == "model_probability":
+                return row.get("model_probability")
+            if sort_key == "expected_value":
+                return row.get("expected_value")
+            if sort_key == "close":
+                return row.get("closing_odds")
+            if sort_key == "clv":
+                return row.get("clv_pct")
+            if sort_key == "pnl":
+                return row.get("pnl_minor")
+            if sort_key == "model_version_id":
+                return str(row.get("model_version_id") or "").casefold()
+            if sort_key == "kickoff_at":
+                return str(row.get("kickoff_at") or "")
+            return None
+
+        if sort_table == "models" and sort_key:
+            model_versions = list(
+                _sorted_for_display(
+                    model_versions,
+                    value=model_sort_value,
+                    direction=sort_dir,
+                )
+            )
+        if sort_table == "picks" and sort_key:
+            rows = list(
+                _sorted_for_display(
+                    rows,
+                    value=pick_sort_value,
+                    direction=sort_dir,
+                )
+            )
+
+        base_params = {"league_id": league_id, "season": season}
+        model_headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/league",
+                base_params={**base_params, "sort_table": "models"},
+                active_key=sort_key if sort_table == "models" else "",
+                active_dir=sort_dir,
+                anchor="models",
+            )
+            for label, key in (
+                ("Model version", "model_version_id"),
+                ("N", "n"),
+                ("W-L-V", "record"),
+                ("Win%", "win_rate_pct"),
+                ("Expected", "expected_win_rate_pct"),
+                ("ROI", "roi_pct"),
+                ("Avg CLV", "avg_clv_pct"),
+                ("Evidence", "sample_band"),
+            )
+        )
+        pick_headers = "".join(
+            _sortable_th(
+                label,
+                key,
+                path="/research/analytics/league",
+                base_params={**base_params, "sort_table": "picks"},
+                active_key=sort_key if sort_table == "picks" else "",
+                active_dir=sort_dir,
+                anchor="picks",
+            )
+            for label, key in (
+                ("Match", "match"),
+                ("Result", "result"),
+                ("Pick", "pick"),
+                ("Entry", "entry"),
+                ("Model P", "model_probability"),
+                ("EV", "expected_value"),
+                ("Close", "close"),
+                ("CLV", "clv"),
+                ("P/L", "pnl"),
+                ("Model version", "model_version_id"),
+                ("Kickoff UTC", "kickoff_at"),
+            )
+        )
 
         cards = "".join(
             f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -1130,7 +1253,7 @@ class ResearchDashboardService:
 
         competition_name = escape(str(league.get("competition_name") or f"League {league_id}"))
         country = escape(str(league.get("country") or "—"))
-        query = urlencode({"league_id": league_id, "season": season})
+        json_query = urlencode({"league_id": league_id, "season": season})
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1151,7 +1274,11 @@ p,small{{color:var(--muted)}}a{{color:#d8dcdf}}.meta{{color:var(--muted);font-si
 .scroll{{overflow:auto;max-height:65vh}}table{{width:100%;border-collapse:collapse;font-size:12px}}
 th,td{{padding:9px 10px;border-bottom:1px solid #272c31;white-space:nowrap;text-align:left;
 vertical-align:top}}th{{position:sticky;top:0;background:#1b1f23;color:#9aa1a8;font-size:10px;
-text-transform:uppercase;letter-spacing:.05em}}td.match{{min-width:240px}}td small{{display:block;
+text-transform:uppercase;letter-spacing:.05em}}.th-wrap{{display:flex;align-items:center;gap:6px}}
+.sort-tools{{display:inline-flex;gap:2px}}.sort-tools a{{display:inline-grid;place-items:center;width:17px;
+height:17px;border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;
+font-size:10px;line-height:1}}.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;
+border-color:#778089;background:#252b30}}td.match{{min-width:240px}}td small{{display:block;
 margin-top:4px}}.model-link{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
 text-decoration:none;border-bottom:1px dotted #778089}}.model-link:hover{{color:#fff;
 border-bottom-color:#fff}}.result{{display:inline-block;padding:4px 7px;border-radius:999px;
@@ -1166,18 +1293,14 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
 <div class="meta">{country} · League ID {league_id} · all DC retrains combined</div>
 <p>League performance first; model versions remain available as the audit layer.</p></div>
 <div><a href="/research/analytics">← Analytics V2</a> ·
-<a href="/research/analytics/league.json?{escape(query, quote=True)}">JSON</a></div></header>
+<a href="/research/analytics/league.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
-<section class="panel"><h2>Model versions · retrain history</h2>
-<div class="scroll"><table><thead><tr>
-<th>Model version</th><th>N</th><th>W-L-V</th><th>Win%</th><th>Expected</th>
-<th>ROI</th><th>Avg CLV</th><th>Evidence</th>
-</tr></thead><tbody>{model_rows_html}</tbody></table></div></section>
-<section class="panel"><h2>All settled picks · all retrains</h2>
-<div class="scroll"><table><thead><tr>
-<th>Match</th><th>Result</th><th>Pick</th><th>Entry</th><th>Model P</th><th>EV</th>
-<th>Close</th><th>CLV</th><th>P/L</th><th>Model version</th><th>Kickoff UTC</th>
-</tr></thead><tbody>{pick_rows_html}</tbody></table></div></section>
+<section id="models" class="panel"><h2>Model versions · retrain history</h2>
+<div class="scroll"><table><thead><tr>{model_headers}</tr></thead>
+<tbody>{model_rows_html}</tbody></table></div></section>
+<section id="picks" class="panel"><h2>All settled picks · all retrains</h2>
+<div class="scroll"><table><thead><tr>{pick_headers}</tr></thead>
+<tbody>{pick_rows_html}</tbody></table></div></section>
 </main></body></html>"""
 
     def render_model_version_html(self, model_version_id: str) -> str:
