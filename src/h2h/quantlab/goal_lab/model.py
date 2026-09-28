@@ -1951,7 +1951,11 @@ class GoalStructuralModelService:
         if self._cache_at == now:
             return
         started_at = perf_counter()
-        rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
+        scoring_history = getattr(self._repository, "goal_scoring_history", None)
+        if self._artifact_model_version is not None and callable(scoring_history):
+            rows = scoring_history(before=now, limit=HISTORY_LIMIT)
+        else:
+            rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
         history_loaded_at = perf_counter()
         LOGGER.info(
             "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
