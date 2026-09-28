@@ -73,3 +73,31 @@ def test_dc_plus_keeps_sparse_team_coverage_with_neutral_latent_effect(
     }
     assert model.OPTIMIZER_MAXITER == 1400
     assert model.OPTIMIZER_GTOL == 1e-5
+
+
+def test_v2_feature_contract_is_compact_and_predeclared() -> None:
+    rows = []
+    for index in range(120):
+        rows.append(
+            {
+                "home_l5_goals_for": 1.0 + index * 0.001,
+                "away_l5_goals_against": 1.2 + index * 0.001,
+                "home_l5_shots_for": 10.0 + index * 0.01,
+                "away_l5_sot_against": 4.0 + index * 0.01,
+                "noise_feature_should_not_enter_model": 99.0,
+            }
+        )
+
+    x, model_names, _means, _scales, base_names = model._prepare_features(rows)
+
+    assert "noise_feature_should_not_enter_model" not in model_names
+    assert model_names == base_names
+    assert x.shape[1] == len(model_names)
+    assert x.shape[1] <= len(model.V2_CORE_FEATURE_NAMES)
+    assert all(not name.endswith("__missing") for name in model_names)
+
+
+def test_v2_regularization_is_stronger_than_v1_contract() -> None:
+    assert model.RIDGE_TEAM > 1.5
+    assert model.RIDGE_FEATURE > 4.0
+    assert model.RIDGE_INTERACTION > 8.0
