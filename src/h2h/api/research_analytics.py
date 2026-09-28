@@ -954,6 +954,10 @@ gap:12px;padding:0 2px 7px}}.group-head p{{margin:0;font-size:12px}}
 table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
 border-bottom:1px solid #272c31;white-space:nowrap;text-align:left}}th{{position:sticky;top:0;
 background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;letter-spacing:.05em}}
+.th-wrap{{display:flex;align-items:center;gap:6px}}.sort-tools{{display:inline-flex;gap:2px}}
+.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid #343b42;
+border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
+.sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 tbody tr:hover{{background:#1d2226}}.action-col{{text-align:right}}.metric-strong{{font-weight:700}}
 .metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}
 .metric-neutral{{color:inherit}}.empty{{color:var(--muted);text-align:center}}
