@@ -8,7 +8,7 @@ from h2h.quantlab.goal_lab import audit
 
 
 NOW = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
-MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V2:" + "e" * 64
+MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V3:" + "e" * 64
 
 
 def _history_rows() -> tuple[dict[str, object], ...]:
@@ -125,7 +125,7 @@ def test_validation_v4_uses_sparse_pooled_control_and_blocks_weak_challenger(mon
         evaluated_at=NOW,
     )
 
-    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
+    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V5"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
     assert validation.authority_review_status == "NOT_READY"
@@ -207,5 +207,5 @@ def test_validation_waits_for_active_v2_artifact() -> None:
     result = audit.ensure_latest_goal_model_validation(HistoricalRepo(), Logger())
 
     assert result["status"] == "WAITING_ACTIVE_MODEL"
-    assert result["active_model_prefix"] == "DC_PLUS_PRO_STRUCTURAL_V2:"
+    assert result["active_model_prefix"] == "DC_PLUS_PRO_STRUCTURAL_V3:"
     assert result["active_feature_version"] == "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2"
