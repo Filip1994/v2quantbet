@@ -109,7 +109,7 @@ def test_structural_training_features_do_not_include_target_result() -> None:
 
 def test_structural_estimate_produces_bounded_goal_market_probabilities() -> None:
     artifact = GoalStructuralModelArtifact(
-        model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "a" * 64,
+        model_version="DC_PLUS_PRO_STRUCTURAL_V2:" + "a" * 64,
         trained_at=NOW,
         training_cutoff=NOW,
         feature_version=FEATURE_VERSION,
@@ -177,7 +177,7 @@ def test_structural_value_signal_has_no_shadow_pick_authority() -> None:
         def estimate(self, _fixture, *, decision_at):
             assert decision_at == NOW
             artifact = SimpleNamespace(
-                model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "b" * 64,
+                model_version="DC_PLUS_PRO_STRUCTURAL_V2:" + "b" * 64,
                 rho=-0.05,
                 feature_version=FEATURE_VERSION,
                 training_sample_size=500,
@@ -237,7 +237,7 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
             }
 
         def goal_pick_exists(self, _fixture_id, *, pick_policy_version):
-            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V1"
+            assert pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V2"
             return False
 
         def save_goal_pick(self, item):
@@ -248,7 +248,7 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
         def estimate(self, _fixture, *, decision_at):
             assert decision_at == NOW
             artifact = SimpleNamespace(
-                model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "c" * 64,
+                model_version="DC_PLUS_PRO_STRUCTURAL_V2:" + "c" * 64,
                 rho=-0.04,
                 feature_version=FEATURE_VERSION,
                 training_sample_size=600,
@@ -273,7 +273,7 @@ def test_structural_pick_authority_creates_exactly_one_canonical_goal_pick() -> 
         repo,
         policy=StructuralGoalPolicy(
             pick_authority=True,
-            approved_model_version="DC_PLUS_PRO_STRUCTURAL_V1:" + "c" * 64,
+            approved_model_version="DC_PLUS_PRO_STRUCTURAL_V2:" + "c" * 64,
         ),
     )
     engine._model = Model()
@@ -321,7 +321,7 @@ def test_structural_model_reuses_persisted_artifact_for_unchanged_training(
 ) -> None:
     import h2h.quantlab.goal_lab.model as model_module
 
-    model_version = "DC_PLUS_PRO_STRUCTURAL_V1:" + "d" * 64
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V2:" + "d" * 64
 
     class Repo:
         def __init__(self) -> None:
