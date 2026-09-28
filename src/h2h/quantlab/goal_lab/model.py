@@ -1632,6 +1632,27 @@ def _fit_dc_plus(
         options={"maxiter": 700, "ftol": 1e-9, "gtol": 1e-6},
     )
     if not result.success or not np.isfinite(result.fun):
+        gradient_norm = (
+            None
+            if result.jac is None
+            else float(np.linalg.norm(np.asarray(result.jac, dtype=float), ord=np.inf))
+        )
+        LOGGER.warning(
+            "GoalLab DC+ optimizer failed status=%s message=%s nit=%s nfev=%s "
+            "objective=%s gradient_inf_norm=%s parameter_count=%d training_sample=%d "
+            "feature_count=%d team_count=%d league_count=%d",
+            getattr(result, "status", None),
+            getattr(result, "message", None),
+            getattr(result, "nit", None),
+            getattr(result, "nfev", None),
+            None if not np.isfinite(result.fun) else float(result.fun),
+            gradient_norm,
+            size,
+            n,
+            nf,
+            nt,
+            nl,
+        )
         return None
 
     params = result.x
