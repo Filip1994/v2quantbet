@@ -2,12 +2,15 @@
 
 ## Operator PLAYED/SKIPPED tracking
 
-Every registered system pick is shown and defaults to operator state `PLAYED` when no
-override exists. Authenticated one-click controls append either a `PLAYED` or `SKIPPED`
-event; they never mutate the registered pick. The summary separates all system picks,
-played picks and skipped picks. Bankroll, exposure, stake and realized P/L cards are actual
-operator figures derived only from picks whose latest operator state is `PLAYED`. Per-pick
-settlement and CLV remain visible as system facts even when a pick is skipped.
+Every registered system pick is shown and defaults to operator state `PENDING` until the
+operator explicitly chooses `PLAYED` or `SKIPPED`. Both actions are visible beside the
+pick ID/fixture for pre-match processing. The action appends an immutable operator-state
+event; it never mutates the registered pick.
+
+`PENDING` and `PLAYED` both reserve open risk exposure. `SKIPPED` immediately releases
+that reservation. Actual stake, returns and realized P/L are derived only from `PLAYED`
+picks; a pending pick is not counted as actually played. Per-pick settlement and CLV remain
+visible as system facts regardless of operator state.
 
 ## Multi-bookmaker price fields
 
