@@ -211,10 +211,12 @@ Every settlement retains the exact result observation used.
 ## DC+ validation
 
 Each immutable model artifact may receive one
-`GOALLAB_CHRONOLOGICAL_HOLDOUT_V1` validation record.
+`GOALLAB_CHRONOLOGICAL_HOLDOUT_V2` validation record. V1 evidence remains immutable and queryable.
 
 The chronological holdout compares DC+ Structural against plain Dixon-Coles on the same
-common evaluation fixtures and records:
+common evaluation fixtures. It prefers league-specific controls and uses a pooled
+stable-team plain-DC fallback only where league-specific control coverage is unavailable,
+and records:
 
 - exact-score mean/total log likelihood;
 - home/away goal MAE;
