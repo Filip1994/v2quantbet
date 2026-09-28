@@ -1248,7 +1248,7 @@ th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:upperc
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}.result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}.result-void{{color:#b6bdc3;background:rgba(154,161,168,.12)}}.result-pending{{color:#d7b36f;background:rgba(198,163,93,.12)}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.empty{{text-align:center;padding:42px!important;color:var(--muted)}}
 .context-table{{margin-bottom:12px}}td.provenance{{max-width:520px;white-space:normal;line-height:1.45;color:var(--muted)}}
-.pick-note{{position:relative}}.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}.pick-note summary::-webkit-details-marker{{display:none}}.note-popover{{position:absolute;z-index:8;right:0;top:35px;width:360px;max-width:75vw;padding:12px;border:1px solid #3b434a;border-radius:10px;background:#111518;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:normal;line-height:1.45}}.note-popover b,.note-popover span{{display:block}}.note-popover span{{margin-top:7px;color:#b3bbc2;font-size:11px}}.corner-model-guide{{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:8px;padding:12px}}.corner-model-guide div{{border:1px solid #2d343a;border-radius:9px;background:#15191c;padding:10px}}.corner-model-guide b{{display:block;font-size:11px;margin-bottom:5px}}.corner-model-guide span{{font-size:10px;line-height:1.45;color:var(--muted)}}
+.pick-note{{position:relative}}.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}.pick-note summary::-webkit-details-marker{{display:none}}.note-popover{{position:absolute;z-index:8;right:0;top:35px;width:360px;max-width:75vw;padding:12px;border:1px solid #3b434a;border-radius:10px;background:#111518;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:normal;line-height:1.45}}.note-popover b,.note-popover span{{display:block}}.note-popover span{{margin-top:7px;color:#b3bbc2;font-size:11px}}.goal-note-popover{{width:640px;max-width:min(86vw,640px);max-height:70vh;overflow:auto}}.goal-note-popover p{{white-space:normal;color:#b8c0c7;font-size:11px;line-height:1.55}}.goal-note-popover h4{{margin:11px 0 5px;font-size:11px}}.goal-note-popover ul{{margin:5px 0 8px;padding-left:18px;white-space:normal;color:#b8c0c7;font-size:11px;line-height:1.5}}.note-detail-link{{display:inline-block;margin-top:8px;color:#9bc7ff;text-decoration:none;font-weight:900;font-size:11px}}.selected-picks{{margin-bottom:12px}}.corner-model-guide{{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:8px;padding:12px}}.corner-model-guide div{{border:1px solid #2d343a;border-radius:9px;background:#15191c;padding:10px}}.corner-model-guide b{{display:block;font-size:11px;margin-bottom:5px}}.corner-model-guide span{{font-size:10px;line-height:1.45;color:var(--muted)}}
 .contract-summary{{padding:13px 14px;border-bottom:1px solid var(--line)}}.contract-summary small{{margin-top:6px}}
 .feature-details{{padding:12px 14px;border-top:1px solid var(--line)}}.feature-details summary{{cursor:pointer;font-weight:900}}
 .feature-list{{margin-top:10px;color:var(--muted);white-space:normal;line-height:1.7;font-size:11px}}
@@ -1271,9 +1271,10 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <input name="model_version" placeholder="Exact model version" value="{field("model_version")}">
 <input name="policy_version" placeholder="Exact policy version" value="{field("policy_version")}">
 <button type="submit">Apply</button></form></section>
+{goal_selected_picks_html}
+{goal_pipeline_html}
 {goal_research_html}
 {goal_contract_html}
-{goal_pipeline_html}
 {corner_picks_html}
 {corner_contract_html}
 {card_context_html}
