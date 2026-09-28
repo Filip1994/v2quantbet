@@ -187,6 +187,18 @@ def settle_goal_pick(
                 "selection": row["selection"],
                 "provider_status": row.get("provider_status"),
                 "rule": "non-played terminal fixture voids GoalLab pick",
+                "result_confirmation_count": row.get("result_confirmation_count"),
+                "result_first_confirmed_at": (
+                    row.get("result_first_confirmed_at").isoformat()
+                    if row.get("result_first_confirmed_at") is not None
+                    else None
+                ),
+                "result_confirmed_at": (
+                    row.get("result_confirmed_at").isoformat()
+                    if row.get("result_confirmed_at") is not None
+                    else None
+                ),
+                "result_settlement_fingerprint": row.get("result_settlement_fingerprint"),
             },
         )
 
@@ -242,5 +254,17 @@ def settle_goal_pick(
             "regulation_home_goals": home,
             "regulation_away_goals": away,
             "semantic": semantic,
+            "result_confirmation_count": row.get("result_confirmation_count"),
+            "result_first_confirmed_at": (
+                row.get("result_first_confirmed_at").isoformat()
+                if row.get("result_first_confirmed_at") is not None
+                else None
+            ),
+            "result_confirmed_at": (
+                row.get("result_confirmed_at").isoformat()
+                if row.get("result_confirmed_at") is not None
+                else None
+            ),
+            "result_settlement_fingerprint": row.get("result_settlement_fingerprint"),
         },
     )
