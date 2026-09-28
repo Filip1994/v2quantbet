@@ -26,7 +26,7 @@ from h2h.quantlab.goal_lab.model import (
 )
 
 
-METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
+METHOD_VERSION = "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
 HOLDOUT_FRACTION = 0.30
 MIN_COMMON_EVALUATION = 50
 CONTROL_RIDGE = 0.01
@@ -781,7 +781,27 @@ def build_goal_model_validation(
         ),
     }
     leakage = _leakage_audit()
-    ready = common_n >= MIN_COMMON_EVALUATION and leakage["status"] == "PASS"
+    promotion_gate = {
+        "common_evaluation_ok": common_n >= MIN_COMMON_EVALUATION,
+        "leakage_ok": leakage["status"] == "PASS",
+        "total_goals_rmse_non_worse": (
+            comparison["dc_plus_minus_control_total_goals_rmse"] <= 0.0
+        ),
+        "over25_brier_non_worse": (
+            comparison["dc_plus_minus_control_over25_brier"] <= 0.0
+        ),
+        "btts_brier_non_worse": (
+            comparison["dc_plus_minus_control_btts_brier"] <= 0.0
+        ),
+        "exact_score_log_likelihood_not_materially_worse": (
+            comparison["dc_plus_minus_control_exact_score_mean_log_likelihood"] >= -0.05
+        ),
+    }
+    comparison["promotion_gate"] = promotion_gate
+    comparison["automatic_promotion_rule"] = (
+        "all promotion_gate checks must pass; authority still requires exact-hash approval"
+    )
+    ready = all(promotion_gate.values())
     return GoalModelValidation(
         model_version=model_version,
         evaluated_at=evaluated_at.astimezone(UTC),
