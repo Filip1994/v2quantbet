@@ -48,6 +48,7 @@ RIDGE_FEATURE = 4.0
 RIDGE_INTERACTION = 8.0
 RECENCY_XI = 0.0015
 MIN_TEAM_HISTORY = 5
+MIN_LATENT_TEAM_MATCHES = 5
 MIN_TRAINING_EXAMPLES = 300
 MIN_FEATURE_OBSERVATIONS = 20
 HISTORY_LIMIT = 10_000
@@ -1460,6 +1461,28 @@ def _feature_penalties(names: tuple[str, ...]) -> np.ndarray:
     )
 
 
+def _latent_team_support(
+    home_ids: np.ndarray,
+    away_ids: np.ndarray,
+    *,
+    minimum_matches: int = MIN_LATENT_TEAM_MATCHES,
+) -> tuple[tuple[int, ...], dict[int, int]]:
+    if minimum_matches <= 0:
+        raise ValueError("minimum_matches must be positive")
+    combined = np.concatenate([home_ids, away_ids]).astype(np.int64, copy=False)
+    if combined.size == 0:
+        return (), {}
+    values, counts = np.unique(combined, return_counts=True)
+    support = {
+        int(team_id): int(count)
+        for team_id, count in zip(values, counts, strict=True)
+    }
+    latent = tuple(
+        team_id for team_id, count in support.items() if count >= minimum_matches
+    )
+    return latent, support
+
+
 def _fit_dc_plus(
     x: np.ndarray,
     y_home: np.ndarray,
@@ -1477,14 +1500,25 @@ def _fit_dc_plus(
         return None
 
     team_values = tuple(sorted(set(home_ids.tolist()) | set(away_ids.tolist())))
+    latent_team_values, team_support = _latent_team_support(home_ids, away_ids)
     league_values = tuple(sorted(set(league_ids.tolist())))
-    team_index = {team_id: index for index, team_id in enumerate(team_values)}
+    latent_team_index = {
+        team_id: index for index, team_id in enumerate(latent_team_values)
+    }
     league_index = {league_id: index for index, league_id in enumerate(league_values)}
-    h_idx = np.asarray([team_index[int(value)] for value in home_ids], dtype=np.int64)
-    a_idx = np.asarray([team_index[int(value)] for value in away_ids], dtype=np.int64)
+    nt = len(latent_team_values)
+    sparse_team_index = nt
+    h_idx = np.asarray(
+        [latent_team_index.get(int(value), sparse_team_index) for value in home_ids],
+        dtype=np.int64,
+    )
+    a_idx = np.asarray(
+        [latent_team_index.get(int(value), sparse_team_index) for value in away_ids],
+        dtype=np.int64,
+    )
     l_idx = np.asarray([league_index[int(value)] for value in league_ids], dtype=np.int64)
 
-    nt = len(team_values)
+    all_nt = len(team_values)
     nl = len(league_values)
     nf = x.shape[1]
     attack_slice = slice(0, nt)
@@ -1523,18 +1557,20 @@ def _fit_dc_plus(
         beta_home = params[beta_home_slice]
         beta_away = params[beta_away_slice]
 
+        attack_effects = np.append(attacks, 0.0)
+        defense_effects = np.append(defenses, 0.0)
         eta_home_raw = (
             intercept
             + home_adv
-            + attacks[h_idx]
-            + defenses[a_idx]
+            + attack_effects[h_idx]
+            + defense_effects[a_idx]
             + leagues[l_idx]
             + x @ beta_home
         )
         eta_away_raw = (
             intercept
-            + attacks[a_idx]
-            + defenses[h_idx]
+            + attack_effects[a_idx]
+            + defense_effects[h_idx]
             + leagues[l_idx]
             + x @ beta_away
         )
@@ -1597,10 +1633,28 @@ def _fit_dc_plus(
         grad_eta_away *= ((eta_away_raw > -6.0) & (eta_away_raw < 4.0))
 
         grad = np.zeros_like(params)
-        np.add.at(grad[attack_slice], h_idx, grad_eta_home)
-        np.add.at(grad[attack_slice], a_idx, grad_eta_away)
-        np.add.at(grad[defense_slice], a_idx, grad_eta_home)
-        np.add.at(grad[defense_slice], h_idx, grad_eta_away)
+        home_latent = h_idx < nt
+        away_latent = a_idx < nt
+        np.add.at(
+            grad[attack_slice],
+            h_idx[home_latent],
+            grad_eta_home[home_latent],
+        )
+        np.add.at(
+            grad[attack_slice],
+            a_idx[away_latent],
+            grad_eta_away[away_latent],
+        )
+        np.add.at(
+            grad[defense_slice],
+            a_idx[away_latent],
+            grad_eta_home[away_latent],
+        )
+        np.add.at(
+            grad[defense_slice],
+            h_idx[home_latent],
+            grad_eta_away[home_latent],
+        )
         np.add.at(grad[league_slice], l_idx, grad_eta_home + grad_eta_away)
         grad[intercept_index] = float(np.sum(grad_eta_home + grad_eta_away))
         grad[home_adv_index] = float(np.sum(grad_eta_home))
@@ -1640,7 +1694,7 @@ def _fit_dc_plus(
         LOGGER.warning(
             "GoalLab DC+ optimizer failed status=%s message=%s nit=%s nfev=%s "
             "objective=%s gradient_inf_norm=%s parameter_count=%d training_sample=%d "
-            "feature_count=%d team_count=%d league_count=%d",
+            "feature_count=%d team_count=%d latent_team_count=%d league_count=%d",
             getattr(result, "status", None),
             getattr(result, "message", None),
             getattr(result, "nit", None),
@@ -1650,6 +1704,7 @@ def _fit_dc_plus(
             size,
             n,
             nf,
+            all_nt,
             nt,
             nl,
         )
@@ -1658,14 +1713,27 @@ def _fit_dc_plus(
     params = result.x
     payload = {
         "team_ids": team_values,
+        "latent_team_ids": latent_team_values,
+        "latent_team_min_matches": MIN_LATENT_TEAM_MATCHES,
+        "team_training_appearances": {
+            str(team_id): int(team_support[team_id]) for team_id in team_values
+        },
         "league_ids": league_values,
         "attacks": {
-            str(team_id): float(params[attack_slice][index])
-            for index, team_id in enumerate(team_values)
+            str(team_id): (
+                float(params[attack_slice][latent_team_index[team_id]])
+                if team_id in latent_team_index
+                else 0.0
+            )
+            for team_id in team_values
         },
         "defenses": {
-            str(team_id): float(params[defense_slice][index])
-            for index, team_id in enumerate(team_values)
+            str(team_id): (
+                float(params[defense_slice][latent_team_index[team_id]])
+                if team_id in latent_team_index
+                else 0.0
+            )
+            for team_id in team_values
         },
         "league_effects": {
             str(league_id): float(params[league_slice][index])
@@ -1833,6 +1901,7 @@ class GoalStructuralModelService:
             "training_sample_size": len(y_home),
             "history_match_count": history_match_count,
             "ridge_team": RIDGE_TEAM,
+            "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
             "ridge_feature": RIDGE_FEATURE,
             "ridge_interaction": RIDGE_INTERACTION,
             "recency_xi": RECENCY_XI,
@@ -1861,6 +1930,8 @@ class GoalStructuralModelService:
             training_payload={
                 "objective": objective,
                 "minimum_team_history": MIN_TEAM_HISTORY,
+                "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
+                "latent_team_count": len(params.get("latent_team_ids") or ()),
                 "minimum_training_examples": MIN_TRAINING_EXAMPLES,
                 "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
                 "history_limit": HISTORY_LIMIT,
