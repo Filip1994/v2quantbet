@@ -71,11 +71,11 @@ class FakeControl:
         return 1.35, 1.10
 
 
-def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
-    control_fit_sizes: list[int] = []
+def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
+    pooled_fit_sizes: list[int] = []
 
-    def fake_control_fit(records, **_kwargs):
-        control_fit_sizes.append(len(records))
+    def fake_pooled_fit(records, **_kwargs):
+        pooled_fit_sizes.append(len(records))
         return FakeControl(records)
 
     def fake_dc_plus_fit(
@@ -105,7 +105,7 @@ def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatc
         }
         return params, 1.0
 
-    monkeypatch.setattr(audit.DixonColesModel, "fit", staticmethod(fake_control_fit))
+    monkeypatch.setattr(audit, "_fit_sparse_pooled_control", fake_pooled_fit)
     monkeypatch.setattr(audit, "_fit_dc_plus", fake_dc_plus_fit)
 
     validation = audit.build_goal_model_validation(
@@ -114,15 +114,15 @@ def test_validation_v2_uses_pooled_control_when_leagues_are_too_small(monkeypatc
         evaluated_at=NOW,
     )
 
-    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V2"
+    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
     assert validation.authority_review_status == "READY_FOR_MANUAL_REVIEW"
     assert validation.comparison["control_leagues_fitted"] == []
     assert validation.comparison["pooled_control_fitted"] is True
     assert validation.comparison["control_scope_counts"]["pooled"] >= audit.MIN_COMMON_EVALUATION
-    assert control_fit_sizes
-    assert min(control_fit_sizes) >= audit.CONTROL_MIN_MATCHES
+    assert pooled_fit_sizes
+    assert min(pooled_fit_sizes) >= audit.CONTROL_MIN_MATCHES
 
 
 def test_validation_repository_lookup_is_method_specific() -> None:
