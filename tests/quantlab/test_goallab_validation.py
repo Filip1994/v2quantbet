@@ -69,3 +69,15 @@ def test_goal_validation_leakage_contract_forbids_target_live_and_market_inputs(
     assert checks["target_match_live_statistics_used"] is False
     assert checks["bookmaker_features_used_in_probability_model"] is False
     assert checks["provider_predictions_used_in_probability_model"] is False
+
+
+def test_existing_validation_is_logged_with_diagnostics() -> None:
+    import inspect
+
+    from h2h.quantlab.goal_lab import audit
+
+    source = inspect.getsource(audit.ensure_latest_goal_model_validation)
+
+    assert "GoalLab DC+ validation existing" in source
+    assert "existing.get(\"contract_snapshot\")" in source
+    assert "existing.get(\"comparison\")" in source
