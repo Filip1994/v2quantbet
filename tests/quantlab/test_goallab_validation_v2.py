@@ -71,7 +71,7 @@ class FakeControl:
         return 1.35, 1.10
 
 
-def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(monkeypatch) -> None:
+def test_validation_v4_uses_sparse_pooled_control_and_blocks_weak_challenger(monkeypatch) -> None:
     pooled_fit_sizes: list[int] = []
 
     def fake_pooled_fit(records, **_kwargs):
@@ -128,7 +128,10 @@ def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(mon
     assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
-    assert validation.authority_review_status == "READY_FOR_MANUAL_REVIEW"
+    assert validation.authority_review_status == "NOT_READY"
+    assert validation.comparison["promotion_gate"]["common_evaluation_ok"] is True
+    assert validation.comparison["promotion_gate"]["leakage_ok"] is True
+    assert not all(validation.comparison["promotion_gate"].values())
     assert validation.comparison["control_leagues_fitted"] == []
     assert validation.comparison["pooled_control_fitted"] is True
     assert validation.comparison["control_scope_counts"]["pooled"] >= audit.MIN_COMMON_EVALUATION
