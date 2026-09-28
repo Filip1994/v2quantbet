@@ -53,6 +53,9 @@ MIN_TRAINING_EXAMPLES = 300
 MIN_FEATURE_OBSERVATIONS = 20
 HISTORY_LIMIT = 10_000
 SHORT_REST_DAYS = 4.0
+OPTIMIZER_MAXITER = 1400
+OPTIMIZER_FTOL = 1e-9
+OPTIMIZER_GTOL = 1e-5
 
 CONTRACT_COVERAGE_V1 = {
     "A_BASE_DC": {"status": "FULL", "implemented": list(range(1, 11)), "pending": []},
@@ -1683,7 +1686,11 @@ def _fit_dc_plus(
         method="L-BFGS-B",
         jac=True,
         bounds=bounds,
-        options={"maxiter": 700, "ftol": 1e-9, "gtol": 1e-6},
+        options={
+            "maxiter": OPTIMIZER_MAXITER,
+            "ftol": OPTIMIZER_FTOL,
+            "gtol": OPTIMIZER_GTOL,
+        },
     )
     if not result.success or not np.isfinite(result.fun):
         gradient_norm = (
@@ -1902,6 +1909,9 @@ class GoalStructuralModelService:
             "history_match_count": history_match_count,
             "ridge_team": RIDGE_TEAM,
             "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
+            "optimizer_maxiter": OPTIMIZER_MAXITER,
+            "optimizer_ftol": OPTIMIZER_FTOL,
+            "optimizer_gtol": OPTIMIZER_GTOL,
             "ridge_feature": RIDGE_FEATURE,
             "ridge_interaction": RIDGE_INTERACTION,
             "recency_xi": RECENCY_XI,
@@ -1932,6 +1942,12 @@ class GoalStructuralModelService:
                 "minimum_team_history": MIN_TEAM_HISTORY,
                 "minimum_latent_team_matches": MIN_LATENT_TEAM_MATCHES,
                 "latent_team_count": len(params.get("latent_team_ids") or ()),
+                "optimizer": {
+                    "method": "L-BFGS-B",
+                    "maxiter": OPTIMIZER_MAXITER,
+                    "ftol": OPTIMIZER_FTOL,
+                    "gtol": OPTIMIZER_GTOL,
+                },
                 "minimum_training_examples": MIN_TRAINING_EXAMPLES,
                 "minimum_feature_observations": MIN_FEATURE_OBSERVATIONS,
                 "history_limit": HISTORY_LIMIT,
