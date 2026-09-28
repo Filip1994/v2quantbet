@@ -317,11 +317,11 @@ def main() -> None:
         try:
             ensure_latest_goal_model_validation(repository, LOGGER)
         except Exception as exc:
-            LOGGER.error(
+            sqlstate = getattr(exc, "sqlstate", None)
+            LOGGER.exception(
                 "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s",
                 type(exc).__name__,
-                getattr(exc, "sqlstate", None),
-                exc_info=True,
+                sqlstate,
             )
         while not stop.is_set():
             try:
@@ -348,11 +348,11 @@ def main() -> None:
                 try:
                     ensure_latest_goal_model_validation(repository, LOGGER)
                 except Exception as exc:
-                    LOGGER.error(
+                    sqlstate = getattr(exc, "sqlstate", None)
+                    LOGGER.exception(
                         "GoalLab DC+ validation failed error_class=%s sqlstate=%s",
                         type(exc).__name__,
-                        getattr(exc, "sqlstate", None),
-                        exc_info=True,
+                        sqlstate,
                     )
                 readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                 if (
