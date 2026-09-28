@@ -1260,12 +1260,11 @@ class QuantLabRuntime:
                 outcome = self._goal_engine.run_fixture(fixture, decision_at=now)
             except ApiBudgetExceededError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 LOGGER.exception(
-                    "GoalLab fixture evaluation failed fixture=%s error_class=%s error=%s",
+                    "GoalLab fixture evaluation failed fixture=%s error_class=%s",
                     fixture_id,
                     type(exc).__name__,
-                    str(exc),
                 )
                 continue
             decisions += int(outcome.decisions_inserted)
@@ -1285,14 +1284,13 @@ class QuantLabRuntime:
                 settled += int(
                     bool(self._repository.save_goal_pick_settlement(settlement))
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 LOGGER.exception(
                     "GoalLab settlement failed fixture=%s goal_pick_id=%s "
-                    "error_class=%s error=%s",
+                    "error_class=%s",
                     fixture_id,
                     goal_pick_id,
                     type(exc).__name__,
-                    str(exc),
                 )
         return settled
 
