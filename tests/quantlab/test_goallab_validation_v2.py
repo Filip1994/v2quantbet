@@ -186,3 +186,26 @@ def test_sparse_pooled_control_keeps_sparse_team_matches() -> None:
     lambda_home, lambda_away = control.expected_goals(1000, 1001)
     assert lambda_home > 0.0
     assert lambda_away > 0.0
+
+
+def test_validation_waits_for_active_v2_artifact() -> None:
+    class HistoricalRepo:
+        def goal_model_contract(self, model_version=None):
+            assert model_version is None
+            return {
+                "model_version": "DC_PLUS_PRO_STRUCTURAL_V1:" + "f" * 64,
+                "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
+            }
+
+        def goal_model_validation(self, *_args, **_kwargs):
+            raise AssertionError("historical artifact must not enter V4 validation")
+
+    class Logger:
+        def info(self, *_args, **_kwargs):
+            return None
+
+    result = audit.ensure_latest_goal_model_validation(HistoricalRepo(), Logger())
+
+    assert result["status"] == "WAITING_ACTIVE_MODEL"
+    assert result["active_model_prefix"] == "DC_PLUS_PRO_STRUCTURAL_V2:"
+    assert result["active_feature_version"] == "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2"
