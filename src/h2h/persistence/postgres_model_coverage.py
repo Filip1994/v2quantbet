@@ -96,6 +96,7 @@ class PostgreSQLModelCoverageRepository:
                         name=name,
                         type=competition_type,
                         level=None,
+                        league_id=int(league_id),
                     )
                 ).eligible
             ]
