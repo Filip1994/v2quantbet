@@ -473,6 +473,27 @@ class QuantLabDashboardService:
         def field(name: str) -> str:
             return escape(params.get(name, [""])[0], quote=True)
 
+        goal_contract_cache: dict[str, dict[str, Any] | None] = {}
+
+        def goal_contract_for(row: dict[str, Any]) -> dict[str, Any] | None:
+            if lab_key != "goal":
+                return None
+            model_version = str(row.get("model_version") or "")
+            if not model_version:
+                return None
+            if model_version not in goal_contract_cache:
+                try:
+                    goal_contract_cache[model_version] = self._repository.goal_model_contract(
+                        model_version
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "GoalLab pick explanation model-contract query failed model=%s",
+                        model_version,
+                    )
+                    goal_contract_cache[model_version] = None
+            return goal_contract_cache[model_version]
+
         rows_html = ""
         for row in rows:
             pnl_minor = row.get("pnl_minor")
@@ -491,7 +512,19 @@ class QuantLabDashboardService:
                 match = match_text
             league_text = escape(str(row.get("competition_name") or "—"))
             line = "—" if row.get("line") is None else escape(str(row["line"]))
-            note_cell = _corner_pick_note(row) if lab_key == "corner" else "—"
+            if lab_key == "corner":
+                note_cell = _corner_pick_note(row)
+            elif lab_key == "goal" and row.get("goal_pick_id"):
+                note_href = "/quantlab/goal/pick?" + urlencode(
+                    {"goal_pick_id": str(row["goal_pick_id"])}
+                )
+                note_cell = render_goal_pick_note_html(
+                    row,
+                    goal_contract_for(row),
+                    detail_href=note_href,
+                )
+            else:
+                note_cell = "—"
             close_cell = (
                 f'<td>{_odd(row.get("closing_odds"))}<small>audit only</small></td>'
                 if lab_key == "corner"
