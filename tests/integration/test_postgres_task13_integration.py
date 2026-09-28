@@ -67,7 +67,7 @@ def test_fresh_schema_runtime_leadership_and_bankroll(isolated_database) -> None
         applied = apply_migrations(connection, MIGRATION_DIR)
     expected = tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
     assert applied == expected
-    assert expected[-1] == "050_quantlab_goallab_validation_v3.sql"
+    assert expected[-1] == "051_quantlab_goallab_result_e2e.sql"
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     assert runtime.check_database()
