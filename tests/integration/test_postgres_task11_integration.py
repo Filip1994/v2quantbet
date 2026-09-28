@@ -67,7 +67,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
-            assert applied[-1] == "053_quantlab_goallab_deep_history_v3.sql"
+            assert applied[-1] == "054_quantlab_goallab_positive_ev_policy.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
