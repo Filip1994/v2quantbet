@@ -834,22 +834,23 @@ class QuantLabDashboardService:
                     f'<td><span class="badge {decision_class}">{escape(decision)}</span><small>{escape(reason)}</small></td>'
                     f'<td>{escape(str(item.get("model_version") or "—"))}</td>'
                     f'<td>{latest_pick}</td>'
+                    f'<td>{_pct(item.get("model_probability"))}<small>market {_pct(item.get("market_probability"))}</small></td>'
                     f'<td>{_pct(item.get("edge"))}<small>{_pct(item.get("expected_value"))} EV</small></td>'
                     "</tr>"
                 )
             if not rendered_pipeline:
                 rendered_pipeline = (
-                    '<tr><td class="empty" colspan="7">'
+                    '<tr><td class="empty" colspan="8">'
                     'No upcoming QuantLab fixtures are stored in the current lookahead window.'
                     "</td></tr>"
                 )
             goal_pipeline_html = (
                 '<section class="table-shell context-table">'
-                '<div class="table-title"><b>Upcoming fixture / GoalLab decision pipeline</b>'
-                f'<span>{len(pipeline_rows)} fixtures</span></div>'
+                '<div class="table-title"><b>Sve analizirane utakmice · PASS + PICK</b>'
+                f'<span>{len(pipeline_rows)} mečeva u lookahead prozoru</span></div>'
                 '<div class="table"><table><thead><tr>'
-                '<th>Match</th><th>Goal scope</th><th>Last odds capture</th>'
-                '<th>Decision</th><th>Model</th><th>Candidate</th><th>Edge / EV</th>'
+                '<th>Meč</th><th>Goal scope</th><th>Poslednje kvote</th>'
+                '<th>Odluka</th><th>Model</th><th>Kandidat</th><th>Model / market</th><th>Edge / EV</th>'
                 f'</tr></thead><tbody>{rendered_pipeline}</tbody></table></div></section>'
             )
 
