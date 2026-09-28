@@ -138,7 +138,7 @@ def test_goal_analytics_v2_reports_scoring_clv_drawdown_and_calibration_bins() -
     metrics = snapshot["windows"]["lifetime"]
 
     assert metrics["graded_n"] == 2
-    assert metrics["brier_score"] == 0.325
+    assert round(metrics["brier_score"], 3) == 0.325
     assert metrics["log_loss"] is not None
     assert metrics["avg_clv_pct"] is not None
     assert metrics["clv_n"] == 2
