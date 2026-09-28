@@ -15,7 +15,7 @@ _EFFECTIVE_PLAYED_OPEN_EXPOSURE_SQL = (
     "FROM bankroll_ledger_entries l "
     "LEFT JOIN latest_operator o ON o.pick_id = l.pick_id "
     "WHERE l.bankroll_account_id = %s AND l.entry_type = 'STAKE_RESERVED' "
-    "AND COALESCE(o.state, 'PLAYED') = 'PLAYED' "
+    "AND COALESCE(o.state, 'PENDING') <> 'SKIPPED' "
     "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
     "WHERE e.pick_id = l.pick_id AND e.outcome IS NOT NULL "
     "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events successor "
