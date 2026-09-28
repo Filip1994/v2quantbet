@@ -1683,7 +1683,7 @@ def _fit_dc_plus(
         method="L-BFGS-B",
         jac=True,
         bounds=bounds,
-        options={"maxiter": 700, "ftol": 1e-9, "gtol": 1e-6},
+        options={"maxiter": 1500, "ftol": 1e-9, "gtol": 1e-6},
     )
     if not result.success or not np.isfinite(result.fun):
         gradient_norm = (
