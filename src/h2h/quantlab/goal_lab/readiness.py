@@ -28,19 +28,19 @@ from h2h.quantlab.goal_lab.structural_shadow_engine import (
 )
 
 
-GOALLAB_V1_LOCK_VERSION = "GOALLAB_V3_LOCK_2026_09_28"
+GOALLAB_V1_LOCK_VERSION = "GOALLAB_V4_LOCK_2026_09_28"
 
 LOCKED_CONTRACT: dict[str, Any] = {
     "lock_version": GOALLAB_V1_LOCK_VERSION,
     "model_prefix": "DC_PLUS_PRO_STRUCTURAL_V3:",
     "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2",
-    "evaluation_policy_version": "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V4",
-    "pick_policy_version": "GOALLAB_DC_PLUS_PICK_POLICY_V3",
+    "evaluation_policy_version": "GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5",
+    "pick_policy_version": "GOALLAB_DC_PLUS_PICK_POLICY_V4",
     "settlement_rule_version": "GOALLAB_SETTLEMENT_V1",
     "validation_method_version": "GOALLAB_CHRONOLOGICAL_HOLDOUT_V5",
     "flat_stake_minor": 10_000,
-    "min_edge": 0.03,
-    "min_expected_value": 0.03,
+    "min_edge": None,
+    "min_expected_value": 0.0,
     "min_odds": 1.40,
     "max_odds": 4.00,
     "max_quote_age_seconds": 13 * 60 * 60,
