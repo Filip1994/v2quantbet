@@ -598,13 +598,15 @@ def test_run_once_prioritizes_goallab_before_provider_backed_work():
 
     runtime._evaluate_context_picks = evaluate_context  # type: ignore[method-assign]
     runtime._evaluate_goal_picks = mark("goal_evaluation", (0, 0))  # type: ignore[method-assign]
+    runtime._refresh_goal_pick_results = mark("goal_result_refresh", 0)  # type: ignore[method-assign]
     runtime._settle_goal_picks = mark("goal_settlement", 0)  # type: ignore[method-assign]
 
     result = runtime.run_once()
 
     assert result["corner_settlements"] == 1
     assert result["card_settlements"] == 1
-    assert order[:2] == ["goal_evaluation", "goal_settlement"]
+    assert order[:3] == ["goal_evaluation", "goal_result_refresh", "goal_settlement"]
+    assert order.index("goal_result_refresh") < order.index("goal_settlement")
     assert order.index("goal_settlement") < order.index("corner_result_refresh")
     assert order.index("corner_settlement") < order.index("card_result_refresh")
     assert order.index("card_settlement") < order.index("card_referee_history")
