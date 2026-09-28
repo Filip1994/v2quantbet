@@ -8,7 +8,7 @@ from h2h.quantlab.goal_lab import audit
 
 
 NOW = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
-MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V1:" + "e" * 64
+MODEL_VERSION = "DC_PLUS_PRO_STRUCTURAL_V2:" + "e" * 64
 
 
 def _history_rows() -> tuple[dict[str, object], ...]:
@@ -43,7 +43,7 @@ class Repo:
         return {
             "model_version": MODEL_VERSION,
             "training_cutoff": NOW,
-            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V1",
+            "feature_version": "GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2",
             "training_sample_size": 700,
             "history_match_count": 1000,
             "training_payload": {"contract_coverage": {"A_BASE_DC": {"status": "FULL"}}},
@@ -125,7 +125,7 @@ def test_validation_v3_uses_sparse_pooled_control_when_leagues_are_too_small(mon
         evaluated_at=NOW,
     )
 
-    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V3"
+    assert validation.method_version == "GOALLAB_CHRONOLOGICAL_HOLDOUT_V4"
     assert validation.status == "OK"
     assert validation.common_evaluation_size >= audit.MIN_COMMON_EVALUATION
     assert validation.authority_review_status == "READY_FOR_MANUAL_REVIEW"
