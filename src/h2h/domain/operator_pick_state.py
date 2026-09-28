@@ -1,4 +1,4 @@
-"""Minimal operator PLAYED/SKIPPED state with PLAYED as the derived default."""
+"""Operator PENDING/PLAYED/SKIPPED state with PENDING as the derived default."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from enum import StrEnum
 
 
 class OperatorPickState(StrEnum):
+    PENDING = "PENDING"
     PLAYED = "PLAYED"
     SKIPPED = "SKIPPED"
 
