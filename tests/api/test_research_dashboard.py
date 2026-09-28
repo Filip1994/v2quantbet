@@ -411,7 +411,7 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     html = dashboard.render_analytics_html()
     assert "Research Analytics V2" in html
     assert "Core performance" in html
-    assert "Calibration &amp; price" in html
+    assert "Calibration & price" in html
     assert "Audit" in html
     assert "Production filter cube" in html
     assert "Low-scoring diagnostic" in html
