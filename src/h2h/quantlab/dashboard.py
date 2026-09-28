@@ -125,6 +125,20 @@ def _clv_text(ppm: int | None) -> str:
     return "—" if ppm is None else f"{ppm / 10_000:+.2f}%"
 
 
+def _metric_text(
+    value: Any,
+    *,
+    suffix: str = "",
+    digits: int = 2,
+    signed: bool = False,
+) -> str:
+    if value is None:
+        return "—"
+    number = float(value)
+    sign = "+" if signed and number > 0 else ""
+    return f"{sign}{number:.{digits}f}{suffix}"
+
+
 def _corner_pick_note(row: dict[str, Any]) -> str:
     expected = _number(row.get("expected_total_corners"))
     line = _number(row.get("line"))
@@ -828,7 +842,7 @@ class QuantLabDashboardService:
                 "league": ("Leagues", snapshot["cohorts"]["league"], ("competition_name",)),
                 "bookmaker": ("Bookmakers", snapshot["cohorts"]["bookmaker"], ("bookmaker_name",)),
             }
-            if research_table not in research_specs:
+            if research_table not in {*research_specs, "calibration"}:
                 research_table = "model_version"
             sortable_metrics = {
                 "n", "graded_n", "wins", "losses", "voids", "win_rate_pct",
@@ -921,14 +935,14 @@ class QuantLabDashboardService:
                     rendered += (
                         "<tr>" + dim_cells
                         + f"<td>{item['graded_n']}</td>"
-                        + f"<td>{'—' if item['win_rate_pct'] is None else f'{item['win_rate_pct']:.2f}%'}</td>"
-                        + f"<td>{'—' if item['roi_pct'] is None else f'{item['roi_pct']:+.2f}%'}</td>"
-                        + f"<td>{'—' if item['avg_clv_pct'] is None else f'{item['avg_clv_pct']:+.2f}%'}</td>"
-                        + f"<td>{'—' if item['brier_score'] is None else f'{item['brier_score']:.3f}'}</td>"
-                        + f"<td>{'—' if item['log_loss'] is None else f'{item['log_loss']:.3f}'}</td>"
-                        + f"<td>{'—' if item['calibration_gap_pp'] is None else f'{item['calibration_gap_pp']:+.2f}pp'}</td>"
-                        + f"<td>{'—' if item['avg_edge_pct'] is None else f'{item['avg_edge_pct']:+.2f}%'}</td>"
-                        + f"<td>{'—' if item['avg_ev_pct'] is None else f'{item['avg_ev_pct']:+.2f}%'}</td>"
+                        + f"<td>{_metric_text(item['win_rate_pct'], suffix='%')}</td>"
+                        + f"<td>{_metric_text(item['roi_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_clv_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['brier_score'], digits=3)}</td>"
+                        + f"<td>{_metric_text(item['log_loss'], digits=3)}</td>"
+                        + f"<td>{_metric_text(item['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_edge_pct'], suffix='%', signed=True)}</td>"
+                        + f"<td>{_metric_text(item['avg_ev_pct'], suffix='%', signed=True)}</td>"
                         + f"<td>{escape(str(item['sample_band']))}</td>"
                         + "</tr>"
                     )
@@ -941,21 +955,52 @@ class QuantLabDashboardService:
                     f'<tbody>{rendered}</tbody></table></div></section>'
                 )
 
+            calibration_active_key = research_sort if research_table == "calibration" else "bin"
+            calibration_active_dir = research_dir if research_table == "calibration" else "asc"
+            if calibration_active_key not in {"bin", "n", "expected_pct", "observed_pct", "gap_pp"}:
+                calibration_active_key = "bin"
+            calibration = _sort_rows(
+                tuple(snapshot["calibration_bins"]),
+                calibration_active_key,
+                calibration_active_dir,
+            )
+            calibration_base = dict(current_params)
+            calibration_base["research_table"] = "calibration"
+            calibration_headers = "".join(
+                _sortable_th(
+                    label,
+                    key,
+                    base_params=calibration_base,
+                    sort_param="research_sort",
+                    dir_param="research_dir",
+                    active_key=calibration_active_key,
+                    active_dir=calibration_active_dir,
+                    anchor="research-calibration",
+                )
+                for label, key in (
+                    ("Bin", "bin"),
+                    ("N", "n"),
+                    ("Expected", "expected_pct"),
+                    ("Observed", "observed_pct"),
+                    ("Gap", "gap_pp"),
+                )
+            )
             calibration_rows = "".join(
                 "<tr>"
                 f"<td><b>{escape(str(item['bin']))}</b></td><td>{item['n']}</td>"
-                f"<td>{item['expected_pct']:.2f}%</td><td>{item['observed_pct']:.2f}%</td>"
-                f"<td>{item['gap_pp']:+.2f}pp</td></tr>"
-                for item in snapshot["calibration_bins"]
+                f"<td>{_metric_text(item['expected_pct'], suffix='%')}</td>"
+                f"<td>{_metric_text(item['observed_pct'], suffix='%')}</td>"
+                f"<td>{_metric_text(item['gap_pp'], suffix='pp', signed=True)}</td></tr>"
+                for item in calibration
             ) or '<tr><td class="empty" colspan="5">No graded picks for calibration yet.</td></tr>'
 
             research_cards = "".join(
                 f'<div class="mini-stat"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
                 for label, value in (
                     ("Audit", str(audit["status"])),
-                    ("Brier", "—" if lifetime["brier_score"] is None else f'{lifetime["brier_score"]:.3f}'),
-                    ("Log loss", "—" if lifetime["log_loss"] is None else f'{lifetime["log_loss"]:.3f}'),
-                    ("Calibration", "—" if lifetime["calibration_gap_pp"] is None else f'{lifetime["calibration_gap_pp"]:+.2f}pp'),
+                    ("Brier", _metric_text(lifetime["brier_score"], digits=3)),
+                    ("Log loss", _metric_text(lifetime["log_loss"], digits=3)),
+                    ("Calibration", _metric_text(lifetime["calibration_gap_pp"], suffix="pp", signed=True)),
                     ("CLV N", str(lifetime["clv_n"])),
                     ("Violations", str(audit["violations"])),
                 )
@@ -967,8 +1012,8 @@ class QuantLabDashboardService:
                 f'<div class="mini-stats">{research_cards}</div>'
                 f'<details class="research-details"{open_attr}><summary>Research breakdowns and calibration</summary>'
                 + "".join(research_tables)
-                + '<section class="research-table"><div class="table-title"><b>Calibration bins</b><span>selected-pick probability</span></div>'
-                + '<div class="table"><table><thead><tr><th>Bin</th><th>N</th><th>Expected</th><th>Observed</th><th>Gap</th></tr></thead>'
+                + '<section class="research-table" id="research-calibration"><div class="table-title"><b>Calibration bins</b><span>selected-pick probability</span></div>'
+                + f'<div class="table"><table><thead><tr>{calibration_headers}</tr></thead>'
                 + f'<tbody>{calibration_rows}</tbody></table></div></section>'
                 + '</details></section>'
             )
