@@ -314,3 +314,91 @@ def test_composite_goal_engine_runs_control_and_structural_paths() -> None:
     assert structural.calls == 1
     assert result.decisions_inserted == 5
     assert result.picks_inserted == 0
+
+
+def test_structural_model_reuses_persisted_artifact_for_unchanged_training(
+    monkeypatch,
+) -> None:
+    import h2h.quantlab.goal_lab.model as model_module
+
+    model_version = "DC_PLUS_PRO_STRUCTURAL_V1:" + "d" * 64
+
+    class Repo:
+        def __init__(self) -> None:
+            self.fingerprints: list[str] = []
+
+        def goal_model_history(self, *, before, limit):
+            assert before == NOW
+            assert limit == model_module.HISTORY_LIMIT
+            return ({"fixture_id": "history-stable", "kickoff_at": NOW - timedelta(days=1)},)
+
+        def goal_model_by_training_fingerprint(self, fingerprint):
+            self.fingerprints.append(fingerprint)
+            return {
+                "model_version": model_version,
+                "trained_at": NOW - timedelta(hours=2),
+                "training_cutoff": NOW - timedelta(hours=2),
+                "feature_version": model_module.FEATURE_VERSION,
+                "training_sample_size": 300,
+                "history_match_count": 300,
+                "team_count": 2,
+                "league_count": 1,
+                "ridge_team": model_module.RIDGE_TEAM,
+                "ridge_feature": model_module.RIDGE_FEATURE,
+                "rho": -0.05,
+                "intercept": 0.1,
+                "home_advantage": 0.1,
+                "parameters": {
+                    "model_feature_names": ["feature_a"],
+                    "base_feature_names": ["feature_a"],
+                },
+                "feature_means": {"feature_a": 0.0},
+                "feature_scales": {"feature_a": 1.0},
+                "training_payload": {"training_fingerprint": fingerprint},
+            }
+
+    dates = [NOW - timedelta(minutes=index) for index in range(300)]
+    monkeypatch.setattr(
+        model_module,
+        "_build_training",
+        lambda _rows: (
+            [{"feature_a": 0.0}] * 300,
+            model_module.np.zeros(300),
+            model_module.np.zeros(300),
+            model_module.np.ones(300, dtype=int),
+            model_module.np.full(300, 2, dtype=int),
+            model_module.np.full(300, 39, dtype=int),
+            dates,
+            {},
+            {},
+            [],
+            300,
+        ),
+    )
+    monkeypatch.setattr(
+        model_module,
+        "_prepare_features",
+        lambda _rows: (
+            model_module.np.zeros((300, 1)),
+            ("feature_a",),
+            {"feature_a": 0.0},
+            {"feature_a": 1.0},
+            ("feature_a",),
+        ),
+    )
+
+    def unexpected_fit(*_args, **_kwargs):
+        raise AssertionError("unchanged training evidence must reuse the persisted artifact")
+
+    monkeypatch.setattr(model_module, "_fit_dc_plus", unexpected_fit)
+
+    repo = Repo()
+    service = model_module.GoalStructuralModelService(repo)
+    readiness = service.readiness(decision_at=NOW)
+
+    assert readiness["reason"] == "MODEL_READY"
+    assert readiness["model_version"] == model_version
+    assert readiness["artifact_reused"] is True
+    assert readiness["training_sample_size"] == 300
+    assert readiness["history_match_count"] == 300
+    assert readiness["training_fingerprint"] == repo.fingerprints[0]
