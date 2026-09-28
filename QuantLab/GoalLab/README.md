@@ -10,10 +10,10 @@ model activation state.
 The pick-producing research model family is:
 
 - model: **DC+ Pro Structural**
-- model prefix: `DC_PLUS_PRO_STRUCTURAL_V2:`
+- model prefix: `DC_PLUS_PRO_STRUCTURAL_V3:`
 - feature version: `GOALLAB_DC_PLUS_STRUCTURAL_FEATURES_V2`
-- evaluation policy: `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V3`
-- canonical pick policy: `GOALLAB_DC_PLUS_PICK_POLICY_V2`
+- evaluation policy: `GOALLAB_DC_PLUS_STRUCTURAL_POLICY_V5`
+- canonical pick policy: `GOALLAB_DC_PLUS_PICK_POLICY_V4`
 - settlement rule: `GOALLAB_SETTLEMENT_V1`
 
 Plain production Dixon-Coles remains a read-only control under
@@ -137,11 +137,14 @@ Market fair probability is proportional two-way de-vig.
 
 A candidate must satisfy all of:
 
-- edge >= 3 percentage points;
-- expected value >= 3%;
+- expected value strictly greater than 0;
 - odds 1.40 through 4.00;
 - quote age <= 13 hours;
 - kickoff at least 15 minutes away.
+
+Edge is still calculated, persisted and used as a secondary ranking/audit signal, but it
+is no longer a hard qualification threshold. A candidate with positive EV can therefore
+qualify even when its edge is below 3 percentage points.
 
 Odds are used only after DC+ has produced sports probabilities.
 
@@ -236,7 +239,7 @@ Every settlement retains the exact result observation used.
 ## DC+ validation
 
 Each immutable model artifact may receive one
-`GOALLAB_CHRONOLOGICAL_HOLDOUT_V4` validation record. Earlier validation evidence remains immutable and queryable.
+`GOALLAB_CHRONOLOGICAL_HOLDOUT_V5` validation record. Earlier validation evidence remains immutable and queryable.
 
 The chronological holdout compares DC+ Structural against plain Dixon-Coles on the same
 common evaluation fixtures. It prefers league-specific controls and uses a pooled
@@ -341,7 +344,7 @@ contributors plus the plain-language context.
 
 ## GoalLab active production-readiness lock
 
-GoalLab V1 remains historical and immutable. The active successor is frozen by `GOALLAB_V2_LOCK_2026_09_28`.
+GoalLab V1/V2/V3 historical contracts remain immutable. The active policy successor is frozen by `GOALLAB_V4_LOCK_2026_09_28`.
 
 Startup now verifies the live runtime constants against the frozen contract and fails closed
 if an in-place semantic change is detected. A change to any of the following requires an
