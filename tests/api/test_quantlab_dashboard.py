@@ -20,11 +20,14 @@ def goal_pick(*, outcome: str = "WIN", suffix: str = "a"):
         "line": 2.5,
         "model_name": "DC+ Pro Structural",
         "model_version": "DC_PLUS_PRO_STRUCTURAL_V1:" + "b" * 64,
-        "policy_version": "GOALLAB_DC_PLUS_PICK_POLICY_V1",
+        "policy_version": "GOALLAB_DC_PLUS_PICK_POLICY_V4",
+        "pick_policy_version": "GOALLAB_DC_PLUS_PICK_POLICY_V4",
         "model_probability": 0.58,
         "market_probability": 0.52,
         "edge": 0.06,
         "expected_value": 0.10,
+        "expected_home_goals": 1.72,
+        "expected_away_goals": 1.08,
         "odds": 2.0,
         "quote_observed_at": NOW,
         "decision_at": NOW,
@@ -39,7 +42,30 @@ def goal_pick(*, outcome: str = "WIN", suffix: str = "a"):
         "competition_name": "Premier League",
         "country": "England",
         "kickoff_at": NOW,
-        "feature_payload": {"raw_features": {"home_l5_goals_for": 2.1}},
+        "feature_payload": {
+            "raw_features": {
+                "home_l5_goals_for": 2.10,
+                "home_l5_goals_against": 1.00,
+                "away_l5_goals_for": 1.20,
+                "away_l5_goals_against": 1.60,
+                "home_l5_shots_for": 14.0,
+                "home_l5_sot_for": 5.4,
+                "away_l5_shots_for": 10.2,
+                "away_l5_sot_for": 3.6,
+            },
+            "target_match_live_stats_used": False,
+        },
+        "selection_rank_payload": {
+            "candidate_count": 2,
+            "candidates": [
+                {
+                    "rank": 1,
+                    "bookmaker_name": "Bet365",
+                    "market_key": "OU_25",
+                    "selection": "OVER",
+                }
+            ],
+        },
     }
 
 
@@ -117,6 +143,22 @@ def test_quantlab_dashboard_is_operational_only() -> None:
     assert "DC+ model contract / active variables" not in html
 
 
+def test_goallab_dashboard_restores_plain_serbian_pick_notes() -> None:
+    html = QuantLabDashboardService(StubRepository()).render_html("lab=goal")
+
+    assert "<th>Notes</th>" in html
+    assert "📝" in html
+    assert "Zašto je izabran ovaj pik" in html
+    assert "Model je za Home – Away izabrao „više od 2.5 gola“" in html
+    assert "Forma golova L5: domaćin daje 2.10" in html
+    assert "Šutevi L5: domaćin 14.00 šuteva / 5.40 u okvir" in html
+    assert "Po aktuelnom V4 pravilu" in html
+    assert "Edge pomaže pri rangiranju" in html
+    assert "Među 2 kandidata koji su prošli filtere" in html
+    assert "Nisu korišćene live statistike" in html
+    assert "Otvori sve brojke i sve varijable →" in html
+
+
 def test_quantlab_dashboard_separates_active_from_history() -> None:
     class ActiveRepository(StubRepository):
         def list_goal_picks(self):
@@ -137,6 +179,9 @@ def test_quantlab_dashboard_separates_active_from_history() -> None:
     assert "Settled – Match" not in active_section
     assert "Settled – Match" in history_section
     assert "Active – Match" not in history_section
+    assert html.count("📝") == 2
+    assert "Zašto je izabran ovaj pik" in active_section
+    assert "Zašto je izabran ovaj pik" in history_section
 
 
 def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
@@ -155,6 +200,8 @@ def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
     assert "TOTAL_CORNERS · OVER 9.5" in html
     assert "WIN" in html
     assert "Kako CornerLab dolazi do procene" not in html
+    assert "<th>Notes</th>" not in html
+    assert "📝" not in html
 
 
 class FailingGoalRepository(StubRepository):
