@@ -17,9 +17,6 @@ ConnectionFactory = Callable[[], Any]
 LEADER_LOCK_NAME = "quantbet-production-v1"
 
 _OPPORTUNITY_NO_ODDS_ERROR = "OpportunityOddsUnavailableError"
-_OPPORTUNITY_FIXTURE_OBSERVATION_MAX_AGE = timedelta(hours=24)
-_OPPORTUNITY_NO_ODDS_MAX_RETRY = timedelta(hours=4)
-_OPPORTUNITY_NO_ODDS_URGENT_KICKOFF = timedelta(hours=2)
 
 
 def _initial_item_retry_at(worker: str, error_class: str, failed_at: datetime) -> datetime:
@@ -36,8 +33,8 @@ _ITEM_FAILURE_UPSERT_SQL = (
     "last_failure_at = EXCLUDED.last_failure_at, next_retry_at = CASE "
     "WHEN EXCLUDED.worker_name = 'opportunity' "
     "AND EXCLUDED.last_error_class = 'OpportunityOddsUnavailableError' THEN LEAST("
-    "EXCLUDED.last_failure_at + interval '4 hours', EXCLUDED.last_failure_at + "
-    "(power(2, LEAST(production_item_failures.failure_count, 5)) * interval '10 minutes')) "
+    "EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
+    "(power(2, LEAST(production_item_failures.failure_count, 3)) * interval '10 minutes')) "
     "ELSE LEAST(EXCLUDED.last_failure_at + interval '1 hour', EXCLUDED.last_failure_at + "
     "(power(2, LEAST(production_item_failures.failure_count, 8)) * interval '5 seconds')) END, "
     "last_error_class = EXCLUDED.last_error_class, "
@@ -269,7 +266,6 @@ class PostgreSQLRuntimeRepository:
                 "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
                 "competition_name, competition_type "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
-                "AND o.observed_at >= %s "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
                 "LEFT JOIN LATERAL (SELECT MAX(q.captured_at) AS last_captured_at "
                 "FROM quote_series s JOIN quote_snapshots q ON q.series_id = s.series_id "
@@ -293,14 +289,12 @@ class PostgreSQLRuntimeRepository:
                 "WHERE latest.kickoff_at > %s "
                 "AND latest.kickoff_at <= %s "
                 "AND latest.provider_status = ANY(%s) "
-                "AND (failures.next_retry_at IS NULL OR failures.next_retry_at <= %s "
-                "OR latest.kickoff_at <= %s) "
+                "AND (failures.next_retry_at IS NULL OR failures.next_retry_at <= %s) "
                 "AND (%s = FALSE OR (refresh.freshness_state = 'STALE' "
                 "AND refresh.next_retry_at IS NOT NULL AND refresh.next_retry_at <= %s)) "
                 "AND (%s::timestamptz IS NULL OR (latest.kickoff_at, f.fixture_id) > (%s, %s)) "
                 "ORDER BY latest.kickoff_at, f.fixture_id LIMIT %s",
                 (
-                    current - _OPPORTUNITY_FIXTURE_OBSERVATION_MAX_AGE,
                     bookmaker_id,
                     bookmaker_id,
                     bookmaker_id,
@@ -308,7 +302,6 @@ class PostgreSQLRuntimeRepository:
                     current + timedelta(hours=72),
                     list(allowed_statuses),
                     current,
-                    current + _OPPORTUNITY_NO_ODDS_URGENT_KICKOFF,
                     stale_only,
                     current,
                     after_kickoff,
