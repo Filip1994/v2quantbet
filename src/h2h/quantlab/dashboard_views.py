@@ -311,7 +311,7 @@ def render_dashboard(
     warning = ""
     try:
         rows = _sorted(_display_rows(repository, lab))
-    except Exception:
+    except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         rows = ()
         warning = (
             '<p class="analytics-note">Pick ledger temporarily unavailable. '
@@ -325,7 +325,7 @@ def render_dashboard(
         else:
             loader = getattr(repository, "list_all_bets", None)
             metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
-    except Exception:
+    except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         metric_rows = rows
         if not warning:
             warning = (
@@ -352,7 +352,7 @@ def render_dashboard(
     roi = None if risked == 0 else pnl / risked
     try:
         api_used = int(repository.api_usage_today())
-    except Exception:
+    except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         api_used = 0
 
     cards = (
@@ -538,7 +538,7 @@ def _goal_audit(repository: Any, rows: tuple[dict[str, Any], ...]) -> str:
         loader = getattr(repository, "list_all_goal_decisions", None)
     try:
         decisions = tuple(loader()) if callable(loader) else ()
-    except Exception:
+    except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         decisions = ()
     snapshot = build_goal_analytics_snapshot(rows, decisions)
     audit = snapshot["integrity_audit"]
