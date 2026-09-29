@@ -318,12 +318,20 @@ def render_dashboard(
             'QuantLab processing is unchanged; this is a read-only dashboard error.</p>'
         )
 
-    if lab == "GOAL":
-        loader = getattr(repository, "list_all_goal_picks", None)
-        metric_rows = _sorted(tuple(loader())) if callable(loader) else rows
-    else:
-        loader = getattr(repository, "list_all_bets", None)
-        metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
+    try:
+        if lab == "GOAL":
+            loader = getattr(repository, "list_all_goal_picks", None)
+            metric_rows = _sorted(tuple(loader())) if callable(loader) else rows
+        else:
+            loader = getattr(repository, "list_all_bets", None)
+            metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
+    except Exception:
+        metric_rows = rows
+        if not warning:
+            warning = (
+                '<p class="analytics-note">Complete metric history temporarily unavailable. '
+                'Visible picks remain available; QuantLab processing is unchanged.</p>'
+            )
 
     active = tuple(row for row in rows if _result(row) == "PENDING")
     history = tuple(row for row in rows if _result(row) in {"WIN", "LOSS", "VOID"})
@@ -528,7 +536,10 @@ def _goal_audit(repository: Any, rows: tuple[dict[str, Any], ...]) -> str:
     loader = getattr(repository, "list_all_goal_decision_evidence", None)
     if not callable(loader):
         loader = getattr(repository, "list_all_goal_decisions", None)
-    decisions = tuple(loader()) if callable(loader) else ()
+    try:
+        decisions = tuple(loader()) if callable(loader) else ()
+    except Exception:
+        decisions = ()
     snapshot = build_goal_analytics_snapshot(rows, decisions)
     audit = snapshot["integrity_audit"]
     status = str(audit["status"])
