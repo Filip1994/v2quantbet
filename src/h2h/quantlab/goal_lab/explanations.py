@@ -418,12 +418,26 @@ def build_goal_pick_explanation(
             f"ukupno {total_xg:.2f}."
         )
 
-    gate = (
-        "Pik je prošao oba glavna value uslova: edge je najmanje 3 procentna poena "
-        "i EV je najmanje 3%."
-        if edge is not None and ev is not None and edge >= 0.03 and ev >= 0.03
-        else "Ovaj zapis ne prolazi oba standardna GoalLab value praga od 3%."
+    pick_policy = str(
+        row.get("pick_policy_version")
+        or row.get("policy_version")
+        or "NEPOZNATA_POLITIKA"
     )
+    if pick_policy == "GOALLAB_DC_PLUS_PICK_POLICY_V4":
+        gate = (
+            "Po aktuelnom V4 pravilu, pik ulazi u završni izbor samo ako ima pozitivan EV "
+            "i prođe filtere za raspon kvote, svežinu kvote i dovoljno vremena do početka. "
+            f"Ovde je EV {_pct(ev)}, a edge {_pp(edge)}. Edge pomaže pri rangiranju, "
+            "ali više nije obavezan prag od 3 procentna poena."
+            if ev is not None and ev > 0
+            else "Ovaj zapis po V4 pravilu nema pozitivan EV i ne bi bio kvalifikovan za novi pik."
+        )
+    else:
+        gate = (
+            f"Ovaj pik je sačuvan po istorijskom pravilu {pick_policy}. "
+            f"Za njega su zabeleženi EV {_pct(ev)} i edge {_pp(edge)}; "
+            "objašnjenje ispod koristi tačno podatke koji su bili sačuvani uz taj pik."
+        )
 
     rank, candidate_count = _actual_rank(row)
     ranking = None
@@ -477,15 +491,19 @@ def render_goal_pick_note_html(
         else:
             detail = (
                 f"vrednost {_fmt(item['raw_value'])}; "
-                f"trening prosek {_fmt(item['training_mean'])}; "
-                f"z={float(item['standardized']):+.2f}; "
-                f"uticaj λH {float(item['home_eta_contribution']):+.3f}, "
-                f"λA {float(item['away_eta_contribution']):+.3f}"
+                f"prosek na trening podacima {_fmt(item['training_mean'])}; "
+                f"odstupanje od proseka {float(item['standardized']):+.2f}; "
+                f"uticaj na procenu golova domaćina {float(item['home_eta_contribution']):+.3f}, "
+                f"gosta {float(item['away_eta_contribution']):+.3f}"
             )
         contribution_rows.append(
             f"<li><b>{escape(str(item['label']))}</b>: {escape(detail)}</li>"
         )
     contributions = "".join(contribution_rows)
+    evidence_notes = "".join(
+        f"<li>{escape(str(note))}</li>"
+        for note in explanation["notes"]
+    )
     ranking = (
         ""
         if not explanation["ranking"]
@@ -493,19 +511,19 @@ def render_goal_pick_note_html(
     )
     return (
         '<details class="pick-note goal-pick-note">'
-        '<summary title="Brojčano objašnjenje zašto je pik izabran">📝</summary>'
+        '<summary title="Prosto objašnjenje zašto je ovaj pik izabran">📝</summary>'
         '<div class="note-popover goal-note-popover">'
         '<b>Zašto je izabran ovaj pik</b>'
         f'<p>{escape(str(explanation["summary"]))}</p>'
         f'<p>{escape(str(explanation["gate"]))}</p>'
         f"{ranking}"
         + (
-            '<h4>Brojevi koje je model video</h4><ul>' + context + "</ul>"
+            '<h4>Najvažniji brojevi koje je model video</h4><ul>' + context + "</ul>"
             if context
             else ""
         )
         + (
-            '<h4>Najveći numerički doprinosi modelu</h4><ul>'
+            '<h4>Šta je najviše guralo model ka ovom izboru</h4><ul>'
             + contributions
             + "</ul>"
             if contributions
@@ -513,6 +531,11 @@ def render_goal_pick_note_html(
                 "<p>Za ovaj zapis nema dovoljno model-contract podataka "
                 "za tačan decomposition.</p>"
             )
+        )
+        + (
+            '<h4>Važno za čitanje ovog pika</h4><ul>' + evidence_notes + "</ul>"
+            if evidence_notes
+            else ""
         )
         + f'<a class="note-detail-link" href="{escape(detail_href, quote=True)}">'
         "Otvori sve brojke i sve varijable →</a>"
