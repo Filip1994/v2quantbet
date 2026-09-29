@@ -11,9 +11,10 @@ import hashlib
 import hmac
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
@@ -75,7 +76,6 @@ class S3ObjectStore:
         return cls(S3ObjectStoreConfig.from_environment())
 
     def _host(self) -> str:
-        # Railway's current buckets use virtual-hosted style.
         if self._endpoint_host.startswith(self.config.bucket + "."):
             return self._endpoint_host
         return f"{self.config.bucket}.{self._endpoint_host}"
@@ -114,17 +114,13 @@ class S3ObjectStore:
         canonical_headers = "".join(f"{key}:{value}\n" for key, value in ordered)
         signed_headers = ";".join(key for key, _ in ordered)
         canonical_request = (
-            f"{method}\\n{canonical_uri}\\n\\n{canonical_headers}\\n"
-            f"{signed_headers}\\n{payload_hash}"
+            f"{method}\n{canonical_uri}\n\n{canonical_headers}\n"
+            f"{signed_headers}\n{payload_hash}"
         )
         scope = f"{date_stamp}/{self.config.region}/s3/aws4_request"
-        string_to_sign = "\n".join(
-            [
-                "AWS4-HMAC-SHA256",
-                amz_date,
-                scope,
-                hashlib.sha256(canonical_request.encode()).hexdigest(),
-            ]
+        string_to_sign = (
+            f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n"
+            f"{hashlib.sha256(canonical_request.encode()).hexdigest()}"
         )
         date_key = self._sign(("AWS4" + self.config.secret_access_key).encode(), date_stamp)
         region_key = self._sign(date_key, self.config.region)
@@ -197,9 +193,12 @@ class S3ObjectStore:
     def get_bytes(self, key: str) -> bytes:
         return self._request("GET", key)
 
-    def put_jsonl_gzip(self, key: str, rows: Iterable[dict[str, Any]]) -> tuple[str, int, int]:
+    def put_jsonl_gzip(
+        self, key: str, rows: Iterable[dict[str, Any]]
+    ) -> tuple[str, int, int]:
         raw_lines = [
-            json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode() + b"\n"
+            json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode()
+            + b"\n"
             for row in rows
         ]
         raw = b"".join(raw_lines)
@@ -214,8 +213,4 @@ class S3ObjectStore:
 
     def get_jsonl_gzip(self, key: str) -> tuple[dict[str, Any], ...]:
         raw = gzip.decompress(self.get_bytes(key))
-        return tuple(
-            json.loads(line)
-            for line in raw.splitlines()
-            if line.strip()
-        )
+        return tuple(json.loads(line) for line in raw.splitlines() if line.strip())
