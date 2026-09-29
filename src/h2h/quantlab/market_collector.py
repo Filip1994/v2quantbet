@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
@@ -13,6 +14,9 @@ from typing import Any
 
 from h2h.quantlab.market_classifier import CLASSIFIER_VERSION, classify_market
 
+
+LOGGER = logging.getLogger("quantbet.quantlab.market_collector")
+RAW_ODDS_ARCHIVE_DATASET = "provider/odds-captures"
 
 BOOKMAKERS = {8: "Bet365", 11: "1xBet"}
 LAB_OWNERS = frozenset({"GOAL", "CORNER", "CARD", "UNCLASSIFIED"})
@@ -199,9 +203,56 @@ def parse_market_response(
 
 
 class QuantLabMarketCollector:
-    def __init__(self, repository: Any, provider: Any) -> None:
+    def __init__(
+        self,
+        repository: Any,
+        provider: Any,
+        *,
+        archive_writer: Any | None = None,
+    ) -> None:
         self._repository = repository
         self._provider = provider
+        self._archive_writer = archive_writer
+
+    def _archive_response(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        fixture_id: str,
+        provider_fixture_id: int,
+        captured_at: datetime,
+    ) -> dict[str, Any] | None:
+        if self._archive_writer is None:
+            return None
+        try:
+            return self._archive_writer.archive_rows(
+                RAW_ODDS_ARCHIVE_DATASET,
+                (
+                    {
+                        "fixture_id": fixture_id,
+                        "provider_fixture_id": provider_fixture_id,
+                        "captured_at": captured_at,
+                        "raw_payload": dict(payload),
+                    },
+                ),
+                recorded_at_field="captured_at",
+                metadata={
+                    "source": "api-football:odds",
+                    "fixture_id": fixture_id,
+                    "provider_fixture_id": provider_fixture_id,
+                    "retention_class": "permanent-raw-provider-capture",
+                },
+            )
+        except Exception:
+            # Durable Barrel is an optimization, never a live-scoring dependency.
+            # On archive failure the caller persists the full per-row raw payload in PG.
+            LOGGER.exception(
+                "Raw odds archive failed; falling back to PostgreSQL raw payload "
+                "fixture=%s provider_fixture_id=%s",
+                fixture_id,
+                provider_fixture_id,
+            )
+            return None
 
     def collect_fixture(
         self,
@@ -229,13 +280,34 @@ class QuantLabMarketCollector:
             if row.lab_owner in allowed
             and not (row.lab_owner == "CARD" and row.bookmaker_id != 11)
         )
-        self._repository.save_market_observations(selected)
+
+        archive = self._archive_response(
+            payload,
+            fixture_id=fixture_id,
+            provider_fixture_id=provider_fixture_id,
+            captured_at=captured_at,
+        )
+        persisted = (
+            tuple(replace(row, raw_payload={}) for row in selected)
+            if archive is not None
+            else selected
+        )
+        self._repository.save_market_observations(persisted)
         self._repository.save_market_capture(
             fixture_id=fixture_id,
             provider_fixture_id=provider_fixture_id,
             captured_at=captured_at,
             raw_observation_count=len(observations),
-            stored_observation_count=len(selected),
+            stored_observation_count=len(persisted),
             allowed_labs=allowed,
+            archive_dataset=None if archive is None else RAW_ODDS_ARCHIVE_DATASET,
+            archive_object_key=None if archive is None else str(archive["object_key"]),
+            archive_content_sha256=None
+            if archive is None
+            else str(archive["content_sha256"]),
+            archive_compressed_bytes=None
+            if archive is None
+            else int(archive["compressed_bytes"]),
         )
-        return selected
+        return persisted
+

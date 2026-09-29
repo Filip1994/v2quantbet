@@ -256,6 +256,101 @@ def test_collector_reuses_one_fixture_response_for_both_books_and_all_markets() 
     assert repo.capture["stored_observation_count"] == len(rows)
 
 
+def test_collector_archives_raw_response_once_and_keeps_postgres_rows_compact() -> None:
+    class Provider:
+        def fetch_odds(self, fixture_id):
+            assert fixture_id == 42
+            return _odds_payload()
+
+    class ArchiveWriter:
+        def __init__(self):
+            self.calls = []
+
+        def archive_rows(self, dataset, rows, **kwargs):
+            self.calls.append((dataset, tuple(rows), kwargs))
+            return {
+                "object_key": "quantbet-cold/provider/odds-captures/test.jsonl.gz",
+                "content_sha256": "a" * 64,
+                "compressed_bytes": 321,
+            }
+
+    class Repo:
+        def __init__(self):
+            self.saved = ()
+            self.capture = None
+
+        def save_market_observations(self, rows):
+            self.saved = tuple(rows)
+
+        def save_market_capture(self, **kwargs):
+            self.capture = kwargs
+
+    archive = ArchiveWriter()
+    repo = Repo()
+    rows = QuantLabMarketCollector(
+        repo,
+        Provider(),
+        archive_writer=archive,
+    ).collect_fixture(
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+    )
+
+    assert len(archive.calls) == 1
+    dataset, archived_rows, kwargs = archive.calls[0]
+    assert dataset == "provider/odds-captures"
+    assert kwargs["recorded_at_field"] == "captured_at"
+    assert archived_rows[0]["raw_payload"] == _odds_payload()
+    assert repo.saved == rows
+    assert rows
+    assert all(row.raw_payload == {} for row in rows)
+    assert repo.capture["archive_dataset"] == "provider/odds-captures"
+    assert repo.capture["archive_content_sha256"] == "a" * 64
+    assert repo.capture["archive_compressed_bytes"] == 321
+
+
+def test_collector_archive_failure_falls_back_to_full_postgres_raw_payload() -> None:
+    class Provider:
+        def fetch_odds(self, fixture_id):
+            assert fixture_id == 42
+            return _odds_payload()
+
+    class FailingArchiveWriter:
+        def archive_rows(self, *_args, **_kwargs):
+            raise RuntimeError("bucket unavailable")
+
+    class Repo:
+        def __init__(self):
+            self.saved = ()
+            self.capture = None
+
+        def save_market_observations(self, rows):
+            self.saved = tuple(rows)
+
+        def save_market_capture(self, **kwargs):
+            self.capture = kwargs
+
+    repo = Repo()
+    rows = QuantLabMarketCollector(
+        repo,
+        Provider(),
+        archive_writer=FailingArchiveWriter(),
+    ).collect_fixture(
+        fixture_id="api-football:42",
+        provider_fixture_id=42,
+        captured_at=NOW,
+    )
+
+    assert repo.saved == rows
+    assert rows
+    assert all(row.raw_payload for row in rows)
+    assert repo.capture["archive_dataset"] is None
+    assert repo.capture["archive_object_key"] is None
+    assert repo.capture["archive_content_sha256"] is None
+    assert repo.capture["archive_compressed_bytes"] is None
+
+
 def test_collector_filters_card_corner_rows_and_watermarks_empty_or_filtered_capture() -> None:
     class Provider:
         def fetch_odds(self, fixture_id):
