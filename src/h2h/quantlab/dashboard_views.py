@@ -18,6 +18,7 @@ from h2h.quantlab.goal_analytics import (
     calibration_bins,
     goal_pick_metrics,
 )
+from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
 
@@ -160,6 +161,35 @@ def _all_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
     return tuple(repository.list_bets(lab))
 
 
+def _goal_notes(
+    repository: Any,
+    rows: tuple[dict[str, Any], ...],
+) -> dict[str, str]:
+    contracts: dict[str, dict[str, Any] | None] = {}
+    rendered: dict[str, str] = {}
+    loader = getattr(repository, "goal_model_contract", None)
+    for row in rows:
+        goal_pick_id = str(row.get("goal_pick_id") or "")
+        if not goal_pick_id:
+            continue
+        model_version = str(row.get("model_version") or "")
+        if model_version not in contracts:
+            contract = None
+            if callable(loader):
+                try:
+                    contract = loader(model_version) if model_version else loader()
+                except Exception:  # noqa: BLE001 - notes must degrade without blocking dashboard
+                    contract = None
+            contracts[model_version] = contract
+        href = "/quantlab/goal/pick?" + urlencode({"goal_pick_id": goal_pick_id})
+        rendered[_pick_id(row)] = render_goal_pick_note_html(
+            row,
+            contracts[model_version],
+            detail_href=href,
+        )
+    return rendered
+
+
 def _nav(view: str, lab_key: str) -> tuple[str, str]:
     analytics_lab = lab_key if lab_key in ANALYTICS_LABS else "goal"
     primary = (
@@ -227,6 +257,16 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}
 .bookmaker{{display:inline-flex;align-items:center;justify-content:center;min-width:78px;height:27px;padding:0 8px;border-radius:7px;font-weight:900;background:#232a30}}
 .bookmaker-bet365{{background:#146947}}.bookmaker-bet365 strong{{color:#f3d24b}}.bookmaker-1xbet{{background:#182f47}}.bookmaker-1xbet strong{{color:#61aef4}}
+.notes-cell{{min-width:70px;white-space:normal}}
+.pick-note summary{{list-style:none;cursor:pointer;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:#14181b}}
+.pick-note summary::-webkit-details-marker{{display:none}}
+.pick-note[open] summary{{background:#242b31}}
+.note-popover{{width:min(640px,65vw);min-width:420px;margin-top:8px;padding:13px;border:1px solid #3b434a;border-radius:10px;background:#111518;white-space:normal;line-height:1.5;box-shadow:0 12px 30px rgba(0,0,0,.28)}}
+.note-popover> b{{font-size:13px}}
+.note-popover p{{margin:8px 0;color:#c1c8ce;font-size:11px;white-space:normal}}
+.note-popover h4{{margin:12px 0 5px;font-size:11px}}
+.note-popover ul{{margin:5px 0 8px;padding-left:18px;color:#b8c0c7;font-size:11px;line-height:1.55;white-space:normal}}
+.note-detail-link{{display:inline-block;margin-top:8px;color:#9bc7ff;font-weight:900;font-size:11px}}
 .empty{{text-align:center;padding:34px!important;color:var(--muted)}}
 .analytics-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
 .analytics-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}}
@@ -251,9 +291,19 @@ footer{{margin-top:14px;color:#7f878e;font-size:11px;line-height:1.6}}
 </main></body></html>"""
 
 
-def _active_rows_html(rows: tuple[dict[str, Any], ...], *, lab_key: str) -> str:
+def _active_rows_html(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    lab_key: str,
+    notes: dict[str, str],
+) -> str:
     rendered = []
     for row in rows:
+        note_cell = (
+            f'<td class="notes-cell">{notes.get(_pick_id(row), "—")}</td>'
+            if lab_key == "goal"
+            else ""
+        )
         rendered.append(
             "<tr>"
             + _match_html(row, lab_key=lab_key)
@@ -263,12 +313,14 @@ def _active_rows_html(rows: tuple[dict[str, Any], ...], *, lab_key: str) -> str:
             + f"<td>{_odd(row.get('odds'))}</td>"
             + f"<td>{_pct(row.get('edge'), signed=True)}</td>"
             + f"<td>{_pct(row.get('expected_value'), signed=True)}</td>"
+            + note_cell
             + f"<td>{_result_badge('PENDING')}</td>"
             + f"<td>{_time(row.get('decision_at'))}</td>"
             + "</tr>"
         )
     if not rendered:
-        return '<tr><td class="empty" colspan="9">No active picks.</td></tr>'
+        colspan = 10 if lab_key == "goal" else 9
+        return f'<tr><td class="empty" colspan="{colspan}">No active picks.</td></tr>'
     return "".join(rendered)
 
 
@@ -277,6 +329,7 @@ def _history_rows_html(
     *,
     lab_key: str,
     currency: str,
+    notes: dict[str, str],
 ) -> str:
     rendered = []
     for row in rows:
@@ -284,19 +337,26 @@ def _history_rows_html(
         pnl_raw = row.get("pnl_minor")
         pnl = None if pnl_raw is None else int(pnl_raw)
         pnl_class = "positive" if (pnl or 0) > 0 else "negative" if (pnl or 0) < 0 else "neutral"
+        note_cell = (
+            f'<td class="notes-cell">{notes.get(_pick_id(row), "—")}</td>'
+            if lab_key == "goal"
+            else ""
+        )
         rendered.append(
             "<tr>"
             + _match_html(row, lab_key=lab_key)
             + f'<td><b>{escape(_pick_text(row))}</b></td>'
             + f"<td>{_bookmaker(row.get('bookmaker_name'))}</td>"
             + f"<td>{_odd(row.get('odds'))}</td>"
+            + note_cell
             + f"<td>{_result_badge(result)}</td>"
             + f'<td class="{pnl_class}">{_money(pnl, currency)}</td>'
             + f"<td>{_time(row.get('settled_at'))}</td>"
             + "</tr>"
         )
     if not rendered:
-        return '<tr><td class="empty" colspan="7">No settled picks yet.</td></tr>'
+        colspan = 8 if lab_key == "goal" else 7
+        return f'<tr><td class="empty" colspan="{colspan}">No settled picks yet.</td></tr>'
     return "".join(rendered)
 
 
@@ -340,6 +400,8 @@ def render_dashboard(
         row for row in metric_rows if _result(row) in {"WIN", "LOSS", "VOID"}
     )
 
+    notes = _goal_notes(repository, rows) if lab == "GOAL" else {}
+
     wins = sum(_result(row) == "WIN" for row in metric_history)
     losses = sum(_result(row) == "LOSS" for row in metric_history)
     voids = sum(_result(row) == "VOID" for row in metric_history)
@@ -378,16 +440,19 @@ def render_dashboard(
         f'<span>{len(active)} pending settlement</span></div>'
         '<div class="table"><table><thead><tr>'
         '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Model / market</th>'
-        '<th>Odds</th><th>Edge</th><th>EV</th><th>Status</th><th>Decision</th>'
-        f'</tr></thead><tbody>{_active_rows_html(active, lab_key=lab_key)}</tbody></table></div>'
+        '<th>Odds</th><th>Edge</th><th>EV</th>'
+        + ('<th>Notes</th>' if lab_key == "goal" else '')
+        + '<th>Status</th><th>Decision</th>'
+        f'</tr></thead><tbody>{_active_rows_html(active, lab_key=lab_key, notes=notes)}</tbody></table></div>'
         '</section>'
         '<section class="panel">'
         '<div class="panel-title"><b>Pick History</b>'
         f'<span>{len(history)} settled · WIN / LOSS / VOID</span></div>'
         '<div class="table"><table><thead><tr>'
         '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Odds</th>'
-        '<th>Result</th><th>P/L</th><th>Settled</th>'
-        f'</tr></thead><tbody>{_history_rows_html(history, lab_key=lab_key, currency=currency)}</tbody></table></div>'
+        + ('<th>Notes</th>' if lab_key == "goal" else '')
+        + '<th>Result</th><th>P/L</th><th>Settled</th>'
+        f'</tr></thead><tbody>{_history_rows_html(history, lab_key=lab_key, currency=currency, notes=notes)}</tbody></table></div>'
         '</section>'
     )
     return _shell(
