@@ -436,6 +436,15 @@ def test_authority_mode_loads_exact_approved_artifact_without_training(monkeypat
     assert readiness["approved_model_version"] == approved
 
 
+def test_legacy_approved_artifact_missing_optional_contract_metadata_is_safe() -> None:
+    import h2h.quantlab.goal_lab.model as model_module
+
+    assert model_module._artifact_contract_blocks({}) == []
+    assert model_module._artifact_contract_blocks(
+        {"contract_blocks_pending_acquisition": ["standings", 7]}
+    ) == ["standings", "7"]
+
+
 def test_positive_ev_qualifies_even_when_edge_is_below_three_points() -> None:
     model_version = "DC_PLUS_PRO_STRUCTURAL_V3:" + "e" * 64
 
