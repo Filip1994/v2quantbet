@@ -124,12 +124,17 @@ class QuantLabRuntime:
         goal_engine: Any | None = None,
         corner_engine: Any | None = None,
         card_engine: Any | None = None,
+        market_archive_writer: Any | None = None,
     ) -> None:
         self._repository = repository
         self._provider = provider
         self._settings = settings or QuantLabRuntimeSettings()
         self._clock = clock
-        self._collector = QuantLabMarketCollector(repository, provider)
+        self._collector = QuantLabMarketCollector(
+            repository,
+            provider,
+            archive_writer=market_archive_writer,
+        )
         self._goal_engine = goal_engine
         self._corner_engine = corner_engine
         self._card_engine = card_engine
