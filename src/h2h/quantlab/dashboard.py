@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.quantlab.dashboard_views import render_quantlab_view
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     render_goal_analytics_html,
@@ -371,6 +372,13 @@ class QuantLabDashboardService:
         return render_goal_pick_html(row, contract)
 
     def render_html(self, raw_query: str = "") -> str:
+        return render_quantlab_view(
+            self._repository,
+            raw_query,
+            api_daily_limit=self._api_limit,
+            currency=self._currency,
+        )
+
         params = parse_qs(raw_query, keep_blank_values=True)
         lab_key = params.get("lab", ["goal"])[0].strip().casefold()
         if lab_key not in LABS:
