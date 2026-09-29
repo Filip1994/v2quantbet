@@ -48,6 +48,9 @@ class RepositoryFake:
     def latest_complete_market_states(self, *_args, **_kwargs):
         return ()
 
+    def record_quote_refresh_state(self, *_args, **_kwargs):
+        return SimpleNamespace(stale_attempt_count=0, next_retry_at=None)
+
     def latest_complete_snapshot_ids(self, *_args, **_kwargs):
         return ()
 
