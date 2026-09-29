@@ -503,6 +503,8 @@ def _cohort_table(
     title: str,
     rows: tuple[dict[str, Any], ...],
     dimensions: tuple[str, ...],
+    *,
+    lab_key: str,
 ) -> str:
     headers = "".join(
         f"<th>{escape(dimension.replace('_', ' ').title())}</th>"
@@ -514,10 +516,20 @@ def _cohort_table(
             f"<td><b>{escape(str(row.get(dimension) or '—'))}</b></td>"
             for dimension in dimensions
         )
+        link_params = {
+            "view": "analytics",
+            "lab": lab_key,
+            "bucket": "1",
+            **{
+                f"bucket_{dimension}": str(row.get(dimension) or "—")
+                for dimension in dimensions
+            },
+        }
+        href = "/quantlab?" + urlencode(link_params) + "#bucket-picks"
         rendered.append(
             "<tr>"
             + dimension_cells
-            + f"<td>{row['graded_n']}</td>"
+            + f"<td>{row['n']}</td>"
             + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
             + f"<td>{_metric(row['win_rate_pct'], suffix='%')}</td>"
             + f"<td>{_metric(row['roi_pct'], suffix='%', signed=True)}</td>"
@@ -527,11 +539,12 @@ def _cohort_table(
             + f"<td>{_metric(row['avg_edge_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{_metric(row['avg_ev_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{escape(str(row['sample_band']))}</td>"
+            + f'<td><a href="{escape(href, quote=True)}">View {row["n"]}</a></td>'
             + "</tr>"
         )
     if not rendered:
         rendered.append(
-            f'<tr><td class="empty" colspan="{len(dimensions) + 10}">No settled picks for this breakdown.</td></tr>'
+            f'<tr><td class="empty" colspan="{len(dimensions) + 11}">No settled picks for this breakdown.</td></tr>'
         )
     return (
         '<section class="panel">'
@@ -540,6 +553,118 @@ def _cohort_table(
         + headers
         + '<th>N</th><th>W-L-V</th><th>Win%</th><th>ROI</th><th>Brier</th>'
         '<th>Log loss</th><th>Cal gap</th><th>Avg edge</th><th>Avg EV</th><th>Evidence</th>'
+        '<th>Picks</th>'
+        '</tr></thead><tbody>'
+        + "".join(rendered)
+        + "</tbody></table></div></section>"
+    )
+
+
+_BUCKET_DIMENSIONS = (
+    "market_key",
+    "selection",
+    "competition_name",
+    "bookmaker_name",
+    "model_version",
+)
+
+
+def _probability_bin_index(row: dict[str, Any]) -> int | None:
+    if _result(row) not in {"WIN", "LOSS"} or row.get("model_probability") is None:
+        return None
+    probability = min(1.0, max(0.0, float(row["model_probability"])))
+    return min(9, int(probability * 10))
+
+
+def _bucket_detail_rows(
+    rows: tuple[dict[str, Any], ...],
+    params: dict[str, list[str]],
+) -> tuple[tuple[dict[str, Any], ...], str] | None:
+    if params.get("bucket", [""])[0] != "1":
+        return None
+
+    probability_bin = params.get("bucket_probability_bin", [""])[0].strip()
+    if probability_bin:
+        try:
+            bucket_index = int(probability_bin)
+        except ValueError:
+            return ((), "Invalid probability bucket")
+        if bucket_index < 0 or bucket_index > 9:
+            return ((), "Invalid probability bucket")
+        selected = tuple(
+            row for row in rows
+            if _probability_bin_index(row) == bucket_index
+        )
+        return (
+            _sorted(selected),
+            f"Model probability {bucket_index / 10:.1f}–{(bucket_index + 1) / 10:.1f}",
+        )
+
+    filters: dict[str, str] = {}
+    for dimension in _BUCKET_DIMENSIONS:
+        raw = params.get(f"bucket_{dimension}", [""])[0]
+        if raw:
+            filters[dimension] = raw
+    if not filters:
+        return ((), "No bucket filters")
+
+    selected = tuple(
+        row
+        for row in rows
+        if _result(row) in {"WIN", "LOSS", "VOID"}
+        and all(str(row.get(dimension) or "—") == value for dimension, value in filters.items())
+    )
+    label = " · ".join(
+        f"{dimension.replace('_', ' ').title()}: {value}"
+        for dimension, value in filters.items()
+    )
+    return _sorted(selected), label
+
+
+def _bucket_pick_table(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    params: dict[str, list[str]],
+    lab_key: str,
+    currency: str,
+) -> str:
+    detail = _bucket_detail_rows(rows, params)
+    if detail is None:
+        return ""
+    selected, label = detail
+    rendered = []
+    for row in selected:
+        result = _result(row)
+        pnl_raw = row.get("pnl_minor")
+        pnl = None if pnl_raw is None else int(pnl_raw)
+        pnl_class = "positive" if (pnl or 0) > 0 else "negative" if (pnl or 0) < 0 else "neutral"
+        rendered.append(
+            "<tr>"
+            + _match_html(row, lab_key=lab_key)
+            + f'<td><b>{escape(_pick_text(row))}</b></td>'
+            + f"<td>{_bookmaker(row.get('bookmaker_name'))}</td>"
+            + f"<td>{_pct(row.get('model_probability'))}</td>"
+            + f"<td>{_odd(row.get('odds'))}</td>"
+            + f"<td>{_pct(row.get('edge'), signed=True)}</td>"
+            + f"<td>{_pct(row.get('expected_value'), signed=True)}</td>"
+            + f"<td>{_result_badge(result)}</td>"
+            + f'<td class="{pnl_class}">{_money(pnl, currency)}</td>'
+            + f"<td>{_time(row.get('settled_at'))}</td>"
+            + "</tr>"
+        )
+    if not rendered:
+        rendered.append(
+            '<tr><td class="empty" colspan="10">No settled picks match this bucket.</td></tr>'
+        )
+    clear_href = "/quantlab?" + urlencode({"view": "analytics", "lab": lab_key})
+    return (
+        '<section class="panel" id="bucket-picks">'
+        '<div class="panel-title"><b>Bucket picks</b>'
+        f'<span>{len(selected)} exact settled picks · {escape(label)} · '
+        f'<a href="{escape(clear_href, quote=True)}">clear</a></span></div>'
+        '<div class="table"><table><thead><tr>'
+        '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Model P</th><th>Odds</th>'
+        '<th>Edge</th><th>EV</th><th>Result</th><th>P/L</th><th>Settled</th>'
         '</tr></thead><tbody>'
         + "".join(rendered)
         + "</tbody></table></div></section>"
@@ -574,25 +699,42 @@ def _window_card(title: str, metrics: dict[str, Any]) -> str:
     )
 
 
-def _calibration_table(rows: tuple[dict[str, Any], ...]) -> str:
+def _calibration_table(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    lab_key: str,
+) -> str:
     bins = calibration_bins(rows)
-    rendered = "".join(
-        "<tr>"
-        f"<td><b>{escape(str(item['bin']))}</b></td>"
-        f"<td>{item['n']}</td>"
-        f"<td>{_metric(item['expected_pct'], suffix='%')}</td>"
-        f"<td>{_metric(item['observed_pct'], suffix='%')}</td>"
-        f"<td>{_metric(item['gap_pp'], suffix='pp', signed=True)}</td>"
-        "</tr>"
-        for item in bins
-    )
+    rendered_rows = []
+    for item in bins:
+        lower = float(str(item["bin"]).split("–", 1)[0])
+        bucket_index = int(round(lower * 10))
+        href = "/quantlab?" + urlencode(
+            {
+                "view": "analytics",
+                "lab": lab_key,
+                "bucket": "1",
+                "bucket_probability_bin": str(bucket_index),
+            }
+        ) + "#bucket-picks"
+        rendered_rows.append(
+            "<tr>"
+            f"<td><b>{escape(str(item['bin']))}</b></td>"
+            f"<td>{item['n']}</td>"
+            f"<td>{_metric(item['expected_pct'], suffix='%')}</td>"
+            f"<td>{_metric(item['observed_pct'], suffix='%')}</td>"
+            f"<td>{_metric(item['gap_pp'], suffix='pp', signed=True)}</td>"
+            f'<td><a href="{escape(href, quote=True)}">View {item["n"]}</a></td>'
+            "</tr>"
+        )
+    rendered = "".join(rendered_rows)
     if not rendered:
-        rendered = '<tr><td class="empty" colspan="5">No graded picks for calibration yet.</td></tr>'
+        rendered = '<tr><td class="empty" colspan="6">No graded picks for calibration yet.</td></tr>'
     return (
         '<section class="panel"><div class="panel-title"><b>Calibration</b>'
         '<span>model probability vs observed result</span></div>'
         '<div class="table"><table><thead><tr>'
-        '<th>Probability bin</th><th>N</th><th>Expected</th><th>Observed</th><th>Gap</th>'
+        '<th>Probability bin</th><th>N</th><th>Expected</th><th>Observed</th><th>Gap</th><th>Picks</th>'
         f'</tr></thead><tbody>{rendered}</tbody></table></div></section>'
     )
 
@@ -633,9 +775,11 @@ def render_analytics(
     *,
     lab_key: str,
     currency: str,
+    params: dict[str, list[str]] | None = None,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
     rows = _sorted(_all_rows(repository, lab))
+    params = params or {}
     metrics = goal_pick_metrics(rows)
     now = datetime.now(UTC)
     last_7 = goal_pick_metrics(_window_rows(rows, days=7, now=now))
@@ -668,7 +812,13 @@ def render_analytics(
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
         f'<section class="cards">{cards_html}</section>'
-        '<div class="analytics-grid">'
+        + _bucket_pick_table(
+            rows,
+            params=params,
+            lab_key=lab_key,
+            currency=currency,
+        )
+        + '<div class="analytics-grid">'
         + _window_card("Last 7 days", last_7)
         + _window_card("Last 30 days", last_30)
         + _window_card("Lifetime", metrics)
@@ -677,23 +827,27 @@ def render_analytics(
             "Markets / selections",
             _cohorts(rows, ("market_key", "selection")),
             ("market_key", "selection"),
+            lab_key=lab_key,
         )
         + _cohort_table(
             "Leagues",
             _cohorts(rows, ("competition_name",)),
             ("competition_name",),
+            lab_key=lab_key,
         )
         + _cohort_table(
             "Bookmakers",
             _cohorts(rows, ("bookmaker_name",)),
             ("bookmaker_name",),
+            lab_key=lab_key,
         )
         + _cohort_table(
             "Model versions",
             _cohorts(rows, ("model_version",)),
             ("model_version",),
+            lab_key=lab_key,
         )
-        + _calibration_table(rows)
+        + _calibration_table(rows, lab_key=lab_key)
         + (_goal_audit(repository, rows) if lab_key == "goal" else "")
     )
 
@@ -725,7 +879,12 @@ def render_quantlab_view(
         lab_key = "goal"
 
     if view == "analytics":
-        return render_analytics(repository, lab_key=lab_key, currency=currency)
+        return render_analytics(
+            repository,
+            lab_key=lab_key,
+            currency=currency,
+            params=params,
+        )
     return render_dashboard(
         repository,
         lab_key=lab_key,
