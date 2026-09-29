@@ -2441,9 +2441,9 @@ class GoalStructuralModelService:
                 "away_history_size": len(away_history),
                 "league_id": league_id,
                 "rho": self._artifact.rho,
-                "contract_blocks_pending_acquisition": self._artifact.training_payload[
-                    "contract_blocks_pending_acquisition"
-                ],
+                "contract_blocks_pending_acquisition": self._artifact.training_payload.get(
+                    "contract_blocks_pending_acquisition", []
+                ),
                 "imputation_strategy": "TRAINING_MEAN_PLUS_EXPLICIT_MISSING_INDICATOR",
                 "target_match_live_stats_used": False,
             },
