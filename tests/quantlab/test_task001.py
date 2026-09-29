@@ -763,16 +763,16 @@ class _DashboardRepo:
         )
 
 
-def test_cardlab_dashboard_displays_feature_values_and_provenance() -> None:
+def test_cardlab_dashboard_is_operational_only() -> None:
     html = QuantLabDashboardService(_DashboardRepo()).render_html("lab=card")
 
-    assert "CardLab v1 context snapshots" in html
-    assert "Ref A" in html
-    assert "4.25" in html
-    assert "n=8" in html
-    assert "MATCH_IMPORTANCE_V1" in html
-    assert "quantlab_completed_fixture_statistics" in html
-    assert "CARDLAB_FEATURES_V1" in html
+    assert "CardLab" in html
+    assert "Active Picks" in html
+    assert "Pick History" in html
+    assert "12 / 75,000" in html
+    assert "CardLab v1 context snapshots" not in html
+    assert "Ref A" not in html
+    assert "MATCH_IMPORTANCE_V1" not in html
 
 
 def test_global_discovery_is_independent_from_production_scope() -> None:
