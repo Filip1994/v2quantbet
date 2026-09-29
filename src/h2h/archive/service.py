@@ -6,7 +6,7 @@ import gzip
 import hashlib
 import json
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from collections.abc import Iterable\nfrom typing import Any
 
 from h2h.archive.object_store import S3ObjectStore
 from h2h.archive.repository import ColdArchiveCatalog
