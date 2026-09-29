@@ -8,13 +8,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from html import escape
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
-from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     calibration_bins,
@@ -310,25 +308,48 @@ def render_dashboard(
     currency: str,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
-    rows = _sorted(_display_rows(repository, lab))
+    warning = ""
+    try:
+        rows = _sorted(_display_rows(repository, lab))
+    except Exception:
+        rows = ()
+        warning = (
+            '<p class="analytics-note">Pick ledger temporarily unavailable. '
+            'QuantLab processing is unchanged; this is a read-only dashboard error.</p>'
+        )
+
+    if lab == "GOAL":
+        loader = getattr(repository, "list_all_goal_picks", None)
+        metric_rows = _sorted(tuple(loader())) if callable(loader) else rows
+    else:
+        loader = getattr(repository, "list_all_bets", None)
+        metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
+
     active = tuple(row for row in rows if _result(row) == "PENDING")
     history = tuple(row for row in rows if _result(row) in {"WIN", "LOSS", "VOID"})
+    metric_active = tuple(row for row in metric_rows if _result(row) == "PENDING")
+    metric_history = tuple(
+        row for row in metric_rows if _result(row) in {"WIN", "LOSS", "VOID"}
+    )
 
-    wins = sum(_result(row) == "WIN" for row in history)
-    losses = sum(_result(row) == "LOSS" for row in history)
-    voids = sum(_result(row) == "VOID" for row in history)
-    pnl = sum(int(row.get("pnl_minor") or 0) for row in history)
+    wins = sum(_result(row) == "WIN" for row in metric_history)
+    losses = sum(_result(row) == "LOSS" for row in metric_history)
+    voids = sum(_result(row) == "VOID" for row in metric_history)
+    pnl = sum(int(row.get("pnl_minor") or 0) for row in metric_history)
     risked = sum(
         int(row.get("stake_minor") or 0)
-        for row in history
+        for row in metric_history
         if _result(row) in {"WIN", "LOSS"}
     )
     roi = None if risked == 0 else pnl / risked
-    api_used = int(repository.api_usage_today())
+    try:
+        api_used = int(repository.api_usage_today())
+    except Exception:
+        api_used = 0
 
     cards = (
-        ("Active picks", str(len(active))),
-        ("Settled", str(len(history))),
+        ("Active picks", str(len(metric_active))),
+        ("Settled", str(len(metric_history))),
         ("Wins", str(wins)),
         ("Losses", str(losses)),
         ("Voids", str(voids)),
@@ -342,7 +363,8 @@ def render_dashboard(
     )
 
     body = (
-        f'<section class="cards">{cards_html}</section>'
+        warning
+        + f'<section class="cards">{cards_html}</section>'
         '<section class="panel">'
         '<div class="panel-title"><b>Active Picks</b>'
         f'<span>{len(active)} pending settlement</span></div>'
