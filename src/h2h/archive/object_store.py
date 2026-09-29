@@ -28,7 +28,7 @@ class S3ObjectStoreConfig:
     endpoint: str
 
     @classmethod
-    def from_environment(cls) -> "S3ObjectStoreConfig":
+    def from_environment(cls) -> S3ObjectStoreConfig:
         def first(*names: str) -> str:
             for name in names:
                 value = os.getenv(name, "").strip()
@@ -71,7 +71,7 @@ class S3ObjectStore:
         self._endpoint_path = parsed.path.rstrip("/")
 
     @classmethod
-    def from_environment(cls) -> "S3ObjectStore":
+    def from_environment(cls) -> S3ObjectStore:
         return cls(S3ObjectStoreConfig.from_environment())
 
     def _host(self) -> str:
@@ -113,15 +113,9 @@ class S3ObjectStore:
         ordered = sorted(headers.items())
         canonical_headers = "".join(f"{key}:{value}\n" for key, value in ordered)
         signed_headers = ";".join(key for key, _ in ordered)
-        canonical_request = "\n".join(
-            [
-                method,
-                canonical_uri,
-                "",
-                canonical_headers,
-                signed_headers,
-                payload_hash,
-            ]
+        canonical_request = (
+            f"{method}\\n{canonical_uri}\\n\\n{canonical_headers}\\n"
+            f"{signed_headers}\\n{payload_hash}"
         )
         scope = f"{date_stamp}/{self.config.region}/s3/aws4_request"
         string_to_sign = "\n".join(
