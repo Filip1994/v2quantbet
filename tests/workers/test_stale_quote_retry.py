@@ -56,6 +56,7 @@ def selection_row(
     *,
     kickoff_at=NOW + timedelta(hours=4),
     last_captured_at=NOW,
+    item_next_retry_at=None,
     freshness_state=None,
     stale_attempt_count=None,
     stale_next_retry_at=None,
@@ -72,7 +73,7 @@ def selection_row(
         "Primera A",
         "League",
         last_captured_at,
-        None,
+        item_next_retry_at,
         freshness_state,
         stale_attempt_count,
         stale_next_retry_at,
@@ -127,6 +128,22 @@ def test_fresh_observation_uses_normal_captured_at_cadence() -> None:
 
     assert result.due_fixtures == ()
     assert result.waiting_for_refresh_count == 1
+
+
+def test_due_no_usable_quote_retry_bypasses_normal_refresh_cadence() -> None:
+    result = select(
+        selection_row(
+            last_captured_at=NOW - timedelta(minutes=5),
+            item_next_retry_at=NOW,
+            freshness_state="NO_USABLE_QUOTE",
+            refresh_last_attempt_at=NOW - timedelta(minutes=10),
+            observed_at=NOW - timedelta(minutes=5),
+        )
+    )
+
+    assert result.waiting_for_refresh_count == 0
+    assert len(result.due_fixtures) == 1
+    assert result.due_fixtures[0].next_retry_at == NOW
 
 
 def test_persisted_usable_stale_uses_normal_cadence_without_priority_retry() -> None:
