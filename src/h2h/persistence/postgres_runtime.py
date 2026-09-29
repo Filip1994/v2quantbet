@@ -491,3 +491,379 @@ class PostgreSQLRuntimeRepository:
             "STALE",
             "NO_USABLE_QUOTE",
         }:
+            raise ValueError("unsupported quote freshness state")
+        attempted = _utc(attempted_at)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT freshness_state, stale_attempt_count, first_stale_at "
+                "FROM production_quote_refresh_states WHERE fixture_id = %s "
+                "AND bookmaker_id = %s FOR UPDATE",
+                (fixture_id, bookmaker_id),
+            )
+            prior = cursor.fetchone()
+            if freshness_state == "STALE":
+                if latest_observed_at is None or latest_captured_at is None:
+                    raise ValueError("stale state requires complete market provenance")
+                prior_stale = prior is not None and prior[0] == "STALE"
+                attempt_count = int(prior[1]) + 1 if prior_stale else 1
+                first_stale_at = prior[2] if prior_stale else attempted
+                next_retry_at = stale_retry_policy.next_retry_at(
+                    stale_attempt_count=attempt_count,
+                    first_stale_at=first_stale_at,
+                    attempted_at=attempted,
+                )
+            else:
+                attempt_count = 0
+                first_stale_at = None
+                next_retry_at = None
+            cursor.execute(
+                "INSERT INTO production_quote_refresh_states (fixture_id, bookmaker_id, "
+                "freshness_state, stale_attempt_count, first_stale_at, last_attempt_at, "
+                "next_retry_at, latest_observed_at, latest_captured_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET freshness_state = "
+                "EXCLUDED.freshness_state, stale_attempt_count = EXCLUDED.stale_attempt_count, "
+                "first_stale_at = EXCLUDED.first_stale_at, last_attempt_at = EXCLUDED.last_attempt_at, "
+                "next_retry_at = EXCLUDED.next_retry_at, latest_observed_at = "
+                "EXCLUDED.latest_observed_at, latest_captured_at = EXCLUDED.latest_captured_at, "
+                "updated_at = EXCLUDED.updated_at",
+                (
+                    fixture_id,
+                    bookmaker_id,
+                    freshness_state,
+                    attempt_count,
+                    first_stale_at,
+                    attempted,
+                    next_retry_at,
+                    latest_observed_at,
+                    latest_captured_at,
+                    attempted,
+                ),
+            )
+        return QuoteRefreshState(
+            freshness_state,
+            attempt_count,
+            first_stale_at,
+            attempted,
+            next_retry_at,
+            latest_observed_at,
+            latest_captured_at,
+        )
+
+    def latest_complete_snapshot_ids(self, fixture_id: str, bookmaker_id: int) -> tuple[str, ...]:
+        """Return both selections for each latest complete market observation."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH ranked AS (SELECT s.market, q.observed_at, q.source, "
+                "MAX(q.captured_at) AS captured_at FROM quote_series s "
+                "JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = %s AND s.bookmaker_id = %s "
+                "GROUP BY s.market, q.observed_at, q.source HAVING COUNT(DISTINCT s.selection) = 2), "
+                "chosen AS (SELECT DISTINCT ON (market) market, observed_at, source, captured_at "
+                "FROM ranked ORDER BY market, observed_at DESC, captured_at DESC, source) "
+                "SELECT q.snapshot_id FROM chosen c JOIN quote_series s "
+                "ON s.fixture_id = %s AND s.bookmaker_id = %s AND s.market = c.market "
+                "JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "AND q.observed_at = c.observed_at AND q.source = c.source "
+                "AND q.captured_at = c.captured_at "
+                "ORDER BY s.market, s.selection, q.snapshot_id",
+                (fixture_id, bookmaker_id, fixture_id, bookmaker_id),
+            )
+            return tuple(row[0] for row in cursor.fetchall())
+
+    def snapshot_ids_for_market_observation(
+        self,
+        fixture_id: str,
+        bookmaker_id: int,
+        market: str,
+        observed_at: datetime,
+        source: str,
+    ) -> tuple[tuple[str, str], ...]:
+        """Resolve an exact returned market without mixing observation contexts."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT ON (s.selection) s.selection, q.snapshot_id "
+                "FROM quote_series s JOIN quote_snapshots q ON q.series_id = s.series_id "
+                "WHERE s.fixture_id = %s AND s.bookmaker_id = %s AND s.market = %s "
+                "AND q.observed_at = %s AND q.source = %s "
+                "ORDER BY s.selection, q.captured_at DESC, q.snapshot_id DESC",
+                (fixture_id, bookmaker_id, market, _utc(observed_at), source),
+            )
+            rows = tuple((str(row[0]), str(row[1])) for row in cursor.fetchall())
+            if len(rows) != 2 or len({selection for selection, _ in rows}) != 2:
+                return ()
+            return rows
+
+    def item_retry_due(self, worker: str, item_id: str, *, now: datetime) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT next_retry_at <= %s FROM production_item_failures "
+                "WHERE worker_name = %s AND item_id = %s",
+                (_utc(now), worker, item_id),
+            )
+            row = cursor.fetchone()
+            return row is None or bool(row[0])
+
+    def record_item_failure(
+        self, worker: str, item_id: str, error: BaseException, *, failed_at: datetime
+    ) -> None:
+        error_class, message = _bounded_error(error)
+        failed = _utc(failed_at)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                _ITEM_FAILURE_UPSERT_SQL,
+                (
+                    worker,
+                    item_id,
+                    failed,
+                    _initial_item_retry_at(worker, error_class, failed),
+                    error_class,
+                    message,
+                ),
+            )
+
+    def record_item_failures(
+        self,
+        failures: Iterable[tuple[str, str, BaseException, datetime]],
+    ) -> None:
+        """Persist one bounded worker batch atomically on a single connection."""
+        pending = tuple(failures)
+        if not pending:
+            return
+        with self.connect() as connection, connection.cursor() as cursor:
+            for worker, item_id, error, failed_at in pending:
+                error_class, message = _bounded_error(error)
+                failed = _utc(failed_at)
+                cursor.execute(
+                    _ITEM_FAILURE_UPSERT_SQL,
+                    (
+                        worker,
+                        item_id,
+                        failed,
+                        _initial_item_retry_at(worker, error_class, failed),
+                        error_class,
+                        message,
+                    ),
+                )
+
+    def clear_item_failure(self, worker: str, item_id: str) -> None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM production_item_failures WHERE worker_name = %s AND item_id = %s",
+                (worker, item_id),
+            )
+
+    def worker_started(self, worker: str, instance_id: str, *, at: datetime) -> None:
+        current = _utc(at)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO production_worker_status (worker_name, last_started_at, cycle_count, "
+                "instance_id, updated_at) VALUES (%s, %s, 1, %s, %s) "
+                "ON CONFLICT (worker_name) DO UPDATE SET last_started_at = EXCLUDED.last_started_at, "
+                "cycle_count = production_worker_status.cycle_count + 1, "
+                "instance_id = EXCLUDED.instance_id, updated_at = EXCLUDED.updated_at",
+                (worker, current, instance_id, current),
+            )
+
+    def worker_succeeded(
+        self, worker: str, instance_id: str, *, at: datetime, next_due_at: datetime
+    ) -> None:
+        current = _utc(at)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE production_worker_status SET last_success_at = %s, next_due_at = %s, "
+                "consecutive_failures = 0, success_count = success_count + 1, "
+                "last_error_class = NULL, last_error_message = NULL, instance_id = %s, "
+                "updated_at = %s WHERE worker_name = %s",
+                (current, _utc(next_due_at), instance_id, current, worker),
+            )
+
+    def worker_failed(
+        self,
+        worker: str,
+        instance_id: str,
+        error: BaseException,
+        *,
+        at: datetime,
+        next_due_at: datetime,
+    ) -> None:
+        current = _utc(at)
+        error_class, message = _bounded_error(error)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE production_worker_status SET last_failure_at = %s, next_due_at = %s, "
+                "consecutive_failures = consecutive_failures + 1, failure_count = failure_count + 1, "
+                "last_error_class = %s, last_error_message = %s, instance_id = %s, updated_at = %s "
+                "WHERE worker_name = %s",
+                (current, _utc(next_due_at), error_class, message, instance_id, current, worker),
+            )
+
+    def worker_statuses(self) -> tuple[WorkerStatus, ...]:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT worker_name, last_started_at, last_success_at, last_failure_at, next_due_at, "
+                "consecutive_failures, cycle_count, success_count, failure_count, last_error_class, "
+                "last_error_message, instance_id, updated_at FROM production_worker_status "
+                "ORDER BY worker_name"
+            )
+            return tuple(WorkerStatus(*row) for row in cursor.fetchall())
+
+    def readiness_snapshot(self) -> tuple[tuple[WorkerStatus, ...], dict[str, int]]:
+        """Read all runtime readiness facts using one database connection."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT worker_name, last_started_at, last_success_at, last_failure_at, next_due_at, "
+                "consecutive_failures, cycle_count, success_count, failure_count, last_error_class, "
+                "last_error_message, instance_id, updated_at FROM production_worker_status "
+                "ORDER BY worker_name"
+            )
+            statuses = tuple(WorkerStatus(*row) for row in cursor.fetchall())
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
+                "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
+                "('OpportunityOddsUnavailableError', 'TransportError', "
+                "'QuoteNormalizationError')) FROM production_item_failures"
+            )
+            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
+            )
+            pending_results = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
+            )
+            corrections = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM fixture_predictions")
+            predictions = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM value_evaluations")
+            evaluations = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome = 'APPROVED'), "
+                "COUNT(*) FILTER (WHERE outcome = 'REJECTED') FROM pick_decisions"
+            )
+            decisions, approved, rejected = (int(value) for value in cursor.fetchone())
+            cursor.execute("SELECT COUNT(*) FROM registered_picks")
+            registered_picks = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE freshness_state = 'FRESH'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'NO_USABLE_QUOTE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE' AND next_retry_at IS NOT NULL) "
+                "FROM production_quote_refresh_states"
+            )
+            quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE status = 'REQUESTED'), "
+                "COUNT(*) FILTER (WHERE status = 'READY'), "
+                "COUNT(*) FILTER (WHERE status = 'REJECTED'), "
+                "COUNT(*) FILTER (WHERE stale_quote) FROM final_quote_verifications"
+            )
+            final_requested, final_ready, final_rejected, final_stale = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*), COALESCE((SELECT COUNT(*) FROM "
+                "daily_bulletin_memberships), 0) FROM daily_bulletins"
+            )
+            bulletins, bulletin_memberships = (int(value) for value in cursor.fetchone())
+        return statuses, {
+            "retry": retry,
+            "model_unavailable": model_unavailable,
+            "odds_unavailable": odds_unavailable,
+            "pending_results": pending_results,
+            "correction_required": corrections,
+            "predictions": predictions,
+            "evaluations": evaluations,
+            "decisions": decisions,
+            "decisions_approved": approved,
+            "decisions_rejected": rejected,
+            "registered_picks": registered_picks,
+            "quote_fresh": quote_fresh,
+            "quote_stale": quote_stale,
+            "quote_unusable": quote_unusable,
+            "stale_retry_scheduled": stale_retry_scheduled,
+            "final_quote_requested": final_requested,
+            "final_quote_ready": final_ready,
+            "final_quote_rejected": final_rejected,
+            "final_quote_stale_warnings": final_stale,
+            "daily_bulletins": bulletins,
+            "daily_bulletin_memberships": bulletin_memberships,
+        }
+
+    def operational_counts(self) -> dict[str, int]:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
+                "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
+                "('OpportunityOddsUnavailableError', 'TransportError', "
+                "'QuoteNormalizationError')) FROM production_item_failures"
+            )
+            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
+            )
+            pending_results = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
+            )
+            corrections = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM fixture_predictions")
+            predictions = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM value_evaluations")
+            evaluations = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome = 'APPROVED'), "
+                "COUNT(*) FILTER (WHERE outcome = 'REJECTED') FROM pick_decisions"
+            )
+            decisions, approved, rejected = (int(value) for value in cursor.fetchone())
+            cursor.execute("SELECT COUNT(*) FROM registered_picks")
+            registered_picks = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE freshness_state = 'FRESH'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'NO_USABLE_QUOTE'), "
+                "COUNT(*) FILTER (WHERE freshness_state = 'STALE' AND next_retry_at IS NOT NULL) "
+                "FROM production_quote_refresh_states"
+            )
+            quote_fresh, quote_stale, quote_unusable, stale_retry_scheduled = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE status = 'REQUESTED'), "
+                "COUNT(*) FILTER (WHERE status = 'READY'), "
+                "COUNT(*) FILTER (WHERE status = 'REJECTED'), "
+                "COUNT(*) FILTER (WHERE stale_quote) FROM final_quote_verifications"
+            )
+            final_requested, final_ready, final_rejected, final_stale = (
+                int(value) for value in cursor.fetchone()
+            )
+            cursor.execute(
+                "SELECT COUNT(*), COALESCE((SELECT COUNT(*) FROM "
+                "daily_bulletin_memberships), 0) FROM daily_bulletins"
+            )
+            bulletins, bulletin_memberships = (int(value) for value in cursor.fetchone())
+        return {
+            "retry": retry,
+            "model_unavailable": model_unavailable,
+            "odds_unavailable": odds_unavailable,
+            "pending_results": pending_results,
+            "correction_required": corrections,
+            "predictions": predictions,
+            "evaluations": evaluations,
+            "decisions": decisions,
+            "decisions_approved": approved,
+            "decisions_rejected": rejected,
+            "registered_picks": registered_picks,
+            "quote_fresh": quote_fresh,
+            "quote_stale": quote_stale,
+            "quote_unusable": quote_unusable,
+            "stale_retry_scheduled": stale_retry_scheduled,
+            "final_quote_requested": final_requested,
+            "final_quote_ready": final_ready,
+            "final_quote_rejected": final_rejected,
+            "final_quote_stale_warnings": final_stale,
+            "daily_bulletins": bulletins,
+            "daily_bulletin_memberships": bulletin_memberships,
+        }
