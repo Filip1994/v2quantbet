@@ -2,6 +2,7 @@
 
 This module is presentation-only. It reads the existing QuantLab ledgers and does not
 write to production, alter model authority, or change collector/modeler/settlement logic.
+Analytics bucket links resolve cohort rows back to their exact settled constituent picks.
 """
 
 from __future__ import annotations
