@@ -5,8 +5,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
-from collections.abc import Iterable\nfrom typing import Any
+from typing import Any
 
 from h2h.archive.object_store import S3ObjectStore
 from h2h.archive.repository import ColdArchiveCatalog
