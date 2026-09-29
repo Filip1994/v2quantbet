@@ -140,7 +140,10 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
     assert selection.waiting_for_window_count == 1
     assert selection.waiting_for_refresh_count == 1
     assert "f.league_id =" not in cursor.query
+    assert "o.observed_at >= %s" in cursor.query
+    assert "OR latest.kickoff_at <= %s" in cursor.query
     assert cursor.parameters == (
+        now - timedelta(hours=24),
         8,
         8,
         8,
@@ -148,6 +151,7 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
         now + timedelta(hours=72),
         ["NS"],
         now,
+        now + timedelta(hours=2),
         False,
         now,
         None,
@@ -178,6 +182,7 @@ def test_opportunity_no_odds_failure_starts_with_ten_minute_retry() -> None:
     assert cursor.parameters[3] == failed_at + timedelta(minutes=10)
     assert cursor.parameters[4] == "OpportunityOddsUnavailableError"
     assert "interval '10 minutes'" in cursor.query
+    assert "interval '4 hours'" in cursor.query
     assert "interval '1 hour'" in cursor.query
 
 
