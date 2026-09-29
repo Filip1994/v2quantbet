@@ -500,6 +500,10 @@ def render_goal_pick_note_html(
             f"<li><b>{escape(str(item['label']))}</b>: {escape(detail)}</li>"
         )
     contributions = "".join(contribution_rows)
+    evidence_notes = "".join(
+        f"<li>{escape(str(note))}</li>"
+        for note in explanation["notes"]
+    )
     ranking = (
         ""
         if not explanation["ranking"]
@@ -527,6 +531,11 @@ def render_goal_pick_note_html(
                 "<p>Za ovaj zapis nema dovoljno model-contract podataka "
                 "za tačan decomposition.</p>"
             )
+        )
+        + (
+            '<h4>Važno za čitanje ovog pika</h4><ul>' + evidence_notes + "</ul>"
+            if evidence_notes
+            else ""
         )
         + f'<a class="note-detail-link" href="{escape(detail_href, quote=True)}">'
         "Otvori sve brojke i sve varijable →</a>"
