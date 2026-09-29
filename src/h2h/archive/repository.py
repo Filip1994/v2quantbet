@@ -50,6 +50,34 @@ class ColdArchiveCatalog:
                 dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
             )
 
+    def market_observation_stats(self) -> tuple[dict[str, Any], ...]:
+        """Return planner statistics without scanning the multi-GB market table."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT attname, avg_width, n_distinct, "
+                "most_common_vals::text AS most_common_vals, "
+                "most_common_freqs::text AS most_common_freqs, "
+                "histogram_bounds::text AS histogram_bounds "
+                "FROM pg_stats "
+                "WHERE schemaname = 'public' "
+                "AND tablename = 'quantlab_market_observations' "
+                "AND attname = ANY(%s) ORDER BY attname",
+                (
+                    [
+                        "captured_at",
+                        "fixture_id",
+                        "lab_owner",
+                        "provider_bet_id",
+                        "provider_updated_at",
+                        "raw_payload",
+                    ],
+                ),
+            )
+            columns = tuple(item.name for item in cursor.description)
+            return tuple(
+                dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
+            )
+
     def register_verified_batch(
         self,
         *,
