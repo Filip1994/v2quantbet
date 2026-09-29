@@ -69,7 +69,7 @@ class ColdArchiveWriter:
                     recorded.append(value)
                 elif isinstance(value, str):
                     try:
-                        recorded.append(datetime.fromisoformat(value.replace("Z", "+00:00")))
+                        recorded.append(datetime.fromisoformat(value))
                     except ValueError:
                         pass
 
