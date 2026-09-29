@@ -280,58 +280,70 @@ class ColdArchiveCatalog:
     ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
+        production_sql = (
+            "SELECT e.settlement_event_id, e.pick_id, e.fixture_id, e.event_kind, "
+            "e.prior_event_id, e.result_observation_id, e.outcome, "
+            "e.settlement_rule_version, e.rounding_version, e.entry_snapshot_id, "
+            "e.entry_odd_decimal, e.stake_minor, e.gross_return_minor, "
+            "e.realized_pnl_minor, e.ledger_delta_minor, e.bankroll_account_id, "
+            "e.currency, e.candidate_first_seen_at, e.confirmed_at, "
+            "e.confirmation_count, e.request_id, e.reason, e.actor, e.occurred_at, "
+            "r.market, r.selection, r.registered_at, r.config_fingerprint "
+            "FROM pick_settlement_events e "
+            "JOIN registered_picks r ON r.pick_id = e.pick_id"
+        )
+        goallab_sql = (
+            "SELECT s.goal_pick_settlement_id, s.goal_pick_id, s.fixture_id, "
+            "s.result_observation_id, s.result_classification, "
+            "s.regulation_home_goals, s.regulation_away_goals, s.outcome, "
+            "s.pnl_minor, s.settled_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_goal_pick_settlements s "
+            "JOIN quantlab_goal_picks p ON p.goal_pick_id = s.goal_pick_id"
+        )
+        cornerlab_sql = (
+            "SELECT s.corner_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
+            "s.event_kind, s.prior_event_id, s.result_observation_id, "
+            "s.statistics_observation_id, s.result_classification, s.outcome, "
+            "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_corner_settlement_events s "
+            "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id"
+        )
+        cardlab_sql = (
+            "SELECT s.card_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
+            "s.fixture_observation_id, s.card_event_observation_id, s.outcome, "
+            "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_card_settlement_events s "
+            "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id"
+        )
         queries = {
             "production/settlements": (
                 "e.occurred_at",
                 "e.settlement_event_id",
-                "SELECT e.settlement_event_id, e.pick_id, e.fixture_id, e.event_kind, "
-                "e.prior_event_id, e.result_observation_id, e.outcome, "
-                "e.settlement_rule_version, e.rounding_version, e.entry_snapshot_id, "
-                "e.entry_odd_decimal, e.stake_minor, e.gross_return_minor, "
-                "e.realized_pnl_minor, e.ledger_delta_minor, e.bankroll_account_id, "
-                "e.currency, e.candidate_first_seen_at, e.confirmed_at, "
-                "e.confirmation_count, e.request_id, e.reason, e.actor, e.occurred_at, "
-                "r.market, r.selection, r.registered_at, r.config_fingerprint "
-                "FROM pick_settlement_events e "
-                "JOIN registered_picks r ON r.pick_id = e.pick_id",
+                production_sql,
             ),
             "quantlab/goallab-settlements": (
                 "s.settled_at",
                 "s.goal_pick_settlement_id",
-                "SELECT s.goal_pick_settlement_id, s.goal_pick_id, s.fixture_id, "
-                "s.result_observation_id, s.result_classification, "
-                "s.regulation_home_goals, s.regulation_away_goals, s.outcome, "
-                "s.pnl_minor, s.settled_at, s.settlement_rule_version, s.result_detail, "
-                "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
-                "p.odds, p.model_name, p.model_version, p.model_probability, "
-                "p.market_probability, p.edge, p.expected_value, p.decision_at "
-                "FROM quantlab_goal_pick_settlements s "
-                "JOIN quantlab_goal_picks p ON p.goal_pick_id = s.goal_pick_id",
+                goallab_sql,
             ),
             "quantlab/cornerlab-settlements": (
                 "s.occurred_at",
                 "s.corner_settlement_event_id",
-                "SELECT s.corner_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
-                "s.event_kind, s.prior_event_id, s.result_observation_id, "
-                "s.statistics_observation_id, s.result_classification, s.outcome, "
-                "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
-                "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
-                "p.odds, p.model_name, p.model_version, p.model_probability, "
-                "p.market_probability, p.edge, p.expected_value, p.decision_at "
-                "FROM quantlab_corner_settlement_events s "
-                "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id",
+                cornerlab_sql,
             ),
             "quantlab/cardlab-settlements": (
                 "s.occurred_at",
                 "s.card_settlement_event_id",
-                "SELECT s.card_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
-                "s.fixture_observation_id, s.card_event_observation_id, s.outcome, "
-                "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
-                "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
-                "p.odds, p.model_name, p.model_version, p.model_probability, "
-                "p.market_probability, p.edge, p.expected_value, p.decision_at "
-                "FROM quantlab_card_settlement_events s "
-                "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id",
+                cardlab_sql,
             ),
         }
         if dataset not in queries:
@@ -348,12 +360,11 @@ class ColdArchiveCatalog:
 
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                base
-                + where
-                + f" ORDER BY {time_expr}, {id_expr} LIMIT %s",
+                base + where + f" ORDER BY {time_expr}, {id_expr} LIMIT %s",
                 tuple(params),
             )
             return _row_dicts(cursor)
+
 
 
 class ColdArchiveReader:
