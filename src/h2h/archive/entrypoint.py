@@ -23,6 +23,83 @@ def main() -> None:
         _print({"archive_mode": "audit", "tables": catalog.table_sizes(limit=40)})
         return
 
+    if mode == "throttle-audit":
+        with catalog.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT category, request_count, updated_at "
+                "FROM provider_request_usage WHERE request_day = CURRENT_DATE "
+                "ORDER BY category"
+            )
+            api_usage = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT status, COUNT(*) FROM model_coverage_scopes "
+                "WHERE eligible GROUP BY status ORDER BY status"
+            )
+            model_coverage = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT freshness_state, COUNT(*), "
+                "COUNT(*) FILTER (WHERE next_retry_at IS NOT NULL "
+                "AND next_retry_at <= CURRENT_TIMESTAMP), "
+                "MIN(next_retry_at), MAX(last_attempt_at) "
+                "FROM production_quote_refresh_states "
+                "GROUP BY freshness_state ORDER BY freshness_state"
+            )
+            quote_refresh = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT last_error_class, COUNT(*), MIN(next_retry_at), MAX(next_retry_at) "
+                "FROM production_item_failures "
+                "WHERE worker_name = 'opportunity' "
+                "GROUP BY last_error_class ORDER BY COUNT(*) DESC"
+            )
+            opportunity_failures = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT decision, reason, COUNT(*) "
+                "FROM quantlab_goal_decisions "
+                "WHERE decision_at >= CURRENT_TIMESTAMP - INTERVAL '6 hours' "
+                "GROUP BY decision, reason ORDER BY COUNT(*) DESC, decision, reason"
+            )
+            goal_reasons = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT COUNT(*), MAX(decision_at), "
+                "COUNT(*) FILTER (WHERE decision_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours') "
+                "FROM quantlab_goal_picks"
+            )
+            goal_picks = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT COUNT(*), MAX(qualified_at), "
+                "COUNT(*) FILTER (WHERE qualified_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours') "
+                "FROM research_signals"
+            )
+            research_signals = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT COUNT(*), MAX(registered_at), "
+                "COUNT(*) FILTER (WHERE registered_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours') "
+                "FROM registered_picks"
+            )
+            registered_picks = cursor.fetchone()
+
+        _print(
+            {
+                "archive_mode": "throttle-audit",
+                "api_usage": api_usage,
+                "model_coverage": model_coverage,
+                "quote_refresh": quote_refresh,
+                "opportunity_failures": opportunity_failures,
+                "goallab_reasons_6h": goal_reasons,
+                "goallab_picks": goal_picks,
+                "research_signals": research_signals,
+                "registered_picks": registered_picks,
+            }
+        )
+        return
+
     if mode == "market-stats":
         _print(
             {
