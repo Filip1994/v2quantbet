@@ -144,6 +144,23 @@ PICK. Other qualifying candidates are PASS / `BETTER_VALUE_AVAILABLE`.
 Everything remains shadow-only. CornerLab does not write production registered picks,
 production model state or bankroll state.
 
+## Dashboard and analytics
+
+CornerLab follows the same operational split as GoalLab.
+
+The QuantLab **Dashboard** shows only active CornerLab picks and settled pick history
+(WIN / LOSS / VOID), with the core entry odds, probability, edge, EV and P/L fields.
+
+The separate **Analytics** tab evaluates the settled CornerLab ledger with:
+
+- 7-day, 30-day and lifetime performance;
+- market/selection, league, bookmaker and model-version breakdowns;
+- win rate, ROI and max drawdown;
+- Brier score, binary log loss and calibration bins.
+
+The structural feature/model context remains in the underlying research system; it is no
+longer mixed into the operational homepage.
+
 ## V1 historical baseline
 
 Task 003 originally used `CROSS_BOOK_FAIR_REFERENCE_V1`, where the other bookmaker's

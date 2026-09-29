@@ -271,76 +271,48 @@ explicitly approved and pick authority must be ON.
 
 ## GoalLab dashboard
 
-The Goal tab is the operational surface for:
+The QuantLab UI separates **operation** from **analysis**.
 
-- current DC+ model/version;
-- exact active variables;
-- contract coverage by feature block;
-- validation status and DC+ vs DC metrics;
-- upcoming DC+ decision pipeline;
-- canonical GoalLab picks only;
-- pending/WIN/LOSS/VOID settlement state;
-- P&L / ROI and model probabilities.
+The GoalLab **Dashboard** is deliberately narrow. It shows only:
 
-GoalLab Research / Audit is now embedded directly in the main GoalLab page. The legacy
-`/quantlab/goal/analytics` route remains read-only for compatibility, but normal operation
-does not require a second navigation layer.
+- current active canonical picks still waiting for settlement;
+- settled pick history with WIN / LOSS / VOID;
+- entry odds and core model/value fields for active picks;
+- P&L / ROI and simple outcome counts.
 
-The same-page research surface reports:
+PASS candidates, the upcoming PASS/PICK pipeline, model-contract diagnostics and research
+breakdowns are not rendered on the operational homepage.
 
-- model, policy, market/selection, bookmaker, league and weekly cohorts;
-- selected-pick Brier score, binary log loss and calibration bins;
-- realized same-book/same-market pre-kickoff CLV where later immutable quotes exist;
-- flat-stake max drawdown;
-- canonical-pick integrity checks for duplicate fixture/policy keys, source-decision
-  provenance, feature payloads, model identity and valid probabilities;
-- exact model and pick drilldowns for reproducibility.
+The separate **Analytics** tab contains GoalLab performance/research evidence:
 
-Closing evidence is derived from the latest matching immutable GoalLab market observation
-after the entry quote and strictly before kickoff. It is research evidence only and is
-never a probability-model input.
+- 7-day, 30-day and lifetime performance;
+- model, market/selection, bookmaker and league cohorts;
+- Brier score, binary log loss and calibration bins;
+- flat-stake ROI and max drawdown;
+- the existing GoalLab decision Research / Audit funnel and integrity status.
+
+The legacy `/quantlab/goal/analytics` route remains read-only for compatibility. Exact
+pick and model drilldowns also remain available.
+
+Closing evidence is research evidence only and is never a probability-model input.
 
 CornerLab and CardLab remain separate labs and are not part of GoalLab pick semantics.
+CornerLab has its own Analytics tab; CardLab analytics is intentionally not exposed yet.
 
-Product/UI rules:
+## Pick presentation and numeric evidence
 
-- one main GoalLab page owns KPIs, filters, research cohorts, model contract, upcoming pipeline and canonical picks;
-- all research-table headers expose Lowest/Highest sorting controls;
-- canonical-pick ledger headers expose the same two-way sorting contract;
-- cohort values drill directly into the underlying filtered canonical picks;
-- a canonical-pick match opens its exact pick/evidence drilldown;
-- a model version opens its immutable model contract / feature drilldown;
-- filters are preserved across sorting so aggregate-to-row navigation remains reproducible.
+The operational GoalLab page now has two tables:
 
+- **Active Picks** — canonical GoalLab picks still waiting for settlement;
+- **Pick History** — settled canonical picks with WIN / LOSS / VOID and P/L.
 
+A GoalLab match can still open its exact persisted pick/evidence drilldown. The drilldown
+continues to reconstruct the model probability, de-vigged market probability, edge, EV,
+expected home/away goals and the timestamp-safe Structural DC+ feature evidence for that
+exact pick.
 
-## Pick presentation and numeric notes
-
-The normal GoalLab page separates two operational views:
-
-- **Izabrani pikovi · aktivni** — canonical GoalLab picks still waiting for settlement;
-- **Sve analizirane utakmice · PASS + PICK** — every upcoming fixture with its latest
-  Structural GoalLab decision, candidate, model/market probability and value evidence.
-
-Every canonical pick exposes a 📝 note. The note is deterministic and is built only from
-persisted pre-match evidence for that exact pick. It includes model probability, de-vigged
-market probability, edge, EV, expected home/away goals and available numeric context such
-as recent goals/shots, venue form, standings, injuries/suspensions, rest/congestion, H2H
-and projected-player form.
-
-For the exact model artifact, GoalLab also reconstructs the standardized Structural DC+
-feature vector and coefficient contribution for each active input:
-
-- raw pre-match value;
-- training mean and scale;
-- standardized z-value;
-- contribution to home and away log goal intensity.
-
-Missing data is never rendered as a fabricated zero. Explicit missing-indicator features
-are shown as missing evidence. The detailed pick drilldown contains the complete
-reconstructable active-variable table; the inline note shows the strongest numeric
-contributors plus the plain-language context.
-
+Missing data is never rendered as a fabricated zero. Detailed model/pick evidence remains
+available outside the operational homepage.
 
 ## GoalLab active production-readiness lock
 
