@@ -2571,6 +2571,10 @@ class PostgreSQLQuantLabRepository:
         raw_observation_count: int,
         stored_observation_count: int,
         allowed_labs: Iterable[str],
+        archive_dataset: str | None = None,
+        archive_object_key: str | None = None,
+        archive_content_sha256: str | None = None,
+        archive_compressed_bytes: int | None = None,
     ) -> str:
         labs = tuple(sorted({str(lab) for lab in allowed_labs}))
         capture_id = _identifier(
@@ -2584,12 +2588,26 @@ class PostgreSQLQuantLabRepository:
                 "allowed_labs": labs,
             },
         )
+        archive_values = (
+            archive_dataset,
+            archive_object_key,
+            archive_content_sha256,
+            archive_compressed_bytes,
+        )
+        if any(value is not None for value in archive_values) and not all(
+            value is not None for value in archive_values
+        ):
+            raise ValueError("market capture archive metadata must be complete")
+
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO quantlab_market_captures ("
                 "market_capture_id, fixture_id, provider_fixture_id, captured_at, "
-                "raw_observation_count, stored_observation_count, allowed_labs"
-                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                "raw_observation_count, stored_observation_count, allowed_labs, "
+                "archive_dataset, archive_object_key, archive_content_sha256, "
+                "archive_compressed_bytes"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) "
+                "ON CONFLICT DO NOTHING",
                 (
                     capture_id,
                     fixture_id,
@@ -2598,9 +2616,35 @@ class PostgreSQLQuantLabRepository:
                     raw_observation_count,
                     stored_observation_count,
                     _json(labs),
+                    archive_dataset,
+                    archive_object_key,
+                    archive_content_sha256,
+                    archive_compressed_bytes,
                 ),
             )
         return capture_id
+
+    def market_capture_archive(
+        self,
+        fixture_id: str,
+        *,
+        captured_at: datetime,
+    ) -> dict[str, Any] | None:
+        """Return the exact Durable Barrel object for one market-capture timestamp."""
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT market_capture_id, archive_dataset, archive_object_key, "
+                "archive_content_sha256, archive_compressed_bytes "
+                "FROM quantlab_market_captures "
+                "WHERE fixture_id = %s AND captured_at = %s "
+                "ORDER BY market_capture_id DESC LIMIT 1",
+                (fixture_id, captured_at),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            return dict(zip(columns, row, strict=True))
 
     def save_market_observations(self, observations: Iterable[Any]) -> int:
         rows = tuple(observations)
