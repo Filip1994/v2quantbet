@@ -25,7 +25,7 @@ class ArchiveLifecycleConfig:
     settlement_batch_size: int = 2000
 
     @classmethod
-    def from_environment(cls) -> "ArchiveLifecycleConfig":
+    def from_environment(cls) -> ArchiveLifecycleConfig:
         def integer(name: str, default: int, *, minimum: int, maximum: int) -> int:
             raw = os.getenv(name, "").strip()
             value = default if not raw else int(raw)
