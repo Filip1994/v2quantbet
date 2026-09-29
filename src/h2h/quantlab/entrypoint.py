@@ -266,14 +266,18 @@ def main() -> None:
         ),
     )
 
-    dashboard = QuantLabDashboardService(
-        repository,
-        api_daily_limit=api_daily_limit,
-        currency=os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD",
-    )
-    server = QuantLabDashboardHTTPService(
-        dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
-    )
+    collector_only = _boolean("QUANTBET_QUANTLAB_COLLECTOR_ONLY", "false")
+    one_shot = _boolean("QUANTBET_QUANTLAB_ONE_SHOT", "false")
+    server = None
+    if not collector_only:
+        dashboard = QuantLabDashboardService(
+            repository,
+            api_daily_limit=api_daily_limit,
+            currency=os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD",
+        )
+        server = QuantLabDashboardHTTPService(
+            dashboard, host="0.0.0.0", port=_positive_integer("PORT", "8080")
+        )
     cycle_seconds = _positive_integer("QUANTBET_QUANTLAB_CYCLE_SECONDS", "300")
     inline_goal_validation = _boolean(
         "QUANTBET_QUANTLAB_INLINE_GOAL_VALIDATION", "false"
@@ -283,8 +287,11 @@ def main() -> None:
     )
     model_ready_audit_emitted = not inline_research_audits
     try:
-        server.start()
-        LOGGER.info("QuantLab dashboard listening; startup audits continue asynchronously from healthcheck perspective")
+        if server is not None:
+            server.start()
+            LOGGER.info("QuantLab dashboard listening; startup audits continue asynchronously from healthcheck perspective")
+        else:
+            LOGGER.info("QuantLab collector-only runtime started")
         if inline_research_audits:
             try:
                 log_cardlab_v5_audit(repository, LOGGER)
@@ -393,9 +400,13 @@ def main() -> None:
                     type(exc).__name__,
                     error_text,
                 )
+            if one_shot:
+                LOGGER.info("QuantLab one-shot collector cycle complete; exiting")
+                break
             stop.wait(cycle_seconds)
     finally:
-        server.close()
+        if server is not None:
+            server.close()
 
 
 if __name__ == "__main__":
