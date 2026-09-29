@@ -113,3 +113,18 @@ def test_verified_writer_and_research_reader_round_trip():
 
     assert [row["id"] for row in restored] == ["one", "two"]
     assert restored[0]["raw_payload"] == {"a": 1}
+
+
+def test_writer_uses_content_addressed_object_key_for_retries():
+    store = FakeStore()
+    catalog = FakeCatalog()
+    writer = ColdArchiveWriter(catalog, store)
+    recorded_at = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    rows = ({"id": "one", "recorded_at": recorded_at, "raw_payload": {"a": 1}},)
+
+    first = writer.archive_rows("quantlab/raw", rows, recorded_at_field="recorded_at")
+    second = writer.archive_rows("quantlab/raw", rows, recorded_at_field="recorded_at")
+
+    assert first["object_key"] == second["object_key"]
+    assert first["content_sha256"] == second["content_sha256"]
+    assert first["object_key"].startswith("quantbet-cold/quantlab/raw/2026/09/01/")

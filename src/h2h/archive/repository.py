@@ -6,10 +6,15 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from h2h.archive.object_store import S3ObjectStore
+
+
+def _row_dicts(cursor: Any) -> tuple[dict[str, Any], ...]:
+    columns = tuple(item.name for item in cursor.description)
+    return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
 
 
 class ColdArchiveCatalog:
@@ -45,19 +50,13 @@ class ColdArchiveCatalog:
                 "ORDER BY pg_total_relation_size(relid) DESC, relname LIMIT %s",
                 (limit,),
             )
-            columns = tuple(item.name for item in cursor.description)
-            return tuple(
-                dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
-            )
+            return _row_dicts(cursor)
 
     def market_observation_stats(self) -> tuple[dict[str, Any], ...]:
-        """Return planner statistics without scanning the multi-GB market table."""
+        """Return compact planner statistics without scanning the multi-GB market table."""
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT attname, avg_width, n_distinct, "
-                "most_common_vals::text AS most_common_vals, "
-                "most_common_freqs::text AS most_common_freqs, "
-                "histogram_bounds::text AS histogram_bounds "
+                "SELECT attname, avg_width, n_distinct "
                 "FROM pg_stats "
                 "WHERE schemaname = 'public' "
                 "AND tablename = 'quantlab_market_observations' "
@@ -73,10 +72,7 @@ class ColdArchiveCatalog:
                     ],
                 ),
             )
-            columns = tuple(item.name for item in cursor.description)
-            return tuple(
-                dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
-            )
+            return _row_dicts(cursor)
 
     def register_verified_batch(
         self,
@@ -127,6 +123,35 @@ class ColdArchiveCatalog:
             )
         return batch_id
 
+    def mark_deleted_from_hot(
+        self,
+        archive_batch_id: str,
+        *,
+        deleted_rows: int,
+        selected_rows: int,
+        deleted_at: datetime | None = None,
+    ) -> None:
+        timestamp = deleted_at or datetime.now(UTC)
+        metadata = {
+            "selected_rows": selected_rows,
+            "deleted_rows": deleted_rows,
+            "retained_hot_rows": max(selected_rows - deleted_rows, 0),
+        }
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE cold_archive_batches "
+                "SET deleted_from_hot_at = COALESCE(deleted_from_hot_at, %s), "
+                "metadata = metadata || %s::jsonb "
+                "WHERE archive_batch_id = %s",
+                (
+                    timestamp,
+                    json.dumps(metadata, sort_keys=True, separators=(",", ":")),
+                    archive_batch_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("archive batch disappeared before hot-delete marking")
+
     def list_batches(
         self,
         dataset: str,
@@ -152,14 +177,194 @@ class ColdArchiveCatalog:
                 + " ORDER BY min_recorded_at NULLS FIRST, created_at, archive_batch_id",
                 tuple(params),
             )
-            columns = tuple(item.name for item in cursor.description)
-            rows = [
-                dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
-            ]
+            rows = list(_row_dicts(cursor))
         for row in rows:
             if isinstance(row.get("metadata"), str):
                 row["metadata"] = json.loads(row["metadata"])
         return tuple(rows)
+
+    @staticmethod
+    def _market_unreferenced_sql(alias: str = "m") -> str:
+        return (
+            f"NOT EXISTS (SELECT 1 FROM quantlab_goal_decisions d "
+            f"WHERE d.selected_observation_id = {alias}.market_observation_id "
+            f"OR d.companion_observation_id = {alias}.market_observation_id) "
+            f"AND NOT EXISTS (SELECT 1 FROM quantlab_context_market_decisions d "
+            f"WHERE d.selected_observation_id = {alias}.market_observation_id "
+            f"OR d.companion_observation_id = {alias}.market_observation_id "
+            f"OR d.reference_observation_id = {alias}.market_observation_id "
+            f"OR d.reference_companion_observation_id = {alias}.market_observation_id) "
+            f"AND NOT EXISTS (SELECT 1 FROM quantlab_goal_picks p "
+            f"WHERE p.selected_observation_id = {alias}.market_observation_id "
+            f"OR p.companion_observation_id = {alias}.market_observation_id)"
+        )
+
+    def market_archive_candidates(
+        self,
+        *,
+        cutoff: datetime,
+        limit: int,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        predicate = self._market_unreferenced_sql("m")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT m.market_observation_id, m.fixture_id, m.provider_fixture_id, "
+                "m.bookmaker_id, m.bookmaker_name, m.provider_bet_id, m.provider_bet_name, "
+                "m.raw_selection, m.parsed_line, m.odds, m.provider_updated_at, "
+                "m.captured_at, m.lab_owner, m.classifier_version, m.raw_payload "
+                "FROM quantlab_market_observations m "
+                "WHERE m.captured_at < %s AND "
+                + predicate
+                + " ORDER BY m.captured_at, m.market_observation_id LIMIT %s",
+                (cutoff, limit),
+            )
+            return _row_dicts(cursor)
+
+    def delete_archived_market_observations(self, ids: tuple[str, ...]) -> int:
+        if not ids:
+            return 0
+        predicate = self._market_unreferenced_sql("m")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT set_config('quantbet.archive_maintenance', 'on', true)"
+            )
+            cursor.execute(
+                "DELETE FROM quantlab_market_observations m "
+                "WHERE m.market_observation_id = ANY(%s) AND "
+                + predicate,
+                (list(ids),),
+            )
+            return int(cursor.rowcount)
+
+    def watermark(self, dataset: str) -> dict[str, Any] | None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT dataset, recorded_at, record_id, updated_at "
+                "FROM cold_archive_watermarks WHERE dataset = %s",
+                (dataset,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            columns = tuple(item.name for item in cursor.description)
+            return dict(zip(columns, row, strict=True))
+
+    def advance_watermark(
+        self,
+        dataset: str,
+        *,
+        recorded_at: datetime,
+        record_id: str,
+    ) -> None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO cold_archive_watermarks "
+                "(dataset, recorded_at, record_id, updated_at) "
+                "VALUES (%s, %s, %s, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (dataset) DO UPDATE SET "
+                "recorded_at = EXCLUDED.recorded_at, "
+                "record_id = EXCLUDED.record_id, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE (EXCLUDED.recorded_at, EXCLUDED.record_id) > "
+                "(cold_archive_watermarks.recorded_at, cold_archive_watermarks.record_id)",
+                (dataset, recorded_at, record_id),
+            )
+
+    def settlement_export_rows(
+        self,
+        dataset: str,
+        *,
+        limit: int,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        production_sql = (
+            "SELECT e.settlement_event_id, e.pick_id, e.fixture_id, e.event_kind, "
+            "e.prior_event_id, e.result_observation_id, e.outcome, "
+            "e.settlement_rule_version, e.rounding_version, e.entry_snapshot_id, "
+            "e.entry_odd_decimal, e.stake_minor, e.gross_return_minor, "
+            "e.realized_pnl_minor, e.ledger_delta_minor, e.bankroll_account_id, "
+            "e.currency, e.candidate_first_seen_at, e.confirmed_at, "
+            "e.confirmation_count, e.request_id, e.reason, e.actor, e.occurred_at, "
+            "r.market, r.selection, r.registered_at, r.config_fingerprint "
+            "FROM pick_settlement_events e "
+            "JOIN registered_picks r ON r.pick_id = e.pick_id"
+        )
+        goallab_sql = (
+            "SELECT s.goal_pick_settlement_id, s.goal_pick_id, s.fixture_id, "
+            "s.result_observation_id, s.result_classification, "
+            "s.regulation_home_goals, s.regulation_away_goals, s.outcome, "
+            "s.pnl_minor, s.settled_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_goal_pick_settlements s "
+            "JOIN quantlab_goal_picks p ON p.goal_pick_id = s.goal_pick_id"
+        )
+        cornerlab_sql = (
+            "SELECT s.corner_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
+            "s.event_kind, s.prior_event_id, s.result_observation_id, "
+            "s.statistics_observation_id, s.result_classification, s.outcome, "
+            "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_corner_settlement_events s "
+            "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id"
+        )
+        cardlab_sql = (
+            "SELECT s.card_settlement_event_id, s.shadow_bet_id, s.fixture_id, "
+            "s.fixture_observation_id, s.card_event_observation_id, s.outcome, "
+            "s.pnl_minor, s.occurred_at, s.settlement_rule_version, s.result_detail, "
+            "p.market_key, p.selection, p.line, p.bookmaker_id, p.bookmaker_name, "
+            "p.odds, p.model_name, p.model_version, p.model_probability, "
+            "p.market_probability, p.edge, p.expected_value, p.decision_at "
+            "FROM quantlab_card_settlement_events s "
+            "JOIN quantlab_shadow_bets p ON p.shadow_bet_id = s.shadow_bet_id"
+        )
+        queries = {
+            "production/settlements": (
+                "e.occurred_at",
+                "e.settlement_event_id",
+                production_sql,
+            ),
+            "quantlab/goallab-settlements": (
+                "s.settled_at",
+                "s.goal_pick_settlement_id",
+                goallab_sql,
+            ),
+            "quantlab/cornerlab-settlements": (
+                "s.occurred_at",
+                "s.corner_settlement_event_id",
+                cornerlab_sql,
+            ),
+            "quantlab/cardlab-settlements": (
+                "s.occurred_at",
+                "s.card_settlement_event_id",
+                cardlab_sql,
+            ),
+        }
+        if dataset not in queries:
+            raise ValueError(f"unsupported settlement archive dataset: {dataset}")
+
+        time_expr, id_expr, base = queries[dataset]
+        mark = self.watermark(dataset)
+        params: list[Any] = []
+        where = ""
+        if mark is not None:
+            where = f" WHERE ({time_expr}, {id_expr}) > (%s, %s)"
+            params.extend([mark["recorded_at"], mark["record_id"]])
+        params.append(limit)
+
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                base + where + f" ORDER BY {time_expr}, {id_expr} LIMIT %s",
+                tuple(params),
+            )
+            return _row_dicts(cursor)
+
 
 
 class ColdArchiveReader:
@@ -187,3 +392,20 @@ class ColdArchiveReader:
         end: datetime | None = None,
     ) -> tuple[dict[str, Any], ...]:
         return tuple(self.iter_rows(dataset, start=start, end=end))
+
+    def unique_rows(
+        self,
+        dataset: str,
+        *,
+        key_field: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read archived rows while de-duplicating retry/race overlap by primary key."""
+        unique: dict[str, dict[str, Any]] = {}
+        for row in self.iter_rows(dataset, start=start, end=end):
+            key = row.get(key_field)
+            if key is None:
+                raise KeyError(f"archive row is missing {key_field!r}")
+            unique[str(key)] = row
+        return tuple(unique.values())
