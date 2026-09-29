@@ -34,6 +34,18 @@ class ColdArchiveWriter:
         if not materialized:
             raise ValueError("cannot archive an empty batch")
 
+        recorded: list[datetime] = []
+        if recorded_at_field:
+            for row in materialized:
+                value = row.get(recorded_at_field)
+                if isinstance(value, datetime):
+                    recorded.append(value)
+                elif isinstance(value, str):
+                    try:
+                        recorded.append(datetime.fromisoformat(value))
+                    except ValueError:
+                        pass
+
         raw = b"".join(
             json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode()
             + b"\n"
@@ -44,9 +56,11 @@ class ColdArchiveWriter:
         safe_dataset = dataset.strip().replace("..", "_").strip("/")
         if not safe_dataset:
             raise ValueError("dataset must not be empty")
+
         now = datetime.now(UTC)
+        partition_at = min(recorded) if recorded else now
         object_key = (
-            f"quantbet-cold/{safe_dataset}/{now:%Y/%m/%d}/{digest}.jsonl.gz"
+            f"quantbet-cold/{safe_dataset}/{partition_at:%Y/%m/%d}/{digest}.jsonl.gz"
         )
 
         uploaded_digest = self.store.put_bytes(
@@ -61,18 +75,6 @@ class ColdArchiveWriter:
         verified_digest = hashlib.sha256(downloaded).hexdigest()
         if verified_digest != digest:
             raise RuntimeError("archive read-back verification failed")
-
-        recorded: list[datetime] = []
-        if recorded_at_field:
-            for row in materialized:
-                value = row.get(recorded_at_field)
-                if isinstance(value, datetime):
-                    recorded.append(value)
-                elif isinstance(value, str):
-                    try:
-                        recorded.append(datetime.fromisoformat(value))
-                    except ValueError:
-                        pass
 
         batch_id = self.catalog.register_verified_batch(
             dataset=safe_dataset,
