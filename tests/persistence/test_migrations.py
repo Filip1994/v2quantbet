@@ -237,6 +237,25 @@ def test_full_opportunity_backoff_flush_touches_only_transient_worker_state() ->
     assert "bankroll" not in statements
 
 
+def test_restore_no_odds_retry_migration_only_clamps_transient_failure_deadlines() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "056_restore_opportunity_no_odds_retry.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "UPDATE production_item_failures" in migration
+    assert "worker_name = 'opportunity'" in migration
+    assert "last_error_class = 'OpportunityOddsUnavailableError'" in migration
+    assert "interval '1 hour'" in migration
+    assert "interval '10 minutes'" in migration
+    assert "failure_count - 1" in migration
+    assert "registered_picks" not in migration
+    assert "quote_snapshots" not in migration
+    assert "pick_decisions" not in migration
+    assert "bankroll" not in migration
+
+
 def test_usable_stale_quote_migration_extends_only_refresh_state_enum() -> None:
     migration = (
         Path(__file__).parents[2]
