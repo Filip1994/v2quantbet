@@ -80,6 +80,7 @@ class OpportunityCycle:
     live_corroborations: int = 0
     live_proxy_rejections: int = 0
     item_retry_deferred: int = 0
+    preliminary_persisted_fallbacks: int = 0
 
 
 class OpportunityOddsUnavailableError(RuntimeError):
@@ -307,6 +308,7 @@ class OpportunityWorker:
         live_corroborations = 0
         live_proxy_rejections = 0
         item_retry_deferred = 0
+        preliminary_persisted_fallbacks = 0
         model_gate_seconds = 0.0
         preliminary_fetch_seconds = 0.0
         quote_processing_seconds = 0.0
@@ -398,24 +400,14 @@ class OpportunityWorker:
                         },
                     )
                     continue
-                if not quotes:
-                    error = OpportunityOddsUnavailableError("provider returned no usable quotes")
-                    failures_to_persist.append(
-                        (WORKER_NAME, fixture.fixture_id, error, self._now())
-                    )
-                    failed.append(fixture.fixture_id)
-                    odds_unavailable.append(fixture.fixture_id)
-                    LOGGER.info(
-                        "opportunity odds unavailable",
-                        extra={"worker": WORKER_NAME, "fixture_id": fixture.fixture_id},
-                    )
-                    continue
                 # Persistence conflicts and database integrity failures are deliberately
                 # outside the provider-error boundary and must reach the orchestrator.
                 quote_processing_started = self._monotonic()
-                quotes_fetched += len(quotes)
-                odds_fetches += 1
-                fresh_quotes += self._ingestion.ingest(quotes)
+                quotes = tuple(quotes)
+                if quotes:
+                    quotes_fetched += len(quotes)
+                    odds_fetches += 1
+                    fresh_quotes += self._ingestion.ingest(quotes)
                 attempted_at = self._now()
                 states_by_bookmaker = {
                     approved_id: self._repository.latest_complete_market_states(
@@ -423,26 +415,9 @@ class OpportunityWorker:
                     )
                     for approved_id in self._bookmaker_ids
                 }
-                # Current-response membership must follow provider observation identity.
-                # Local captured_at may be old when an identical provider snapshot is deduplicated.
-                returned_observations = _returned_complete_market_observations(quotes)
-                returned_states_by_bookmaker = {
-                    approved_id: tuple(
-                        state
-                        for state in states
-                        if (
-                            approved_id,
-                            state.market,
-                            state.observed_at,
-                            state.source,
-                        )
-                        in returned_observations
-                    )
-                    for approved_id, states in states_by_bookmaker.items()
-                }
                 market_states = tuple(
                     state
-                    for states in returned_states_by_bookmaker.values()
+                    for states in states_by_bookmaker.values()
                     for state in states
                 )
                 if not market_states:
@@ -458,7 +433,7 @@ class OpportunityWorker:
                             stale_retry_policy=self._stale_retry_policy,
                         )
                     error = OpportunityOddsUnavailableError(
-                        "provider returned no complete supported two-way market in this cycle"
+                        "no persisted complete supported two-way market is available"
                     )
                     failures_to_persist.append(
                         (WORKER_NAME, fixture.fixture_id, error, attempted_at)
@@ -466,14 +441,31 @@ class OpportunityWorker:
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
                     quote_processing_seconds += self._monotonic() - quote_processing_started
+                    LOGGER.info(
+                        "opportunity odds unavailable",
+                        extra={
+                            "worker": WORKER_NAME,
+                            "fixture_id": fixture.fixture_id,
+                            "odds_unavailable_reason": (
+                                "EMPTY_CANONICAL_RESPONSE_NO_PERSISTED_MARKET"
+                                if not quotes
+                                else "NO_PERSISTED_COMPLETE_MARKET"
+                            ),
+                        },
+                    )
                     continue
 
+                # Preliminary evaluation is allowed to use the latest persisted complete
+                # canonical market within the provider-age bound. A fresh targeted fetch is
+                # still mandatory before any Production registration below.
+                returned_observations = _returned_complete_market_observations(quotes)
                 strict_age = timedelta(seconds=self._maximum_quote_age_seconds)
                 provider_age = timedelta(seconds=self._provider_snapshot_max_age_seconds)
                 usable_market_keys: set[tuple[int, str]] = set()
                 strict_fresh_bookmaker_ids: set[int] = set()
                 usable_bookmaker_ids: set[int] = set()
-                for approved_id, states in returned_states_by_bookmaker.items():
+                used_persisted_fallback = False
+                for approved_id, states in states_by_bookmaker.items():
                     if not states:
                         self._repository.record_quote_refresh_state(
                             fixture.fixture_id,
@@ -497,6 +489,13 @@ class OpportunityWorker:
                             continue
                         usable_market_keys.add((approved_id, state.market))
                         usable_bookmaker_ids.add(approved_id)
+                        if (
+                            approved_id,
+                            state.market,
+                            state.observed_at,
+                            state.source,
+                        ) not in returned_observations:
+                            used_persisted_fallback = True
                         if age <= strict_age:
                             fresh_market_count += 1
                             strict_fresh_bookmaker_ids.add(approved_id)
@@ -551,7 +550,7 @@ class OpportunityWorker:
                 if not usable_market_keys:
                     no_valid_quote_count += 1
                     error = OpportunityOddsUnavailableError(
-                        "no current provider-published market is within the bounded age policy"
+                        "no persisted complete supported market is within the bounded age policy"
                     )
                     failures_to_persist.append(
                         (WORKER_NAME, fixture.fixture_id, error, attempted_at)
@@ -559,7 +558,26 @@ class OpportunityWorker:
                     failed.append(fixture.fixture_id)
                     odds_unavailable.append(fixture.fixture_id)
                     quote_processing_seconds += self._monotonic() - quote_processing_started
+                    LOGGER.info(
+                        "opportunity odds unavailable",
+                        extra={
+                            "worker": WORKER_NAME,
+                            "fixture_id": fixture.fixture_id,
+                            "odds_unavailable_reason": "PERSISTED_MARKET_OUTSIDE_PROVIDER_AGE",
+                        },
+                    )
                     continue
+
+                if used_persisted_fallback:
+                    preliminary_persisted_fallbacks += 1
+                    LOGGER.info(
+                        "opportunity preliminary persisted quote fallback",
+                        extra={
+                            "worker": WORKER_NAME,
+                            "fixture_id": fixture.fixture_id,
+                            "preliminary_persisted_fallback": True,
+                        },
+                    )
 
                 quote_processing_seconds += self._monotonic() - quote_processing_started
                 try:
@@ -1111,6 +1129,7 @@ class OpportunityWorker:
             live_corroborations=live_corroborations,
             live_proxy_rejections=live_proxy_rejections,
             item_retry_deferred=item_retry_deferred,
+            preliminary_persisted_fallbacks=preliminary_persisted_fallbacks,
         )
         LOGGER.info(
             "opportunity cycle outcomes",
@@ -1146,6 +1165,7 @@ class OpportunityWorker:
                 "live_corroborations": cycle.live_corroborations,
                 "live_proxy_rejections": cycle.live_proxy_rejections,
                 "item_retry_deferred": cycle.item_retry_deferred,
+                "preliminary_persisted_fallbacks": cycle.preliminary_persisted_fallbacks,
                 "stale_retries_requested": cycle.stale_retries_requested,
                 "stale_retries_scheduled": cycle.stale_retries_scheduled,
                 "stale_retries_cleared": cycle.stale_retries_cleared,

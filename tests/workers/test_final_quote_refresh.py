@@ -157,16 +157,17 @@ class Registration:
 
 
 class Source:
-    def __init__(self, final, *, live=()):
+    def __init__(self, final, *, live=(), preliminary=None):
         self.final = final
         self.live = live
+        self.preliminary = preliminary
         self.calls = 0
         self.live_calls = 0
 
     def fetch_quotes(self, **_kwargs):
         self.calls += 1
         if self.calls == 1:
-            return market(2.1)
+            return market(2.1) if self.preliminary is None else self.preliminary
         if isinstance(self.final, BaseException):
             raise self.final
         return self.final
@@ -184,6 +185,7 @@ def run(
     registration=None,
     evaluator=None,
     live=(),
+    preliminary=None,
     kickoff_at=None,
     provider_snapshot_max_age_seconds=28800,
     record_research_signal=None,
@@ -201,7 +203,7 @@ def run(
             repository.fixture.last_captured_at,
         )
     registration = registration or Registration()
-    source = Source(final, live=live)
+    source = Source(final, live=live, preliminary=preliminary)
     worker = OpportunityWorker(
         repository,
         source,
@@ -231,6 +233,34 @@ def test_candidate_requires_second_provider_request_and_accepts_final_reprice() 
     assert cycle.registered_pick_ids == ("pick-1",)
     assert registration.executed[0][0] == "evaluation-final"
     assert registration.completed[0][2]["stale_quote"] is False
+
+
+def test_empty_preliminary_response_uses_persisted_market_but_still_requires_final_fetch() -> None:
+    cycle, source, registration, _ = run(market(2.0), preliminary=())
+
+    assert source.calls == 2
+    assert cycle.preliminary_persisted_fallbacks == 1
+    assert cycle.odds_unavailable_fixture_ids == ()
+    assert cycle.registered_pick_ids == ("pick-1",)
+    assert registration.executed[0][0] == "evaluation-final"
+
+
+def test_empty_preliminary_response_without_persisted_market_remains_unavailable() -> None:
+    class EmptyRepository(Repository):
+        def latest_complete_market_states(self, *_args):
+            return ()
+
+    cycle, source, registration, _ = run(
+        market(2.0),
+        preliminary=(),
+        repository=EmptyRepository(),
+    )
+
+    assert source.calls == 1
+    assert cycle.preliminary_persisted_fallbacks == 0
+    assert cycle.odds_unavailable_fixture_ids == ("api-football:1",)
+    assert cycle.prediction_ids == ()
+    assert registration.executed == []
 
 
 def test_production_pick_is_recorded_in_research_with_preliminary_candidate() -> None:
