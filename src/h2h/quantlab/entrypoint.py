@@ -6,6 +6,9 @@ import logging
 import os
 from threading import Event
 
+from h2h.archive.object_store import S3ObjectStore
+from h2h.archive.repository import ColdArchiveCatalog
+from h2h.archive.service import ColdArchiveWriter
 from h2h.logging_config import configure_logging
 from h2h.persistence.migrations import MIGRATION_RUNNER_VERSION
 from h2h.persistence.postgres_model_lifecycle import (
@@ -76,6 +79,29 @@ def _boolean(name: str, default: str = "false") -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean")
+
+
+def _market_archive_writer(database_url: str) -> ColdArchiveWriter | None:
+    required = ("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ENDPOINT")
+    present = {name: bool(os.getenv(name, "").strip()) for name in required}
+    if not any(present.values()):
+        LOGGER.info("QuantLab raw odds archive disabled; bucket variables are absent")
+        return None
+    if not all(present.values()):
+        LOGGER.warning(
+            "QuantLab raw odds archive disabled; bucket variable references are incomplete"
+        )
+        return None
+    try:
+        return ColdArchiveWriter(
+            ColdArchiveCatalog(database_url),
+            S3ObjectStore.from_environment(),
+        )
+    except Exception:
+        LOGGER.exception(
+            "QuantLab raw odds archive setup failed; PostgreSQL raw fallback remains active"
+        )
+        return None
 
 
 def _log_latest_goal_picks(repository: PostgreSQLQuantLabRepository, *, limit: int = 20) -> None:
@@ -173,12 +199,18 @@ def main() -> None:
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
 
+    market_archive_writer = _market_archive_writer(database_url)
+    LOGGER.info(
+        "QuantLab raw odds archive enabled=%s",
+        market_archive_writer is not None,
+    )
     runtime = QuantLabRuntime(
         repository,
         provider,
         goal_engine=goal_engine,
         corner_engine=corner_engine,
         card_engine=card_engine,
+        market_archive_writer=market_archive_writer,
         settings=QuantLabRuntimeSettings(
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
             discovery_lookback_days=_integer(
