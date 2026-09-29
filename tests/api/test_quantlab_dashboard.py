@@ -324,6 +324,89 @@ def test_goallab_analytics_is_a_separate_tab() -> None:
     assert "Pick History" not in analytics
 
 
+def test_quantlab_analytics_bucket_links_open_exact_settled_picks() -> None:
+    class BucketRepository(StubRepository):
+        def list_all_goal_picks(self):
+            winner = goal_pick(outcome="WIN", suffix="w")
+            winner["fixture_id"] = "api-football:201"
+            winner["home_team"] = "Winner"
+            winner["away_team"] = "Group"
+
+            void = goal_pick(outcome="VOID", suffix="v")
+            void["fixture_id"] = "api-football:202"
+            void["home_team"] = "Void"
+            void["away_team"] = "Group"
+
+            pending = goal_pick(outcome="PENDING", suffix="p")
+            pending["fixture_id"] = "api-football:203"
+            pending["home_team"] = "Pending"
+            pending["away_team"] = "Group"
+
+            other = goal_pick(outcome="LOSS", suffix="u")
+            other["fixture_id"] = "api-football:204"
+            other["home_team"] = "Other"
+            other["away_team"] = "Group"
+            other["selection"] = "UNDER"
+
+            return (winner, void, pending, other)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    dashboard = QuantLabDashboardService(BucketRepository())
+    analytics = dashboard.render_html("view=analytics&lab=goal")
+
+    assert "<th>Picks</th>" in analytics
+    assert "bucket_market_key=OU_25" in analytics
+    assert "bucket_selection=OVER" in analytics
+    assert "View 2" in analytics
+    assert "bucket_probability_bin=5" in analytics
+
+    drilldown = dashboard.render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_market_key=OU_25&bucket_selection=OVER"
+    )
+
+    assert "Bucket picks" in drilldown
+    assert "2 exact settled picks" in drilldown
+    assert "Winner – Group" in drilldown
+    assert "Void – Group" in drilldown
+    assert "Pending – Group" not in drilldown
+    assert "Other – Group" not in drilldown
+
+
+def test_quantlab_calibration_bucket_drilldown_matches_graded_population() -> None:
+    class CalibrationRepository(StubRepository):
+        def list_all_goal_picks(self):
+            win = goal_pick(outcome="WIN", suffix="w")
+            win["fixture_id"] = "api-football:301"
+            win["home_team"] = "Calibration Win"
+            win["model_probability"] = 0.58
+
+            loss = goal_pick(outcome="LOSS", suffix="l")
+            loss["fixture_id"] = "api-football:302"
+            loss["home_team"] = "Calibration Loss"
+            loss["model_probability"] = 0.59
+
+            void = goal_pick(outcome="VOID", suffix="v")
+            void["fixture_id"] = "api-football:303"
+            void["home_team"] = "Calibration Void"
+            void["model_probability"] = 0.57
+
+            return (win, loss, void)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    html = QuantLabDashboardService(CalibrationRepository()).render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_probability_bin=5"
+    )
+
+    assert "2 exact settled picks" in html
+    assert "Calibration Win" in html
+    assert "Calibration Loss" in html
+    assert "Calibration Void" not in html
+
+
 def first_model_version() -> str:
     return "DC_PLUS_PRO_STRUCTURAL_V1:" + "b" * 64
 
