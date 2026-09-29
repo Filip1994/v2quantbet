@@ -45,6 +45,9 @@ class RepositoryFake:
     def clear_item_failure(self, *_args, **_kwargs):
         return None
 
+    def latest_complete_market_states(self, *_args, **_kwargs):
+        return ()
+
     def latest_complete_snapshot_ids(self, *_args, **_kwargs):
         return ()
 
