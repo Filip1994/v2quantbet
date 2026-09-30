@@ -359,7 +359,7 @@ class PostgreSQLResultSettlementRepository:
             cursor.execute(
                 "SELECT r.pick_id FROM registered_picks r WHERE r.fixture_id = %s "
                 "AND NOT EXISTS (SELECT 1 FROM pick_settlement_events e "
-                "WHERE e.pick_id = r.pick_id AND e.event_kind = 'NORMAL') "
+                "WHERE e.pick_id = r.pick_id AND e.event_kind IN ('NORMAL', 'MANUAL_VOID')) "
                 "ORDER BY r.registered_at, r.pick_id",
                 (fixture_id,),
             )
@@ -411,12 +411,16 @@ class PostgreSQLResultSettlementRepository:
                 raise ResultPersistenceConflictError("pick context changed while locking")
             cursor.execute(
                 "SELECT settlement_event_id, result_observation_id, outcome, entry_odd_decimal, "
-                "stake_minor, gross_return_minor, realized_pnl_minor, ledger_entry_id, occurred_at "
-                "FROM pick_settlement_events WHERE pick_id = %s AND event_kind = 'NORMAL'",
+                "stake_minor, gross_return_minor, realized_pnl_minor, ledger_entry_id, occurred_at, "
+                "event_kind "
+                "FROM pick_settlement_events WHERE pick_id = %s "
+                "AND event_kind IN ('NORMAL', 'MANUAL_VOID')",
                 (pick_id,),
             )
             replay = cursor.fetchone()
             if replay is not None:
+                if replay[9] == "MANUAL_VOID":
+                    raise SettlementConflictError("pick was manually voided")
                 if replay[1] != result_observation_id:
                     raise SettlementConflictError("pick already has a different normal settlement")
                 return SettlementRecord(

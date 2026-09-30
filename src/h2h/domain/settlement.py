@@ -27,6 +27,7 @@ class SettlementOutcome(StrEnum):
 
 class SettlementEventKind(StrEnum):
     NORMAL = "NORMAL"
+    MANUAL_VOID = "MANUAL_VOID"
     CORRECTION = "CORRECTION"
     REVERSAL = "REVERSAL"
 
