@@ -1471,7 +1471,10 @@ def render_analytics(
     params: dict[str, list[str]] | None = None,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
-    rows = _sorted(_all_rows(repository, lab))
+    rows = _analytics_rows(
+        _sorted(_all_rows(repository, lab)),
+        lab_key=lab_key,
+    )
     params = params or {}
     metrics = goal_pick_metrics(rows)
     now = datetime.now(UTC)
@@ -1482,11 +1485,18 @@ def render_analytics(
         ("Settled", str(metrics["n"])),
         ("W-L-V", f'{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}'),
         ("Win rate", _metric(metrics["win_rate_pct"], suffix="%")),
+        ("Expected", _metric(metrics["expected_win_rate_pct"], suffix="%")),
+        ("Calibration", _metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)),
         ("ROI", _metric(metrics["roi_pct"], suffix="%", signed=True)),
+        ("P/L", _money(int(metrics["pnl_minor"]), currency)),
+        ("Avg odds", _metric(metrics["avg_odds"], digits=2)),
         ("Brier", _metric(metrics["brier_score"], digits=3)),
         ("Log loss", _metric(metrics["log_loss"], digits=3)),
-        ("Calibration", _metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)),
+        ("Avg CLV", _metric(metrics["avg_clv_pct"], suffix="%", signed=True)),
+        ("CLV coverage", _metric(metrics["closing_coverage_pct"], suffix="%")),
         ("Max DD", _money(int(metrics["max_drawdown_minor"]), currency)),
+        ("Avg edge", _metric(metrics["avg_edge_pct"], suffix="%", signed=True)),
+        ("Avg EV", _metric(metrics["avg_ev_pct"], suffix="%", signed=True)),
     )
     cards_html = "".join(
         f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -1494,13 +1504,325 @@ def render_analytics(
     )
 
     analytics_note = (
-        "GoalLab analytics is isolated from the operational dashboard. It includes pick performance, "
-        "calibration, cohort breakdowns and the existing decision audit."
+        "GoalLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
+        "version regimes, calibration and exact constituent-pick drilldowns."
         if lab_key == "goal"
         else
-        "CornerLab analytics is isolated from the operational dashboard. It measures the settled pick "
-        "ledger by market, league, bookmaker and model regime."
+        "CornerLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
+        "version regimes, calibration and exact constituent-pick drilldowns."
     )
+
+    def table(
+        title_text: str,
+        dimensions: tuple[str, ...],
+        table_key: str,
+        *,
+        labels: dict[str, str] | None = None,
+    ) -> str:
+        if not _dimension_available(rows, dimensions):
+            return ""
+        return _cohort_table(
+            title_text,
+            _cohorts(rows, dimensions),
+            dimensions,
+            lab_key=lab_key,
+            table_key=table_key,
+            params=params,
+            currency=currency,
+            dimension_labels=labels,
+        )
+
+    baseline = (
+        _analytics_section(
+            "Universe / regimes",
+            "categorical cohorts and model-policy context",
+        )
+        + table(
+            "Markets / selections",
+            ("market_key", "selection"),
+            "markets",
+            labels={"market_key": "Market", "selection": "Selection"},
+        )
+        + table(
+            "Leagues",
+            ("competition_name",),
+            "leagues",
+            labels={"competition_name": "League"},
+        )
+        + table(
+            "Countries",
+            ("country",),
+            "countries",
+            labels={"country": "Country"},
+        )
+        + table(
+            "Bookmakers",
+            ("bookmaker_name",),
+            "bookmakers",
+            labels={"bookmaker_name": "Bookmaker"},
+        )
+        + table(
+            "Model versions",
+            ("model_version",),
+            "models",
+            labels={"model_version": "Model version"},
+        )
+        + table(
+            "Policy versions",
+            ("policy_version",),
+            "policies",
+            labels={"policy_version": "Policy version"},
+        )
+        + table(
+            "Model × policy",
+            ("model_version", "policy_version"),
+            "model_policy",
+            labels={
+                "model_version": "Model version",
+                "policy_version": "Policy version",
+            },
+        )
+    )
+
+    signal_buckets = (
+        _analytics_section(
+            "Signal / price buckets",
+            "stable ranges for probability, price, edge, EV, line and CLV",
+        )
+        + table(
+            "Model probability",
+            ("model_probability_bucket",),
+            "model_probability",
+            labels={"model_probability_bucket": "Model P"},
+        )
+        + table(
+            "Market probability",
+            ("market_probability_bucket",),
+            "market_probability",
+            labels={"market_probability_bucket": "Market P"},
+        )
+        + table(
+            "Entry odds",
+            ("entry_odds_bucket",),
+            "entry_odds",
+            labels={"entry_odds_bucket": "Entry odds"},
+        )
+        + table(
+            "Closing odds",
+            ("closing_odds_bucket",),
+            "closing_odds",
+            labels={"closing_odds_bucket": "Closing odds"},
+        )
+        + table(
+            "Edge",
+            ("edge_bucket",),
+            "edge",
+            labels={"edge_bucket": "Edge"},
+        )
+        + table(
+            "Expected value",
+            ("ev_bucket",),
+            "ev",
+            labels={"ev_bucket": "EV"},
+        )
+        + table(
+            "Realized CLV",
+            ("clv_bucket",),
+            "clv",
+            labels={"clv_bucket": "CLV"},
+        )
+        + table(
+            "Market line",
+            ("line_bucket",),
+            "line",
+            labels={"line_bucket": "Line"},
+        )
+    )
+
+    timing = (
+        _analytics_section(
+            "Timing / stability",
+            "when picks were made and when matches were played",
+        )
+        + table(
+            "Weekly stability",
+            ("kickoff_week",),
+            "weeks",
+            labels={"kickoff_week": "Week"},
+        )
+        + table(
+            "Kickoff weekday",
+            ("kickoff_weekday",),
+            "weekday",
+            labels={"kickoff_weekday": "Weekday"},
+        )
+        + table(
+            "Kickoff time · Europe/Belgrade",
+            ("kickoff_time_bucket",),
+            "kickoff_time",
+            labels={"kickoff_time_bucket": "Hour"},
+        )
+        + table(
+            "Decision lead time",
+            ("decision_lead_bucket",),
+            "decision_lead",
+            labels={"decision_lead_bucket": "Kickoff − decision"},
+        )
+        + table(
+            "Quote age at decision",
+            ("quote_age_bucket",),
+            "quote_age",
+            labels={"quote_age_bucket": "Decision − quote"},
+        )
+    )
+
+    cross_sections = (
+        _analytics_section(
+            "Cross-sections",
+            "interaction cohorts for locating where performance is actually coming from",
+        )
+        + table(
+            "Market × selection × model probability",
+            ("market_key", "selection", "model_probability_bucket"),
+            "market_model_p",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "model_probability_bucket": "Model P",
+            },
+        )
+        + table(
+            "Market × selection × market probability",
+            ("market_key", "selection", "market_probability_bucket"),
+            "market_market_p",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "market_probability_bucket": "Market P",
+            },
+        )
+        + table(
+            "Market × selection × entry odds",
+            ("market_key", "selection", "entry_odds_bucket"),
+            "market_odds",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "entry_odds_bucket": "Odds",
+            },
+        )
+        + table(
+            "Market × selection × EV",
+            ("market_key", "selection", "ev_bucket"),
+            "market_ev",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "ev_bucket": "EV",
+            },
+        )
+        + table(
+            "Market × selection × line",
+            ("market_key", "selection", "line_bucket"),
+            "market_line",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "line_bucket": "Line",
+            },
+        )
+        + table(
+            "League × market",
+            ("competition_name", "market_key", "selection"),
+            "league_market",
+            labels={
+                "competition_name": "League",
+                "market_key": "Market",
+                "selection": "Selection",
+            },
+        )
+        + table(
+            "Bookmaker × market",
+            ("bookmaker_name", "market_key", "selection"),
+            "bookmaker_market",
+            labels={
+                "bookmaker_name": "Bookmaker",
+                "market_key": "Market",
+                "selection": "Selection",
+            },
+        )
+    )
+
+    if lab_key == "goal":
+        domain = (
+            _analytics_section(
+                "GoalLab model-state buckets",
+                "DC+ expected-goal structure recorded on each pick",
+            )
+            + table(
+                "Expected total goals",
+                ("expected_total_goals_bucket",),
+                "goal_total",
+                labels={"expected_total_goals_bucket": "λ total"},
+            )
+            + table(
+                "Expected home goals",
+                ("expected_home_goals_bucket",),
+                "goal_home",
+                labels={"expected_home_goals_bucket": "λ home"},
+            )
+            + table(
+                "Expected away goals",
+                ("expected_away_goals_bucket",),
+                "goal_away",
+                labels={"expected_away_goals_bucket": "λ away"},
+            )
+            + table(
+                "Home − away expected-goal spread",
+                ("goal_lambda_spread_bucket",),
+                "goal_spread",
+                labels={"goal_lambda_spread_bucket": "λH − λA"},
+            )
+            + table(
+                "Market × expected total goals",
+                ("market_key", "selection", "expected_total_goals_bucket"),
+                "goal_market_total",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "expected_total_goals_bucket": "λ total",
+                },
+            )
+        )
+    else:
+        domain = (
+            _analytics_section(
+                "CornerLab model-state buckets",
+                "expected corner mean and distance from the quoted line",
+            )
+            + table(
+                "Expected total corners",
+                ("expected_total_corners_bucket",),
+                "corner_total",
+                labels={"expected_total_corners_bucket": "Expected corners"},
+            )
+            + table(
+                "Expected corners − line",
+                ("corner_model_line_gap_bucket",),
+                "corner_line_gap",
+                labels={"corner_model_line_gap_bucket": "Mean − line"},
+            )
+            + table(
+                "Market × expected total corners",
+                ("market_key", "selection", "expected_total_corners_bucket"),
+                "corner_market_total",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "expected_total_corners_bucket": "Expected corners",
+                },
+            )
+        )
 
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
@@ -1516,41 +1838,22 @@ def render_analytics(
         + _window_card("Last 30 days", last_30)
         + _window_card("Lifetime", metrics)
         + "</div>"
-        + _cohort_table(
-            "Markets / selections",
-            _cohorts(rows, ("market_key", "selection")),
-            ("market_key", "selection"),
-            lab_key=lab_key,
-            table_key="markets",
-            params=params,
-        )
-        + _cohort_table(
-            "Leagues",
-            _cohorts(rows, ("competition_name",)),
-            ("competition_name",),
-            lab_key=lab_key,
-            table_key="leagues",
-            params=params,
-        )
-        + _cohort_table(
-            "Bookmakers",
-            _cohorts(rows, ("bookmaker_name",)),
-            ("bookmaker_name",),
-            lab_key=lab_key,
-            table_key="bookmakers",
-            params=params,
-        )
-        + _cohort_table(
-            "Model versions",
-            _cohorts(rows, ("model_version",)),
-            ("model_version",),
-            lab_key=lab_key,
-            table_key="models",
-            params=params,
+        + baseline
+        + signal_buckets
+        + domain
+        + timing
+        + cross_sections
+        + _analytics_section(
+            "Calibration",
+            "probability reliability and exact graded constituents",
         )
         + _calibration_table(rows, lab_key=lab_key, params=params)
         + (
-            _goal_audit(
+            _analytics_section(
+                "GoalLab decision audit",
+                "decision evidence and integrity checks",
+            )
+            + _goal_audit(
                 repository,
                 rows,
                 params=params,
@@ -1568,6 +1871,7 @@ def render_analytics(
         lab_key=lab_key,
         body=body,
     )
+
 
 
 def render_quantlab_view(
