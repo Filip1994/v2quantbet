@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from html import escape
+import re
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
+from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     calibration_bins,
@@ -274,6 +277,8 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .note-detail-link{{display:inline-block;margin-top:8px;color:#9bc7ff;font-weight:900;font-size:11px}}
 .empty{{text-align:center;padding:34px!important;color:var(--muted)}}
 .analytics-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
+.analytics-section{{margin:22px 2px 10px;padding-top:5px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#c8d0d7}}
+.analytics-section small{{display:inline;margin-left:9px;text-transform:none;letter-spacing:0;font-weight:400}}
 .analytics-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}}
 .analytics-grid .panel{{margin:0}}
 .metric-list{{padding:8px 14px 12px}}.metric-line{{display:flex;justify-content:space-between;gap:18px;padding:8px 0;border-bottom:1px solid #262c31}}
@@ -466,6 +471,283 @@ def render_dashboard(
         view="dashboard",
         lab_key=lab_key,
         body=body,
+    )
+
+
+def _probability_bucket(value: Any, *, market: bool = False) -> str:
+    number = _number(value)
+    if number is None:
+        return "—"
+    pct = number * 100
+    ranges = (
+        ((25, 35), (35, 40), (40, 45), (45, 50), (50, 55), (55, 60), (60, 65), (65, 75))
+        if market
+        else ((40, 45), (45, 50), (50, 55), (55, 60), (60, 65), (65, 70), (70, 75))
+    )
+    floor = 25 if market else 40
+    for low, high in ranges:
+        if low <= pct < high:
+            return f"{low}–{high}%"
+    if pct >= 75:
+        return "75%+"
+    return f"<{floor}%"
+
+
+def _ev_bucket(value: Any) -> str:
+    number = _number(value)
+    if number is None:
+        return "—"
+    pct = number * 100
+    for low, high in ((0, 5), (5, 7), (7, 10), (10, 15), (15, 20), (20, 30)):
+        if low <= pct < high:
+            return f"{low}–{high}%"
+    if pct >= 30:
+        return "30%+"
+    return "<0%"
+
+
+def _edge_bucket(value: Any) -> str:
+    number = _number(value)
+    if number is None:
+        return "—"
+    pct = number * 100
+    for low, high in ((0, 5), (5, 7), (7, 10), (10, 15), (15, 20)):
+        if low <= pct < high:
+            return f"{low}–{high}%"
+    if pct >= 20:
+        return "20%+"
+    return "<0%"
+
+
+def _odds_bucket(value: Any) -> str:
+    odds = _number(value)
+    if odds is None:
+        return "—"
+    if odds < 1.40:
+        return "<1.40"
+    for low, high, label in (
+        (1.40, 1.60, "1.40–1.60"),
+        (1.60, 1.80, "1.61–1.80"),
+        (1.80, 2.00, "1.81–2.00"),
+        (2.00, 2.50, "2.01–2.50"),
+        (2.50, 3.00, "2.51–3.00"),
+        (3.00, 3.50, "3.01–3.50"),
+    ):
+        if low <= odds <= high:
+            return label
+    return "3.51+"
+
+
+def _realized_clv_pct(row: dict[str, Any]) -> float | None:
+    odds = row.get("odds")
+    closing = row.get("closing_odds")
+    entry_at = row.get("quote_observed_at")
+    closing_at = row.get("closing_observed_at")
+    if (
+        odds is None
+        or closing is None
+        or not isinstance(entry_at, datetime)
+        or not isinstance(closing_at, datetime)
+        or closing_at <= entry_at
+    ):
+        return None
+    return realized_clv_ppm(
+        Decimal(str(odds)),
+        Decimal(str(closing)),
+    ) / 10_000.0
+
+
+def _clv_bucket(row: dict[str, Any]) -> str:
+    value = _realized_clv_pct(row)
+    if value is None:
+        return "—"
+    for low, high in ((-10, -5), (-5, -2), (-2, 0), (0, 2), (2, 5), (5, 10)):
+        if low <= value < high:
+            return f"{low:+g}–{high:+g}%"
+    if value < -10:
+        return "<-10%"
+    return "+10%+"
+
+
+def _scalar_bucket(
+    value: Any,
+    *,
+    breaks: tuple[float, ...],
+    suffix: str = "",
+    digits: int = 1,
+) -> str:
+    number = _number(value)
+    if number is None:
+        return "—"
+
+    def fmt(item: float) -> str:
+        return f"{item:.{digits}f}".rstrip("0").rstrip(".") + suffix
+
+    if number < breaks[0]:
+        return f"<{fmt(breaks[0])}"
+    for low, high in zip(breaks, breaks[1:], strict=False):
+        if low <= number < high:
+            return f"{fmt(low)}–{fmt(high)}"
+    return f"{fmt(breaks[-1])}+"
+
+
+def _signed_gap_bucket(value: Any) -> str:
+    number = _number(value)
+    if number is None:
+        return "—"
+    for low, high in ((-2, -1), (-1, -0.5), (-0.5, 0), (0, 0.5), (0.5, 1), (1, 2)):
+        if low <= number < high:
+            return f"{low:+g}–{high:+g}"
+    if number < -2:
+        return "<-2"
+    return "+2+"
+
+
+def _line_bucket(value: Any) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:g}"
+
+
+def _decision_lead_bucket(row: dict[str, Any]) -> str:
+    kickoff = row.get("kickoff_at")
+    decision = row.get("decision_at")
+    if not isinstance(kickoff, datetime) or not isinstance(decision, datetime):
+        return "—"
+    hours = (kickoff - decision).total_seconds() / 3600
+    if hours < 0:
+        return "<0h"
+    for low, high in ((0, 1), (1, 3), (3, 6), (6, 12), (12, 24), (24, 48)):
+        if low <= hours < high:
+            return f"{low:g}–{high:g}h"
+    return "48h+"
+
+
+def _quote_age_bucket(row: dict[str, Any]) -> str:
+    quote = row.get("quote_observed_at")
+    decision = row.get("decision_at")
+    if not isinstance(quote, datetime) or not isinstance(decision, datetime):
+        return "—"
+    minutes = (decision - quote).total_seconds() / 60
+    if minutes < 0:
+        return "<0m"
+    for low, high, label in (
+        (0, 5, "0–5m"),
+        (5, 15, "5–15m"),
+        (15, 30, "15–30m"),
+        (30, 60, "30–60m"),
+        (60, 180, "1–3h"),
+    ):
+        if low <= minutes < high:
+            return label
+    return "3h+"
+
+
+def _kickoff_dimensions(row: dict[str, Any]) -> tuple[str, str, str]:
+    kickoff = row.get("kickoff_at")
+    if not isinstance(kickoff, datetime):
+        return "—", "—", "—"
+    if kickoff.tzinfo is None or kickoff.utcoffset() is None:
+        kickoff = kickoff.replace(tzinfo=UTC)
+    local = kickoff.astimezone(BELGRADE)
+    iso_year, iso_week, _ = local.isocalendar()
+    hour = local.hour
+    if hour < 6:
+        daypart = "00–05"
+    elif hour < 12:
+        daypart = "06–11"
+    elif hour < 18:
+        daypart = "12–17"
+    else:
+        daypart = "18–23"
+    return local.strftime("%A"), daypart, f"{iso_year}-W{iso_week:02d}"
+
+
+def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
+    item = dict(row)
+    weekday, daypart, week = _kickoff_dimensions(item)
+    item.update(
+        {
+            "model_probability_bucket": _probability_bucket(item.get("model_probability")),
+            "market_probability_bucket": _probability_bucket(
+                item.get("market_probability"),
+                market=True,
+            ),
+            "edge_bucket": _edge_bucket(item.get("edge")),
+            "ev_bucket": _ev_bucket(item.get("expected_value")),
+            "entry_odds_bucket": _odds_bucket(item.get("odds")),
+            "closing_odds_bucket": _odds_bucket(item.get("closing_odds")),
+            "clv_bucket": _clv_bucket(item),
+            "line_bucket": _line_bucket(item.get("line")),
+            "decision_lead_bucket": _decision_lead_bucket(item),
+            "quote_age_bucket": _quote_age_bucket(item),
+            "kickoff_weekday": weekday,
+            "kickoff_time_bucket": daypart,
+            "kickoff_week": week,
+        }
+    )
+    if lab_key == "goal":
+        home = _number(item.get("expected_home_goals"))
+        away = _number(item.get("expected_away_goals"))
+        total = None if home is None or away is None else home + away
+        item.update(
+            {
+                "expected_total_goals_bucket": _scalar_bucket(
+                    total,
+                    breaks=(1.5, 2.0, 2.5, 3.0, 3.5, 4.0),
+                ),
+                "expected_home_goals_bucket": _scalar_bucket(
+                    home,
+                    breaks=(0.5, 1.0, 1.5, 2.0, 2.5),
+                ),
+                "expected_away_goals_bucket": _scalar_bucket(
+                    away,
+                    breaks=(0.5, 1.0, 1.5, 2.0, 2.5),
+                ),
+                "goal_lambda_spread_bucket": _signed_gap_bucket(
+                    None if home is None or away is None else home - away
+                ),
+            }
+        )
+    elif lab_key == "corner":
+        expected = _number(item.get("expected_total_corners"))
+        line = _number(item.get("line"))
+        item.update(
+            {
+                "expected_total_corners_bucket": _scalar_bucket(
+                    expected,
+                    breaks=(7, 8, 9, 10, 11, 12, 13),
+                    digits=0,
+                ),
+                "corner_model_line_gap_bucket": _signed_gap_bucket(
+                    None if expected is None or line is None else expected - line
+                ),
+            }
+        )
+    return item
+
+
+def _analytics_rows(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    lab_key: str,
+) -> tuple[dict[str, Any], ...]:
+    return tuple(_analytics_row(row, lab_key=lab_key) for row in rows)
+
+
+def _dimension_available(
+    rows: tuple[dict[str, Any], ...],
+    dimensions: tuple[str, ...],
+) -> bool:
+    return any(
+        all(str(row.get(dimension) or "—") != "—" for dimension in dimensions)
+        for row in rows
+    )
+
+
+def _analytics_section(title: str, subtitle: str) -> str:
+    return (
+        f'<h2 class="analytics-section">{escape(title)}'
+        f'<small>{escape(subtitle)}</small></h2>'
     )
 
 
