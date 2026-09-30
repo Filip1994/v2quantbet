@@ -328,6 +328,8 @@ def test_goallab_analytics_is_a_separate_tab() -> None:
     assert "Weekly stability" in analytics
     assert "Decision lead time" in analytics
     assert "Market × selection × entry odds" in analytics
+    assert "Research-style signal cube" in analytics
+    assert "Low-scoring diagnostic" in analytics
     assert "Expected total goals" in analytics
     assert "Home − away expected-goal spread" in analytics
     assert "Recorded pre-match features" in analytics
