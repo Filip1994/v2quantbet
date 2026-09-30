@@ -13,7 +13,7 @@ from h2h.quantlab.corner_lab.model import MODEL_NAME, CornerPressureModelService
 from h2h.quantlab.reference_shadow_engine import ContextMarketDecision, ReferenceEngineResult
 
 
-POLICY_VERSION = "CORNERLAB_PRESSURE_POISSON_POLICY_V2"
+POLICY_VERSION = "CORNERLAB_PRESSURE_POISSON_POLICY_V3"
 MARKET_KEY = "TOTAL_CORNERS"
 MIN_EDGE = 0.03
 MIN_EXPECTED_VALUE = 0.03
@@ -77,6 +77,19 @@ def _fair_probability(selected_odds: float, companion_odds: float) -> float:
     selected = 1.0 / selected_odds
     companion = 1.0 / companion_odds
     return selected / (selected + companion)
+
+
+def _candidate_score(item: dict[str, Any]) -> tuple[float, float, float, int, float, int, int]:
+    """Rank economically first; remaining fields are deterministic tie-breakers only."""
+    return (
+        float(item["expected_value"]),
+        float(item["edge"]),
+        float(item["odds"]),
+        -int(item["pair"]["bookmaker_id"]),
+        -float(item["line"]),
+        1 if item["selection"] == "OVER" else 0,
+        -int(item["pair"]["provider_bet_id"]),
+    )
 
 
 class CornerLabShadowPickEngine:
@@ -245,31 +258,31 @@ class CornerLabShadowPickEngine:
                     }
                 )
 
-        winners: dict[float, dict[str, Any]] = {}
-        for item in evaluated:
-            if item["reason"] is not None:
-                continue
-            line = float(item["line"])
-            current = winners.get(line)
-            score = (
-                float(item["expected_value"]),
-                float(item["edge"]),
-                float(item["odds"]),
-                -int(item["pair"]["bookmaker_id"]),
-                1 if item["selection"] == "OVER" else 0,
+        eligible = [
+            item
+            for item in evaluated
+            if item["reason"] is None
+        ]
+        ranked = sorted(eligible, key=_candidate_score, reverse=True)
+        ranks = {id(item): rank for rank, item in enumerate(ranked, start=1)}
+        best_current = ranked[0] if ranked else None
+
+        existing_checker = getattr(
+            self._repository,
+            "context_shadow_bet_exists",
+            None,
+        )
+        existing_fixture_pick = (
+            bool(
+                existing_checker(
+                    str(fixture["fixture_id"]),
+                    lab="CORNER",
+                )
             )
-            if current is None:
-                winners[line] = item
-                continue
-            current_score = (
-                float(current["expected_value"]),
-                float(current["edge"]),
-                float(current["odds"]),
-                -int(current["pair"]["bookmaker_id"]),
-                1 if current["selection"] == "OVER" else 0,
-            )
-            if score > current_score:
-                winners[line] = item
+            if callable(existing_checker)
+            else False
+        )
+        canonical_winner = None if existing_fixture_pick else best_current
 
         decisions_inserted = 0
         picks_inserted = 0
@@ -279,10 +292,12 @@ class CornerLabShadowPickEngine:
             companion = item["companion"]
             line = float(item["line"])
             if item["reason"] is None:
-                if winners.get(line) is item:
-                    decision_value, reason = "PICK", "VALUE_THRESHOLD_PASSED"
+                if existing_fixture_pick:
+                    decision_value, reason = "PASS", "FIXTURE_PICK_ALREADY_EXISTS"
+                elif canonical_winner is item:
+                    decision_value, reason = "PICK", "CANONICAL_FIXTURE_VALUE_PICK"
                 else:
-                    decision_value, reason = "PASS", "BETTER_VALUE_AVAILABLE"
+                    decision_value, reason = "PASS", "BETTER_FIXTURE_VALUE_AVAILABLE"
             else:
                 decision_value, reason = "PASS", str(item["reason"])
 
@@ -351,6 +366,29 @@ class CornerLabShadowPickEngine:
                     "quote_age_seconds": item["quote_age_seconds"],
                     "seconds_to_kickoff": item["seconds_to_kickoff"],
                     "cross_book_reference_used": False,
+                    "canonical_fixture_selection": True,
+                    "eligible_fixture_candidate_count": len(ranked),
+                    "eligible_fixture_candidate_rank": ranks.get(id(item)),
+                    "existing_fixture_pick": existing_fixture_pick,
+                    "best_current_candidate": (
+                        None
+                        if best_current is None
+                        else {
+                            "bookmaker_id": int(best_current["pair"]["bookmaker_id"]),
+                            "bookmaker_name": str(best_current["pair"]["bookmaker_name"]),
+                            "line": float(best_current["line"]),
+                            "selection": str(best_current["selection"]),
+                            "odds": float(best_current["odds"]),
+                            "edge": float(best_current["edge"]),
+                            "expected_value": float(best_current["expected_value"]),
+                        }
+                    ),
+                    "ranking_order": (
+                        "expected_value",
+                        "edge",
+                        "odds",
+                        "deterministic_tiebreakers",
+                    ),
                     "thresholds": {
                         "min_edge": MIN_EDGE,
                         "min_expected_value": MIN_EXPECTED_VALUE,
