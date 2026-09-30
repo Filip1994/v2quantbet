@@ -330,6 +330,9 @@ def test_goallab_analytics_is_a_separate_tab() -> None:
     assert "Market × selection × entry odds" in analytics
     assert "Expected total goals" in analytics
     assert "Home − away expected-goal spread" in analytics
+    assert "Recorded pre-match features" in analytics
+    assert "Home L5 goals for" in analytics
+    assert "Away L5 shots on target" in analytics
     assert "Calibration" in analytics
     assert "GoalLab Research / Audit" in analytics
     assert "CANONICAL_FIXTURE_VALUE_PICK" in analytics
@@ -580,6 +583,8 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
     assert "Expected total corners" in html
     assert "Expected corners − line" in html
     assert "Market × expected total corners" in html
+    assert "Recorded pre-match features" in html
+    assert "Home L5 corners for" in html
     assert "Calibration" in html
     assert "GoalLab Research / Audit" not in html
     assert ">CardLab<" not in html
