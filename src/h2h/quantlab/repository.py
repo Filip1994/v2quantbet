@@ -978,23 +978,59 @@ class PostgreSQLQuantLabRepository:
             )
             return cursor.rowcount > 0
 
+    def context_shadow_bet_exists(self, fixture_id: str, *, lab: str) -> bool:
+        if lab not in {"CORNER", "CARD"}:
+            raise ValueError("context shadow bet lab must be CORNER or CARD")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS ("
+                " SELECT 1 FROM quantlab_shadow_bets "
+                " WHERE fixture_id = %s AND lab = %s"
+                ")",
+                (fixture_id, lab),
+            )
+            row = cursor.fetchone()
+        return bool(row and row[0])
+
     def save_context_shadow_bet(self, item: Any, *, stake_minor: int) -> bool:
         if item.lab not in {"CORNER", "CARD"}:
             raise ValueError("context shadow bet lab must be CORNER or CARD")
         if item.decision != "PICK":
             raise ValueError("only PICK decisions may create shadow bets")
-        shadow_identity = {
-            "fixture_id": item.fixture_id,
-            "lab": item.lab,
-            "market_key": item.market_key,
-            "selection": item.selection,
-            "line": item.line,
-        }
-        if item.lab == "CARD":
-            shadow_identity["bookmaker_id"] = item.bookmaker_id
-            shadow_identity["policy_version"] = item.policy_version
+
+        if item.lab == "CORNER":
+            shadow_identity = {
+                "fixture_id": item.fixture_id,
+                "lab": item.lab,
+            }
+        else:
+            shadow_identity = {
+                "fixture_id": item.fixture_id,
+                "lab": item.lab,
+                "market_key": item.market_key,
+                "selection": item.selection,
+                "line": item.line,
+                "bookmaker_id": item.bookmaker_id,
+                "policy_version": item.policy_version,
+            }
+
         shadow_bet_id = _identifier("quantlab-shadow-v1:", shadow_identity)
         with self.connect() as connection, connection.cursor() as cursor:
+            if item.lab == "CORNER":
+                # Serialize concurrent attempts for the same fixture and keep historical
+                # multi-pick rows untouched while guaranteeing one new CornerLab exposure.
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"quantlab:corner:{item.fixture_id}",),
+                )
+                cursor.execute(
+                    "SELECT 1 FROM quantlab_shadow_bets "
+                    "WHERE fixture_id = %s AND lab = 'CORNER' LIMIT 1",
+                    (item.fixture_id,),
+                )
+                if cursor.fetchone() is not None:
+                    return False
+
             cursor.execute(
                 "INSERT INTO quantlab_shadow_bets ("
                 "shadow_bet_id, fixture_id, lab, bookmaker_id, bookmaker_name, provider_bet_id, "
