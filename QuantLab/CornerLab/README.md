@@ -9,7 +9,7 @@ source.
 
 Policy:
 
-- `CORNERLAB_PRESSURE_POISSON_POLICY_V2`
+- `CORNERLAB_PRESSURE_POISSON_POLICY_V3`
 
 Model family:
 
@@ -130,7 +130,7 @@ to calculate the de-vig market probability, edge and EV.
 
 ## Shadow value policy
 
-A V2 PICK requires:
+A V3 PICK requires:
 
 - edge >= 3 percentage points
 - EV >= 3%
@@ -138,8 +138,22 @@ A V2 PICK requires:
 - quote age <= 13 hours
 - at least 15 minutes to kickoff
 
-For one line, if multiple books/directions qualify, only the highest-EV candidate becomes
-PICK. Other qualifying candidates are PASS / `BETTER_VALUE_AVAILABLE`.
+CornerLab emits at most **one canonical PICK per fixture**. All qualifying lines,
+directions and bookmakers are ranked fixture-wide by:
+
+1. expected value (descending);
+2. edge (descending);
+3. odds (descending);
+4. deterministic tie-breakers only.
+
+The highest-ranked candidate becomes PICK / `CANONICAL_FIXTURE_VALUE_PICK`.
+Every other qualifying candidate remains in the decision ledger as
+PASS / `BETTER_FIXTURE_VALUE_AVAILABLE`.
+
+If a CornerLab shadow bet already exists for the fixture, later refresh cycles cannot
+create another exposure; newly qualifying alternatives are recorded as
+PASS / `FIXTURE_PICK_ALREADY_EXISTS`. Historical pre-V3 multi-pick rows are preserved
+as immutable research evidence.
 
 Everything remains shadow-only. CornerLab does not write production registered picks,
 production model state or bankroll state.
