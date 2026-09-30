@@ -16,6 +16,7 @@ from h2h.quantlab.card_lab.context import (
     parse_fixture_statistics,
 )
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
+from h2h.quantlab.card_lab.referee import referee_key
 from h2h.quantlab.card_lab.settlement import (
     parse_1xbet_card_events,
     settle_card_shadow_bet,
@@ -66,9 +67,11 @@ class QuantLabRuntimeSettings:
     corner_team_statistics_per_cycle: int = 360
     corner_team_history_refresh_seconds: int = 21600
     card_referee_history_target: int = 8
-    card_referee_history_lookback_days: int = 400
-    card_referee_history_scopes_per_cycle: int = 8
-    card_referee_statistics_per_cycle: int = 64
+    card_referee_history_lookback_days: int = 1100
+    card_referee_prior_seasons: int = 3
+    card_referee_history_days_per_cycle: int = 12
+    card_referee_history_scopes_per_cycle: int = 24
+    card_referee_statistics_per_cycle: int = 128
     card_referee_history_refresh_seconds: int = 604800
     card_referee_statistics_retry_seconds: int = 86400
     league_coverage_refresh_seconds: int = 21600
@@ -97,6 +100,7 @@ class QuantLabRuntimeSettings:
             ("corner_team_history_refresh_seconds", self.corner_team_history_refresh_seconds),
             ("card_referee_history_target", self.card_referee_history_target),
             ("card_referee_history_lookback_days", self.card_referee_history_lookback_days),
+            ("card_referee_history_days_per_cycle", self.card_referee_history_days_per_cycle),
             ("card_referee_history_scopes_per_cycle", self.card_referee_history_scopes_per_cycle),
             ("card_referee_statistics_per_cycle", self.card_referee_statistics_per_cycle),
             ("card_referee_history_refresh_seconds", self.card_referee_history_refresh_seconds),
@@ -108,6 +112,7 @@ class QuantLabRuntimeSettings:
         for name, value in (
             ("discovery_lookback_days", self.discovery_lookback_days),
             ("history_backfill_per_cycle", self.history_backfill_per_cycle),
+            ("card_referee_prior_seasons", self.card_referee_prior_seasons),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be non-negative")
@@ -987,20 +992,26 @@ class QuantLabRuntime:
         now: datetime,
     ) -> tuple[int, int, frozenset[str]]:
         """Fill referee history from league fixtures, then fetch only missing match stats."""
-        targets = self._card_referee_history_targets(now)
-        if not targets:
+        current_targets = self._card_referee_history_targets(now)
+        if not current_targets:
             return 0, 0, frozenset()
-
         target_referees: dict[str, str] = {}
-        for referees in targets.values():
+        for referees in current_targets.values():
             for referee in referees:
-                target_referees.setdefault(referee.casefold(), referee)
+                target_referees.setdefault(referee_key(referee), referee)
         baseline_samples = {
-            referee_key: self._card_history_sample_size(
+            key: self._card_history_sample_size(
                 self._repository.referee_history(referee, decision_at=now)
             )
-            for referee_key, referee in target_referees.items()
+            for key, referee in target_referees.items()
         }
+        self._scan_card_referee_days(now)
+        targets: dict[tuple[int, int], set[str]] = {}
+        for (league_id, season), referees in current_targets.items():
+            for prior in range(self._settings.card_referee_prior_seasons + 1):
+                historical_season = season - prior
+                if historical_season > 0:
+                    targets.setdefault((league_id, historical_season), set()).update(referees)
         LOGGER.info(
             "QuantLab CardLab referee bootstrap targets scopes=%d referees=%d",
             len(targets),
@@ -1015,8 +1026,21 @@ class QuantLabRuntime:
 
         for (league_id, season), referees in sorted(
             targets.items(),
-            key=lambda item: (-len(item[1]), item[0][0], item[0][1]),
+            key=lambda item: (-len(item[1]), -item[0][1], item[0][0]),
         ):
+            active_referees: set[str] = set()
+            for referee in referees:
+                current_sample = self._card_history_sample_size(
+                    self._repository.referee_history(referee, decision_at=now)
+                )
+                key = referee_key(referee)
+                if current_sample > baseline_samples.get(key, 0):
+                    updated_referees.add(key)
+                    baseline_samples[key] = current_sample
+                if current_sample < self._settings.card_referee_history_target:
+                    active_referees.add(referee)
+            if not active_referees:
+                continue
             if (
                 scopes_refreshed < self._settings.card_referee_history_scopes_per_cycle
                 and self._repository.referee_history_scope_due(
@@ -1059,17 +1083,17 @@ class QuantLabRuntime:
                     season,
                     response_count,
                     saved_contexts,
-                    len(referees),
+                    len(active_referees),
                 )
 
-            for referee in sorted(referees):
-                referee_key = referee.casefold()
+            for referee in sorted(active_referees):
+                referee_key_value = referee_key(referee)
                 history = self._repository.referee_history(referee, decision_at=now)
                 current_sample = self._card_history_sample_size(history)
-                baseline_sample = baseline_samples.get(referee_key, 0)
+                baseline_sample = baseline_samples.get(referee_key_value, 0)
                 if current_sample > baseline_sample:
-                    updated_referees.add(referee_key)
-                    baseline_samples[referee_key] = current_sample
+                    updated_referees.add(referee_key_value)
+                    baseline_samples[referee_key_value] = current_sample
                     LOGGER.info(
                         "QuantLab CardLab referee history unlocked referee=%s sample=%d",
                         referee,
@@ -1116,9 +1140,9 @@ class QuantLabRuntime:
                     statistics_backfilled += 1
                     history = self._repository.referee_history(referee, decision_at=now)
                     current_sample = self._card_history_sample_size(history)
-                    if current_sample > baseline_samples.get(referee_key, 0):
-                        updated_referees.add(referee_key)
-                        baseline_samples[referee_key] = current_sample
+                    if current_sample > baseline_samples.get(referee_key_value, 0):
+                        updated_referees.add(referee_key_value)
+                        baseline_samples[referee_key_value] = current_sample
 
         LOGGER.info(
             "QuantLab CardLab referee bootstrap completed scopes_refreshed=%d "
@@ -1129,6 +1153,65 @@ class QuantLabRuntime:
             len(updated_referees),
         )
         return scopes_refreshed, statistics_backfilled, frozenset(updated_referees)
+
+    def _scan_card_referee_days(self, now: datetime) -> int:
+        """Index finished referee fixtures across competitions, newest dates first."""
+        first_day = (now - timedelta(days=self._settings.card_referee_history_lookback_days)).date()
+        last_day = now.date() - timedelta(days=1)
+        days = self._repository.unscanned_referee_history_days(
+            first_day=first_day,
+            last_day=last_day,
+            limit=self._settings.card_referee_history_days_per_cycle,
+        )
+        scanned = 0
+        for day in days:
+            try:
+                first = self._provider.fetch_fixtures_for_date(day)
+                paging = first.get("paging")
+                if not isinstance(paging, dict):
+                    raise TypeError("referee date response has no paging")
+                total_pages = int(paging.get("total") or 0)
+                if not 1 <= total_pages <= 20:
+                    raise ValueError(f"referee date response has invalid page count: {total_pages}")
+                response_count = 0
+                referee_count = 0
+                for page in range(1, total_pages + 1):
+                    payload = first if page == 1 else self._provider.fetch_fixtures_for_date(day, page=page)
+                    if payload.get("errors"):
+                        raise RuntimeError(f"API-Football referee date errors: {payload['errors']}")
+                    response = payload.get("response")
+                    if not isinstance(response, list):
+                        raise TypeError("referee date response must be a list")
+                    response_count += len(response)
+                    selected = [
+                        item for item in response
+                        if isinstance(item, dict)
+                        and isinstance(item.get("fixture"), dict)
+                        and referee_key(item["fixture"].get("referee"))
+                        and isinstance(item["fixture"].get("status"), dict)
+                        and item["fixture"]["status"].get("short") in {"FT", "AET", "PEN"}
+                    ]
+                    selected_payload = {"errors": [], "response": selected}
+                    observations = parse_fixture_discovery_response(selected_payload, captured_at=now)
+                    self._repository.save_fixture_observations(observations)
+                    referee_count += self._persist_team_history_contexts(
+                        selected_payload, observations, now
+                    )
+                self._repository.save_referee_day_scan(
+                    scan_date=day,
+                    captured_at=now,
+                    response_fixture_count=response_count,
+                    referee_fixture_count=referee_count,
+                    page_count=total_pages,
+                )
+                scanned += 1
+            except ApiBudgetExceededError:
+                raise
+            except Exception:
+                LOGGER.exception("QuantLab CardLab referee date scan failed date=%s", day)
+        if scanned:
+            LOGGER.info("QuantLab CardLab referee date scans completed days=%d", scanned)
+        return scanned
 
     def _collect_upcoming(
         self,
@@ -1196,8 +1279,8 @@ class QuantLabRuntime:
                 if context is None:
                     continue
                 referee = context.get("referee")
-                referee_key = str(referee or "").strip().casefold()
-                force_snapshot = bool(referee_key and referee_key in force_card_referees)
+                referee_key_value = referee_key(referee)
+                force_snapshot = bool(referee_key_value and referee_key_value in force_card_referees)
                 if (
                     not force_snapshot
                     and not self._repository.feature_snapshot_due(

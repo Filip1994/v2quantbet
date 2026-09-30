@@ -10,6 +10,7 @@ from h2h.quantlab.card_lab.rivalry import (
     RIVALRY_REGISTRY_VERSION,
     rivalry_indicator,
 )
+from h2h.quantlab.card_lab.referee import referee_key
 
 
 CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V1"
@@ -102,7 +103,7 @@ def referee_rates(
         available_utc = _utc(available_at, "history.available_at")
         if kickoff_utc >= decision or available_utc > decision:
             continue
-        if referee and str(row.get("referee") or "").strip().casefold() != referee.strip().casefold():
+        if referee and referee_key(row.get("referee")) != referee_key(referee):
             continue
 
         yellow = _number(row.get("yellow_cards"))

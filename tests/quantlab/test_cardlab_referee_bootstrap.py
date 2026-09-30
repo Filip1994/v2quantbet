@@ -1,6 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from h2h.quantlab.card_lab.context import parse_fixture_contexts_from_fixture_response
+from h2h.quantlab.card_lab.features import referee_rates
+from h2h.quantlab.card_lab.referee import referee_key
 
 
 NOW = datetime(2026, 9, 27, 21, 0, tzinfo=UTC)
@@ -105,6 +107,9 @@ def test_targeted_referee_bootstrap_uses_one_scope_call_and_stops_at_target() ->
         def referee_history_scope_due(self, league_id, season, **_kwargs):
             assert (league_id, season) == (39, 2026)
             return True
+
+        def unscanned_referee_history_days(self, **_kwargs):
+            return ()
 
         def save_fixture_observations(self, observations):
             self.observations.extend(observations)
@@ -212,6 +217,9 @@ def test_scope_context_unlocks_existing_referee_statistics_for_same_cycle_refres
         def referee_history_scope_due(self, *_args, **_kwargs):
             return True
 
+        def unscanned_referee_history_days(self, **_kwargs):
+            return ()
+
         def save_fixture_observations(self, observations):
             return len(tuple(observations))
 
@@ -273,3 +281,176 @@ def test_collect_upcoming_can_force_snapshot_after_referee_history_change() -> N
     assert "force_card_referees" in source
     assert "force_snapshot" in source
     assert "feature_snapshot_due" in source
+
+
+def test_prior_season_country_suffix_matches_current_referee() -> None:
+    history = ({
+        "referee": "Espen Eskas, Norway",
+        "kickoff_at": datetime(2024, 10, 10, 18, tzinfo=UTC),
+        "available_at": datetime(2026, 9, 1, tzinfo=UTC),
+        "yellow_cards": 4,
+        "red_cards": 1,
+        "second_yellow_cards": None,
+        "fouls": 24,
+    },)
+    cards, _fouls, card_n, _foul_n = referee_rates(
+        history, referee="Espen Eskas", decision_at=NOW
+    )
+    assert referee_key(" Espen  Eskas, Norway ") == referee_key("Espen Eskas")
+    assert card_n == 1
+    assert cards.value == 5
+
+
+def test_referee_bootstrap_checks_prior_seasons_with_wider_date_window() -> None:
+    from types import MethodType
+
+    from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+
+    class Repo:
+        def __init__(self) -> None:
+            self.captures = []
+            self.contexts = []
+
+        def referee_history(self, *_args, **_kwargs):
+            return ()
+
+        def referee_history_scope_due(self, *_args, **_kwargs):
+            return True
+
+        def unscanned_referee_history_days(self, **_kwargs):
+            return ()
+
+        def save_fixture_observations(self, observations):
+            return len(tuple(observations))
+
+        def save_fixture_context(self, context):
+            self.contexts.append(context)
+
+        def save_referee_history_scope_capture(self, **kwargs):
+            self.captures.append(kwargs)
+
+        def referee_statistics_backfill_candidates(self, *_args, **_kwargs):
+            return ()
+
+    class Provider:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def fetch_completed_league_fixtures(self, league_id, season, *, start_date, end_date):
+            self.calls.append((league_id, season, start_date, end_date))
+            if season != 2024:
+                return {"errors": [], "response": []}
+            return {
+                "errors": [],
+                "response": [{
+                    "fixture": {
+                        "id": 12345,
+                        "date": "2024-10-10T18:00:00+00:00",
+                        "referee": "Espen Eskas, Norway",
+                        "status": {"short": "FT"},
+                    },
+                    "league": {
+                        "id": 5, "name": "UEFA Nations League", "country": "World",
+                        "type": "Cup", "season": 2024,
+                    },
+                    "teams": {
+                        "home": {"id": 10, "name": "Home"},
+                        "away": {"id": 11, "name": "Away"},
+                    },
+                }],
+            }
+
+    repo, provider = Repo(), Provider()
+    runtime = QuantLabRuntime(
+        repo,
+        provider,
+        settings=QuantLabRuntimeSettings(
+            card_referee_history_lookback_days=1100,
+            card_referee_prior_seasons=2,
+        ),
+        clock=lambda: NOW,
+    )
+    runtime._card_referee_history_targets = MethodType(
+        lambda self, _now: {(5, 2026): {"Espen Eskas"}}, runtime
+    )
+
+    scopes, stats, _updated = runtime._bootstrap_card_referee_history(NOW)
+
+    assert scopes == 3
+    assert stats == 0
+    assert [call[1] for call in provider.calls] == [2026, 2025, 2024]
+    assert provider.calls[-1][2].year <= 2024
+    assert len(repo.contexts) == 1
+    assert repo.contexts[0].referee == "Espen Eskas, Norway"
+
+
+def test_cross_competition_day_scan_persists_only_finished_referee_fixtures() -> None:
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    scan_day = date(2026, 9, 20)
+
+    class Repo:
+        def __init__(self) -> None:
+            self.observations = []
+            self.contexts = []
+            self.scans = []
+
+        def unscanned_referee_history_days(self, **kwargs):
+            assert kwargs["limit"] == 12
+            return (scan_day,)
+
+        def save_fixture_observations(self, observations):
+            self.observations.extend(observations)
+
+        def save_fixture_context(self, context):
+            self.contexts.append(context)
+
+        def save_referee_day_scan(self, **kwargs):
+            self.scans.append(kwargs)
+
+    def fixture(fixture_id, referee, status):
+        return {
+            "fixture": {
+                "id": fixture_id, "date": "2026-09-20T18:00:00+00:00",
+                "referee": referee, "status": {"short": status},
+            },
+            "league": {
+                "id": 140, "name": "La Liga", "country": "Spain",
+                "type": "League", "season": 2026,
+            },
+            "teams": {
+                "home": {"id": 10, "name": "Home"},
+                "away": {"id": 11, "name": "Away"},
+            },
+        }
+
+    class Provider:
+        def __init__(self) -> None:
+            self.pages = []
+
+        def fetch_fixtures_for_date(self, fixture_date, *, page=1):
+            assert fixture_date == scan_day
+            self.pages.append(page)
+            return {
+                "errors": [], "paging": {"current": page, "total": 2},
+                "response": (
+                    [fixture(1, "Alejandro Hernandez", "FT"), fixture(2, None, "FT")]
+                    if page == 1 else
+                    [fixture(3, "Espen Eskas, Norway", "AET"), fixture(4, "Other", "NS")]
+                ),
+            }
+
+    repo, provider = Repo(), Provider()
+    runtime = QuantLabRuntime(repo, provider, clock=lambda: NOW)
+
+    assert runtime._scan_card_referee_days(NOW) == 1
+    assert provider.pages == [1, 2]
+    assert {item.fixture.fixture_id for item in repo.observations} == {
+        "api-football:1", "api-football:3",
+    }
+    assert {item.referee for item in repo.contexts} == {
+        "Alejandro Hernandez", "Espen Eskas, Norway",
+    }
+    assert repo.scans[0]["response_fixture_count"] == 4
+    assert repo.scans[0]["referee_fixture_count"] == 2
+    assert repo.scans[0]["page_count"] == 2

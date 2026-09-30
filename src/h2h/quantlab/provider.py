@@ -72,12 +72,19 @@ class QuantLabApiFootballClient:
             raise ValueError("fixture_id must be a positive integer")
         return self._get("fixtures", {"id": fixture_id, "timezone": "UTC"}, cache_ttl_seconds=3600.0)
 
-    def fetch_fixtures_for_date(self, fixture_date: date) -> Mapping[str, Any]:
+    def fetch_fixtures_for_date(
+        self, fixture_date: date, *, page: int = 1
+    ) -> Mapping[str, Any]:
         if isinstance(fixture_date, datetime) or not isinstance(fixture_date, date):
             raise TypeError("fixture_date must be a date")
+        if isinstance(page, bool) or not isinstance(page, int) or page <= 0:
+            raise ValueError("page must be a positive integer")
+        params: dict[str, object] = {"date": fixture_date.isoformat(), "timezone": "UTC"}
+        if page > 1:
+            params["page"] = page
         return self._get(
             "fixtures",
-            {"date": fixture_date.isoformat(), "timezone": "UTC"},
+            params,
             cache_ttl_seconds=21600.0,
         )
 
