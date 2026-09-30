@@ -167,6 +167,8 @@ def _odds_bucket(value: Any) -> str:
 
 
 def counterfactual_outcome(row: dict[str, Any]) -> str:
+    if row.get("production_manual_void"):
+        return "VOID"
     classification = row.get("result_classification")
     if classification == "NON_PLAYED_VOIDABLE":
         return "VOID"

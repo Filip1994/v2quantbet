@@ -245,7 +245,9 @@ class PostgreSQLResearchSignalRepository:
                 "e.edge, e.expected_value, e.quote_observed_at, e.selected_captured_at, "
                 "e.source, closing.odd, closing.observed_at, closing.captured_at, "
                 "state.phase, result.result_classification, result.provider_status, "
-                "result.regulation_home_goals, result.regulation_away_goals "
+                "result.regulation_home_goals, result.regulation_away_goals, "
+                "(settlement.event_kind = 'MANUAL_VOID' AND settlement.outcome = 'VOID') "
+                "AS production_manual_void "
                 "FROM research_signals rs "
                 "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id "
                 "JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id "
@@ -268,6 +270,10 @@ class PostgreSQLResearchSignalRepository:
                 "ON state.fixture_id = e.fixture_id "
                 "LEFT JOIN fixture_result_observations result "
                 "ON result.result_observation_id = state.current_observation_id "
+                "LEFT JOIN LATERAL (SELECT pse.event_kind, pse.outcome "
+                "FROM pick_settlement_events pse WHERE pse.pick_id = rs.production_pick_id "
+                "ORDER BY pse.occurred_at DESC, pse.settlement_event_id DESC LIMIT 1) "
+                "settlement ON TRUE "
                 "ORDER BY rs.qualified_at DESC, rs.evaluation_id DESC LIMIT %s OFFSET %s",
                 (limit, offset),
             )
@@ -286,7 +292,7 @@ class PostgreSQLResearchSignalRepository:
                 "odds", "edge", "expected_value", "quote_observed_at", "quote_captured_at",
                 "source", "closing_odds", "closing_observed_at", "closing_captured_at",
                 "result_phase", "result_classification", "result_provider_status",
-                "regulation_home_goals", "regulation_away_goals",
+                "regulation_home_goals", "regulation_away_goals", "production_manual_void",
             )
             return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
 

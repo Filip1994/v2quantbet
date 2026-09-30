@@ -64,7 +64,20 @@ def signal_row():
         "result_provider_status": "FT",
         "regulation_home_goals": 1,
         "regulation_away_goals": 1,
+        "production_manual_void": False,
     }
+
+
+def test_production_manual_void_is_reflected_in_research():
+    row = signal_row()
+    row["result_classification"] = "NON_TERMINAL"
+    row["result_provider_status"] = "PST"
+    row["regulation_home_goals"] = None
+    row["regulation_away_goals"] = None
+    row["production_manual_void"] = True
+
+    assert counterfactual_outcome(row) == "VOID"
+    assert counterfactual_pnl_minor(row, 10000) == 0
 
 
 class Repository:
