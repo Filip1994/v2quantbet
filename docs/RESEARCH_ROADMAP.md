@@ -1,54 +1,60 @@
 # QuantBet Research Roadmap
 
-**Status:** Future side project — not part of the current production implementation.
+**Status:** Operational — no longer a deferred side project  
+**Last synchronized:** 2026-09-30
 
-**Recorded:** 2026-09-12 19:16 (Europe/Belgrade)
+## Current foundation
 
-## Purpose
+Research already has:
 
-Build a separate research capability that can use long-term historical football and odds data to discover patterns, engineer features, train models, and eventually produce independently evaluated research signals.
+- canonical final-gate candidate capture;
+- PLAYED / SKIPPED / BLOCKED_EXPOSURE routes;
+- immutable decision context;
+- raw model probability, market fair probability, edge, EV and odds;
+- settlement linkage;
+- same-book closing/CLV when available;
+- bucket/cohort analytics;
+- model/policy regime dimensions;
+- time-sliced stability views;
+- drilldowns to exact picks.
 
-## Scope deferred for later
+## Roadmap
 
-- Long-term collection of API-Football data.
-- Continuous pre-match odds collection, including a configurable scan window such as 72 hours before kickoff.
-- Immutable storage of raw API responses and odds observations.
-- Historical odds movement analysis for `OU_25` and `BTTS` first.
-- Feature engineering using fixtures, teams, leagues, results, statistics, events, injuries, lineups, and other available provider data.
-- Research datasets, backtesting, model training, experiment tracking, and model versioning.
-- A separate research signal layer that can propose candidate picks without directly changing production decisions.
+### 1. Evidence quality
 
-## Data-infrastructure direction
+Add stronger uncertainty and stability reporting:
 
-Railway should primarily host operational production services and hot data. It should not be treated as the permanent archive for every raw API response.
+- ROI confidence/uncertainty interval;
+- 30/60/90-day stability;
+- league breadth;
+- bookmaker consistency;
+- regime consistency.
 
-The future architecture should separate:
+### 2. Coverage diagnostics
 
-1. **Production storage:** active fixtures, current market state, operational records, and data needed for live QuantBet decisions.
-2. **Archive storage:** immutable raw API responses and historical odds data in external object storage, preferably an S3-compatible service.
-3. **Research storage/compute:** analytical datasets such as Parquet, queried with an analytical engine such as DuckDB or a dedicated warehouse when scale requires it.
+Expose why candidates disappear from the funnel:
 
-No historical odds data should be deleted merely to control Railway storage growth. Retention and archival policies must preserve the raw source data.
+```text
+discovered
+→ modelable
+→ quote eligible
+→ value evaluated
+→ final-gate research candidate
+→ Production / blocked / skipped
+```
 
-## Research isolation rules
+### 3. Owner review workflow
 
-- Research must not directly modify production picks, bankroll, risk controls, or settlement records.
-- Production and research may share canonical schemas, fixture identifiers, market definitions, and validation contracts.
-- Research signals must be versioned, backtested, and independently evaluated before any production integration.
-- A Git branch is not sufficient runtime isolation; research should eventually run as a separate process/service with separate configuration.
+Research should make candidate Production rules easy to inspect, but it must not auto-promote them.
 
-## Deferred implementation sequence
+The owner may approve a bucket without a mandatory forward/OOS waiting period. When forward evidence exists, show it separately from discovery history.
 
-1. Build reliable production ingestion and canonical odds normalization.
-2. Measure actual API response sizes, request volume, and storage growth.
-3. Add immutable raw-response archiving.
-4. Add configurable 72-hour pre-match collection and scheduling.
-5. Build research ETL and historical datasets.
-6. Implement feature engineering and reproducible backtests.
-7. Train and evaluate research models.
-8. Expose research signals as a separate, controlled interface.
-9. Consider production integration only after objective validation.
+### 4. Ban monitoring
 
-## Current decision
+For existing Production buckets, maintain enough evidence to support a deliberate 3–6 month performance review.
 
-Research is intentionally deferred. The immediate priority is to validate the API-Football response format and build the smallest reliable production ingestion path before implementing research infrastructure.
+Immediate suspension remains reserved for technical-integrity failures.
+
+### 5. Long-term archive/analytics
+
+As data volume grows, retain the option to introduce object-storage/columnar archival for raw historical payloads. PostgreSQL remains the current canonical operational database; archive infrastructure should be added only when scale justifies it.

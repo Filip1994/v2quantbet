@@ -1,41 +1,67 @@
 # QuantLab Roadmap
 
-## Foundation — current
+_Last synchronized: 2026-09-30_
 
-- separate Railway service
-- separate API category
-- shared shadow ledger
-- three-tab dashboard
-- repository architecture split into GoalLab / CornerLab / CardLab
-- documentation and mandatory work log
+## Foundation
 
-## Phase 1 — market ingestion
+**Status: complete/operational**
 
-Collect every supported pre-match market returned for Bet365 and 1xBet while preserving raw provider bet IDs/names/selections and timestamps.
+- separate runtime/services;
+- independent QuantLab data ownership;
+- GoalLab / CornerLab / CardLab;
+- shared market/stat/context collection;
+- shadow/canonical lab decision evidence;
+- settlement;
+- dashboard and analytics.
 
-## Phase 2 — lab feature stores
+## GoalLab
 
-### GoalLab
-DC+ core, recent form, home/away splits, rest and congestion.
+**Current:** DC+ Pro Structural V3 with compact V2 structural features.
 
-### CornerLab
-historical corners for/against, home/away splits, recent corner form and relevant attacking-pressure proxies.
+Next:
 
-### CardLab
-team card/foul profile plus the five immediate context variables defined in `CardLab/FEATURES_V1.md`.
+- clearer league-specific vs pooled-control validation;
+- macro-by-league validation reporting;
+- continue exact-hash manual authority;
+- maintain leakage-safe feature discipline.
 
-## Phase 3 — shadow models
+## CornerLab
 
-Generate model probabilities, devig market probabilities, edge and EV without production writes.
+**Current:** pressure-Poisson structural model.
 
-## Phase 4 — settlement
+Next:
 
-Settle all supported market semantics and maintain flat-stake P&L, ROI, CLV and drawdown.
+- increase team/stat history coverage;
+- historical aligned bookmaker evaluation;
+- monitor overdispersion;
+- evaluate Negative Binomial only when the data justify it;
+- improve coverage/dropout diagnostics.
 
-## Phase 5 — walk-forward evaluation
+## CardLab
 
-Compare model versions only with time-valid features and out-of-sample walk-forward evaluation.
+**Current:** referee-Poisson on 1xBet Cards Over/Under.
 
-## Promotion
+Next:
 
-Any production promotion requires a separate explicit decision and is outside QuantLab's automatic authority.
+- referee-history coverage;
+- canonical historical card outcomes;
+- league/team discipline context;
+- hierarchical/shrunk referee rates;
+- no expansion to ambiguous settlement semantics until canonical.
+
+## Analytics
+
+Current Watchlist remains exploratory and owner-facing.
+
+Next evidence improvements:
+
+- ROI uncertainty;
+- 30/60/90-day stability;
+- league/bookmaker breadth;
+- clearer discovery vs post-approval tracking.
+
+## Production promotion
+
+There is no automatic QuantLab promotion.
+
+Explicit owner approval is required. Forward/OOS confirmation is advisory, not mandatory.

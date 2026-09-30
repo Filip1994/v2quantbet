@@ -1,352 +1,175 @@
 # QuantBet Research Analysis Framework
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-30_
 
-This document defines the research dataset, current bucketization, cohort semantics, derived metrics, and the intended workflow for making future Production more selective without contaminating the research sample.
+This document defines the current Research universe, bucket semantics, analytics metrics and Production-governance boundary.
 
 ## 1. Core principle
 
-Research is the superset of Production.
+Research is a read-only analytical superset of comparable Production candidates.
 
-A fixture enters the Research universe when its canonical candidate reaches the final production-eligibility boundary. Research must contain both:
+Production is not a separate “better” sample. Research must preserve enough context to compare what was played, skipped or blocked only by exposure.
 
-- candidates that become real-money Production picks;
-- candidates that would otherwise be Production-eligible but are rejected only because the open-exposure cap is full.
+## 2. Canonical row
 
-The purpose is to build one comparable dataset from which future Production filters can be learned. Production must not be treated as a separate "better" sample.
+Research uses one canonical candidate per fixture at the common research decision stage.
 
-Research remains read-only and must never change registration, bankroll, exposure, staking, settlement, model training, calibration, or any other Production behavior.
+For Production picks that later pass final quote verification/repricing, Research retains the comparable preliminary decision-stage evidence rather than mixing later Production pricing with earlier exposure-blocked pricing.
 
-## 2. Canonical unit
+## 3. Routes
 
-Research uses exactly one canonical pick per fixture.
-
-The canonical row is the candidate used at the common research decision stage. For Production picks that later go through final-quote verification/repricing, Research uses the original preliminary candidate evaluation so that Production and exposure-blocked cohorts are compared at the same stage.
-
-This avoids comparing:
-
-- a Production pick at a later repriced quote;
-- against an exposure-blocked pick at an earlier preliminary quote.
-
-Historical data is also projected to one research row per fixture.
-
-## 3. Research dispositions / routes
-
-Every Research row belongs to one of these routes:
-
-| Disposition | Meaning |
+| Route | Meaning |
 |---|---|
-| `PLAYED` | Candidate registered in Production and left as played. |
-| `SKIPPED` | Candidate registered in Production but later manually skipped. |
-| `BLOCKED_EXPOSURE` | Candidate passed the relevant gates and the sole preliminary rejection was `MAX_OPEN_EXPOSURE_EXCEEDED`. |
+| `PLAYED` | Registered Production candidate treated as played/effective for operator tracking. |
+| `SKIPPED` | Registered Production candidate later explicitly skipped. |
+| `BLOCKED_EXPOSURE` | Candidate passed the relevant final-gate logic and was blocked by open exposure. |
 
-Important: candidates rejected for other reasons are not part of this Research universe. Raw `value_evaluations` remain available for deeper model diagnostics, but they are a different dataset.
+Earlier failures remain available in lower-level diagnostics but are not mixed into this final-gate universe.
 
-Examples of candidates that should **not** be mixed into the final-gate Research universe include rows failing edge, EV, odds, timing, freshness, or other eligibility checks.
+## 4. Core stored evidence
 
-## 4. Current Production settings — do not infer quality from these
+Preserve:
 
-Current fixed Production settings remain independent from Research:
-
-- minimum edge: **7%**
-- minimum expected value: **7%**
-- fixed stake: **300 RSD**
-- maximum PLAYED/open exposure: **3,000 RSD**
-- Kelly staking: **not enabled**
-- Production default state: **PLAYED**
-- manual `SKIPPED` picks remain audit/history and do not consume the hard exposure cap
-
-These values are not evidence that the corresponding region is optimal. They are the current operating policy while data is accumulated.
-
-## 5. Current Research buckets
-
-### 5.1 Model probability buckets
-
-These buckets use the model probability, not market probability:
-
-- `40–45%`
-- `45–50%`
-- `50–55%`
-- `55–60%`
-- `60–65%`
-- `65–70%`
-- `70–75%`
-- `75%+`
-
-### 5.2 Expected-value buckets
-
-- `7–10%`
-- `10–15%`
-- `15–20%`
-- `20–30%`
-- `30%+`
-
-### 5.3 Odds buckets
-
-- `1.40–1.60`
-- `1.61–1.80`
-- `1.81–2.00`
-- `2.01–2.50`
-- `2.51–3.00`
-- `3.01–3.50`
-- `other`
-
-### 5.4 Market fair probability buckets — TODO
-
-Market fair probability is currently stored/displayed but is **not yet bucketed**.
-
-It should be added as a separate analytical dimension. The exact bucket boundaries should be chosen before implementation and then kept stable long enough to accumulate comparable data.
-
-Do not confuse:
-
-- **model probability** — our estimated event probability;
-- **market fair probability** — de-vigged / fair probability implied by the market.
-
-The difference between them contributes to measured edge, but they should also be analyzed separately.
-
-## 6. Markets currently covered
-
-Research counterfactual settlement currently supports:
-
-- `OU_25`
-- `BTTS`
-
-Market and selection must always be retained as analysis dimensions because performance can differ materially across markets even when model probability or EV is similar.
-
-## 7. Research entry data to preserve
-
-For each canonical research candidate, preserve enough information to reproduce the decision context:
-
-- fixture identity;
-- league / competition;
-- kickoff;
-- market;
-- selection;
+- fixture / competition / kickoff;
+- market / selection;
+- bookmaker/source;
+- entry odds;
 - model probability;
 - market fair probability;
-- entry odds;
 - edge;
-- expected value;
-- bookmaker;
-- source;
-- quote observation/capture timestamps;
-- quote age / freshness classification;
-- probability bucket;
-- EV bucket;
-- odds bucket;
-- research qualification timestamp;
-- disposition / route;
+- EV;
+- quote observed/captured timestamps;
+- model version;
+- prediction/devig/policy fingerprints;
+- route;
 - Production pick ID where applicable;
-- exposure metadata for exposure-blocked candidates.
+- settlement/result;
+- closing odds and same-book CLV where valid.
 
-Future market-probability bucket should be derived from the stored market fair probability rather than replacing the raw value.
+## 5. Bucket dimensions
 
-## 8. Outcomes and comparison basis
+Current analytics include:
 
-Research outcome is counterfactual and normalized to a flat stake.
+### Model probability
 
-Current comparison stake:
+`40–45%`, `45–50%`, `50–55%`, `55–60%`, `60–65%`, `65–70%`, `70–75%`, `75%+`.
 
-- **300 RSD flat stake**
+### Market fair probability
 
-For a Production pick, keep these concepts separate:
+`<25%`, `25–35%`, `35–40%`, `40–45%`, `45–50%`, `50–55%`, `55–60%`, `60–65%`, `65–75%`, `75%+`.
 
-1. **actual Production result / bankroll effect**;
-2. **Research flat-stake P/L** used for cohort comparison.
+### EV
 
-This makes `PLAYED`, `SKIPPED`, and `BLOCKED_EXPOSURE` directly comparable even if Production staking changes later.
+`7–10%`, `10–15%`, `15–20%`, `20–30%`, `30%+` for the current Production-comparable policy range, while raw EV remains stored.
 
-## 9. Closing odds and CLV
+### Odds
 
-Research closing odds use the later stored quote from the same series/source before kickoff.
+`1.40–1.60`, `1.61–1.80`, `1.81–2.00`, `2.01–2.50`, `2.51–3.00`, `3.01–3.50`, `other`.
 
-Research CLV is only considered available when the closing observation is later than the Research entry observation.
+Additional dimensions include market, selection, route, bookmaker, league, freshness, time and immutable model/policy regimes.
 
-CLV should be analyzed together with realized ROI, not as a substitute for it.
+## 6. Metrics
 
-Useful CLV views:
+Cohort tables should prefer evidence density over one headline ROI number.
 
-- average CLV;
-- median CLV;
-- positive-CLV rate;
-- CLV distribution by bucket;
-- CLV by market;
-- CLV by bookmaker;
-- CLV by route.
+Current core metrics:
 
-## 10. Minimum metrics for later analysis
-
-Every analysis table should show the sample size `N`. Never interpret win rate or ROI without `N`.
-
-At minimum, evaluate:
-
-- settled count;
+- N / graded N;
 - wins / losses / voids;
 - win rate;
-- expected win rate from model probabilities;
+- expected win rate;
 - calibration gap;
-- flat-stake P/L;
-- flat-stake ROI;
-- average entry odds;
+- Wilson 95% win-rate interval;
+- flat P&L;
+- flat ROI;
+- average odds;
 - average model probability;
 - average market fair probability;
-- average edge;
-- average EV;
-- average CLV;
-- median CLV;
+- average edge / EV;
+- CLV count / coverage;
+- average / median CLV;
 - positive-CLV rate.
 
-For calibration, later analysis should compare predicted probability against realized frequency, preferably with confidence intervals rather than only point estimates.
+Priority enhancement: add ROI uncertainty, preferably fixture-level bootstrap.
 
-## 11. Primary analysis dimensions
+## 7. Evidence bands
 
-The main analytical cube should support combinations of:
+Current descriptive bands:
 
-- model probability bucket;
-- market fair probability bucket — once added;
-- EV bucket;
-- odds bucket;
-- market;
-- selection;
-- disposition;
-- bookmaker;
-- league / competition;
-- quote freshness;
-- time-to-kickoff / registration window.
+- `<20`: `SIGNAL_ONLY`;
+- `20–49`: `MONITOR`;
+- `50–99`: `PROVISIONAL_EVIDENCE`;
+- `100+`: `STABILITY_REVIEW`.
 
-The central future question is not "did Research win?" but:
+These labels describe sample maturity. They do not carry Production authority.
 
-> In which stable regions of the decision space do we observe repeatable calibration, ROI, and/or CLV strong enough to justify stricter Production selection?
+## 8. Watchlist / bucket discovery
 
-## 12. Production vs Research analysis
+Watchlists are for fast pattern discovery and exact-pick drilldown.
 
-Production should be treated as a route inside the same Research universe, not as an independent quality sample.
+Important distinction:
 
-Useful comparisons:
+- a strong historical bucket is evidence;
+- it is not an automatic Production rule;
+- it is also not required to wait for a fixed forward/OOS sample before the owner may approve it.
 
-- `PLAYED` vs `BLOCKED_EXPOSURE`;
-- `PLAYED` vs `SKIPPED`;
-- all routes combined;
-- bucket-level performance independent of route.
+When a bucket is owner-approved, preserve its exact rule/version so later performance can be evaluated against the decision that was actually made.
 
-Exposure is path-dependent. Therefore, differences between `PLAYED` and `BLOCKED_EXPOSURE` must not automatically be interpreted as model-quality differences.
+## 9. Production promotion
 
-## 13. Why more data is required before tightening Production
+Production promotion requires an explicit owner decision.
 
-Early bucket performance can be extremely noisy. High estimated EV can lose over short samples, and low win rate can occur by variance, especially at higher odds.
+Forward/OOS evidence should be shown separately when available and is useful for confidence, but it is **advisory rather than a mandatory gate**.
 
-Before changing Production gates, inspect jointly:
+No analytics endpoint may register or alter Production picks automatically.
 
-- sample size;
+## 10. Production bucket review / ban
+
+A weak period should normally move a bucket to human `UNDER_REVIEW`, not directly to a ban.
+
+Default permanent performance-ban horizon: **3–6 months**.
+
+Review together:
+
+- N;
 - ROI;
+- CLV;
 - calibration;
-- CLV;
-- odds distribution;
-- market mix;
-- route mix;
-- league mix.
+- odds mix;
+- league/bookmaker breadth;
+- time/regime stability.
 
-Avoid selecting Production buckets because of a small run of wins/losses. The objective is to identify repeatable structure, not recent luck.
+Immediate suspension is reserved for technical-integrity problems.
 
-## 14. Intended future Production-selection workflow
+## 11. Time and regime analysis
 
-Do not implement this automatically from small samples.
+Always distinguish:
 
-Once sufficient settled data exists:
+- discovery/history;
+- post-approval Production behavior;
+- model/policy changes;
+- league/bookmaker shifts.
 
-1. build bucket/cohort performance tables;
-2. identify regions with adequate sample size;
-3. inspect calibration and CLV as well as realized ROI;
-4. check whether performance persists across time and leagues;
-5. define candidate Production filters;
-6. keep excluded-but-final-gate candidates in Research so the counterfactual sample continues;
-7. only after stable evidence, consider different stake sizing / Kelly behavior.
+A bucket that spans incompatible regimes should not be treated as one homogeneous sample without an explicit combined view.
 
-This preserves the ability to measure whether a stricter Production policy actually removes weaker regions rather than merely hiding them.
+## 12. Data-integrity rules
 
-## 15. Dashboard expectations
+- Research never blocks Production writes.
+- Research settlement never creates fake Production settlement/bankroll events.
+- Raw values remain stored when buckets are added.
+- Historical backfills are deterministic.
+- Bucket definitions and model/policy versions must be auditable.
+- Same-book closing methodology remains preferred for CLV.
+- Exposure route is path-dependent and not a model-quality label.
 
-Research dashboard should continue to expose:
+## 13. Open analytical priorities
 
-- Active and History separately;
-- route filter: `PLAYED`, `SKIPPED`, `BLOCKED_EXPOSURE`;
-- model-probability bucket filter;
-- EV bucket filter;
-- odds bucket filter;
-- market filter;
-- result filter in History;
-- prominent score and WIN/LOSS/VOID status;
-- CLV;
-- flat-stake P/L;
-- bookmaker;
-- qualification time.
+- ROI uncertainty/bootstrap;
+- 30/60/90-day stability;
+- league/bookmaker breadth indicators;
+- coverage/dropout funnels;
+- clearer discovery-vs-post-approval comparison;
+- model/policy regime stability;
+- continued exact-pick drilldowns.
 
-Add market-fair-probability bucket filtering when that bucketization is implemented.
-
-## 16. Data-integrity rules
-
-- Research persistence must never block or alter Production.
-- One canonical Research row per fixture.
-- Production picks must be present in Research.
-- Exposure-only candidates must be present in Research only when exposure is the sole relevant blocker.
-- Raw probability, EV, odds, edge, and market probability must remain stored even when bucket labels are added.
-- Historical backfills must be deterministic.
-- Research settlement must not create fake Production settlement or bankroll events.
-- Do not rewrite historical bucket labels retroactively without documenting the change.
-
-## 17. Open analytical TODOs
-
-- [ ] Define market fair probability bucket boundaries.
-- [ ] Add market fair probability bucket to Research projection and dashboard filters.
-- [ ] Add bucket summary tables with `N`, ROI, calibration, CLV, and positive-CLV rate.
-- [ ] Add time-sliced analysis (for example by week) to distinguish persistence from one short run.
-- [ ] Add confidence intervals / uncertainty around bucket win rate and ROI.
-- [ ] Compare Production routes without treating route as a quality label.
-- [ ] Revisit Production selectivity only after enough settled observations accumulate.
-- [ ] Consider Kelly / variable staking only after candidate quality is empirically characterized.
-
-## 18. Interpretation rule
-
-The Research dataset exists to answer:
-
-> Which final-gate candidates are actually worth allocating real-money exposure to?
-
-Until the data can answer that with reasonable stability, Production policy should remain conservative and Research should remain broad enough to observe the opportunities that Production does not take.
-
-
-## Research Analytics V2 implementation
-
-Contract: `RESEARCH_ANALYTICS_V2`.
-
-The analytics layer is read-only and continuously recomputes from the full canonical
-Research history. V2 additionally stratifies settled performance by immutable model and policy\nregimes and explicitly labels legacy rows whose policy fingerprint was never recorded. Pending\ncandidates remain in Research capture but do not contribute to
-settled performance metrics until a settlement is available.
-
-V1 surfaces:
-
-- `/research/analytics` — human-readable cohort dashboard;
-- `/research/analytics.json` — machine-readable snapshot for later filter research;
-- lifetime, trailing 30-day, trailing 7-day, and ISO-week stability slices;
-- market × selection, model-probability, market-fair-probability, EV, odds, route,
-  bookmaker, league, and freshness cohorts;
-- a full Production-filter evidence cube across market, selection, model probability,
-  market fair probability, EV, and odds;
-- a dedicated low-scoring extreme-value diagnostic for OU 2.5 UNDER / BTTS NO versus
-  the remaining Research universe;
-- observed win rate, mean model probability, calibration gap, 95% Wilson interval,
-  flat-stake P/L and ROI, average entry odds, average edge/EV, CLV coverage,
-  average/median CLV, and positive-CLV rate.
-
-Market-fair-probability buckets are versioned with V1 as:
-`<25%`, `25–35%`, `35–40%`, `40–45%`, `45–50%`, `50–55%`,
-`55–60%`, `60–65%`, `65–75%`, and `75%+`.
-
-Evidence bands are descriptive only and have no Production authority:
-
-- fewer than 20 graded rows: `SIGNAL_ONLY`;
-- 20–49: `MONITOR`;
-- 50–99: `PROVISIONAL_EVIDENCE`;
-- 100+: `STABILITY_REVIEW`.
-
-No V1 analytics result can register, skip, block, promote, or otherwise mutate a
-Production pick.
+See [../docs/CURRENT_PRIORITIES.md](../docs/CURRENT_PRIORITIES.md).

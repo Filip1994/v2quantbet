@@ -1,32 +1,14 @@
 # QuantLab Change Protocol
 
-Every QuantLab implementation change must update documentation in the same work unit.
+_Last synchronized: 2026-09-30_
 
-Minimum record:
-
-1. Date.
-2. Lab or shared core owner.
-3. Files/schema changed.
-4. What changed.
-5. Why it changed.
-6. Data sources/endpoints used.
-7. API-cost impact.
-8. Leakage/provenance considerations.
-9. Tests or verification performed.
-10. Production impact: normally `NONE`.
-
-## Lab-specific changes
-
-If a feature/model belongs to one laboratory, update that laboratory's README or feature specification as well as `WORKLOG.md`.
-
-## Schema changes
-
-Document table ownership, read/write direction and whether any production table is referenced.
-
-## Model changes
-
-Record model/version identifier and exact feature set. Never silently change the meaning of an existing model version.
-
-## API changes
-
-Record endpoint, cache rule, expected request count and the `quantlab_context` budget effect.
+1. Preserve QuantLab/Production write isolation.
+2. Every probability/model semantic change requires an explicit version change.
+3. Every pre-match feature must be timestamp-safe and reconstructable.
+4. Historical decisions/picks/settlements are append-only evidence.
+5. Do not silently change settlement semantics.
+6. Do not silently reuse approval across a changed immutable model hash where exact-hash authority applies.
+7. Update the relevant Lab README and [WORKLOG.md](./WORKLOG.md) for material implementation changes.
+8. Update [../docs/CURRENT_PRIORITIES.md](../docs/CURRENT_PRIORITIES.md) only when project priorities/governance change.
+9. QuantLab analytics may discover candidate Production rules, but cannot apply them automatically.
+10. Production promotion requires explicit owner approval; a fixed forward/OOS waiting period is not mandatory.

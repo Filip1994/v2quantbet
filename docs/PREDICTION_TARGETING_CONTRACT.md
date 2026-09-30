@@ -1,3 +1,5 @@
+> **Document status:** LIVING contract · synchronized 2026-09-30. Current project state: [../PROJECT_STATUS.md](../PROJECT_STATUS.md).
+
 # Prediction targeting contract
 
 ## Purpose
@@ -21,7 +23,7 @@ authoritative Fixture
 
 `DixonColesModel.fit()` requires a nonblank `team_id_namespace` and retains it on the fitted model. At the low-level mathematical API this remains a caller claim. The production API-Football path closes that gap through `build_trusted_api_football_historical_results(settings)`, an internally constructed `ApiFootballTrainingDataset`, and `fit_api_football_dixon_coles()`, which derives the namespace instead of accepting it from the caller. General injected `ApiFootballClient` instances and caller-normalized responses have no dataset-minting authority.
 
-The provider-specific path is FT-only and requires complete single-page envelope evidence, exact league/season and half-open UTC scope, canonical fixture identity, ordered provider team IDs, matching top-level/full-time scores, null home/away values in the extra-time and penalty score objects, and conflict-safe deduplication. Broader training orchestration and model artifact/version lifecycle remain future work.
+The provider-specific path is FT-only and requires complete single-page envelope evidence, exact league/season and half-open UTC scope, canonical fixture identity, ordered provider team IDs, matching top-level/full-time scores, null home/away values in the extra-time and penalty score objects, and conflict-safe deduplication. Broader training orchestration and durable model artifact/version lifecycle are now implemented in Production; this contract remains the lower-level provenance and target-binding boundary.
 
 ## Target-bound execution
 

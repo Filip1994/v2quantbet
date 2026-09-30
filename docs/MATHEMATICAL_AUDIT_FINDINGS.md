@@ -1,3 +1,5 @@
+> **Document status:** HISTORICAL / AUDIT RECORD. Preserved as evidence of the state when written; it is not current-state authority. See [PROJECT_STATUS](../PROJECT_STATUS.md) and the current priorities document.
+
 # QuantBet — Mathematical Audit Findings
 
 ## PostgreSQL verification update — 2026-09-15, remediation branch

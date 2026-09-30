@@ -1,57 +1,83 @@
-# Architecture — Working Draft
+# QuantBet Architecture
 
-This document is intentionally a plan, not an implementation.
+_Last synchronized: 2026-09-30_
 
-## Target flow
+## Top-level sectors
 
-Provider -> Raw Odds -> Normalizer -> Canonical Quote -> Validation
--> Market Snapshot -> Quant -> Decision -> Risk -> Bet lifecycle -> Settlement
+```text
+                         PostgreSQL
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+     Production          Research           QuantLab
+          │                  │                  │
+ live decisions       read-only final-   Goal / Corner /
+ bankroll/risk        gate analytics       Card labs
+```
 
-## Odds cadence
+## Production
 
-The agreed product policy is deliberately conservative and separates fixture discovery from quote refresh:
+Production owns:
 
-- **Fixture discovery:** scan fixtures and markets up to **72 hours before kickoff**, approximately every **15 minutes**.
-- **Early quote refresh (T−72h to T−48h):** approximately once per day.
-- **T−48h to T−24h:** approximately every **12 hours**.
-- **T−24h to T−6h:** approximately every **6 hours**.
-- **T−6h to T−2h:** approximately every **2 hours**.
-- **T−2h to kickoff:** approximately every **30 minutes**.
-- **T−15 minutes:** perform a dedicated final/closing capture.
+- fixture discovery;
+- trusted historical model training;
+- active model lifecycle;
+- odds ingestion;
+- prediction/value;
+- eligibility/risk/final quote verification;
+- pick registration;
+- monitoring/closing;
+- settlement/bankroll;
+- bulletin;
+- operator controls.
 
-These are the agreed baseline intervals, not a mandate to refresh every fixture indiscriminately. Quote refresh is selective and should focus on relevant fixtures, markets, and bookmaker sources. Discovery must not automatically trigger a full quote collection for every discovered fixture.
+Railway PostgreSQL is canonical. SQLite is not a production fallback.
 
-The system must preserve the distinction between:
+## Research
 
-- inexpensive fixture discovery;
-- selective quote refresh;
-- intensified monitoring only for fixtures with meaningful betting potential;
-- the dedicated pre-kickoff closing capture.
+Research reads durable Production evidence and maintains the comparable final-gate analytical universe.
 
-The previous global 60-second quote-polling approach is **not** the agreed policy.
+It may compute cohorts, buckets, counterfactual flat-stake results and CLV analytics, but it must not mutate Production.
 
-## Bookmakers
+## QuantLab
 
-Initial supported bookmakers:
+QuantLab independently discovers/collects broader research data and owns its own QuantLab tables.
 
-- 1xBet
-- Bet365
-- Superbet
+It must not write Production registered picks, Production bankroll, Production decision records or active Production model state.
 
-No additional bookmaker should be introduced without an explicit decision.
+Laboratories:
 
-## Quote semantics
+- GoalLab — DC+ Structural;
+- CornerLab — pressure-Poisson;
+- CardLab — referee-Poisson.
 
-- `first_seen_quote`: first valid quote observed for a fixture/market/selection.
-  This is the provisional opening quote because the system does not know the true market opening time.
-- `pick_quote`: valid quote captured at the moment the bulletin/tip is published.
-  This is the actual offered price used as the reference for the pick.
-- `current_quote`: latest valid quote known to the system.
-- `closing_quote`: designated pre-kickoff closing observation.
+## Provider/API boundary
 
-The exact definitions and database constraints will be implemented later and tested.
+API-Football identities are validated before provider responses become canonical business evidence.
 
-## Railway
+All services share the provider request envelope; QuantLab usage remains separately attributable.
 
-Railway is the planned runtime platform. The initial target is a small number of services
-plus PostgreSQL. We will not introduce additional infrastructure unless a concrete need is proven.
+## Evidence principles
+
+- append-only where facts must remain auditable;
+- timestamp-safe feature availability;
+- no post-kickoff data in pre-match decisions;
+- exact model/policy/version provenance;
+- immutable decision evidence;
+- same-book closing where possible.
+
+## Runtime/services
+
+The current Railway footprint includes separate Production, dashboard/research/QuantLab services plus PostgreSQL. One-shot diagnostic services should be removed or explicitly marked so the production topology remains legible.
+
+## Release boundary
+
+GitHub CI and Railway deployment state are independent facts.
+
+Target release path:
+
+```text
+Git commit → CI PASS → exact SHA deploy → runtime SHA visibility
+```
+
+See [CURRENT_PRIORITIES.md](./CURRENT_PRIORITIES.md).

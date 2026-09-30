@@ -1,254 +1,119 @@
 # QuantBet — Product Goals
 
+_Last synchronized: 2026-09-30_
+
 ## 1. Product purpose
 
-QuantBet is a production football value-betting system. Its purpose is to continuously scan upcoming matches, evaluate bookmaker odds against quantitative model probabilities, identify value opportunities, and track the market before and after a pick is made.
+QuantBet is a reproducible pre-match football decision system. The product is not merely a prediction model; it must preserve the complete evidence chain from fixture and quote observation through model output, decision, pick, closing reference, result, settlement and research evaluation.
 
-The system must be designed for reproducibility, traceability, and measurable performance—not only for producing isolated predictions.
+## 2. Production goal
 
-## 2. Match horizon
+Production should continuously scan the configured future horizon and register only opportunities that pass the active model, market, freshness, eligibility and risk policies.
 
-- Scan all relevant matches scheduled within the next **72 hours**.
-- Continuously update the available match and market universe as fixtures and odds change.
-- Keep all timestamps in a consistent, explicitly defined timezone strategy.
+Required properties:
 
-## 3. Odds ingestion and market history
+- deterministic, versioned decision logic;
+- canonical fixture/bookmaker/market identities;
+- exact quote provenance;
+- PostgreSQL durability;
+- final quote verification;
+- explicit rejection reasons;
+- open-exposure protection;
+- same-bookmaker monitoring/closing;
+- append-only settlement/bankroll evidence;
+- fail-closed behavior when required evidence is missing.
 
-The system must ingest bookmaker odds and preserve their history rather than only the latest value.
+## 3. Research goal
 
-Every odds snapshot must include, at minimum:
+Research is a read-only superset of comparable final-gate Production candidates.
 
-- match/fixture identifier;
-- bookmaker identifier;
-- market and selection identifier;
-- odds value;
-- capture timestamp;
-- source and ingestion metadata where available.
+Research should answer:
 
-The system must support reconstruction of the odds state at any relevant point in time.
+- where model probabilities are calibrated;
+- where market disagreement/edge/EV appears persistent;
+- how ROI, CLV and calibration behave by bucket;
+- whether behavior changes by league, bookmaker, market, time or model/policy regime;
+- which candidate rules deserve owner review for Production;
+- which Production rules deserve long-horizon review or ban.
 
-## 4. Quantitative value signal
+Research analytics do not carry automatic Production authority.
 
-For each supported market:
+## 4. QuantLab goal
 
-1. Calculate the model probability.
-2. Calculate the bookmaker-implied probability.
-3. Compare the two probabilities.
-4. Identify a value opportunity when the model probability exceeds the bookmaker-implied probability, subject to configured filters and risk controls.
+QuantLab is the isolated multi-market model laboratory.
 
-The value signal must be kept separate from predictions about future odds movement and from post-event performance evaluation.
+Current laboratories:
 
-## 5. Expected CLV signal
+- GoalLab — goals/BTTS and DC+ Structural;
+- CornerLab — corner totals and pressure models;
+- CardLab — card/referee models.
 
-Before the event starts, the system may estimate whether the selected odds are likely to move in a favorable direction before the closing line is established.
+QuantLab must preserve timestamp-safe feature provenance and immutable decision evidence while remaining isolated from Production bankroll/registration/model-activation writes.
 
-This is a separate, optional signal from model-vs-bookmaker value:
+## 5. Promotion and ban governance
 
-- **Value** measures the discrepancy between model probability and bookmaker-implied probability at decision time.
-- **Expected CLV** estimates the likely direction and magnitude of subsequent market movement before the event starts.
-- **Realized CLV** is calculated later, using the actual closing reference observed for the market.
+### Promotion
 
-A value opportunity must not automatically be described as a positive expected-CLV opportunity without a separate, versioned methodology and supporting data.
+A Research/QuantLab bucket becomes a Production selection rule only through explicit owner approval.
 
-## 6. Pick registry
+Forward/OOS confirmation is useful and should be shown when available, but it is not a mandatory owner-approval gate.
 
-Every published pick must be registered with immutable decision context, including:
+### Ban
 
-- pick identifier;
-- fixture and market/selection;
-- model version and configuration;
-- model probability;
-- bookmaker-implied probability;
-- value calculation;
-- expected-CLV signal and methodology version, where available;
-- odds at pick time;
-- pick timestamp;
-- applicable filters and decision metadata.
+A performance-based permanent ban should normally require **3–6 months** of observation. Short-term variance alone is not enough.
 
-## 7. Post-pick monitoring and realized CLV
+Technical-integrity failures may be suspended immediately.
 
-After a pick is published, the system must continue collecting and evaluating odds until the event starts or the monitoring window ends.
+## 6. Performance evidence
 
-The monitoring design must support a configurable cadence. An initial candidate cadence is every **30 minutes**, but the final cadence must be defined by system requirements and operational constraints.
+Never interpret ROI alone.
 
-The system must record the odds trajectory after publication. **Realized CLV must be calculated after the relevant event has finished**, once the system has a valid closing reference and the market outcome/settlement state is available as required by the selected CLV definition.
+Important evidence includes:
 
-The realized-CLV calculation must use the actual pick-time odds and the actual closing reference, preserve the calculation methodology/version, and remain distinguishable from expected CLV.
+- settled N;
+- price/odds distribution;
+- win rate and uncertainty;
+- model-vs-realized calibration;
+- CLV coverage and direction;
+- bookmaker consistency;
+- league breadth;
+- temporal stability;
+- model/policy regime.
 
-## 8. Required odds checkpoints
+Profitability claims require representative evidence; operational success is not proof of edge.
 
-The dashboard and reporting layer must expose, at minimum, these checkpoints for every tracked pick:
+## 7. Infrastructure goal
 
-- **First seen odds** — the earliest captured odds for the relevant quote;
-- **Pick odds** — the odds at the moment the pick was published;
-- **Current odds** — the latest captured odds;
-- **Closing odds** — the last valid captured odds before the match starts, used as the closing reference for realized CLV where valid.
+- GitHub for source/CI.
+- Railway services for runtime.
+- PostgreSQL as canonical durable state.
+- No silent SQLite production fallback.
+- Provider budgets and retries are explicit product constraints.
+- Historical decision evidence remains reconstructable.
 
-Each checkpoint must be timestamped and traceable to the underlying odds snapshot.
+## 8. Dashboard goal
 
-## 9. Daily bulletin
+Dashboards are operational/research views over durable facts.
 
-Shortly after midnight in Europe/Belgrade, the system produces one durable Daily Bulletin snapshot containing registered picks that remain actionable in the configured future horizon. Picks are created continuously throughout the day; the bulletin does not create or duplicate them and is not limited to picks registered on its local date.
+The UI should make it easy to answer:
 
-The bulletin should include, at minimum:
+- what is active now;
+- why a pick exists;
+- which price/model/policy produced it;
+- what happened after registration;
+- where coverage is lost;
+- which research buckets are interesting;
+- exactly which picks belong to a cohort.
 
-- fixture and kickoff time;
-- bookmaker and market/selection;
-- current odds;
-- model probability;
-- implied probability;
-- value estimate;
-- expected-CLV signal, where available;
-- relevant confidence, filtering, and data-quality indicators.
+## 9. Current strategic direction
 
-The bulletin must clearly distinguish opportunities that are currently actionable from historical, already published, or expired picks.
+Do not redesign the universe.
 
-The operational screening flow is:
-
-```text
-fixture discovery
-→ competition/universe filter
-→ model probability
-→ bookmaker odds
-→ value comparison
-→ preliminary candidate
-→ mandatory final quote pull and repricing
-→ immediate durable registration
-→ daily actionable-pick snapshot
-```
+The current focus is:
 
-This screening layer must remain deterministic, production-oriented, and focused on finding current opportunities. It must not perform uncontrolled experimentation or silently alter model/ranking rules.
+1. release discipline;
+2. model/data coverage;
+3. research/analytics evidence quality;
+4. maintainability of the largest modules.
 
-## 10. Research sector
-
-The Research sector is a separate analytical and experimental layer. Its purpose is to determine **when, why, and under which conditions a detected value signal is reliable**. It is not another name for the Daily Bulletin screening pipeline.
-
-Research must investigate, among other things:
-
-- model calibration and systematic over/underestimation;
-- signal quality by market, competition, bookmaker, and time-to-kickoff;
-- relationship between initial value, odds movement, and realized CLV;
-- bookmaker disagreement and its predictive usefulness;
-- effects of lineups, injuries, weather, and other contextual data;
-- false-positive value signals and extreme outliers;
-- stability of signals across time periods and competitions;
-- differences between in-sample, out-of-sample, and walk-forward results;
-- model-version and feature-version comparisons;
-- whether proposed filters improve signal quality without introducing selection bias.
-
-### 10.1 Research inputs
-
-Research may consume immutable, historically reconstructable data, including:
-
-- fixture and competition records;
-- raw and normalized odds snapshots;
-- model probabilities and model metadata;
-- published pick decision contexts;
-- odds trajectories and closing references;
-- match outcomes and settlement data;
-- lineup, injury, weather, and other contextual observations where available.
-
-Raw observations must be retained separately from derived research metrics.
-
-### 10.2 Research outputs
-
-Research outputs are analytical artifacts, not direct production decisions. They may include:
-
-- calibration reports;
-- signal-quality reports;
-- CLV and odds-movement analyses;
-- backtests and walk-forward evaluations;
-- experiment datasets and reproducible notebooks/jobs;
-- model or rule proposals;
-- documented limitations, biases, and confidence levels.
-
-Every experiment must identify its dataset period, inclusion rules, feature/model versions, evaluation methodology, and result status.
-
-### 10.3 Production boundary
-
-Research must not directly mutate Daily Bulletin behavior. Any change proposed by Research must pass through:
-
-```text
-research hypothesis
-→ versioned experiment
-→ statistical evaluation
-→ out-of-sample or walk-forward validation
-→ documented acceptance decision
-→ explicit production change
-→ regression and CI verification
-```
-
-Experimental code, datasets, and configurations must be distinguishable from production code and configuration. A research result is not considered production-ready merely because it improves an in-sample metric.
-
-### 10.4 Research acceptance principles
-
-A research proposal should be accepted only when the evidence addresses, as applicable:
-
-- calibration and discrimination quality;
-- robustness across time and relevant subgroups;
-- leakage and look-ahead bias;
-- multiple-testing and overfitting risk;
-- data completeness and survivorship bias;
-- economic relevance to value and/or CLV;
-- reproducibility using stored inputs and explicit versions.
-
-## 11. Dashboard
-
-The dashboard is the operational “eyes” of the system. It must make the complete lifecycle of a pick observable:
-
-- upcoming fixtures and available markets;
-- current value opportunities;
-- published picks;
-- odds history and movement;
-- first seen, pick-time, current, and closing odds;
-- expected CLV at decision time, where available;
-- realized CLV calculated after the event using the valid closing reference;
-- data freshness and ingestion health;
-- model/version and decision provenance;
-- research-derived annotations only when their methodology and version are explicit.
-
-The dashboard should be based on the useful concepts and workflows of the legacy dashboard, but implemented against the new QuantBet data model and production architecture.
-
-## 12. Production requirements
-
-The production system will require, in stages:
-
-- reliable odds and fixture ingestion;
-- a canonical quote and market schema;
-- persistent odds history, initially expected to use PostgreSQL;
-- scheduled and/or continuous workers;
-- model execution and versioning;
-- value and expected-CLV calculation;
-- pick registration;
-- post-pick monitoring;
-- post-event realized-CLV calculation;
-- daily bulletin generation and delivery;
-- dashboard/API;
-- observability, retries, and data-quality checks;
-- deployment and operational configuration.
-
-The research platform will additionally require, in a later stage:
-
-- immutable analytical datasets;
-- reproducible experiment execution;
-- dataset and feature versioning;
-- backtesting and walk-forward evaluation;
-- calibration and CLV reporting;
-- explicit promotion records from research to production.
-
-## 13. Non-goals for the immediate next step
-
-The immediate next step is **not** to expand model mathematics, build the Research platform, or perform broad refactoring.
-
-The next implementation step should establish the canonical quote/odds-snapshot contract that later ingestion, persistence, value calculation, monitoring, reporting, research, and dashboard components can share.
-
-## 14. Guiding principles
-
-- Preserve raw observations before deriving metrics.
-- Make every decision reproducible from stored inputs and model versions.
-- Separate current value, expected CLV, realized CLV, and research conclusions.
-- Calculate realized CLV only after the event lifecycle provides a valid closing reference.
-- Never overwrite odds history when a new snapshot arrives.
-- Prefer explicit schemas and contracts over implicit data assumptions.
-- Keep Research experimentally isolated from production decision logic.
-- Implement one small vertical slice at a time, with tests before moving on.
+See [CURRENT_PRIORITIES.md](./CURRENT_PRIORITIES.md).

@@ -1,3 +1,5 @@
+> **Document status:** HISTORICAL / AUDIT RECORD. Preserved as evidence of the state when written; it is not current-state authority. See [PROJECT_STATUS](../PROJECT_STATUS.md) and the current priorities document.
+
 # QuantLab Work Log
 
 This is the canonical chronological record of QuantLab implementation work.
