@@ -356,11 +356,15 @@ def test_quantlab_analytics_bucket_links_open_exact_settled_picks() -> None:
     dashboard = QuantLabDashboardService(BucketRepository())
     analytics = dashboard.render_html("view=analytics&lab=goal")
 
-    assert "<th>Picks</th>" in analytics
+    assert "<th>Picks</th>" not in analytics
+    assert 'class="group-link"' in analytics
     assert "bucket_market_key=OU_25" in analytics
     assert "bucket_selection=OVER" in analytics
-    assert "View 2" in analytics
+    assert "View 2" not in analytics
     assert "bucket_probability_bin=5" in analytics
+    assert 'id="analytics-markets"' in analytics
+    assert 'class="sort-header active"' in analytics
+    assert '<span class="sort-arrow">↓</span>' in analytics
 
     drilldown = dashboard.render_html(
         "view=analytics&lab=goal&bucket=1&bucket_market_key=OU_25&bucket_selection=OVER"
@@ -372,6 +376,67 @@ def test_quantlab_analytics_bucket_links_open_exact_settled_picks() -> None:
     assert "Void – Group" in drilldown
     assert "Pending – Group" not in drilldown
     assert "Other – Group" not in drilldown
+
+
+def test_quantlab_analytics_sorting_persists_and_keeps_zero_sample_groups_last() -> None:
+    class SortRepository(StubRepository):
+        def list_all_goal_picks(self):
+            loss = goal_pick(outcome="LOSS", suffix="l")
+            loss["fixture_id"] = "api-football:401"
+            loss["competition_name"] = "Alpha League"
+            loss["home_team"] = "Alpha"
+            loss["away_team"] = "Loss"
+
+            win = goal_pick(outcome="WIN", suffix="w")
+            win["fixture_id"] = "api-football:402"
+            win["competition_name"] = "Zulu League"
+            win["home_team"] = "Zulu"
+            win["away_team"] = "Win"
+
+            pending = goal_pick(outcome="PENDING", suffix="p")
+            pending["fixture_id"] = "api-football:403"
+            pending["competition_name"] = "Pending League"
+            pending["home_team"] = "Pending"
+            pending["away_team"] = "Only"
+
+            return (loss, win, pending)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    html = QuantLabDashboardService(SortRepository()).render_html(
+        "view=analytics&lab=goal&leagues_sort=roi_pct&leagues_dir=asc"
+    )
+
+    leagues = html.split('id="analytics-leagues"', 1)[1].split(
+        'id="analytics-bookmakers"', 1
+    )[0]
+    assert leagues.index("Alpha League") < leagues.index("Zulu League")
+    assert leagues.index("Zulu League") < leagues.index("Pending League")
+    assert "leagues_sort=roi_pct" in leagues
+    assert "leagues_dir=desc" in leagues
+    assert '<span class="sort-arrow">↑</span>' in leagues
+
+
+def test_quantlab_group_drilldown_link_preserves_table_sort_state() -> None:
+    class SortedLinkRepository(StubRepository):
+        def list_all_goal_picks(self):
+            return (goal_pick(outcome="WIN", suffix="s"),)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    html = QuantLabDashboardService(SortedLinkRepository()).render_html(
+        "view=analytics&lab=goal&markets_sort=roi_pct&markets_dir=asc"
+    )
+
+    markets = html.split('id="analytics-markets"', 1)[1].split(
+        'id="analytics-leagues"', 1
+    )[0]
+    assert "markets_sort=roi_pct" in markets
+    assert "markets_dir=asc" in markets
+    assert "bucket_market_key=OU_25" in markets
+    assert "bucket_selection=OVER" in markets
 
 
 def test_quantlab_calibration_bucket_drilldown_matches_graded_population() -> None:
