@@ -154,7 +154,116 @@ def test_corner_engine_uses_structural_model_and_needs_only_one_bookmaker():
     assert pick.details["cross_book_reference_used"] is False
     assert pick.edge > 0.03
     assert pick.expected_value > 0.03
+    assert pick.policy_version == "CORNERLAB_PRESSURE_POISSON_POLICY_V3"
+    assert pick.reason == "CANONICAL_FIXTURE_VALUE_PICK"
+    assert pick.details["canonical_fixture_selection"] is True
+    assert pick.details["eligible_fixture_candidate_count"] == 1
+    assert pick.details["eligible_fixture_candidate_rank"] == 1
     assert len(repo.shadows) == 1
+
+def test_corner_engine_emits_only_best_fixture_candidate_across_multiple_lines():
+    class MultiLineEstimate(_CornerEstimate):
+        def probability(self, selection, line):
+            probabilities = {
+                9.5: {"OVER": 0.68, "UNDER": 0.32},
+                10.5: {"OVER": 0.62, "UNDER": 0.38},
+            }
+            return probabilities[line][selection]
+
+    class MultiLineModel:
+        def estimate(self, fixture, *, decision_at):
+            assert fixture["home_team_id"] == 1
+            assert fixture["away_team_id"] == 2
+            assert decision_at == NOW
+            return SimpleNamespace(
+                estimate=MultiLineEstimate(),
+                reason="MODEL_READY",
+                details={"training_sample_size": 250},
+            )
+
+    repo = Repo(
+        pairs=(
+            market_pair(
+                8,
+                "Bet365",
+                bet_id=100,
+                bet_name="Total Corners",
+                line=9.5,
+                over=1.80,
+                under=2.00,
+            ),
+            market_pair(
+                11,
+                "1xBet",
+                bet_id=101,
+                bet_name="Total Corners",
+                line=10.5,
+                over=2.20,
+                under=1.65,
+            ),
+        )
+    )
+    engine = CornerLabShadowPickEngine(repo)
+    engine._model = MultiLineModel()
+
+    result = engine.run_fixture(fixture(), decision_at=NOW)
+
+    picks = [item for item in repo.decisions if item.decision == "PICK"]
+    qualifying_passes = [
+        item
+        for item in repo.decisions
+        if item.reason == "BETTER_FIXTURE_VALUE_AVAILABLE"
+    ]
+
+    assert result.picks_inserted == 1
+    assert len(picks) == 1
+    assert len(repo.shadows) == 1
+    assert picks[0].line == 10.5
+    assert picks[0].selection == "OVER"
+    assert picks[0].bookmaker_name == "1xBet"
+    assert picks[0].reason == "CANONICAL_FIXTURE_VALUE_PICK"
+    assert picks[0].details["eligible_fixture_candidate_count"] == 2
+    assert picks[0].details["eligible_fixture_candidate_rank"] == 1
+    assert len(qualifying_passes) == 1
+    assert qualifying_passes[0].line == 9.5
+    assert qualifying_passes[0].details["eligible_fixture_candidate_rank"] == 2
+
+
+def test_corner_engine_does_not_create_second_pick_after_fixture_is_claimed():
+    class ExistingPickRepo(Repo):
+        def context_shadow_bet_exists(self, fixture_id, *, lab):
+            assert fixture_id == "api-football:3001"
+            assert lab == "CORNER"
+            return True
+
+    repo = ExistingPickRepo(
+        pairs=(
+            market_pair(
+                8,
+                "Bet365",
+                bet_id=100,
+                bet_name="Total Corners",
+                line=10.5,
+                over=2.20,
+                under=1.65,
+            ),
+        )
+    )
+
+    result = _corner_engine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 0
+    assert len(repo.shadows) == 0
+    assert not [item for item in repo.decisions if item.decision == "PICK"]
+    qualifying = [
+        item
+        for item in repo.decisions
+        if item.reason == "FIXTURE_PICK_ALREADY_EXISTS"
+    ]
+    assert len(qualifying) == 1
+    assert qualifying[0].selection == "OVER"
+    assert qualifying[0].details["existing_fixture_pick"] is True
+
 
 def test_corner_engine_requires_supported_two_sided_total_market():
     repo = Repo(
