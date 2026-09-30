@@ -730,8 +730,26 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
         away = _number(item.get("expected_away_goals"))
         total = None if home is None or away is None else home + away
         raw = _raw_features(item, "feature_payload")
+        edge = _number(item.get("edge"))
+        ev = _number(item.get("expected_value"))
+        extreme = (ev is not None and ev >= 0.30) or (edge is not None and edge >= 0.20)
+        low_scoring = (
+            item.get("market_key") == "OU_25" and item.get("selection") == "UNDER"
+        ) or (
+            item.get("market_key") == "BTTS" and item.get("selection") == "NO"
+        )
+        diagnostic = (
+            "LOW_SCORING_EXTREME"
+            if low_scoring and extreme
+            else "LOW_SCORING_NON_EXTREME"
+            if low_scoring
+            else "OTHER_EXTREME"
+            if extreme
+            else "OTHER_NON_EXTREME"
+        )
         item.update(
             {
+                "goal_diagnostic_bucket": diagnostic,
                 "expected_total_goals_bucket": _scalar_bucket(
                     total,
                     breaks=(1.5, 2.0, 2.5, 3.0, 3.5, 4.0),
@@ -1841,6 +1859,26 @@ def render_analytics(
                 "selection": "Selection",
             },
         )
+        + table(
+            "Research-style signal cube",
+            (
+                "market_key",
+                "selection",
+                "model_probability_bucket",
+                "market_probability_bucket",
+                "ev_bucket",
+                "entry_odds_bucket",
+            ),
+            "signal_cube",
+            labels={
+                "market_key": "Market",
+                "selection": "Selection",
+                "model_probability_bucket": "Model P",
+                "market_probability_bucket": "Market P",
+                "ev_bucket": "EV",
+                "entry_odds_bucket": "Odds",
+            },
+        )
     )
 
     if lab_key == "goal":
@@ -1848,6 +1886,12 @@ def render_analytics(
             _analytics_section(
                 "GoalLab model-state buckets",
                 "DC+ expected-goal structure recorded on each pick",
+            )
+            + table(
+                "Low-scoring diagnostic",
+                ("goal_diagnostic_bucket",),
+                "goal_diagnostic",
+                labels={"goal_diagnostic_bucket": "Diagnostic"},
             )
             + table(
                 "Expected total goals",
