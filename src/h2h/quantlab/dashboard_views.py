@@ -284,6 +284,13 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .analytics-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
 .analytics-section{{margin:22px 2px 10px;padding-top:5px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#c8d0d7}}
 .analytics-section small{{display:inline;margin-left:9px;text-transform:none;letter-spacing:0;font-weight:400}}
+.watchlist{{margin:8px 0 18px;padding:12px;border:2px solid #a9782c;border-radius:16px;background:linear-gradient(180deg,rgba(169,120,44,.12),rgba(169,120,44,.035));box-shadow:0 0 0 1px rgba(226,178,93,.08) inset}}
+.watchlist-head{{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:2px 2px 11px}}
+.watchlist-head b{{color:#e5b45d;font-size:13px;letter-spacing:.12em;text-transform:uppercase}}
+.watchlist-head span{{color:#aeb6bd;font-size:11px}}
+.watchlist .panel{{border-color:#5b4726;background:#171b1e}}
+.watchlist .panel-title{{background:rgba(169,120,44,.06)}}
+.watchlist .panel-title b{{color:#f0d29a}}
 .analytics-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}}
 .analytics-grid .panel{{margin:0}}
 .metric-list{{padding:8px 14px 12px}}.metric-line{{display:flex;justify-content:space-between;gap:18px;padding:8px 0;border-bottom:1px solid #262c31}}
@@ -702,6 +709,162 @@ def _feature_bucket(value: Any, kind: str) -> str:
     return "—"
 
 
+def _mean_available(*values: Any) -> float | None:
+    numbers = [number for value in values if (number := _number(value)) is not None]
+    if not numbers:
+        return None
+    return sum(numbers) / len(numbers)
+
+
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        number = _number(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _difference(left: Any, right: Any) -> float | None:
+    left_number = _number(left)
+    right_number = _number(right)
+    if left_number is None or right_number is None:
+        return None
+    return left_number - right_number
+
+
+def _feature_missingness_bucket(raw: dict[str, Any]) -> str:
+    candidates = [
+        value
+        for key, value in raw.items()
+        if not key.endswith("__missing")
+    ]
+    if not candidates:
+        return "—"
+    missing = sum(_number(value) is None for value in candidates)
+    pct = missing / len(candidates) * 100
+    return _scalar_bucket(
+        pct,
+        breaks=(1, 5, 10, 20, 30, 50),
+        suffix="%",
+        digits=0,
+    )
+
+
+def _history_depth_bucket(row: dict[str, Any], raw: dict[str, Any]) -> str:
+    home = _first_number(
+        row.get("home_history_size"),
+        raw.get("home_history_match_count"),
+        raw.get("home_season_match_count"),
+    )
+    away = _first_number(
+        row.get("away_history_size"),
+        raw.get("away_history_match_count"),
+        raw.get("away_season_match_count"),
+    )
+    if home is None or away is None:
+        return "—"
+    return _scalar_bucket(
+        min(home, away),
+        breaks=(5, 10, 20, 30, 50),
+        digits=0,
+    )
+
+
+def _balance_bucket(smaller: float | None, larger: float | None) -> str:
+    if smaller is None or larger is None or larger <= 0:
+        return "—"
+    ratio_pct = smaller / larger * 100
+    return _scalar_bucket(
+        ratio_pct,
+        breaks=(25, 50, 70, 85, 95),
+        suffix="%",
+        digits=0,
+    )
+
+
+def _trend_bucket(raw: dict[str, Any], metric: str) -> str:
+    home = _difference(
+        raw.get(f"home_l5_{metric}"),
+        raw.get(f"home_l10_{metric}"),
+    )
+    away = _difference(
+        raw.get(f"away_l5_{metric}"),
+        raw.get(f"away_l10_{metric}"),
+    )
+    return _signed_gap_bucket(_mean_available(home, away))
+
+
+def _venue_trend_bucket(raw: dict[str, Any], metric: str) -> str:
+    home = _difference(
+        raw.get(f"home_venue_l5_{metric}"),
+        raw.get(f"home_l10_{metric}"),
+    )
+    away = _difference(
+        raw.get(f"away_venue_l5_{metric}"),
+        raw.get(f"away_l10_{metric}"),
+    )
+    return _signed_gap_bucket(_mean_available(home, away))
+
+
+def _goal_matchup_pressure_bucket(raw: dict[str, Any]) -> str:
+    home_matchup = _mean_available(
+        raw.get("home_l5_goals_for"),
+        raw.get("away_l5_goals_against"),
+    )
+    away_matchup = _mean_available(
+        raw.get("away_l5_goals_for"),
+        raw.get("home_l5_goals_against"),
+    )
+    total = (
+        None
+        if home_matchup is None or away_matchup is None
+        else home_matchup + away_matchup
+    )
+    return _scalar_bucket(
+        total,
+        breaks=(1.5, 2.0, 2.5, 3.0, 3.5, 4.0),
+    )
+
+
+def _corner_matchup_pressure_bucket(raw: dict[str, Any]) -> str:
+    home_matchup = _mean_available(
+        raw.get("home_l5_corners_for"),
+        raw.get("away_l5_corners_against"),
+    )
+    away_matchup = _mean_available(
+        raw.get("away_l5_corners_for"),
+        raw.get("home_l5_corners_against"),
+    )
+    total = (
+        None
+        if home_matchup is None or away_matchup is None
+        else home_matchup + away_matchup
+    )
+    return _scalar_bucket(
+        total,
+        breaks=(7, 8, 9, 10, 11, 12, 13, 14),
+        digits=0,
+    )
+
+
+def _watchlist_block(content: str, *, lab_key: str) -> str:
+    if not content:
+        return ""
+    focus = (
+        "λ shape · price · trend · matchup · reliability"
+        if lab_key == "goal"
+        else
+        "model-line gap · price · pressure trend · matchup · reliability"
+    )
+    return (
+        '<section class="watchlist" id="analytics-watchlist">'
+        '<div class="watchlist-head"><b>Watchlist · ROI discovery</b>'
+        f'<span>{escape(focus)} · pre-match features only</span></div>'
+        + content
+        + "</section>"
+    )
+
+
 def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
     item = dict(row)
     weekday, daypart, week = _kickoff_dimensions(item)
@@ -723,6 +886,16 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
             "kickoff_weekday": weekday,
             "kickoff_time_bucket": daypart,
             "kickoff_week": week,
+        }
+    )
+    raw_for_reliability = _raw_features(
+        item,
+        "feature_payload" if lab_key == "goal" else "corner_feature_payload",
+    )
+    item.update(
+        {
+            "history_depth_bucket": _history_depth_bucket(item, raw_for_reliability),
+            "feature_missingness_bucket": _feature_missingness_bucket(raw_for_reliability),
         }
     )
     if lab_key == "goal":
@@ -765,6 +938,28 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "goal_lambda_spread_bucket": _signed_gap_bucket(
                     None if home is None or away is None else home - away
                 ),
+                "goal_lambda_min_bucket": _scalar_bucket(
+                    None if home is None or away is None else min(home, away),
+                    breaks=(0.4, 0.7, 1.0, 1.3, 1.6, 2.0),
+                ),
+                "goal_lambda_max_bucket": _scalar_bucket(
+                    None if home is None or away is None else max(home, away),
+                    breaks=(0.8, 1.2, 1.6, 2.0, 2.5, 3.0),
+                ),
+                "goal_lambda_balance_bucket": _balance_bucket(
+                    None if home is None or away is None else min(home, away),
+                    None if home is None or away is None else max(home, away),
+                ),
+                "goal_total_line_gap_bucket": _signed_gap_bucket(
+                    None
+                    if total is None or _number(item.get("line")) is None
+                    else total - float(item["line"])
+                ),
+                "goal_attack_trend_bucket": _trend_bucket(raw, "goals_for"),
+                "goal_venue_trend_bucket": _venue_trend_bucket(raw, "goals_for"),
+                "goal_shot_trend_bucket": _trend_bucket(raw, "shots_for"),
+                "goal_sot_trend_bucket": _trend_bucket(raw, "sot_for"),
+                "goal_matchup_pressure_bucket": _goal_matchup_pressure_bucket(raw),
                 "feature_home_l5_goals_for_bucket": _feature_bucket(
                     raw.get("home_l5_goals_for"), "goals"
                 ),
@@ -805,6 +1000,11 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "corner_model_line_gap_bucket": _signed_gap_bucket(
                     None if expected is None or line is None else expected - line
                 ),
+                "corner_trend_bucket": _trend_bucket(raw, "corners_for"),
+                "corner_venue_trend_bucket": _venue_trend_bucket(raw, "corners_for"),
+                "corner_shot_trend_bucket": _trend_bucket(raw, "shots_for"),
+                "corner_sot_trend_bucket": _trend_bucket(raw, "sot_for"),
+                "corner_matchup_pressure_bucket": _corner_matchup_pressure_bucket(raw),
                 "feature_home_l5_corners_for_bucket": _feature_bucket(
                     raw.get("home_l5_corners_for"), "corners"
                 ),
@@ -1626,12 +1826,27 @@ def render_analytics(
         table_key: str,
         *,
         labels: dict[str, str] | None = None,
+        drop_missing: bool = False,
+        min_groups: int = 1,
     ) -> str:
-        if not _dimension_available(rows, dimensions):
+        eligible_rows = rows
+        if drop_missing:
+            eligible_rows = tuple(
+                row
+                for row in rows
+                if all(
+                    str(row.get(dimension) or "—") != "—"
+                    for dimension in dimensions
+                )
+            )
+        if not _dimension_available(eligible_rows, dimensions):
+            return ""
+        cohorts = _cohorts(eligible_rows, dimensions)
+        if len(cohorts) < min_groups:
             return ""
         return _cohort_table(
             title_text,
-            _cohorts(rows, dimensions),
+            cohorts,
             dimensions,
             lab_key=lab_key,
             table_key=table_key,
@@ -1640,10 +1855,180 @@ def render_analytics(
             dimension_labels=labels,
         )
 
+    if lab_key == "goal":
+        watchlist_content = (
+            table(
+                "Goal shape × price",
+                (
+                    "market_key",
+                    "selection",
+                    "expected_total_goals_bucket",
+                    "goal_lambda_min_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_goal_shape_price",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "expected_total_goals_bucket": "λ total",
+                    "goal_lambda_min_bucket": "λ min",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Balance × total-line gap",
+                (
+                    "market_key",
+                    "selection",
+                    "goal_lambda_balance_bucket",
+                    "goal_total_line_gap_bucket",
+                ),
+                "watch_goal_balance_gap",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "goal_lambda_balance_bucket": "λ balance",
+                    "goal_total_line_gap_bucket": "λ total − line",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Model vs market × price",
+                (
+                    "market_key",
+                    "selection",
+                    "model_probability_bucket",
+                    "market_probability_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_goal_price",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "model_probability_bucket": "Model P",
+                    "market_probability_bucket": "Market P",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Trend × matchup",
+                (
+                    "market_key",
+                    "selection",
+                    "goal_attack_trend_bucket",
+                    "goal_venue_trend_bucket",
+                    "goal_matchup_pressure_bucket",
+                ),
+                "watch_goal_trend_matchup",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "goal_attack_trend_bucket": "L5−L10 goals",
+                    "goal_venue_trend_bucket": "Venue−L10",
+                    "goal_matchup_pressure_bucket": "Matchup pressure",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Reliability × market",
+                (
+                    "market_key",
+                    "selection",
+                    "history_depth_bucket",
+                    "feature_missingness_bucket",
+                ),
+                "watch_goal_reliability",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "history_depth_bucket": "Min history",
+                    "feature_missingness_bucket": "Missing features",
+                },
+                drop_missing=True,
+            )
+        )
+    else:
+        watchlist_content = (
+            table(
+                "Model-line gap × price",
+                (
+                    "market_key",
+                    "selection",
+                    "corner_model_line_gap_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_corner_gap_price",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "corner_model_line_gap_bucket": "Mean − line",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Pressure trend × matchup",
+                (
+                    "selection",
+                    "corner_trend_bucket",
+                    "corner_venue_trend_bucket",
+                    "corner_matchup_pressure_bucket",
+                ),
+                "watch_corner_trend_matchup",
+                labels={
+                    "selection": "Selection",
+                    "corner_trend_bucket": "L5−L10 corners",
+                    "corner_venue_trend_bucket": "Venue−L10",
+                    "corner_matchup_pressure_bucket": "Matchup pressure",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Model vs market × price",
+                (
+                    "market_key",
+                    "selection",
+                    "model_probability_bucket",
+                    "market_probability_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_corner_price",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "model_probability_bucket": "Model P",
+                    "market_probability_bucket": "Market P",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Reliability × market",
+                (
+                    "market_key",
+                    "selection",
+                    "history_depth_bucket",
+                    "feature_missingness_bucket",
+                ),
+                "watch_corner_reliability",
+                labels={
+                    "market_key": "Market",
+                    "selection": "Selection",
+                    "history_depth_bucket": "Min history",
+                    "feature_missingness_bucket": "Missing features",
+                },
+                drop_missing=True,
+            )
+        )
+
+    watchlist = _watchlist_block(watchlist_content, lab_key=lab_key)
+
     baseline = (
         _analytics_section(
             "Universe / regimes",
-            "categorical cohorts and model-policy context",
+            "core categorical cohorts only",
         )
         + table(
             "Markets / selections",
@@ -1658,12 +2043,6 @@ def render_analytics(
             labels={"competition_name": "League"},
         )
         + table(
-            "Countries",
-            ("country",),
-            "countries",
-            labels={"country": "Country"},
-        )
-        + table(
             "Bookmakers",
             ("bookmaker_name",),
             "bookmakers",
@@ -1674,12 +2053,14 @@ def render_analytics(
             ("model_version",),
             "models",
             labels={"model_version": "Model version"},
+            min_groups=2,
         )
         + table(
             "Policy versions",
             ("policy_version",),
             "policies",
             labels={"policy_version": "Policy version"},
+            min_groups=2,
         )
         + table(
             "Model × policy",
@@ -1689,155 +2070,70 @@ def render_analytics(
                 "model_version": "Model version",
                 "policy_version": "Policy version",
             },
+            min_groups=2,
         )
     )
 
     signal_buckets = (
         _analytics_section(
-            "Signal / price buckets",
-            "stable ranges for probability, price, edge, EV, line and CLV",
-        )
-        + table(
-            "Model probability",
-            ("model_probability_bucket",),
-            "model_probability",
-            labels={"model_probability_bucket": "Model P"},
-        )
-        + table(
-            "Market probability",
-            ("market_probability_bucket",),
-            "market_probability",
-            labels={"market_probability_bucket": "Market P"},
+            "Signal / price",
+            "compact price diagnostics; watchlist contains the important crosses",
         )
         + table(
             "Entry odds",
             ("entry_odds_bucket",),
             "entry_odds",
             labels={"entry_odds_bucket": "Entry odds"},
-        )
-        + table(
-            "Closing odds",
-            ("closing_odds_bucket",),
-            "closing_odds",
-            labels={"closing_odds_bucket": "Closing odds"},
+            drop_missing=True,
         )
         + table(
             "Edge",
             ("edge_bucket",),
             "edge",
             labels={"edge_bucket": "Edge"},
+            drop_missing=True,
         )
         + table(
             "Expected value",
             ("ev_bucket",),
             "ev",
             labels={"ev_bucket": "EV"},
+            drop_missing=True,
         )
         + table(
             "Realized CLV",
             ("clv_bucket",),
             "clv",
             labels={"clv_bucket": "CLV"},
-        )
-        + table(
-            "Market line",
-            ("line_bucket",),
-            "line",
-            labels={"line_bucket": "Line"},
+            drop_missing=True,
         )
     )
 
     timing = (
         _analytics_section(
-            "Timing / stability",
-            "when picks were made and when matches were played",
+            "Stability",
+            "time slices useful for validation, not primary selection",
         )
         + table(
             "Weekly stability",
             ("kickoff_week",),
             "weeks",
             labels={"kickoff_week": "Week"},
-        )
-        + table(
-            "Kickoff weekday",
-            ("kickoff_weekday",),
-            "weekday",
-            labels={"kickoff_weekday": "Weekday"},
-        )
-        + table(
-            "Kickoff time · Europe/Belgrade",
-            ("kickoff_time_bucket",),
-            "kickoff_time",
-            labels={"kickoff_time_bucket": "Hour"},
+            drop_missing=True,
         )
         + table(
             "Decision lead time",
             ("decision_lead_bucket",),
             "decision_lead",
             labels={"decision_lead_bucket": "Kickoff − decision"},
-        )
-        + table(
-            "Quote age at decision",
-            ("quote_age_bucket",),
-            "quote_age",
-            labels={"quote_age_bucket": "Decision − quote"},
+            drop_missing=True,
         )
     )
 
     cross_sections = (
         _analytics_section(
-            "Cross-sections",
-            "interaction cohorts for locating where performance is actually coming from",
-        )
-        + table(
-            "Market × selection × model probability",
-            ("market_key", "selection", "model_probability_bucket"),
-            "market_model_p",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "model_probability_bucket": "Model P",
-            },
-        )
-        + table(
-            "Market × selection × market probability",
-            ("market_key", "selection", "market_probability_bucket"),
-            "market_market_p",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "market_probability_bucket": "Market P",
-            },
-        )
-        + table(
-            "Market × selection × entry odds",
-            ("market_key", "selection", "entry_odds_bucket"),
-            "market_odds",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "entry_odds_bucket": "Odds",
-            },
-        )
-        + table(
-            "Market × selection × EV",
-            ("market_key", "selection", "ev_bucket"),
-            "market_ev",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "ev_bucket": "EV",
-            },
-        )
-        + table(
-            "Market × selection × line",
-            ("market_key", "selection", "line_bucket"),
-            "market_line",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "line_bucket": "Line",
-            },
+            "Execution cross-sections",
+            "secondary checks for league and bookmaker concentration",
         )
         + table(
             "League × market",
@@ -1859,213 +2155,41 @@ def render_analytics(
                 "selection": "Selection",
             },
         )
-        + table(
-            "Research-style signal cube",
-            (
-                "market_key",
-                "selection",
-                "model_probability_bucket",
-                "market_probability_bucket",
-                "ev_bucket",
-                "entry_odds_bucket",
-            ),
-            "signal_cube",
-            labels={
-                "market_key": "Market",
-                "selection": "Selection",
-                "model_probability_bucket": "Model P",
-                "market_probability_bucket": "Market P",
-                "ev_bucket": "EV",
-                "entry_odds_bucket": "Odds",
-            },
-        )
     )
 
     if lab_key == "goal":
         domain = (
             _analytics_section(
-                "GoalLab model-state buckets",
-                "DC+ expected-goal structure recorded on each pick",
-            )
-            + table(
-                "Low-scoring diagnostic",
-                ("goal_diagnostic_bucket",),
-                "goal_diagnostic",
-                labels={"goal_diagnostic_bucket": "Diagnostic"},
+                "GoalLab structure",
+                "secondary structural summaries; ROI candidates are promoted to Watchlist",
             )
             + table(
                 "Expected total goals",
                 ("expected_total_goals_bucket",),
                 "goal_total",
                 labels={"expected_total_goals_bucket": "λ total"},
-            )
-            + table(
-                "Expected home goals",
-                ("expected_home_goals_bucket",),
-                "goal_home",
-                labels={"expected_home_goals_bucket": "λ home"},
-            )
-            + table(
-                "Expected away goals",
-                ("expected_away_goals_bucket",),
-                "goal_away",
-                labels={"expected_away_goals_bucket": "λ away"},
+                drop_missing=True,
             )
             + table(
                 "Home − away expected-goal spread",
                 ("goal_lambda_spread_bucket",),
                 "goal_spread",
                 labels={"goal_lambda_spread_bucket": "λH − λA"},
-            )
-            + table(
-                "Market × expected total goals",
-                ("market_key", "selection", "expected_total_goals_bucket"),
-                "goal_market_total",
-                labels={
-                    "market_key": "Market",
-                    "selection": "Selection",
-                    "expected_total_goals_bucket": "λ total",
-                },
+                drop_missing=True,
             )
         )
     else:
         domain = (
             _analytics_section(
-                "CornerLab model-state buckets",
-                "expected corner mean and distance from the quoted line",
+                "CornerLab structure",
+                "secondary model-state summary; gap × price is promoted to Watchlist",
             )
             + table(
                 "Expected total corners",
                 ("expected_total_corners_bucket",),
                 "corner_total",
                 labels={"expected_total_corners_bucket": "Expected corners"},
-            )
-            + table(
-                "Expected corners − line",
-                ("corner_model_line_gap_bucket",),
-                "corner_line_gap",
-                labels={"corner_model_line_gap_bucket": "Mean − line"},
-            )
-            + table(
-                "Market × expected total corners",
-                ("market_key", "selection", "expected_total_corners_bucket"),
-                "corner_market_total",
-                labels={
-                    "market_key": "Market",
-                    "selection": "Selection",
-                    "expected_total_corners_bucket": "Expected corners",
-                },
-            )
-        )
-
-    if lab_key == "goal":
-        feature_tables = (
-            _analytics_section(
-                "Recorded pre-match features",
-                "stable L5 inputs stored with the GoalLab pick snapshot",
-            )
-            + table(
-                "Home L5 goals for",
-                ("feature_home_l5_goals_for_bucket",),
-                "feat_home_goals_for",
-                labels={"feature_home_l5_goals_for_bucket": "Goals / match"},
-            )
-            + table(
-                "Home L5 goals against",
-                ("feature_home_l5_goals_against_bucket",),
-                "feat_home_goals_against",
-                labels={"feature_home_l5_goals_against_bucket": "Goals / match"},
-            )
-            + table(
-                "Away L5 goals for",
-                ("feature_away_l5_goals_for_bucket",),
-                "feat_away_goals_for",
-                labels={"feature_away_l5_goals_for_bucket": "Goals / match"},
-            )
-            + table(
-                "Away L5 goals against",
-                ("feature_away_l5_goals_against_bucket",),
-                "feat_away_goals_against",
-                labels={"feature_away_l5_goals_against_bucket": "Goals / match"},
-            )
-            + table(
-                "Home L5 shots for",
-                ("feature_home_l5_shots_for_bucket",),
-                "feat_home_shots",
-                labels={"feature_home_l5_shots_for_bucket": "Shots / match"},
-            )
-            + table(
-                "Away L5 shots for",
-                ("feature_away_l5_shots_for_bucket",),
-                "feat_away_shots",
-                labels={"feature_away_l5_shots_for_bucket": "Shots / match"},
-            )
-            + table(
-                "Home L5 shots on target",
-                ("feature_home_l5_sot_for_bucket",),
-                "feat_home_sot",
-                labels={"feature_home_l5_sot_for_bucket": "SOT / match"},
-            )
-            + table(
-                "Away L5 shots on target",
-                ("feature_away_l5_sot_for_bucket",),
-                "feat_away_sot",
-                labels={"feature_away_l5_sot_for_bucket": "SOT / match"},
-            )
-        )
-    else:
-        feature_tables = (
-            _analytics_section(
-                "Recorded pre-match features",
-                "stable L5 inputs stored with the CornerLab pick snapshot",
-            )
-            + table(
-                "Home L5 corners for",
-                ("feature_home_l5_corners_for_bucket",),
-                "feat_home_corners_for",
-                labels={"feature_home_l5_corners_for_bucket": "Corners / match"},
-            )
-            + table(
-                "Home L5 corners against",
-                ("feature_home_l5_corners_against_bucket",),
-                "feat_home_corners_against",
-                labels={"feature_home_l5_corners_against_bucket": "Corners / match"},
-            )
-            + table(
-                "Away L5 corners for",
-                ("feature_away_l5_corners_for_bucket",),
-                "feat_away_corners_for",
-                labels={"feature_away_l5_corners_for_bucket": "Corners / match"},
-            )
-            + table(
-                "Away L5 corners against",
-                ("feature_away_l5_corners_against_bucket",),
-                "feat_away_corners_against",
-                labels={"feature_away_l5_corners_against_bucket": "Corners / match"},
-            )
-            + table(
-                "Home L5 shots for",
-                ("feature_home_l5_shots_for_bucket",),
-                "feat_home_shots",
-                labels={"feature_home_l5_shots_for_bucket": "Shots / match"},
-            )
-            + table(
-                "Away L5 shots for",
-                ("feature_away_l5_shots_for_bucket",),
-                "feat_away_shots",
-                labels={"feature_away_l5_shots_for_bucket": "Shots / match"},
-            )
-            + table(
-                "Home L5 shots on target",
-                ("feature_home_l5_sot_for_bucket",),
-                "feat_home_sot",
-                labels={"feature_home_l5_sot_for_bucket": "SOT / match"},
-            )
-            + table(
-                "Away L5 shots on target",
-                ("feature_away_l5_sot_for_bucket",),
-                "feat_away_sot",
-                labels={"feature_away_l5_sot_for_bucket": "SOT / match"},
+                drop_missing=True,
             )
         )
 
@@ -2078,6 +2202,7 @@ def render_analytics(
             lab_key=lab_key,
             currency=currency,
         )
+        + watchlist
         + '<div class="analytics-grid">'
         + _window_card("Last 7 days", last_7)
         + _window_card("Last 30 days", last_30)
@@ -2086,7 +2211,6 @@ def render_analytics(
         + baseline
         + signal_buckets
         + domain
-        + feature_tables
         + timing
         + cross_sections
         + _analytics_section(
