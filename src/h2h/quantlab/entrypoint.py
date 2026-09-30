@@ -278,13 +278,19 @@ def main() -> None:
                 "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_TARGET", "8"
             ),
             card_referee_history_lookback_days=_positive_integer(
-                "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_LOOKBACK_DAYS", "400"
+                "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_LOOKBACK_DAYS", "1100"
+            ),
+            card_referee_prior_seasons=int(
+                os.environ.get("QUANTBET_QUANTLAB_CARD_REFEREE_PRIOR_SEASONS", "3")
+            ),
+            card_referee_history_days_per_cycle=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_DAYS_PER_CYCLE", "12"
             ),
             card_referee_history_scopes_per_cycle=_positive_integer(
-                "QUANTBET_QUANTLAB_CARD_REFEREE_SCOPES_PER_CYCLE", "8"
+                "QUANTBET_QUANTLAB_CARD_REFEREE_SCOPES_PER_CYCLE", "24"
             ),
             card_referee_statistics_per_cycle=_positive_integer(
-                "QUANTBET_QUANTLAB_CARD_REFEREE_STATS_PER_CYCLE", "64"
+                "QUANTBET_QUANTLAB_CARD_REFEREE_STATS_PER_CYCLE", "128"
             ),
             card_referee_history_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CARD_REFEREE_HISTORY_REFRESH_SECONDS", "604800"

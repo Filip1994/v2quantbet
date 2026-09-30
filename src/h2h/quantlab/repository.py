@@ -77,6 +77,7 @@ class PostgreSQLQuantLabRepository:
             "quantlab_corner_feature_snapshots",
             "quantlab_team_history_captures",
             "quantlab_referee_history_scope_captures",
+            "quantlab_referee_day_scans",
             "quantlab_league_coverage_captures",
         )
         with self.connect() as connection, connection.cursor() as cursor:
@@ -1626,6 +1627,42 @@ class PostgreSQLQuantLabRepository:
             )
         return capture_id
 
+    def unscanned_referee_history_days(
+        self, *, first_day: date, last_day: date, limit: int
+    ) -> tuple[date, ...]:
+        if last_day < first_day or limit <= 0:
+            return ()
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT day::date FROM generate_series(%s::date, %s::date, "
+                "interval '1 day') AS day "
+                "WHERE NOT EXISTS (SELECT 1 FROM quantlab_referee_day_scans s "
+                "WHERE s.scan_date = day::date) "
+                "ORDER BY day DESC LIMIT %s",
+                (first_day, last_day, limit),
+            )
+            return tuple(row[0] for row in cursor.fetchall())
+
+    def save_referee_day_scan(
+        self,
+        *,
+        scan_date: date,
+        captured_at: datetime,
+        response_fixture_count: int,
+        referee_fixture_count: int,
+        page_count: int,
+    ) -> None:
+        if response_fixture_count < 0 or referee_fixture_count < 0 or page_count <= 0:
+            raise ValueError("invalid referee day scan counts")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_referee_day_scans "
+                "(scan_date, captured_at, response_fixture_count, "
+                "referee_fixture_count, page_count) "
+                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (scan_date, captured_at, response_fixture_count, referee_fixture_count, page_count),
+            )
+
     def referee_history_scope_due(
         self,
         league_id: int,
@@ -1715,7 +1752,8 @@ class PostgreSQLQuantLabRepository:
                 "WITH context AS ("
                 " SELECT DISTINCT ON (fixture_id) fixture_id, referee, kickoff_at "
                 " FROM quantlab_fixture_context_observations "
-                " WHERE lower(referee) = lower(%s) AND available_at <= %s "
+                " WHERE lower(btrim(split_part(referee, ',', 1))) = "
+                " lower(btrim(split_part(%s, ',', 1))) AND available_at <= %s "
                 " AND kickoff_at < %s "
                 " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
                 ") "
@@ -3402,7 +3440,8 @@ class PostgreSQLQuantLabRepository:
                 "WITH context AS ("
                 " SELECT DISTINCT ON (fixture_id) fixture_id, referee, kickoff_at, available_at "
                 " FROM quantlab_fixture_context_observations "
-                " WHERE lower(referee) = lower(%s) AND available_at <= %s "
+                " WHERE lower(btrim(split_part(referee, ',', 1))) = "
+                " lower(btrim(split_part(%s, ',', 1))) AND available_at <= %s "
                 " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
                 "), stats AS ("
                 " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
