@@ -380,7 +380,7 @@ def build_worker(repository, source, *, clock=lambda: NOW):
 
 def test_repeated_hard_stale_payload_is_replay_safe_and_schedules_backoff() -> None:
     stale_market = CompleteMarketQuoteState(
-        "BTTS", NOW - timedelta(hours=9), NOW, "api-football"
+        "BTTS", NOW - timedelta(hours=11), NOW, "api-football"
     )
     repository = WorkerRepository(fixture(), (stale_market,))
     source = SimpleNamespace(

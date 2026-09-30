@@ -327,7 +327,7 @@ class ResearchDashboardService:
         *,
         fixed_stake_minor: int = 30_000,
         strict_quote_age_seconds: int = 300,
-        provider_snapshot_max_age_seconds: int = 28_800,
+        provider_snapshot_max_age_seconds: int = 36_000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository

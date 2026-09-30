@@ -87,6 +87,23 @@ class OpportunityOddsUnavailableError(RuntimeError):
     """The provider returned no usable quotes for a due fixture."""
 
 
+def _fetch_quotes(source: object, **kwargs: object) -> tuple[tuple[object, ...], int | None]:
+    """Fetch once while retaining the provider count when the adapter exposes it."""
+    diagnostic_fetch = getattr(source, "fetch_quotes_with_diagnostics", None)
+    if callable(diagnostic_fetch):
+        result = diagnostic_fetch(**kwargs)
+        return tuple(result.quotes), result.provider_response_items
+    return tuple(source.fetch_quotes(**kwargs)), None
+
+
+def _missing_market_reason(quotes: tuple[object, ...], response_items: int | None) -> str:
+    if response_items == 0:
+        return "PROVIDER_RESPONSE_EMPTY"
+    if not quotes:
+        return "NO_SUPPORTED_CANONICAL_QUOTES"
+    return "NO_COMPLETE_SUPPORTED_MARKET"
+
+
 def _returned_complete_market_observations(
     quotes: tuple[object, ...],
 ) -> set[tuple[int, str, datetime, str]]:
@@ -164,7 +181,7 @@ class OpportunityWorker:
         maximum_quote_age_seconds: int,
         minimum_time_to_kickoff_seconds: int,
         stale_retry_policy: StaleQuoteRetryPolicy,
-        provider_snapshot_max_age_seconds: int = 28800,
+        provider_snapshot_max_age_seconds: int = 36000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
         record_research_signal: Callable[[str, datetime], None] | None = None,
@@ -363,7 +380,8 @@ class OpportunityWorker:
                 try:
                     if fixture.stale_retry:
                         stale_retries_requested += 1
-                    quotes = self._source.fetch_quotes(
+                    quotes, preliminary_response_items = _fetch_quotes(
+                        self._source,
                         fixture_identity=fixture.identity,
                         bookmaker_id=(
                             self._bookmaker_id if len(self._bookmaker_ids) == 1 else None
@@ -403,7 +421,6 @@ class OpportunityWorker:
                 # Persistence conflicts and database integrity failures are deliberately
                 # outside the provider-error boundary and must reach the orchestrator.
                 quote_processing_started = self._monotonic()
-                quotes = tuple(quotes)
                 if quotes:
                     quotes_fetched += len(quotes)
                     odds_fetches += 1
@@ -446,11 +463,11 @@ class OpportunityWorker:
                         extra={
                             "worker": WORKER_NAME,
                             "fixture_id": fixture.fixture_id,
-                            "odds_unavailable_reason": (
-                                "EMPTY_CANONICAL_RESPONSE_NO_PERSISTED_MARKET"
-                                if not quotes
-                                else "NO_PERSISTED_COMPLETE_MARKET"
+                            "odds_unavailable_reason": _missing_market_reason(
+                                quotes, preliminary_response_items
                             ),
+                            "provider_response_items": preliminary_response_items,
+                            "canonical_quote_count": len(quotes),
                         },
                     )
                     continue
@@ -564,6 +581,14 @@ class OpportunityWorker:
                             "worker": WORKER_NAME,
                             "fixture_id": fixture.fixture_id,
                             "odds_unavailable_reason": "PERSISTED_MARKET_OUTSIDE_PROVIDER_AGE",
+                            "provider_response_items": preliminary_response_items,
+                            "canonical_quote_count": len(quotes),
+                            "provider_snapshot_max_age_seconds": (
+                                self._provider_snapshot_max_age_seconds
+                            ),
+                            "latest_provider_observed_at": max(
+                                state.observed_at for state in market_states
+                            ),
                         },
                     )
                     continue
@@ -764,7 +789,8 @@ class OpportunityWorker:
                         )
                         final_fetch_started = self._monotonic()
                         try:
-                            final_quotes = self._source.fetch_quotes(
+                            final_quotes, final_response_items = _fetch_quotes(
+                                self._source,
                                 fixture_identity=fixture.identity,
                                 bookmaker_id=preliminary.bookmaker_id,
                                 market=preliminary.market,
@@ -833,13 +859,15 @@ class OpportunityWorker:
                             continue
 
                         captured_at = self._now()
-                        final_quotes = tuple(final_quotes)
                         quotes_fetched += len(final_quotes)
                         fresh_quotes += self._ingestion.ingest(
                             final_quotes, captured_at=captured_at
                         )
                         final_market = _final_market(final_quotes, preliminary)
                         if final_market is None:
+                            missing_reason = _missing_market_reason(
+                                final_quotes, final_response_items
+                            )
                             self._register.reject_final_quote_verification(
                                 claim.verification_id,
                                 reason_codes=(
@@ -850,6 +878,22 @@ class OpportunityWorker:
                             decisions += 1
                             rejected_picks += 1
                             fallback_attempts += 1
+                            LOGGER.info(
+                                "mandatory final quote verification rejected",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": (
+                                        FinalQuoteRejectionCode.FINAL_QUOTE_MARKET_INCOMPLETE.value,
+                                    ),
+                                    "odds_unavailable_reason": missing_reason,
+                                    "provider_response_items": final_response_items,
+                                    "canonical_quote_count": len(final_quotes),
+                                },
+                            )
                             continue
 
                         quote_age = (captured_at - final_market.observed_at).total_seconds()
@@ -865,6 +909,19 @@ class OpportunityWorker:
                             decisions += 1
                             rejected_picks += 1
                             fallback_attempts += 1
+                            LOGGER.info(
+                                "mandatory final quote verification rejected",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": ("QUOTE_NOT_YET_AVAILABLE",),
+                                    "odds_unavailable_reason": "PROVIDER_TIMESTAMP_IN_FUTURE",
+                                    "quote_age_seconds": quote_age,
+                                },
+                            )
                             continue
                         if quote_age > self._provider_snapshot_max_age_seconds:
                             self._repository.record_quote_refresh_state(
@@ -889,6 +946,24 @@ class OpportunityWorker:
                             decisions += 1
                             rejected_picks += 1
                             fallback_attempts += 1
+                            LOGGER.info(
+                                "mandatory final quote verification rejected",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": (
+                                        FinalQuoteRejectionCode.FINAL_QUOTE_STALE.value,
+                                    ),
+                                    "odds_unavailable_reason": "PROVIDER_MARKET_OUTSIDE_MAX_AGE",
+                                    "quote_age_seconds": quote_age,
+                                    "provider_snapshot_max_age_seconds": (
+                                        self._provider_snapshot_max_age_seconds
+                                    ),
+                                },
+                            )
                             continue
 
                         stale_quote = quote_age > self._maximum_quote_age_seconds
@@ -945,6 +1020,21 @@ class OpportunityWorker:
                             decisions += 1
                             rejected_picks += 1
                             fallback_attempts += 1
+                            LOGGER.info(
+                                "mandatory final quote verification rejected",
+                                extra={
+                                    "worker": WORKER_NAME,
+                                    "fixture_id": fixture.fixture_id,
+                                    "market": preliminary.market.value,
+                                    "selection": preliminary.selected_selection.value,
+                                    "final_decision": "REJECTED",
+                                    "rejection_reasons": (
+                                        FinalQuoteRejectionCode.FINAL_QUOTE_MARKET_INCOMPLETE.value,
+                                    ),
+                                    "odds_unavailable_reason": "PERSISTED_FINAL_MARKET_INCOMPLETE",
+                                    "quote_age_seconds": quote_age,
+                                },
+                            )
                             continue
 
                         evaluation_started = self._monotonic()
