@@ -1,3 +1,5 @@
+> **Document status:** HISTORICAL / AUDIT RECORD. Preserved as evidence of the state when written; it is not current-state authority. See [PROJECT_STATUS](../PROJECT_STATUS.md) and the current priorities document.
+
 # QuantBet — Perfect Scaling Plan
 
 > Cilj ovog plana nije da izgradimo prekomplikovanu platformu, već da dođemo do **pouzdanog sistema koji generiše dnevni bilten sa pikovima**, uz jasan, neinteraktivan dashboard za nadzor sistema.

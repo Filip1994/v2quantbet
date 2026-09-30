@@ -1,3 +1,5 @@
+> **Document status:** HISTORICAL / AUDIT RECORD. Preserved as evidence of the state when written; it is not current-state authority. See [PROJECT_STATUS](../../PROJECT_STATUS.md) and the current priorities document.
+
 # GoalLab — DC+ Pro V1
 
 Status: Structural V1 implemented in GoalLab draft; Late-Lineup remains separately versioned.

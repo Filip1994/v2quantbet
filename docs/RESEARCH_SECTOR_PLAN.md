@@ -1,205 +1,104 @@
 # QuantBet — Research Sector Plan
 
-## 1. Purpose
+_Last synchronized: 2026-09-30_
 
-Research is the analytical and experimental layer of QuantBet. It does not search for today's picks and it does not directly control the Daily Bulletin. Its purpose is to establish whether production signals are calibrated, robust, economically meaningful, and reproducible.
+## Purpose
 
-The central research question is:
+Research is the analytical layer of QuantBet. It explains and compares signals; it does not directly register, skip, stake, settle or otherwise mutate Production.
 
-> Under which measurable conditions should QuantBet trust, downgrade, or reject a detected value signal?
+Central questions:
 
-## 2. Separation from Daily Bulletin screening
+- where is the model calibrated;
+- where do price/model/value structures repeat;
+- what does CLV say before enough realized ROI exists;
+- how stable are results across time, leagues and bookmakers;
+- which rules deserve owner review.
 
-### Daily Bulletin screening
+## Canonical dataset
 
-The production screening pipeline answers:
+Research uses the comparable final-gate decision universe.
 
-> Which upcoming fixtures currently show the strongest eligible model-vs-bookmaker value?
+Routes:
 
-It uses current data, fixed production rules, and deterministic ranking.
+- `PLAYED`;
+- `SKIPPED`;
+- `BLOCKED_EXPOSURE`.
 
-### Research
+Rows that fail earlier edge/EV/odds/freshness/timing/model gates belong to lower-level diagnostics, not the same final-gate cohort.
 
-Research answers:
+Research preserves raw values in addition to bucket labels.
 
-> Why does this signal appear, how often is it reliable, and does it generalize beyond the observed sample?
+## Current analyses
 
-It uses historical snapshots, outcomes, versioned experiments, and statistical validation.
+The active analytics layer supports:
 
-Research must never silently change production behavior.
+- model probability buckets;
+- market fair probability buckets;
+- EV buckets;
+- odds buckets;
+- market / selection;
+- route;
+- bookmaker;
+- league;
+- quote freshness;
+- model/policy/devig regimes;
+- time slices;
+- ROI/P&L;
+- win rate / expected win rate / calibration gap;
+- Wilson win-rate intervals;
+- CLV coverage / average / median / positive rate.
 
-## 3. Research data foundation
+## Methodological controls
 
-Research requires historically reconstructable data. The system must preserve:
+Always guard against:
 
-- raw provider observations;
-- normalized fixture, market, selection, and odds records;
-- model probabilities with model and configuration versions;
-- immutable pick decision contexts;
-- timestamped odds snapshots;
-- first-seen, pick-time, current, and closing references;
-- final match results and settlement state;
-- contextual observations such as lineups, injuries, and weather when available.
-
-Derived metrics must not replace raw observations. Every research result must be traceable to source records.
-
-## 4. Research workstreams
-
-### 4.1 Calibration
-
-Measure whether predicted probabilities correspond to observed frequencies.
-
-Required analyses:
-
-- reliability curves;
-- Brier score and log loss where applicable;
-- calibration by market and competition;
-- systematic overconfidence or underconfidence;
-- calibration drift over time;
-- sample-size and uncertainty reporting.
-
-### 4.2 Value-signal quality
-
-Study whether larger probability gaps correspond to better outcomes or better market information.
-
-Required analyses:
-
-- distribution of probability gaps;
-- signal frequency by market and competition;
-- realized outcomes grouped by gap buckets;
-- extreme-gap outlier review;
-- data-quality and stale-odds rejection analysis;
-- false-positive and false-negative review.
-
-### 4.3 Odds movement and CLV
-
-Study the relationship between the odds available at decision time and subsequent market movement.
-
-Required analyses:
-
-- pick odds versus closing reference;
-- time-to-kickoff movement curves;
-- bookmaker-specific movement;
-- disagreement between bookmakers;
-- realized CLV by market, competition, and signal strength;
-- missing, stale, or invalid closing-reference rates.
-
-Expected CLV must remain separate from realized CLV and must be versioned independently.
-
-### 4.4 Contextual factors
-
-Evaluate whether additional information improves reliability without introducing leakage.
-
-Candidate factors include:
-
-- confirmed lineups;
-- injuries and suspensions;
-- weather;
-- rest days and congestion;
-- bookmaker disagreement;
-- odds movement velocity;
-- time to kickoff;
-- competition and team-strength segments.
-
-Every factor must be evaluated with an explicit availability timestamp. Information unavailable at decision time cannot be used in a historical decision simulation.
-
-### 4.5 Model and rule experiments
-
-Compare model versions, feature sets, thresholds, and ranking rules through controlled experiments.
-
-Each experiment must define:
-
-- hypothesis;
-- baseline;
-- dataset and time period;
-- inclusion/exclusion rules;
-- feature and model versions;
-- evaluation metrics;
-- leakage controls;
-- stopping or acceptance criteria;
-- result and limitations.
-
-## 5. Experiment lifecycle
-
-```text
-hypothesis
-→ experiment specification
-→ immutable dataset selection
-→ baseline definition
-→ implementation
-→ backtest
-→ out-of-sample or walk-forward evaluation
-→ robustness checks
-→ result report
-→ explicit accept/reject decision
-```
-
-An experiment is not valid merely because it improves an in-sample metric.
-
-## 6. Required methodological controls
-
-Research must explicitly address:
-
-- look-ahead and target leakage;
-- survivorship bias;
-- selection bias from only examining published picks;
+- look-ahead leakage;
+- target leakage;
+- stale/duplicate quotes;
+- selection bias;
 - missing-data bias;
-- stale or duplicated odds;
 - bookmaker availability bias;
 - multiple testing;
-- overfitting and p-hacking;
-- temporal dependence;
-- regime and competition drift;
-- uncertainty caused by small samples.
+- overfitting;
+- temporal and league/regime drift.
 
-Where possible, evaluation should use chronological splits and walk-forward validation rather than random shuffling.
+Chronological/walk-forward evaluation remains preferred when evaluating model changes.
 
-## 7. Research outputs
+## Production governance
 
-Research may produce:
+### No automatic promotion
 
-- calibration reports;
-- value-signal reports;
-- CLV and odds-movement reports;
-- experiment specifications;
-- reproducible datasets;
-- backtest results;
-- model/rule proposals;
-- production-promotion recommendations;
-- documented rejected hypotheses and limitations.
+No Research result can modify Production by itself.
 
-Every output must state its data period, sample size, methodology version, and limitations.
+### Owner approval
 
-## 8. Promotion to production
+For bucket-based Production selection, explicit owner approval is the authority boundary.
 
-A research result becomes a production candidate only after:
+Forward/OOS confirmation is valuable evidence but **not a mandatory gate** if the owner deliberately approves the bucket.
 
-1. the experiment is reproducible;
-2. the baseline is explicit;
-3. out-of-sample or walk-forward results are available;
-4. leakage and bias checks are documented;
-5. robustness across relevant segments is assessed;
-6. the economic and operational impact is understood;
-7. the proposed production change is reviewed and explicitly implemented;
-8. regression tests and CI verification pass.
+### Bans
 
-There is no automatic promotion from Research to production.
+Do not permanently ban a bucket because of a short negative run.
 
-## 9. Implementation order
+Default performance-based ban review horizon: **3–6 months**.
 
-Research should be implemented only after the production data foundation is sufficiently stable. The planned order is:
+Immediate suspension is appropriate for technical-integrity failures such as leakage, wrong settlement, identity corruption, bad quote alignment or model/data bugs.
 
-1. immutable odds and decision-context history;
-2. outcome and settlement linkage;
-3. reproducible analytical dataset export;
-4. baseline calibration report;
-5. baseline value-signal report;
-6. odds movement and realized-CLV analysis;
-7. walk-forward backtesting framework;
-8. contextual-factor experiments;
-9. model/rule version comparison;
-10. controlled promotion workflow.
+## Output requirements
 
-## 10. Definition of done
+Every important research view/result should make clear:
 
-The Research sector is operational only when a researcher can reproduce a reported result from stored source records, identify the exact model/data versions used, distinguish in-sample from out-of-sample evidence, and produce an explicit recommendation without modifying production logic implicitly.
+- data period;
+- settled N;
+- exact cohort definition;
+- model/policy regime;
+- ROI/P&L;
+- calibration evidence;
+- CLV evidence;
+- important data-quality limitations.
+
+## Separation from QuantLab
+
+Research analyzes the Production-comparable final-gate universe.
+
+QuantLab is a separate model laboratory with broader multi-market data/model experimentation. The two can share analytical principles without sharing write authority.

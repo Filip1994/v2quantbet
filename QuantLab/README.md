@@ -1,27 +1,60 @@
 # QuantLab
 
+_Last synchronized: 2026-09-30_
+
 QuantLab is QuantBet's isolated multi-market model laboratory.
 
-It is **not** the existing Research Board and it has **no authority to place production bets**.
+It is not the Production registration/risk engine and it is not the Production-comparable Research universe.
 
 ## Laboratories
 
-- [GoalLab](./GoalLab/README.md) — goals, BTTS and DC+ experiments.
-- [CornerLab](./CornerLab/README.md) — corner totals, team corners and corner handicaps.
-- [CardLab](./CardLab/README.md) — cards, fouls, referee and match-context models.
+- [GoalLab](./GoalLab/README.md) — goals, BTTS and DC+ Structural research.
+- [CornerLab](./CornerLab/README.md) — corner totals and structural pressure models.
+- [CardLab](./CardLab/README.md) — cards/referee/context research.
 
 ## Runtime
 
-Runtime code lives under `src/h2h/quantlab/`. This top-level `QuantLab/` directory is the canonical architecture, experiment and work-log record.
+Runtime code: `src/h2h/quantlab/`.
 
-## Hard boundaries
+Railway currently separates the QuantLab web/runtime, modeler and collector responsibilities into dedicated services.
 
-1. Production registration, bankroll, pick decisions and active production model activation are out of bounds.
-2. QuantLab predictions are shadow-only until separately promoted through an explicit future production decision.
-3. Bet365 (API-Football bookmaker 8) and 1xBet (11) are the initial market universe.
-4. QuantLab API usage remains separately attributable as `quantlab_context`, but it shares the global 75,000-request/day football provider envelope; there is no separate 1,000/day QuantLab cap.
-5. Every feature and shadow decision must record provenance and availability time before it can be used for historical evaluation.
-6. GoalLab shadow decisions may read validated active Dixon-Coles artifacts but may never activate or mutate production model state.
-7. Every implementation change must be recorded in [WORKLOG.md](./WORKLOG.md).
+All QuantLab persistence is QuantLab-owned. Production registered picks, bankroll, decision records and active Production model state are outside its write boundary.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) and [CHANGE_PROTOCOL.md](./CHANGE_PROTOCOL.md).
+## Shared rules
+
+- timestamp-safe feature availability;
+- no post-kickoff leakage into pre-match models;
+- immutable/versioned decision evidence;
+- exact provider/bookmaker/market provenance;
+- shared provider-budget telemetry;
+- PostgreSQL durability;
+- read-only HTTP dashboard actions.
+
+## Current analytics
+
+GoalLab and CornerLab have a dedicated **Watchlist · ROI discovery** block before the broader analytics tables.
+
+Watchlist cohorts drill down to the exact settled picks and analytics headers are sortable.
+
+### GoalLab watchlist
+
+- Goal shape × price
+- Balance × total-line gap
+- Model vs market × price
+- Trend × matchup
+- Reliability × market
+
+### CornerLab watchlist
+
+- Model-line gap × price
+- Pressure trend × matchup
+- Model vs market × price
+- Reliability × market
+
+## Production boundary
+
+QuantLab never auto-promotes a bucket/model into Production.
+
+An explicit owner decision is required for any Production use. Forward/OOS evidence is useful but not a mandatory owner-approval gate.
+
+See [../docs/CURRENT_PRIORITIES.md](../docs/CURRENT_PRIORITIES.md).

@@ -1,3 +1,5 @@
+> **Document status:** LIVING contract · synchronized 2026-09-30. Current project state: [../PROJECT_STATUS.md](../PROJECT_STATUS.md).
+
 # Quant API Contract
 
 ## Scope
@@ -61,7 +63,7 @@ Before invoking `market_probabilities()`, the predictor requires the model's `te
 
 `evaluate_prediction_quote(prediction, quote)` is the identity-safe valuation gateway. It accepts only the internal result form produced by `DixonColesFixturePredictor`, then requires exact canonical fixture-ID equality before delegating selection mapping to `model_probability_for_selection()` and numerical valuation to unchanged `evaluate_value()`. Supported public APIs therefore cannot rebind arbitrary or fixture-A probabilities to a fixture-B target. Raw provider IDs and canonical IDs are not interchangeable, and cross-provider equivalence is never inferred. This supported-API boundary does not attempt to defend against deliberate private-module imports or reflection.
 
-The target-binding boundary composes with the implemented FT-only API-Football historical acquisition and provenance-aware fitting bridge. Model artifact/version lifecycle, scheduled training and durable prediction provenance are not implemented.
+The target-binding boundary composes with the implemented FT-only API-Football historical acquisition and provenance-aware fitting bridge. Model artifact/version lifecycle, scheduled training and durable prediction provenance are implemented in Production; the public quant API contract below remains the lower-level mathematical/identity boundary.
 
 ## Prediction methods
 
