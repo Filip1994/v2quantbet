@@ -15,10 +15,11 @@ from h2h.quantlab.corner_lab.model import (
     MIN_TRAINING_EXAMPLES,
     _build_training,
 )
-from h2h.quantlab.corner_lab.shadow_engine import _is_half_line, _market_name_supported
-
-
-POLICY_VERSION = "CORNERLAB_PRESSURE_POISSON_POLICY_V2"
+from h2h.quantlab.corner_lab.shadow_engine import (
+    POLICY_VERSION,
+    _is_half_line,
+    _market_name_supported,
+)
 
 
 def _rows(cursor: Any) -> tuple[dict[str, Any], ...]:
