@@ -40,7 +40,7 @@ def main() -> None:
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
         strict_quote_age_seconds=_integer("QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS", "300"),
         provider_snapshot_max_age_seconds=_integer(
-            "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "28800"
+            "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "36000"
         ),
     )
     server = ResearchDashboardHTTPService(

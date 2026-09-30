@@ -24,6 +24,9 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     record.preliminary_persisted_fallbacks = 2
     record.preliminary_persisted_fallback = True
     record.odds_unavailable_reason = "EMPTY_CANONICAL_RESPONSE_NO_PERSISTED_MARKET"
+    record.canonical_quote_count = 0
+    record.provider_response_items = 1
+    record.provider_snapshot_max_age_seconds = 36000
     record.market = "BTTS"
     record.selection = "YES"
     record.preliminary_odds = 2.05
@@ -67,6 +70,9 @@ def test_json_formatter_exposes_opportunity_diagnostics() -> None:
     assert payload["preliminary_persisted_fallbacks"] == 2
     assert payload["preliminary_persisted_fallback"] is True
     assert payload["odds_unavailable_reason"] == "EMPTY_CANONICAL_RESPONSE_NO_PERSISTED_MARKET"
+    assert payload["canonical_quote_count"] == 0
+    assert payload["provider_response_items"] == 1
+    assert payload["provider_snapshot_max_age_seconds"] == 36000
     assert payload["market"] == "BTTS"
     assert payload["selection"] == "YES"
     assert payload["preliminary_odds"] == 2.05

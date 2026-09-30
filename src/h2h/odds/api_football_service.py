@@ -21,6 +21,12 @@ from .api_football_ingestion import (
 
 
 @dataclass(frozen=True)
+class OddsFetchResult:
+    quotes: tuple[CanonicalQuote, ...]
+    provider_response_items: int | None
+
+
+@dataclass(frozen=True)
 class ApiFootballOddsService:
     """Fetch provider data and immediately convert it to domain objects."""
 
@@ -34,16 +40,35 @@ class ApiFootballOddsService:
         market: Market | None = None,
     ) -> tuple[CanonicalQuote, ...]:
         """Fetch and normalize quotes, optionally pinned to one canonical market."""
+        return self.fetch_quotes_with_diagnostics(
+            fixture_identity=fixture_identity,
+            bookmaker_id=bookmaker_id,
+            market=market,
+        ).quotes
+
+    def fetch_quotes_with_diagnostics(
+        self,
+        *,
+        fixture_identity: ResolvedFixtureIdentity,
+        bookmaker_id: int | None = None,
+        market: Market | None = None,
+    ) -> OddsFetchResult:
+        """Preserve raw response count alongside normalized canonical quotes."""
         provider_fixture_id = api_football_provider_fixture_id(fixture_identity)
         response = self.client.fetch_odds(
             fixture_id=provider_fixture_id,
             bookmaker_id=bookmaker_id,
             bet_id=None if market is None else api_football_bet_id_for_market(market),
         )
-        return ingest_api_football_odds(
+        quotes = ingest_api_football_odds(
             response,
             fixture_identity=fixture_identity,
             bookmaker_id=bookmaker_id,
+        )
+        raw_items = response.get("response")
+        return OddsFetchResult(
+            quotes=quotes,
+            provider_response_items=len(raw_items) if isinstance(raw_items, list) else None,
         )
 
     def fetch_live_quotes(

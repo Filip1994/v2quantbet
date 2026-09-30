@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from h2h.domain.final_quote import FinalQuoteClaim, FinalQuoteStatus
 from h2h.domain.odds import CanonicalQuote, Market, Selection
 from h2h.odds import ApiBudgetExceededError
+from h2h.odds.api_football_service import OddsFetchResult
 from h2h.persistence.postgres_runtime import OpportunityFixture, OpportunitySelection
 from h2h.workers.opportunity import OpportunityWorker, _final_market
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
@@ -187,10 +190,11 @@ def run(
     live=(),
     preliminary=None,
     kickoff_at=None,
-    provider_snapshot_max_age_seconds=28800,
+    provider_snapshot_max_age_seconds=36000,
     record_research_signal=None,
     record_research_production=None,
     repository=None,
+    source=None,
 ):
     repository = repository or Repository()
     if kickoff_at is not None:
@@ -203,7 +207,7 @@ def run(
             repository.fixture.last_captured_at,
         )
     registration = registration or Registration()
-    source = Source(final, live=live, preliminary=preliminary)
+    source = source or Source(final, live=live, preliminary=preliminary)
     worker = OpportunityWorker(
         repository,
         source,
@@ -263,6 +267,61 @@ def test_empty_preliminary_response_without_persisted_market_remains_unavailable
     assert registration.executed == []
 
 
+@pytest.mark.parametrize(
+    ("response_items", "quotes", "reason"),
+    [
+        (0, (), "PROVIDER_RESPONSE_EMPTY"),
+        (1, (), "NO_SUPPORTED_CANONICAL_QUOTES"),
+        (1, market(2.0)[:1], "NO_COMPLETE_SUPPORTED_MARKET"),
+    ],
+)
+def test_preliminary_logs_exact_unavailable_reason(
+    caplog, response_items, quotes, reason
+) -> None:
+    class EmptyRepository(Repository):
+        def latest_complete_market_states(self, *_args):
+            return ()
+
+    class DiagnosticSource(Source):
+        def fetch_quotes_with_diagnostics(self, **_kwargs):
+            self.calls += 1
+            return OddsFetchResult(quotes, response_items)
+
+    caplog.set_level("INFO", logger="quantbet.opportunity")
+    cycle, _, _, _ = run(
+        market(2.0),
+        repository=EmptyRepository(),
+        source=DiagnosticSource(market(2.0)),
+    )
+
+    assert cycle.odds_unavailable_fixture_ids == ("api-football:1",)
+    records = [r for r in caplog.records if r.message == "opportunity odds unavailable"]
+    assert len(records) == 1
+    assert records[0].odds_unavailable_reason == reason
+    assert records[0].provider_response_items == response_items
+
+
+def test_final_empty_response_has_distinct_rejection_log(caplog) -> None:
+    class DiagnosticSource(Source):
+        def fetch_quotes_with_diagnostics(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return OddsFetchResult(market(2.1), 1)
+            return OddsFetchResult((), 0)
+
+    caplog.set_level("INFO", logger="quantbet.opportunity")
+    _, _, registration, _ = run(market(2.0), source=DiagnosticSource(market(2.0)))
+
+    assert registration.rejections[0][1]["reason_codes"] == ("FINAL_QUOTE_MARKET_INCOMPLETE",)
+    records = [
+        r for r in caplog.records
+        if r.message == "mandatory final quote verification rejected"
+    ]
+    assert len(records) == 1
+    assert records[0].odds_unavailable_reason == "PROVIDER_RESPONSE_EMPTY"
+    assert records[0].provider_response_items == 0
+
+
 def test_production_pick_is_recorded_in_research_with_preliminary_candidate() -> None:
     recorded = []
 
@@ -302,12 +361,61 @@ def test_stale_observed_at_is_preserved_as_warning_and_can_accept() -> None:
 
 
 def test_provider_snapshot_beyond_bounded_age_rejects() -> None:
-    too_old = NOW - timedelta(hours=8, minutes=1)
+    too_old = NOW - timedelta(hours=10, minutes=1)
     cycle, _, registration, _ = run(market(2.0, observed_at=too_old))
 
     assert cycle.registered_pick_ids == ()
     assert registration.executed == []
     assert registration.rejections[0][1]["reason_codes"] == ("FINAL_QUOTE_STALE",)
+
+
+def test_provider_snapshot_within_ten_hours_passes_preliminary_and_final() -> None:
+    observed_at = NOW - timedelta(hours=9, minutes=30)
+
+    class PersistedMarketRepository(Repository):
+        def latest_complete_market_states(self, *_args):
+            return (
+                SimpleNamespace(
+                    market="BTTS",
+                    observed_at=observed_at,
+                    captured_at=NOW - timedelta(minutes=1),
+                    source="api-football",
+                ),
+            )
+
+    cycle, source, registration, _ = run(
+        market(2.0, observed_at=observed_at),
+        preliminary=market(2.1, observed_at=observed_at),
+        repository=PersistedMarketRepository(),
+    )
+
+    assert source.calls == 2
+    assert cycle.registered_pick_ids == ("pick-1",)
+    assert registration.completed[0][2]["stale_quote"] is True
+    assert registration.completed[0][2]["quote_age_seconds"] == 9.5 * 3600
+
+
+def test_provider_snapshot_over_ten_hours_stops_before_final_refresh() -> None:
+    observed_at = NOW - timedelta(hours=10, seconds=1)
+
+    class PersistedMarketRepository(Repository):
+        def latest_complete_market_states(self, *_args):
+            return (
+                SimpleNamespace(
+                    market="BTTS",
+                    observed_at=observed_at,
+                    captured_at=NOW - timedelta(minutes=1),
+                    source="api-football",
+                ),
+            )
+
+    cycle, source, registration, _ = run(
+        market(2.0), repository=PersistedMarketRepository()
+    )
+
+    assert source.calls == 1
+    assert cycle.odds_unavailable_fixture_ids == ("api-football:1",)
+    assert registration.completed == []
 
 
 def test_usable_stale_candidate_is_not_vetoed_or_polled_via_live_proxy() -> None:

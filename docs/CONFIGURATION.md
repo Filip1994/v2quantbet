@@ -28,6 +28,20 @@ execution always uses the hard-approved Bet365/1xBet/Superbet universe. The form
 `QUANTBET_PILOT_SCOPES`, `QUANTBET_PILOT_FIXTURE_IDS`, and
 `QUANTBET_PILOT_BOOKMAKER_ID` names are not part of the production contract.
 
+`QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS` defaults to **36000 (10 hours)**.
+Production compares the provider's last update timestamp with this limit in both
+preliminary evaluation and mandatory targeted final quote verification. A recent
+local capture does not reset the provider age. The final request must still return
+a complete market for the same bookmaker and market before a pick can be registered.
+
+Opportunity logs distinguish `PROVIDER_RESPONSE_EMPTY` (no provider response
+records), `NO_SUPPORTED_CANONICAL_QUOTES` (records but no supported normalized
+quotes), `NO_COMPLETE_SUPPORTED_MARKET` (quotes but no complete two-way market),
+and `PERSISTED_MARKET_OUTSIDE_PROVIDER_AGE` (persisted complete market older than
+the configured provider-age limit). They include `provider_response_items` and
+`canonical_quote_count` when available. Final verification logs also report a
+specific `odds_unavailable_reason` alongside the durable `rejection_reasons`.
+
 ```python
 from h2h.application import build_postgres_quote_history_application_from_settings
 from h2h.config import load_settings

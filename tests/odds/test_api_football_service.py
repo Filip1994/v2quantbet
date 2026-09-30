@@ -17,6 +17,24 @@ def test_fetch_quotes_delegates_to_client_and_ingestion() -> None:
     client.fetch_odds.assert_called_once_with(fixture_id=42, bookmaker_id=None, bet_id=None)
 
 
+def test_fetch_diagnostics_distinguish_empty_provider_response_from_unsupported_market() -> None:
+    client = Mock()
+    service = ApiFootballOddsService(client)
+    identity = api_football_fixture_identity(42)
+
+    client.fetch_odds.return_value = {"response": []}
+    empty = service.fetch_quotes_with_diagnostics(fixture_identity=identity)
+    assert empty.provider_response_items == 0
+    assert empty.quotes == ()
+
+    client.fetch_odds.return_value = {
+        "response": [{"fixture": {"id": 42}, "bookmakers": []}]
+    }
+    unsupported = service.fetch_quotes_with_diagnostics(fixture_identity=identity)
+    assert unsupported.provider_response_items == 1
+    assert unsupported.quotes == ()
+
+
 def test_fetch_live_quotes_delegates_to_live_client_and_parser() -> None:
     client = Mock()
     client.fetch_live_odds.return_value = {"response": []}

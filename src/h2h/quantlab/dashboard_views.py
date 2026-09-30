@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from html import escape
+from itertools import pairwise
 import re
 from typing import Any
 from urllib.parse import parse_qs, urlencode
@@ -597,7 +598,7 @@ def _scalar_bucket(
 
     if number < breaks[0]:
         return f"<{fmt(breaks[0])}"
-    for low, high in zip(breaks, breaks[1:], strict=False):
+    for low, high in pairwise(breaks):
         if low <= number < high:
             return f"{fmt(low)}–{fmt(high)}"
     return f"{fmt(breaks[-1])}+"
@@ -1662,7 +1663,7 @@ def _calibration_table(
     rendered_rows = []
     for item in bins:
         lower = float(str(item["bin"]).split("–", 1)[0])
-        bucket_index = int(round(lower * 10))
+        bucket_index = round(lower * 10)
         href = _analytics_href(
             params,
             updates={
