@@ -48,10 +48,20 @@ def goal_pick(*, outcome: str = "WIN", suffix: str = "a"):
                 "home_l5_goals_against": 1.00,
                 "away_l5_goals_for": 1.20,
                 "away_l5_goals_against": 1.60,
+                "home_l10_goals_for": 1.70,
+                "away_l10_goals_for": 1.10,
+                "home_venue_l5_goals_for": 2.30,
+                "away_venue_l5_goals_for": 1.00,
                 "home_l5_shots_for": 14.0,
+                "home_l10_shots_for": 12.0,
                 "home_l5_sot_for": 5.4,
+                "home_l10_sot_for": 4.5,
                 "away_l5_shots_for": 10.2,
+                "away_l10_shots_for": 9.5,
                 "away_l5_sot_for": 3.6,
+                "away_l10_sot_for": 3.2,
+                "home_history_match_count": 28,
+                "away_history_match_count": 24,
             },
             "target_match_live_stats_used": False,
         },
@@ -103,7 +113,28 @@ def corner_pick(*, outcome: str = "WIN", suffix: str = "c"):
         "competition_name": "League",
         "country": "England",
         "kickoff_at": NOW,
-        "corner_feature_payload": {"raw_features": {"home_l5_corners_for": 6.2}},
+        "home_history_size": 32,
+        "away_history_size": 29,
+        "corner_feature_payload": {
+            "raw_features": {
+                "home_l5_corners_for": 6.2,
+                "home_l5_corners_against": 4.5,
+                "away_l5_corners_for": 5.4,
+                "away_l5_corners_against": 5.8,
+                "home_l10_corners_for": 5.6,
+                "away_l10_corners_for": 5.0,
+                "home_venue_l5_corners_for": 6.5,
+                "away_venue_l5_corners_for": 5.1,
+                "home_l5_shots_for": 14.0,
+                "home_l10_shots_for": 12.8,
+                "away_l5_shots_for": 11.5,
+                "away_l10_shots_for": 10.9,
+                "home_l5_sot_for": 5.0,
+                "home_l10_sot_for": 4.3,
+                "away_l5_sot_for": 4.1,
+                "away_l10_sot_for": 3.8,
+            }
+        },
     }
 
 
@@ -314,32 +345,48 @@ def test_goallab_analytics_is_a_separate_tab() -> None:
 
     assert "GoalLab Research / Audit" not in operational
     assert "GoalLab Analytics" in analytics
+    assert "Watchlist · ROI discovery" in analytics
+    assert "Goal shape × price" in analytics
+    assert "Balance × total-line gap" in analytics
+    assert "Model vs market × price" in analytics
+    assert "Trend × matchup" in analytics
+    assert "Reliability × market" in analytics
+    assert "λ min" in analytics
+    assert "λ balance" in analytics
+    assert "L5−L10 goals" in analytics
+    assert "Missing features" in analytics
     assert "Markets / selections" in analytics
     assert "Leagues" in analytics
     assert "Bookmakers" in analytics
-    assert "Model versions" in analytics
-    assert "Policy versions" in analytics
-    assert "Model × policy" in analytics
-    assert "Model probability" in analytics
-    assert "Market probability" in analytics
     assert "Entry odds" in analytics
     assert "Expected value" in analytics
-    assert "Market line" in analytics
     assert "Weekly stability" in analytics
     assert "Decision lead time" in analytics
-    assert "Market × selection × entry odds" in analytics
-    assert "Research-style signal cube" in analytics
-    assert "Low-scoring diagnostic" in analytics
     assert "Expected total goals" in analytics
     assert "Home − away expected-goal spread" in analytics
-    assert "Recorded pre-match features" in analytics
-    assert "Home L5 goals for" in analytics
-    assert "Away L5 shots on target" in analytics
     assert "Calibration" in analytics
     assert "GoalLab Research / Audit" in analytics
     assert "CANONICAL_FIXTURE_VALUE_PICK" in analytics
+
+    # Singleton/non-actionable and duplicated tables are intentionally omitted.
+    assert "Countries" not in analytics
+    assert "Closing odds" not in analytics
+    assert "Market × selection × entry odds" not in analytics
+    assert "Research-style signal cube" not in analytics
+    assert "Recorded pre-match features" not in analytics
+    assert "Home L5 goals for" not in analytics
+    assert "Kickoff weekday" not in analytics
+    assert "Kickoff time · Europe/Belgrade" not in analytics
+    assert "Quote age at decision" not in analytics
+    assert "Model versions" not in analytics
+    assert "Policy versions" not in analytics
+    assert "Model × policy" not in analytics
+
+    assert analytics.index("Watchlist · ROI discovery") < analytics.index("Last 7 days")
+    assert analytics.index("Watchlist · ROI discovery") < analytics.index("Universe / regimes")
     assert "Active Picks" not in analytics
     assert "Pick History" not in analytics
+
 
 
 def test_quantlab_analytics_bucket_links_open_exact_settled_picks() -> None:
@@ -523,6 +570,50 @@ def test_quantlab_goal_model_state_bucket_drilldown_is_exact() -> None:
     assert "Goal State Out" not in html
 
 
+def test_quantlab_watchlist_goal_shape_drilldown_is_exact() -> None:
+    class WatchlistRepository(StubRepository):
+        def list_all_goal_picks(self):
+            matching = goal_pick(outcome="WIN", suffix="m")
+            matching["fixture_id"] = "api-football:601"
+            matching["home_team"] = "Watch In"
+            matching["expected_home_goals"] = 1.72
+            matching["expected_away_goals"] = 1.08
+            matching["odds"] = 1.95
+
+            other = goal_pick(outcome="LOSS", suffix="x")
+            other["fixture_id"] = "api-football:602"
+            other["home_team"] = "Watch Out"
+            other["expected_home_goals"] = 2.30
+            other["expected_away_goals"] = 1.40
+            other["odds"] = 2.20
+
+            return (matching, other)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    dashboard = QuantLabDashboardService(WatchlistRepository())
+    analytics = dashboard.render_html("view=analytics&lab=goal")
+
+    assert 'id="analytics-watchlist"' in analytics
+    assert "bucket_goal_lambda_min_bucket=" in analytics
+    assert "bucket_expected_total_goals_bucket=" in analytics
+
+    drilldown = dashboard.render_html(
+        "view=analytics&lab=goal"
+        "&bucket=1"
+        "&bucket_market_key=OU_25"
+        "&bucket_selection=OVER"
+        "&bucket_expected_total_goals_bucket=2.5–3"
+        "&bucket_goal_lambda_min_bucket=1–1.3"
+        "&bucket_entry_odds_bucket=1.81–2.00"
+    )
+
+    assert "1 exact settled picks" in drilldown
+    assert "Watch In" in drilldown
+    assert "Watch Out" not in drilldown
+
+
 def test_quantlab_calibration_bucket_drilldown_matches_graded_population() -> None:
     class CalibrationRepository(StubRepository):
         def list_all_goal_picks(self):
@@ -574,22 +665,37 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
     )
 
     assert "CornerLab Analytics" in html
+    assert "Watchlist · ROI discovery" in html
+    assert "Model-line gap × price" in html
+    assert "Pressure trend × matchup" in html
+    assert "Model vs market × price" in html
+    assert "Reliability × market" in html
+    assert "L5−L10 corners" in html
+    assert "Venue−L10" in html
+    assert "Matchup pressure" in html
     assert "Markets / selections" in html
     assert "Leagues" in html
     assert "Bookmakers" in html
-    assert "Model versions" in html
-    assert "Policy versions" in html
-    assert "Model probability" in html
     assert "Entry odds" in html
     assert "Expected value" in html
     assert "Expected total corners" in html
-    assert "Expected corners − line" in html
-    assert "Market × expected total corners" in html
-    assert "Recorded pre-match features" in html
-    assert "Home L5 corners for" in html
     assert "Calibration" in html
+
+    # Removed because the watchlist supersedes these noisy/duplicated views.
+    assert "Countries" not in html
+    assert "Expected corners − line" not in html
+    assert "Market × expected total corners" not in html
+    assert "Recorded pre-match features" not in html
+    assert "Home L5 corners for" not in html
+    assert "Kickoff weekday" not in html
+    assert "Quote age at decision" not in html
+    assert "Model versions" not in html
+    assert "Policy versions" not in html
     assert "GoalLab Research / Audit" not in html
     assert ">CardLab<" not in html
+
+    assert html.index("Watchlist · ROI discovery") < html.index("Last 7 days")
+
 
 
 def test_cardlab_does_not_get_an_analytics_surface_yet() -> None:
