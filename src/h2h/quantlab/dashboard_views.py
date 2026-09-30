@@ -251,6 +251,10 @@ h1{{margin:5px 0 4px;font-size:28px}}.subtitle{{margin:0;color:var(--muted);font
 table{{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}}
 th,td{{padding:10px 11px;border-bottom:1px solid #262c31;text-align:left;white-space:nowrap;vertical-align:middle}}
 th{{position:sticky;top:0;background:#1c2125;color:#9099a2;text-transform:uppercase;letter-spacing:.06em;font-size:9px;z-index:2}}
+.sort-header{{display:inline-flex;align-items:center;gap:5px;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;white-space:nowrap}}
+.sort-header:hover,.sort-header.active{{color:#d8e5f2}}.sort-arrow{{font-size:10px;line-height:1}}
+.group-link{{color:#dfe8f2;font-weight:900;text-decoration:underline;text-decoration-color:#4a6075;text-underline-offset:2px}}
+.group-link:hover{{color:#a9cdf8;text-decoration-color:#a9cdf8}}
 td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10px;margin-top:4px}}
 .badge{{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:950}}
 .result-win{{color:#82dda6;background:rgba(105,201,143,.14)}}.result-loss{{color:#f08790;background:rgba(224,111,120,.14)}}
@@ -500,33 +504,220 @@ def _metric(value: Any, *, suffix: str = "", signed: bool = False, digits: int =
     return f"{prefix}{number:.{digits}f}{suffix}"
 
 
+def _param(
+    params: dict[str, list[str]],
+    name: str,
+    default: str = "",
+) -> str:
+    values = params.get(name)
+    if not values:
+        return default
+    return values[0].strip()
+
+
+def _analytics_href(
+    params: dict[str, list[str]],
+    *,
+    updates: dict[str, Any] | None = None,
+    anchor: str = "",
+    clear_prefixes: tuple[str, ...] = (),
+) -> str:
+    current = {
+        key: values[0]
+        for key, values in params.items()
+        if values and values[0] != ""
+    }
+    for key in tuple(current):
+        if any(
+            key == prefix or key.startswith(prefix + "_")
+            for prefix in clear_prefixes
+        ):
+            current.pop(key, None)
+    for key, value in (updates or {}).items():
+        if value is None or value == "":
+            current.pop(key, None)
+        else:
+            current[key] = str(value)
+    current["view"] = "analytics"
+    href = "/quantlab?" + urlencode(current)
+    return href + (f"#{anchor}" if anchor else "")
+
+
+def _sortable_th(
+    label: str,
+    key: str,
+    *,
+    table_key: str,
+    params: dict[str, list[str]],
+    anchor: str,
+    active_key: str,
+    active_dir: str,
+    first_dir: str,
+) -> str:
+    active = active_key == key
+    next_dir = (
+        ("desc" if active_dir == "asc" else "asc")
+        if active
+        else first_dir
+    )
+    href = _analytics_href(
+        params,
+        updates={
+            f"{table_key}_sort": key,
+            f"{table_key}_dir": next_dir,
+        },
+        anchor=anchor,
+    )
+    arrow = "↑" if active and active_dir == "asc" else "↓" if active else ""
+    css = "sort-header active" if active else "sort-header"
+    arrow_html = f'<span class="sort-arrow">{arrow}</span>' if arrow else ""
+    return (
+        f'<th><a class="{css}" href="{escape(href, quote=True)}">'
+        f'{escape(label)}{arrow_html}</a></th>'
+    )
+
+
+def _cohort_sort_value(row: dict[str, Any], key: str) -> Any:
+    if key == "record":
+        return (
+            int(row.get("wins") or 0),
+            -int(row.get("losses") or 0),
+            -int(row.get("voids") or 0),
+        )
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return str(value).casefold()
+
+
+def _sort_cohort_rows(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    key: str,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    populated = [row for row in rows if int(row.get("n") or 0) > 0]
+    zero_sample = [row for row in rows if int(row.get("n") or 0) == 0]
+    present = [row for row in populated if _cohort_sort_value(row, key) is not None]
+    missing = [row for row in populated if _cohort_sort_value(row, key) is None]
+    present.sort(
+        key=lambda row: _cohort_sort_value(row, key),
+        reverse=direction == "desc",
+    )
+    return tuple(present + missing + zero_sample)
+
+
 def _cohort_table(
     title: str,
     rows: tuple[dict[str, Any], ...],
     dimensions: tuple[str, ...],
     *,
     lab_key: str,
+    table_key: str,
+    params: dict[str, list[str]],
 ) -> str:
+    allowed_sort_keys = {
+        *dimensions,
+        "n",
+        "record",
+        "win_rate_pct",
+        "roi_pct",
+        "brier_score",
+        "log_loss",
+        "calibration_gap_pp",
+        "avg_edge_pct",
+        "avg_ev_pct",
+        "sample_band",
+    }
+    sort_key = _param(params, f"{table_key}_sort", "n")
+    if sort_key not in allowed_sort_keys:
+        sort_key = "n"
+    sort_dir = _param(params, f"{table_key}_dir", "desc").casefold()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc"
+    ordered_rows = _sort_cohort_rows(rows, key=sort_key, direction=sort_dir)
+    anchor = f"analytics-{table_key}"
+
     headers = "".join(
-        f"<th>{escape(dimension.replace('_', ' ').title())}</th>"
+        _sortable_th(
+            dimension.replace("_", " ").title(),
+            dimension,
+            table_key=table_key,
+            params=params,
+            anchor=anchor,
+            active_key=sort_key,
+            active_dir=sort_dir,
+            first_dir="asc",
+        )
         for dimension in dimensions
     )
-    rendered = []
-    for row in rows:
-        dimension_cells = "".join(
-            f"<td><b>{escape(str(row.get(dimension) or '—'))}</b></td>"
-            for dimension in dimensions
+    headers += "".join(
+        (
+            _sortable_th(
+                "N", "n", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "W-L-V", "record", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "Win%", "win_rate_pct", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "ROI", "roi_pct", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "Brier", "brier_score", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
+            ),
+            _sortable_th(
+                "Log loss", "log_loss", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
+            ),
+            _sortable_th(
+                "Cal gap", "calibration_gap_pp", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "Avg edge", "avg_edge_pct", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "Avg EV", "avg_ev_pct", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
+            ),
+            _sortable_th(
+                "Evidence", "sample_band", table_key=table_key, params=params, anchor=anchor,
+                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
+            ),
         )
-        link_params = {
-            "view": "analytics",
-            "lab": lab_key,
+    )
+
+    rendered = []
+    for row in ordered_rows:
+        bucket_updates = {
             "bucket": "1",
             **{
                 f"bucket_{dimension}": str(row.get(dimension) or "—")
                 for dimension in dimensions
             },
         }
-        href = "/quantlab?" + urlencode(link_params) + "#bucket-picks"
+        href = _analytics_href(
+            params,
+            updates=bucket_updates,
+            anchor="bucket-picks",
+            clear_prefixes=("bucket",),
+        )
+        dimension_cells = "".join(
+            f'<td><a class="group-link" href="{escape(href, quote=True)}">'
+            f'{escape(str(row.get(dimension) or "—"))}</a></td>'
+            for dimension in dimensions
+        )
         rendered.append(
             "<tr>"
             + dimension_cells
@@ -540,22 +731,18 @@ def _cohort_table(
             + f"<td>{_metric(row['avg_edge_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{_metric(row['avg_ev_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{escape(str(row['sample_band']))}</td>"
-            + f'<td><a href="{escape(href, quote=True)}">View {row["n"]}</a></td>'
             + "</tr>"
         )
     if not rendered:
         rendered.append(
-            f'<tr><td class="empty" colspan="{len(dimensions) + 11}">No settled picks for this breakdown.</td></tr>'
+            f'<tr><td class="empty" colspan="{len(dimensions) + 10}">No settled picks for this breakdown.</td></tr>'
         )
     return (
-        '<section class="panel">'
-        f'<div class="panel-title"><b>{escape(title)}</b><span>performance breakdown</span></div>'
+        f'<section class="panel" id="{anchor}">'
+        f'<div class="panel-title"><b>{escape(title)}</b><span>click group name for exact picks · click headers to sort</span></div>'
         '<div class="table"><table><thead><tr>'
         + headers
-        + '<th>N</th><th>W-L-V</th><th>Win%</th><th>ROI</th><th>Brier</th>'
-        '<th>Log loss</th><th>Cal gap</th><th>Avg edge</th><th>Avg EV</th><th>Evidence</th>'
-        '<th>Picks</th>'
-        '</tr></thead><tbody>'
+        + '</tr></thead><tbody>'
         + "".join(rendered)
         + "</tbody></table></div></section>"
     )
@@ -622,6 +809,41 @@ def _bucket_detail_rows(
     return _sorted(selected), label
 
 
+def _pick_sort_value(row: dict[str, Any], key: str) -> Any:
+    if key == "match":
+        return (
+            str(row.get("home_team") or "").casefold(),
+            str(row.get("away_team") or "").casefold(),
+        )
+    if key == "pick":
+        return _pick_text(row).casefold()
+    if key == "result":
+        return _result(row)
+    if key == "settled_at":
+        return _event_time(row).timestamp()
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return str(value).casefold()
+
+
+def _sort_pick_rows(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    key: str,
+    direction: str,
+) -> tuple[dict[str, Any], ...]:
+    present = [row for row in rows if _pick_sort_value(row, key) is not None]
+    missing = [row for row in rows if _pick_sort_value(row, key) is None]
+    present.sort(
+        key=lambda row: _pick_sort_value(row, key),
+        reverse=direction == "desc",
+    )
+    return tuple(present + missing)
+
+
 def _bucket_pick_table(
     rows: tuple[dict[str, Any], ...],
     *,
@@ -633,6 +855,52 @@ def _bucket_pick_table(
     if detail is None:
         return ""
     selected, label = detail
+    allowed_sort_keys = {
+        "match",
+        "pick",
+        "bookmaker_name",
+        "model_probability",
+        "odds",
+        "edge",
+        "expected_value",
+        "result",
+        "pnl_minor",
+        "settled_at",
+    }
+    sort_key = _param(params, "bucket_picks_sort", "settled_at")
+    if sort_key not in allowed_sort_keys:
+        sort_key = "settled_at"
+    sort_dir = _param(params, "bucket_picks_dir", "desc").casefold()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc"
+    selected = _sort_pick_rows(selected, key=sort_key, direction=sort_dir)
+
+    header_specs = (
+        ("Match", "match", "asc"),
+        ("Pick", "pick", "asc"),
+        ("Bookmaker", "bookmaker_name", "asc"),
+        ("Model P", "model_probability", "desc"),
+        ("Odds", "odds", "desc"),
+        ("Edge", "edge", "desc"),
+        ("EV", "expected_value", "desc"),
+        ("Result", "result", "asc"),
+        ("P/L", "pnl_minor", "desc"),
+        ("Settled", "settled_at", "desc"),
+    )
+    headers = "".join(
+        _sortable_th(
+            label_text,
+            key,
+            table_key="bucket_picks",
+            params=params,
+            anchor="bucket-picks",
+            active_key=sort_key,
+            active_dir=sort_dir,
+            first_dir=first_dir,
+        )
+        for label_text, key, first_dir in header_specs
+    )
+
     rendered = []
     for row in selected:
         result = _result(row)
@@ -657,20 +925,22 @@ def _bucket_pick_table(
         rendered.append(
             '<tr><td class="empty" colspan="10">No settled picks match this bucket.</td></tr>'
         )
-    clear_href = "/quantlab?" + urlencode({"view": "analytics", "lab": lab_key})
+    clear_href = _analytics_href(
+        params,
+        updates={"bucket": None},
+        clear_prefixes=("bucket",),
+    )
     return (
         '<section class="panel" id="bucket-picks">'
         '<div class="panel-title"><b>Bucket picks</b>'
         f'<span>{len(selected)} exact settled picks · {escape(label)} · '
         f'<a href="{escape(clear_href, quote=True)}">clear</a></span></div>'
         '<div class="table"><table><thead><tr>'
-        '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Model P</th><th>Odds</th>'
-        '<th>Edge</th><th>EV</th><th>Result</th><th>P/L</th><th>Settled</th>'
-        '</tr></thead><tbody>'
+        + headers
+        + '</tr></thead><tbody>'
         + "".join(rendered)
         + "</tbody></table></div></section>"
     )
-
 
 def _window_rows(
     rows: tuple[dict[str, Any], ...],
@@ -700,47 +970,100 @@ def _window_card(title: str, metrics: dict[str, Any]) -> str:
     )
 
 
+def _calibration_sort_value(row: dict[str, Any], key: str) -> Any:
+    if key == "bin":
+        return float(str(row.get("bin") or "0").split("–", 1)[0])
+    value = row.get(key)
+    if value is None:
+        return None
+    return float(value) if isinstance(value, (int, float)) else str(value).casefold()
+
+
 def _calibration_table(
     rows: tuple[dict[str, Any], ...],
     *,
     lab_key: str,
+    params: dict[str, list[str]],
 ) -> str:
-    bins = calibration_bins(rows)
+    bins = tuple(calibration_bins(rows))
+    allowed = {"bin", "n", "expected_pct", "observed_pct", "gap_pp"}
+    sort_key = _param(params, "calibration_sort", "bin")
+    if sort_key not in allowed:
+        sort_key = "bin"
+    sort_dir = _param(params, "calibration_dir", "asc").casefold()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    present = [item for item in bins if _calibration_sort_value(item, sort_key) is not None]
+    missing = [item for item in bins if _calibration_sort_value(item, sort_key) is None]
+    present.sort(
+        key=lambda item: _calibration_sort_value(item, sort_key),
+        reverse=sort_dir == "desc",
+    )
+    bins = tuple(present + missing)
+    anchor = "analytics-calibration"
+    header_specs = (
+        ("Probability bin", "bin", "asc"),
+        ("N", "n", "desc"),
+        ("Expected", "expected_pct", "desc"),
+        ("Observed", "observed_pct", "desc"),
+        ("Gap", "gap_pp", "desc"),
+    )
+    headers = "".join(
+        _sortable_th(
+            label,
+            key,
+            table_key="calibration",
+            params=params,
+            anchor=anchor,
+            active_key=sort_key,
+            active_dir=sort_dir,
+            first_dir=first_dir,
+        )
+        for label, key, first_dir in header_specs
+    )
+
     rendered_rows = []
     for item in bins:
         lower = float(str(item["bin"]).split("–", 1)[0])
         bucket_index = int(round(lower * 10))
-        href = "/quantlab?" + urlencode(
-            {
-                "view": "analytics",
-                "lab": lab_key,
+        href = _analytics_href(
+            params,
+            updates={
                 "bucket": "1",
                 "bucket_probability_bin": str(bucket_index),
-            }
-        ) + "#bucket-picks"
+            },
+            anchor="bucket-picks",
+            clear_prefixes=("bucket",),
+        )
         rendered_rows.append(
             "<tr>"
-            f"<td><b>{escape(str(item['bin']))}</b></td>"
+            f'<td><a class="group-link" href="{escape(href, quote=True)}">'
+            f'{escape(str(item["bin"]))}</a></td>'
             f"<td>{item['n']}</td>"
             f"<td>{_metric(item['expected_pct'], suffix='%')}</td>"
             f"<td>{_metric(item['observed_pct'], suffix='%')}</td>"
             f"<td>{_metric(item['gap_pp'], suffix='pp', signed=True)}</td>"
-            f'<td><a href="{escape(href, quote=True)}">View {item["n"]}</a></td>'
             "</tr>"
         )
     rendered = "".join(rendered_rows)
     if not rendered:
-        rendered = '<tr><td class="empty" colspan="6">No graded picks for calibration yet.</td></tr>'
+        rendered = '<tr><td class="empty" colspan="5">No graded picks for calibration yet.</td></tr>'
     return (
-        '<section class="panel"><div class="panel-title"><b>Calibration</b>'
-        '<span>model probability vs observed result</span></div>'
+        f'<section class="panel" id="{anchor}"><div class="panel-title"><b>Calibration</b>'
+        '<span>click probability bin for exact picks · click headers to sort</span></div>'
         '<div class="table"><table><thead><tr>'
-        '<th>Probability bin</th><th>N</th><th>Expected</th><th>Observed</th><th>Gap</th><th>Picks</th>'
-        f'</tr></thead><tbody>{rendered}</tbody></table></div></section>'
+        + headers
+        + f'</tr></thead><tbody>{rendered}</tbody></table></div></section>'
     )
 
 
-def _goal_audit(repository: Any, rows: tuple[dict[str, Any], ...]) -> str:
+def _goal_audit(
+    repository: Any,
+    rows: tuple[dict[str, Any], ...],
+    *,
+    params: dict[str, list[str]],
+    lab_key: str,
+) -> str:
     loader = getattr(repository, "list_all_goal_decision_evidence", None)
     if not callable(loader):
         loader = getattr(repository, "list_all_goal_decisions", None)
@@ -752,24 +1075,64 @@ def _goal_audit(repository: Any, rows: tuple[dict[str, Any], ...]) -> str:
     audit = snapshot["integrity_audit"]
     status = str(audit["status"])
     css = "audit-pass" if status == "PASS" else "audit-fail"
+
+    items = tuple(snapshot["decision_funnel"])
+    allowed = {"decision", "reason", "fixture_count", "rows"}
+    sort_key = _param(params, "audit_sort", "rows")
+    if sort_key not in allowed:
+        sort_key = "rows"
+    sort_dir = _param(params, "audit_dir", "desc").casefold()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc"
+
+    def audit_value(item: dict[str, Any]) -> Any:
+        value = item.get(sort_key)
+        if value is None:
+            return None
+        return float(value) if isinstance(value, (int, float)) else str(value).casefold()
+
+    present = [item for item in items if audit_value(item) is not None]
+    missing = [item for item in items if audit_value(item) is None]
+    present.sort(key=audit_value, reverse=sort_dir == "desc")
+    items = tuple(present + missing)
+
+    anchor = "analytics-audit"
+    header_specs = (
+        ("Decision", "decision", "asc"),
+        ("Reason", "reason", "asc"),
+        ("Fixtures", "fixture_count", "desc"),
+        ("Rows", "rows", "desc"),
+    )
+    headers = "".join(
+        _sortable_th(
+            label,
+            key,
+            table_key="audit",
+            params=params,
+            anchor=anchor,
+            active_key=sort_key,
+            active_dir=sort_dir,
+            first_dir=first_dir,
+        )
+        for label, key, first_dir in header_specs
+    )
     funnel = "".join(
         "<tr>"
         f"<td><b>{escape(str(item['decision']))}</b></td>"
         f"<td>{escape(str(item['reason']))}</td>"
         f"<td>{item['fixture_count']}</td><td>{item['rows']}</td>"
         "</tr>"
-        for item in snapshot["decision_funnel"]
+        for item in items
     )
     if not funnel:
         funnel = '<tr><td class="empty" colspan="4">No decision evidence yet.</td></tr>'
     return (
-        '<section class="panel"><div class="panel-title"><b>GoalLab Research / Audit</b>'
+        f'<section class="panel" id="{anchor}"><div class="panel-title"><b>GoalLab Research / Audit</b>'
         f'<span class="{css}">integrity {escape(status)} · {audit["violations"]} violations</span></div>'
         '<div class="table"><table><thead><tr>'
-        '<th>Decision</th><th>Reason</th><th>Fixtures</th><th>Rows</th>'
-        f'</tr></thead><tbody>{funnel}</tbody></table></div></section>'
+        + headers
+        + f'</tr></thead><tbody>{funnel}</tbody></table></div></section>'
     )
-
 
 def render_analytics(
     repository: Any,
@@ -829,27 +1192,44 @@ def render_analytics(
             _cohorts(rows, ("market_key", "selection")),
             ("market_key", "selection"),
             lab_key=lab_key,
+            table_key="markets",
+            params=params,
         )
         + _cohort_table(
             "Leagues",
             _cohorts(rows, ("competition_name",)),
             ("competition_name",),
             lab_key=lab_key,
+            table_key="leagues",
+            params=params,
         )
         + _cohort_table(
             "Bookmakers",
             _cohorts(rows, ("bookmaker_name",)),
             ("bookmaker_name",),
             lab_key=lab_key,
+            table_key="bookmakers",
+            params=params,
         )
         + _cohort_table(
             "Model versions",
             _cohorts(rows, ("model_version",)),
             ("model_version",),
             lab_key=lab_key,
+            table_key="models",
+            params=params,
         )
-        + _calibration_table(rows, lab_key=lab_key)
-        + (_goal_audit(repository, rows) if lab_key == "goal" else "")
+        + _calibration_table(rows, lab_key=lab_key, params=params)
+        + (
+            _goal_audit(
+                repository,
+                rows,
+                params=params,
+                lab_key=lab_key,
+            )
+            if lab_key == "goal"
+            else ""
+        )
     )
 
     return _shell(
