@@ -1909,6 +1909,117 @@ def render_analytics(
             )
         )
 
+    if lab_key == "goal":
+        feature_tables = (
+            _analytics_section(
+                "Recorded pre-match features",
+                "stable L5 inputs stored with the GoalLab pick snapshot",
+            )
+            + table(
+                "Home L5 goals for",
+                ("feature_home_l5_goals_for_bucket",),
+                "feat_home_goals_for",
+                labels={"feature_home_l5_goals_for_bucket": "Goals / match"},
+            )
+            + table(
+                "Home L5 goals against",
+                ("feature_home_l5_goals_against_bucket",),
+                "feat_home_goals_against",
+                labels={"feature_home_l5_goals_against_bucket": "Goals / match"},
+            )
+            + table(
+                "Away L5 goals for",
+                ("feature_away_l5_goals_for_bucket",),
+                "feat_away_goals_for",
+                labels={"feature_away_l5_goals_for_bucket": "Goals / match"},
+            )
+            + table(
+                "Away L5 goals against",
+                ("feature_away_l5_goals_against_bucket",),
+                "feat_away_goals_against",
+                labels={"feature_away_l5_goals_against_bucket": "Goals / match"},
+            )
+            + table(
+                "Home L5 shots for",
+                ("feature_home_l5_shots_for_bucket",),
+                "feat_home_shots",
+                labels={"feature_home_l5_shots_for_bucket": "Shots / match"},
+            )
+            + table(
+                "Away L5 shots for",
+                ("feature_away_l5_shots_for_bucket",),
+                "feat_away_shots",
+                labels={"feature_away_l5_shots_for_bucket": "Shots / match"},
+            )
+            + table(
+                "Home L5 shots on target",
+                ("feature_home_l5_sot_for_bucket",),
+                "feat_home_sot",
+                labels={"feature_home_l5_sot_for_bucket": "SOT / match"},
+            )
+            + table(
+                "Away L5 shots on target",
+                ("feature_away_l5_sot_for_bucket",),
+                "feat_away_sot",
+                labels={"feature_away_l5_sot_for_bucket": "SOT / match"},
+            )
+        )
+    else:
+        feature_tables = (
+            _analytics_section(
+                "Recorded pre-match features",
+                "stable L5 inputs stored with the CornerLab pick snapshot",
+            )
+            + table(
+                "Home L5 corners for",
+                ("feature_home_l5_corners_for_bucket",),
+                "feat_home_corners_for",
+                labels={"feature_home_l5_corners_for_bucket": "Corners / match"},
+            )
+            + table(
+                "Home L5 corners against",
+                ("feature_home_l5_corners_against_bucket",),
+                "feat_home_corners_against",
+                labels={"feature_home_l5_corners_against_bucket": "Corners / match"},
+            )
+            + table(
+                "Away L5 corners for",
+                ("feature_away_l5_corners_for_bucket",),
+                "feat_away_corners_for",
+                labels={"feature_away_l5_corners_for_bucket": "Corners / match"},
+            )
+            + table(
+                "Away L5 corners against",
+                ("feature_away_l5_corners_against_bucket",),
+                "feat_away_corners_against",
+                labels={"feature_away_l5_corners_against_bucket": "Corners / match"},
+            )
+            + table(
+                "Home L5 shots for",
+                ("feature_home_l5_shots_for_bucket",),
+                "feat_home_shots",
+                labels={"feature_home_l5_shots_for_bucket": "Shots / match"},
+            )
+            + table(
+                "Away L5 shots for",
+                ("feature_away_l5_shots_for_bucket",),
+                "feat_away_shots",
+                labels={"feature_away_l5_shots_for_bucket": "Shots / match"},
+            )
+            + table(
+                "Home L5 shots on target",
+                ("feature_home_l5_sot_for_bucket",),
+                "feat_home_sot",
+                labels={"feature_home_l5_sot_for_bucket": "SOT / match"},
+            )
+            + table(
+                "Away L5 shots on target",
+                ("feature_away_l5_sot_for_bucket",),
+                "feat_away_sot",
+                labels={"feature_away_l5_sot_for_bucket": "SOT / match"},
+            )
+        )
+
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
         f'<section class="cards">{cards_html}</section>'
@@ -1926,6 +2037,7 @@ def render_analytics(
         + baseline
         + signal_buckets
         + domain
+        + feature_tables
         + timing
         + cross_sections
         + _analytics_section(
