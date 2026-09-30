@@ -88,6 +88,7 @@ def corner_pick(*, outcome: str = "WIN", suffix: str = "c"):
         "market_probability": 0.48,
         "edge": 0.14,
         "expected_value": 0.24,
+        "expected_total_corners": 10.8,
         "odds": 2.0,
         "quote_observed_at": NOW,
         "decision_at": NOW,
@@ -317,6 +318,18 @@ def test_goallab_analytics_is_a_separate_tab() -> None:
     assert "Leagues" in analytics
     assert "Bookmakers" in analytics
     assert "Model versions" in analytics
+    assert "Policy versions" in analytics
+    assert "Model × policy" in analytics
+    assert "Model probability" in analytics
+    assert "Market probability" in analytics
+    assert "Entry odds" in analytics
+    assert "Expected value" in analytics
+    assert "Market line" in analytics
+    assert "Weekly stability" in analytics
+    assert "Decision lead time" in analytics
+    assert "Market × selection × entry odds" in analytics
+    assert "Expected total goals" in analytics
+    assert "Home − away expected-goal spread" in analytics
     assert "Calibration" in analytics
     assert "GoalLab Research / Audit" in analytics
     assert "CANONICAL_FIXTURE_VALUE_PICK" in analytics
@@ -439,6 +452,72 @@ def test_quantlab_group_drilldown_link_preserves_table_sort_state() -> None:
     assert "bucket_selection=OVER" in markets
 
 
+def test_quantlab_research_style_numeric_bucket_drilldown_is_exact() -> None:
+    class NumericBucketRepository(StubRepository):
+        def list_all_goal_picks(self):
+            in_bucket = goal_pick(outcome="WIN", suffix="i")
+            in_bucket["fixture_id"] = "api-football:501"
+            in_bucket["home_team"] = "Odds In"
+            in_bucket["odds"] = 1.95
+
+            out_bucket = goal_pick(outcome="LOSS", suffix="o")
+            out_bucket["fixture_id"] = "api-football:502"
+            out_bucket["home_team"] = "Odds Out"
+            out_bucket["odds"] = 2.20
+
+            return (in_bucket, out_bucket)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    dashboard = QuantLabDashboardService(NumericBucketRepository())
+    analytics = dashboard.render_html("view=analytics&lab=goal")
+
+    assert "Entry odds" in analytics
+    assert "bucket_entry_odds_bucket=" in analytics
+    assert "Avg CLV" in analytics
+    assert "CLV cov" in analytics
+    assert "Max DD" in analytics
+
+    drilldown = dashboard.render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_entry_odds_bucket=1.81–2.00"
+    )
+
+    assert "1 exact settled picks" in drilldown
+    assert "Odds In" in drilldown
+    assert "Odds Out" not in drilldown
+
+
+def test_quantlab_goal_model_state_bucket_drilldown_is_exact() -> None:
+    class GoalStateRepository(StubRepository):
+        def list_all_goal_picks(self):
+            low = goal_pick(outcome="WIN", suffix="g")
+            low["fixture_id"] = "api-football:511"
+            low["home_team"] = "Goal State In"
+            low["expected_home_goals"] = 1.1
+            low["expected_away_goals"] = 1.0
+
+            high = goal_pick(outcome="LOSS", suffix="h")
+            high["fixture_id"] = "api-football:512"
+            high["home_team"] = "Goal State Out"
+            high["expected_home_goals"] = 2.2
+            high["expected_away_goals"] = 1.7
+
+            return (low, high)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    dashboard = QuantLabDashboardService(GoalStateRepository())
+    html = dashboard.render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_expected_total_goals_bucket=2–2.5"
+    )
+
+    assert "1 exact settled picks" in html
+    assert "Goal State In" in html
+    assert "Goal State Out" not in html
+
+
 def test_quantlab_calibration_bucket_drilldown_matches_graded_population() -> None:
     class CalibrationRepository(StubRepository):
         def list_all_goal_picks(self):
@@ -494,6 +573,13 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
     assert "Leagues" in html
     assert "Bookmakers" in html
     assert "Model versions" in html
+    assert "Policy versions" in html
+    assert "Model probability" in html
+    assert "Entry odds" in html
+    assert "Expected value" in html
+    assert "Expected total corners" in html
+    assert "Expected corners − line" in html
+    assert "Market × expected total corners" in html
     assert "Calibration" in html
     assert "GoalLab Research / Audit" not in html
     assert ">CardLab<" not in html
