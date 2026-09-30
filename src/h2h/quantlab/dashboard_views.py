@@ -662,6 +662,41 @@ def _kickoff_dimensions(row: dict[str, Any]) -> tuple[str, str, str]:
     return local.strftime("%A"), daypart, f"{iso_year}-W{iso_week:02d}"
 
 
+def _raw_features(row: dict[str, Any], payload_key: str) -> dict[str, Any]:
+    payload = row.get(payload_key)
+    if not isinstance(payload, dict):
+        return {}
+    raw = payload.get("raw_features")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _feature_bucket(value: Any, kind: str) -> str:
+    if kind == "goals":
+        return _scalar_bucket(
+            value,
+            breaks=(0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0),
+        )
+    if kind == "corners":
+        return _scalar_bucket(
+            value,
+            breaks=(2, 3, 4, 5, 6, 7, 8, 9),
+            digits=0,
+        )
+    if kind == "shots":
+        return _scalar_bucket(
+            value,
+            breaks=(6, 8, 10, 12, 14, 16, 20),
+            digits=0,
+        )
+    if kind == "sot":
+        return _scalar_bucket(
+            value,
+            breaks=(2, 3, 4, 5, 6, 7, 8),
+            digits=0,
+        )
+    return "—"
+
+
 def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
     item = dict(row)
     weekday, daypart, week = _kickoff_dimensions(item)
@@ -689,6 +724,7 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
         home = _number(item.get("expected_home_goals"))
         away = _number(item.get("expected_away_goals"))
         total = None if home is None or away is None else home + away
+        raw = _raw_features(item, "feature_payload")
         item.update(
             {
                 "expected_total_goals_bucket": _scalar_bucket(
@@ -706,11 +742,36 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "goal_lambda_spread_bucket": _signed_gap_bucket(
                     None if home is None or away is None else home - away
                 ),
+                "feature_home_l5_goals_for_bucket": _feature_bucket(
+                    raw.get("home_l5_goals_for"), "goals"
+                ),
+                "feature_home_l5_goals_against_bucket": _feature_bucket(
+                    raw.get("home_l5_goals_against"), "goals"
+                ),
+                "feature_away_l5_goals_for_bucket": _feature_bucket(
+                    raw.get("away_l5_goals_for"), "goals"
+                ),
+                "feature_away_l5_goals_against_bucket": _feature_bucket(
+                    raw.get("away_l5_goals_against"), "goals"
+                ),
+                "feature_home_l5_shots_for_bucket": _feature_bucket(
+                    raw.get("home_l5_shots_for"), "shots"
+                ),
+                "feature_away_l5_shots_for_bucket": _feature_bucket(
+                    raw.get("away_l5_shots_for"), "shots"
+                ),
+                "feature_home_l5_sot_for_bucket": _feature_bucket(
+                    raw.get("home_l5_sot_for"), "sot"
+                ),
+                "feature_away_l5_sot_for_bucket": _feature_bucket(
+                    raw.get("away_l5_sot_for"), "sot"
+                ),
             }
         )
     elif lab_key == "corner":
         expected = _number(item.get("expected_total_corners"))
         line = _number(item.get("line"))
+        raw = _raw_features(item, "corner_feature_payload")
         item.update(
             {
                 "expected_total_corners_bucket": _scalar_bucket(
@@ -720,6 +781,30 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 ),
                 "corner_model_line_gap_bucket": _signed_gap_bucket(
                     None if expected is None or line is None else expected - line
+                ),
+                "feature_home_l5_corners_for_bucket": _feature_bucket(
+                    raw.get("home_l5_corners_for"), "corners"
+                ),
+                "feature_home_l5_corners_against_bucket": _feature_bucket(
+                    raw.get("home_l5_corners_against"), "corners"
+                ),
+                "feature_away_l5_corners_for_bucket": _feature_bucket(
+                    raw.get("away_l5_corners_for"), "corners"
+                ),
+                "feature_away_l5_corners_against_bucket": _feature_bucket(
+                    raw.get("away_l5_corners_against"), "corners"
+                ),
+                "feature_home_l5_shots_for_bucket": _feature_bucket(
+                    raw.get("home_l5_shots_for"), "shots"
+                ),
+                "feature_away_l5_shots_for_bucket": _feature_bucket(
+                    raw.get("away_l5_shots_for"), "shots"
+                ),
+                "feature_home_l5_sot_for_bucket": _feature_bucket(
+                    raw.get("home_l5_sot_for"), "sot"
+                ),
+                "feature_away_l5_sot_for_bucket": _feature_bucket(
+                    raw.get("away_l5_sot_for"), "sot"
                 ),
             }
         )
