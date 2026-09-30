@@ -14,8 +14,7 @@ from math import lgamma, log, sqrt
 from statistics import fmean, variance
 from typing import Any
 
-
-POLICY_VERSION = "CORNERLAB_PRESSURE_POISSON_POLICY_V2"
+from h2h.quantlab.corner_lab.shadow_engine import POLICY_VERSION
 
 
 def _rows(cursor: Any) -> tuple[dict[str, Any], ...]:
