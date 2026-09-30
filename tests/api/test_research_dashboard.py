@@ -264,6 +264,8 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
 
     active_html = dashboard.render_html("tab=active")
     assert "Active research board" in active_html
+    assert 'data-kickoff="2026-09-25T17:00:00+00:00"' in active_html
+    assert "2026-09-25 19:00" in active_html
     assert "Pending Home – Pending Away" in active_html
     assert "Awaiting Home – Awaiting Away" not in active_html
     assert "Home – Away" not in active_html
@@ -283,6 +285,7 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert "health-unknown" in active_html
 
     awaiting_html = dashboard.render_html("tab=awaiting")
+    assert 'class="kickoff-countdown"' not in awaiting_html
     assert "Awaiting result" in awaiting_html
     assert "Awaiting Home – Awaiting Away" in awaiting_html
     assert "Pending Home – Pending Away" not in awaiting_html

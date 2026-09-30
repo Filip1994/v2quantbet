@@ -188,7 +188,8 @@ def test_country_flag_is_shown_beside_league_metadata() -> None:
 
     assert 'class="league-meta"' in html
     assert 'class="country-flag" title="England" aria-label="England">🇬🇧</span>' in html
-    assert "Premier &lt;League&gt; · 23 Sep 2026 · 12:00 UTC" in html
+    assert "Premier &lt;League&gt; · 23 Sep 2026 · 14:00 Belgrade" in html
+    assert 'data-kickoff="2026-09-23T12:00:00+00:00"' in html
 
 
 def test_registered_bookmaker_identity_is_kept_on_active_pick() -> None:
@@ -228,7 +229,7 @@ def test_active_odds_lifecycle_has_only_four_checkpoints() -> None:
         assert f"<b>{label}</b>" in html
     assert '<small class="quote-age">2h 36mins ago</small>' in html
     assert '<small class="check-age">checked 7min ago</small>' in html
-    assert 'title="23 Sep 2026 · 09:24 UTC"' in html
+    assert 'title="23 Sep 2026 · 11:24 Belgrade"' in html
     assert "Observed 23 Sep" not in html
     assert "Best current" not in html
     assert "Same-book current" not in html
@@ -377,7 +378,7 @@ def test_manual_close_in_history_shows_bad_clv_and_true_clv_still_wins() -> None
 
     assert "1.95 → 2.01" in manual
     assert "Pick → Closing · manual" in manual
-    assert "Last observed · 23 Sep 2026 · 12:00 UTC" in manual
+    assert "Last observed · 23 Sep 2026 · 14:00 Belgrade" in manual
     assert 'class="num history-clv bad"' in manual
     assert "<strong>-2.99%</strong>" in manual
     assert "BAD · MANUAL" in manual

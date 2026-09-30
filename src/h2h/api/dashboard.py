@@ -16,6 +16,12 @@ from threading import Thread
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from h2h.api.dashboard_time import (
+    COUNTDOWN_SCRIPT,
+    COUNTDOWN_SCRIPT_CSP,
+    kickoff_countdown,
+    local_time,
+)
 from h2h.domain.operator_pick_state import OperatorPickState
 
 
@@ -460,15 +466,11 @@ class DashboardService:
 
     @staticmethod
     def _dt(value: datetime | None) -> str:
-        if value is None:
-            return "—"
-        return value.astimezone(UTC).strftime("%d %b %Y · %H:%M UTC")
+        return local_time(value, "%d %b %Y · %H:%M Belgrade")
 
     @staticmethod
     def _checkpoint_time(value: datetime | None) -> str:
-        if value is None:
-            return "—"
-        return value.astimezone(UTC).strftime("%d %b %H:%M")
+        return local_time(value, "%d %b %H:%M")
 
     @staticmethod
     def _relative_age(value: datetime | None, reference: datetime) -> str:
@@ -559,7 +561,7 @@ class DashboardService:
             return ""
         return "".join(chr(0x1F1E6 + ord(letter) - ord("A")) for letter in code.upper())
 
-    def _league_meta(self, pick: dict[str, Any]) -> str:
+    def _league_meta(self, pick: dict[str, Any], *, countdown: bool = False) -> str:
         country = str(pick.get("country") or "")
         flag = self._country_flag(country)
         flag_html = (
@@ -572,7 +574,8 @@ class DashboardService:
         kickoff = escape(self._dt(pick.get("kickoff_at")))
         return (
             '<small class="league-meta">'
-            f"{flag_html}<span>{league} · {kickoff}</span>"
+            f"{flag_html}<span>{league} · {kickoff}"
+            f"{kickoff_countdown(pick.get('kickoff_at')) if countdown else ''}</span>"
             "</small>"
         )
 
@@ -805,7 +808,7 @@ class DashboardService:
             f'<small class="operator-hint">Confirm whether this pick was actually placed.</small>'
             f'</div></td>'
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
-            f"{self._league_meta(pick)}"
+            f"{self._league_meta(pick, countdown=str(pick.get('dashboard_phase') or 'PREMATCH').upper() == 'PREMATCH')}"
             f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
@@ -942,7 +945,7 @@ h1{{font-size:27px;letter-spacing:-.03em;margin:3px 0}}.subtitle{{color:var(--mu
 .table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1680px}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}}
 th{{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;position:sticky;top:0;z-index:1}}
 tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px}}
-.league-meta{{display:flex;align-items:center;gap:5px}}.country-flag{{display:inline-flex;font-size:11px;line-height:1;flex:0 0 auto}}
+.league-meta{{display:flex;align-items:center;gap:5px}}.country-flag{{display:inline-flex;font-size:11px;line-height:1;flex:0 0 auto}}.kickoff-countdown{{display:block;color:var(--amber)!important;font-weight:700;margin-top:3px!important}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
 .odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(108px,1fr));gap:7px;font-variant-numeric:tabular-nums;min-width:455px}}
 .odds-grid>span{{background:var(--panel2);padding:9px 8px;text-align:center;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border:1px solid #202a3a}}
@@ -1027,7 +1030,7 @@ tbody tr:hover{{background:#141c29}}td small{{display:block;color:var(--muted);m
 <dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>
 <dt>CLV</dt><dd>Closing-line value compares Pick odds only with the closing price at the same registered bookmaker.</dd>
 </dl></section><footer><span>Read-only · no betting, settlement or worker controls</span>
-<span>Refresh page for current durable state</span></footer></main></body></html>"""
+<span>Times: Europe/Belgrade · Refresh page for current durable state</span></footer></main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 
 class DashboardHTTPService:
@@ -1105,7 +1108,8 @@ class DashboardHTTPService:
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Cache-Control", "no-store")
         handler.send_header(
-            "Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'"
+            "Content-Security-Policy",
+            f"default-src 'none'; style-src 'unsafe-inline'; script-src {COUNTDOWN_SCRIPT_CSP}",
         )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")

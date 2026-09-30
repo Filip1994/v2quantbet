@@ -14,8 +14,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
-from zoneinfo import ZoneInfo
 
+from h2h.api.dashboard_time import (
+    COUNTDOWN_SCRIPT,
+    COUNTDOWN_SCRIPT_CSP,
+    kickoff_countdown,
+    local_iso,
+    local_time,
+)
 from h2h.api.research_analytics import (
     DIAGNOSTIC_BUCKETS,
     build_research_analytics_snapshot,
@@ -26,9 +32,6 @@ from h2h.api.research_analytics import (
 )
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
-
-
-BELGRADE = ZoneInfo("Europe/Belgrade")
 
 
 def _number(value: Any) -> float | None:
@@ -50,7 +53,7 @@ def _odd(value: Any) -> str:
 def _time(value: Any) -> str:
     if not isinstance(value, datetime):
         return "—"
-    return value.astimezone(BELGRADE).strftime("%Y-%m-%d %H:%M")
+    return local_time(value, "%Y-%m-%d %H:%M")
 
 
 def _bookmaker_key(value: Any) -> str:
@@ -1159,7 +1162,7 @@ class ResearchDashboardService:
                 ("CLV", "clv"),
                 ("P/L", "pnl"),
                 ("Model version", "model_version_id"),
-                ("Kickoff UTC", "kickoff_at"),
+                ("Kickoff Belgrade", "kickoff_at"),
             )
         )
 
@@ -1243,7 +1246,7 @@ class ResearchDashboardService:
                 f'<td><a class="model-link" href="{escape(model_href, quote=True)}" '
                 f'title="{escape(model_version_id, quote=True)}">'
                 f'{escape(short_model(model_version_id))}</a></td>'
-                f'<td>{escape(str(row["kickoff_at"] or "—"))}</td>'
+                f'<td>{escape(local_iso(row["kickoff_at"]))}</td>'
                 "</tr>"
             )
         pick_rows_html = "".join(pick_body) or (
@@ -1392,8 +1395,8 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
                 ("CLV", "clv"),
                 ("P/L", "pnl"),
                 ("Route", "route"),
-                ("Kickoff UTC", "kickoff_at"),
-                ("Qualified UTC", "qualified_at"),
+                ("Kickoff Belgrade", "kickoff_at"),
+                ("Qualified Belgrade", "qualified_at"),
                 ("Policy config", "policy"),
             )
         )
@@ -1456,12 +1459,12 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
                 f'<td>{_pct(row["market_fair_probability"])}</td>'
                 f'<td>{_pct(row["edge"])}</td>'
                 f'<td>{_pct(row["expected_value"])}</td>'
-                f'<td>{close}<small>{escape(str(row["closing_observed_at"] or "—"))}</small></td>'
+                f'<td>{close}<small>{escape(local_iso(row["closing_observed_at"]))}</small></td>'
                 f'<td>{clv_text}</td>'
                 f'<td>{pnl_text}</td>'
                 f'<td>{escape(str(row["disposition"] or "—"))}</td>'
-                f'<td>{escape(str(row["kickoff_at"] or "—"))}</td>'
-                f'<td>{escape(str(row["qualified_at"] or "—"))}</td>'
+                f'<td>{escape(local_iso(row["kickoff_at"]))}</td>'
+                f'<td>{escape(local_iso(row["qualified_at"]))}</td>'
                 f'<td class="policy">{policy}</td>'
                 "</tr>"
             )
@@ -1741,7 +1744,8 @@ main{{padding:14px}}header{{display:block}}}}
                     '<tr class="row-pending">'
                     f'<td class="match"><b>{match}</b>'
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
-                    f'<td><b>{_time(row["kickoff_at"])}</b></td>'
+                    f'<td><b>{_time(row["kickoff_at"])}</b>'
+                    f'{kickoff_countdown(row["kickoff_at"]) if tab == "active" else ""}</td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
@@ -1935,7 +1939,7 @@ th{{position:sticky;top:0;z-index:3;background:#1b1f23;color:#959da5;text-transf
 border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
 .sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#20252a}}tbody tr:last-child td{{border-bottom:0}}
-td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}
+td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var(--muted);margin-top:4px;font-size:10px}}.kickoff-countdown{{color:var(--warn);font-weight:800}}
 .pick-pill{{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;background:#24292e;border:1px solid #3a4046;color:#e6e9ec;font-weight:900;font-size:11px}}
 .bookmaker-cell{{min-width:132px}}.bookmaker-mark{{display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:86px;padding:0 9px;border-radius:7px;border:1px solid #3a4046;background:#22272c;box-shadow:inset 0 1px rgba(255,255,255,.04);font-size:10px;font-weight:950;line-height:1;letter-spacing:-.02em}}.bookmaker-mark b,.bookmaker-mark strong{{font:inherit}}.brand-bet365 b{{color:#f5f5f5}}.brand-bet365 strong{{color:#f1d24b;margin-left:1px}}.bookmaker-bet365{{background:#146947;border-color:#2a8967}}.brand-1xbet b{{color:#61aef4}}.brand-1xbet strong{{color:#f5f6f7;margin-left:2px}}.bookmaker-1xbet{{background:#182f47;border-color:#305f8b}}.brand-superbet b{{color:#fff}}.brand-superbet strong{{color:#ffdc32;margin-left:1px}}.bookmaker-superbet{{background:#d8262e;border-color:#ef4c52}}.brand-pinnacle b{{color:#f6a428}}.brand-pinnacle strong{{color:#f1f1f1}}.bookmaker-pinnacle{{background:#20262b;border-color:#5f6870}}.brand-betfair b{{color:#14181b}}.brand-betfair strong{{color:#14181b;margin-left:1px}}.bookmaker-betfair{{background:#f2a51a;border-color:#ffc255}}.brand-bwin b{{color:#fff;text-transform:lowercase;font-size:13px}}.bookmaker-bwin{{background:#151515;border-color:#4a4a4a}}.brand-unibet b{{color:#fff}}.brand-unibet i{{display:block;color:#56c54f;font-style:normal;font-size:8px;letter-spacing:1px;margin-left:5px}}.bookmaker-unibet{{background:#222;border-color:#4b4b4b}}.brand-betway b{{color:#fff}}.bookmaker-betway{{background:#1f6c45;border-color:#3b9369}}.brand-williamhill b{{color:#f3cc43}}.brand-williamhill strong{{color:#fff;margin-left:2px}}.bookmaker-williamhill{{background:#17365c;border-color:#315f93}}.brand-mozzart b{{color:#fff}}.bookmaker-mozzart,.bookmaker-mozzartbet{{background:#1765b5;border-color:#3e8bd5}}.brand-maxbet b{{color:#fff}}.brand-maxbet strong{{color:#ffce2f;margin-left:2px}}.bookmaker-maxbet{{background:#d1242c;border-color:#ed5056}}.brand-meridian b{{color:#fff}}.brand-meridian strong{{color:#e8473f;margin-left:2px}}.bookmaker-meridian,.bookmaker-meridianbet{{background:#273748;border-color:#485b6d}}.brand-admiral b{{color:#fff}}.brand-admiral strong{{color:#e62e39;margin-left:2px}}.bookmaker-admiral,.bookmaker-admiralbet{{background:#232323;border-color:#555}}.brand-soccerbet b{{color:#fff}}.brand-soccerbet strong{{color:#f4bf32;margin-left:2px}}.bookmaker-soccerbet{{background:#145a92;border-color:#337caf}}.brand-generic{{display:flex;align-items:center;gap:6px}}.brand-generic i{{display:grid;place-items:center;width:18px;height:18px;border-radius:5px;background:#343a40;color:#dfe3e6;font-style:normal;font-size:8px}}.brand-generic b{{color:#dfe3e6;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis}}
 .badge{{display:inline-flex;align-items:center;justify-content:center;min-width:68px;padding:6px 9px;border-radius:999px;font-weight:950;font-size:10px;letter-spacing:.06em}}
@@ -1995,7 +1999,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
 </section>
 <footer><span>Universe = every canonical candidate that reached production eligibility: PLAYED/SKIPPED production picks plus exposure-blocked candidates. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
-</main></body></html>"""
+</main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 
 class ResearchDashboardHTTPService:
@@ -2106,7 +2110,10 @@ class ResearchDashboardHTTPService:
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        handler.send_header(
+            "Content-Security-Policy",
+            f"default-src 'none'; style-src 'unsafe-inline'; script-src {COUNTDOWN_SCRIPT_CSP}",
+        )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")
         handler.send_header("Content-Length", str(len(encoded)))
