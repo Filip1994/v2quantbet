@@ -35,7 +35,12 @@ ANALYTICS_LABS = {"goal", "corner"}
 
 
 def _number(value: Any) -> float | None:
-    return None if value is None else float(value)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _pct(value: Any, *, signed: bool = False) -> str:
