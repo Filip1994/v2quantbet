@@ -859,6 +859,19 @@ def _sortable_th(
     )
 
 
+def _bucket_sort_value(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text or text == "—":
+        return None
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if match is None:
+        return None
+    number = float(match.group(0))
+    if text.startswith("<"):
+        number -= 0.001
+    return number
+
+
 def _cohort_sort_value(row: dict[str, Any], key: str) -> Any:
     if key == "record":
         return (
@@ -869,6 +882,33 @@ def _cohort_sort_value(row: dict[str, Any], key: str) -> Any:
     value = row.get(key)
     if value is None:
         return None
+    if key == "kickoff_week":
+        text = str(value)
+        try:
+            year, week = text.split("-W", 1)
+            return int(year) * 100 + int(week)
+        except (TypeError, ValueError):
+            return None
+    if key == "kickoff_weekday":
+        return {
+            "Monday": 1,
+            "Tuesday": 2,
+            "Wednesday": 3,
+            "Thursday": 4,
+            "Friday": 5,
+            "Saturday": 6,
+            "Sunday": 7,
+        }.get(str(value))
+    if key.endswith("_bucket") or key == "line_bucket":
+        numeric = _bucket_sort_value(value)
+        return numeric if numeric is not None else str(value).casefold()
+    if key == "sample_band":
+        return {
+            "SIGNAL_ONLY": 0,
+            "MONITOR": 1,
+            "PROVISIONAL_EVIDENCE": 2,
+            "STABILITY_REVIEW": 3,
+        }.get(str(value), -1)
     if isinstance(value, (int, float)):
         return float(value)
     return str(value).casefold()
@@ -899,16 +939,25 @@ def _cohort_table(
     lab_key: str,
     table_key: str,
     params: dict[str, list[str]],
+    currency: str,
+    dimension_labels: dict[str, str] | None = None,
 ) -> str:
     allowed_sort_keys = {
         *dimensions,
         "n",
         "record",
         "win_rate_pct",
+        "expected_win_rate_pct",
+        "calibration_gap_pp",
         "roi_pct",
+        "pnl_minor",
+        "avg_odds",
         "brier_score",
         "log_loss",
-        "calibration_gap_pp",
+        "avg_clv_pct",
+        "clv_n",
+        "closing_coverage_pct",
+        "max_drawdown_minor",
         "avg_edge_pct",
         "avg_ev_pct",
         "sample_band",
@@ -924,7 +973,10 @@ def _cohort_table(
 
     headers = "".join(
         _sortable_th(
-            dimension.replace("_", " ").title(),
+            (dimension_labels or {}).get(
+                dimension,
+                dimension.replace("_", " ").title(),
+            ),
             dimension,
             table_key=table_key,
             params=params,
@@ -935,49 +987,37 @@ def _cohort_table(
         )
         for dimension in dimensions
     )
+    metric_headers = (
+        ("N", "n", "desc"),
+        ("W-L-V", "record", "desc"),
+        ("Win%", "win_rate_pct", "desc"),
+        ("Exp%", "expected_win_rate_pct", "desc"),
+        ("Cal gap", "calibration_gap_pp", "desc"),
+        ("ROI", "roi_pct", "desc"),
+        ("P/L", "pnl_minor", "desc"),
+        ("Avg odds", "avg_odds", "desc"),
+        ("Brier", "brier_score", "asc"),
+        ("Log loss", "log_loss", "asc"),
+        ("Avg CLV", "avg_clv_pct", "desc"),
+        ("CLV N", "clv_n", "desc"),
+        ("CLV cov", "closing_coverage_pct", "desc"),
+        ("Max DD", "max_drawdown_minor", "asc"),
+        ("Avg edge", "avg_edge_pct", "desc"),
+        ("Avg EV", "avg_ev_pct", "desc"),
+        ("Evidence", "sample_band", "asc"),
+    )
     headers += "".join(
-        (
-            _sortable_th(
-                "N", "n", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "W-L-V", "record", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "Win%", "win_rate_pct", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "ROI", "roi_pct", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "Brier", "brier_score", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
-            ),
-            _sortable_th(
-                "Log loss", "log_loss", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
-            ),
-            _sortable_th(
-                "Cal gap", "calibration_gap_pp", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "Avg edge", "avg_edge_pct", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "Avg EV", "avg_ev_pct", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="desc",
-            ),
-            _sortable_th(
-                "Evidence", "sample_band", table_key=table_key, params=params, anchor=anchor,
-                active_key=sort_key, active_dir=sort_dir, first_dir="asc",
-            ),
+        _sortable_th(
+            label,
+            key,
+            table_key=table_key,
+            params=params,
+            anchor=anchor,
+            active_key=sort_key,
+            active_dir=sort_dir,
+            first_dir=first_dir,
         )
+        for label, key, first_dir in metric_headers
     )
 
     rendered = []
@@ -1000,16 +1040,25 @@ def _cohort_table(
             f'{escape(str(row.get(dimension) or "—"))}</a></td>'
             for dimension in dimensions
         )
+        pnl = row.get("pnl_minor")
+        max_dd = row.get("max_drawdown_minor")
         rendered.append(
             "<tr>"
             + dimension_cells
             + f"<td>{row['n']}</td>"
             + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
             + f"<td>{_metric(row['win_rate_pct'], suffix='%')}</td>"
+            + f"<td>{_metric(row['expected_win_rate_pct'], suffix='%')}</td>"
+            + f"<td>{_metric(row['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
             + f"<td>{_metric(row['roi_pct'], suffix='%', signed=True)}</td>"
+            + f"<td>{_money(None if pnl is None else int(pnl), currency)}</td>"
+            + f"<td>{_metric(row['avg_odds'], digits=2)}</td>"
             + f"<td>{_metric(row['brier_score'], digits=3)}</td>"
             + f"<td>{_metric(row['log_loss'], digits=3)}</td>"
-            + f"<td>{_metric(row['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
+            + f"<td>{_metric(row['avg_clv_pct'], suffix='%', signed=True)}</td>"
+            + f"<td>{row['clv_n']}</td>"
+            + f"<td>{_metric(row['closing_coverage_pct'], suffix='%')}</td>"
+            + f"<td>{_money(None if max_dd is None else int(max_dd), currency)}</td>"
             + f"<td>{_metric(row['avg_edge_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{_metric(row['avg_ev_pct'], suffix='%', signed=True)}</td>"
             + f"<td>{escape(str(row['sample_band']))}</td>"
@@ -1017,7 +1066,7 @@ def _cohort_table(
         )
     if not rendered:
         rendered.append(
-            f'<tr><td class="empty" colspan="{len(dimensions) + 10}">No settled picks for this breakdown.</td></tr>'
+            f'<tr><td class="empty" colspan="{len(dimensions) + 17}">No settled picks for this breakdown.</td></tr>'
         )
     return (
         f'<section class="panel" id="{anchor}">'
@@ -1029,14 +1078,6 @@ def _cohort_table(
         + "</tbody></table></div></section>"
     )
 
-
-_BUCKET_DIMENSIONS = (
-    "market_key",
-    "selection",
-    "competition_name",
-    "bookmaker_name",
-    "model_version",
-)
 
 
 def _probability_bin_index(row: dict[str, Any]) -> int | None:
@@ -1071,10 +1112,16 @@ def _bucket_detail_rows(
         )
 
     filters: dict[str, str] = {}
-    for dimension in _BUCKET_DIMENSIONS:
-        raw = params.get(f"bucket_{dimension}", [""])[0]
+    for key, values in params.items():
+        if (
+            not key.startswith("bucket_")
+            or key in {"bucket_probability_bin", "bucket_picks_sort", "bucket_picks_dir"}
+            or not values
+        ):
+            continue
+        raw = values[0]
         if raw:
-            filters[dimension] = raw
+            filters[key[len("bucket_"):]] = raw
     if not filters:
         return ((), "No bucket filters")
 
