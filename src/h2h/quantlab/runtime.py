@@ -956,8 +956,36 @@ class QuantLabRuntime:
         return sum(
             1
             for row in rows
-            if row.get("yellow_cards") is not None and row.get("red_cards") is not None
+            if row.get("card_total") is not None
+            or (row.get("yellow_cards") is not None and row.get("red_cards") is not None)
         )
+
+    def _capture_referee_card_events(self, fixture: dict[str, Any], now: datetime) -> bool:
+        """Use events only when their yellow count agrees with fixture statistics."""
+        payload = self._provider.fetch_events(int(fixture["provider_fixture_id"]))
+        observation = parse_1xbet_card_events(
+            payload,
+            fixture_id=str(fixture["fixture_id"]),
+            provider_fixture_id=int(fixture["provider_fixture_id"]),
+            captured_at=now,
+        )
+        yellow_events = sum(
+            str(event["detail"]).casefold() == "yellow card"
+            for event in observation.event_payload
+        )
+        expected_yellows = int(fixture["home_yellow_cards"]) + int(
+            fixture["away_yellow_cards"]
+        )
+        if yellow_events != expected_yellows:
+            LOGGER.info(
+                "QuantLab CardLab referee events disagree with statistics fixture=%s "
+                "event_yellows=%d statistic_yellows=%d",
+                fixture["fixture_id"],
+                yellow_events,
+                expected_yellows,
+            )
+            return False
+        return self._repository.save_card_event_observation(observation)
 
     def _card_referee_history_targets(
         self,
@@ -1020,6 +1048,7 @@ class QuantLabRuntime:
         scopes_refreshed = 0
         statistics_backfilled = 0
         statistics_attempts = 0
+        event_attempts = 0
         updated_referees: set[str] = set()
         window_start = (now - timedelta(days=self._settings.card_referee_history_lookback_days)).date()
         window_end = now.date()
@@ -1101,6 +1130,39 @@ class QuantLabRuntime:
                     )
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
+                event_candidates = self._repository.referee_card_event_backfill_candidates(
+                    referee,
+                    decision_at=now,
+                    limit=max(12, self._settings.card_referee_history_target * 2),
+                )
+                for fixture in event_candidates:
+                    if current_sample >= self._settings.card_referee_history_target:
+                        break
+                    if event_attempts >= self._settings.card_referee_statistics_per_cycle:
+                        break
+                    event_attempts += 1
+                    try:
+                        saved_event = self._capture_referee_card_events(fixture, now)
+                    except ApiBudgetExceededError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        LOGGER.warning(
+                            "QuantLab CardLab referee events failed referee=%s "
+                            "fixture=%s error_class=%s error=%s",
+                            referee,
+                            fixture.get("fixture_id"),
+                            type(exc).__name__,
+                            str(exc),
+                        )
+                        continue
+                    if saved_event:
+                        history = self._repository.referee_history(referee, decision_at=now)
+                        current_sample = self._card_history_sample_size(history)
+                        if current_sample > baseline_samples.get(referee_key_value, 0):
+                            updated_referees.add(referee_key_value)
+                            baseline_samples[referee_key_value] = current_sample
+                if current_sample >= self._settings.card_referee_history_target:
+                    continue
                 candidates = self._repository.referee_statistics_backfill_candidates(
                     referee,
                     decision_at=now,
@@ -1111,11 +1173,7 @@ class QuantLabRuntime:
                     if current_sample >= self._settings.card_referee_history_target:
                         break
                     if statistics_attempts >= self._settings.card_referee_statistics_per_cycle:
-                        return (
-                            scopes_refreshed,
-                            statistics_backfilled,
-                            frozenset(updated_referees),
-                        )
+                        break
                     statistics_attempts += 1
                     try:
                         saved = self._capture_historical_statistics(
@@ -1146,9 +1204,10 @@ class QuantLabRuntime:
 
         LOGGER.info(
             "QuantLab CardLab referee bootstrap completed scopes_refreshed=%d "
-            "statistics_attempts=%d statistics_backfilled=%d updated_referees=%d",
+            "statistics_attempts=%d event_attempts=%d statistics_backfilled=%d updated_referees=%d",
             scopes_refreshed,
             statistics_attempts,
+            event_attempts,
             statistics_backfilled,
             len(updated_referees),
         )
