@@ -33,7 +33,7 @@ LABS = {
     "corner": ("CORNER", "CornerLab", "Corners · totals, team totals and handicaps"),
     "card": ("CARD", "CardLab", "Cards · totals, team cards and referee-sensitive models"),
 }
-ANALYTICS_LABS = {"goal", "corner"}
+ANALYTICS_LABS = {"goal", "corner", "card"}
 
 
 def _number(value: Any) -> float | None:
@@ -857,11 +857,13 @@ def _history_depth_bucket(row: dict[str, Any], raw: dict[str, Any]) -> str:
         row.get("home_history_size"),
         raw.get("home_history_match_count"),
         raw.get("home_season_match_count"),
+        raw.get("home_history_n"),
     )
     away = _first_number(
         row.get("away_history_size"),
         raw.get("away_history_match_count"),
         raw.get("away_season_match_count"),
+        raw.get("away_history_n"),
     )
     if home is None or away is None:
         return "—"
@@ -974,8 +976,9 @@ def _watchlist_block(content: str, *, lab_key: str) -> str:
     focus = (
         "λ shape · price · trend · matchup · reliability"
         if lab_key == "goal"
-        else
-        "calibration regimes · model-line gap · price · pressure trend · matchup · reliability"
+        else "calibration regimes · model-line gap · price · pressure trend · matchup · reliability"
+        if lab_key == "corner"
+        else "raw consensus · referee · team discipline · fouls · context · cross-buckets"
     )
     return (
         '<section class="watchlist" id="analytics-watchlist">'
@@ -1009,10 +1012,14 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
             "kickoff_week": week,
         }
     )
-    raw_for_reliability = _raw_features(
-        item,
-        "feature_payload" if lab_key == "goal" else "corner_feature_payload",
+    payload_key = (
+        "feature_payload"
+        if lab_key == "goal"
+        else "corner_feature_payload"
+        if lab_key == "corner"
+        else "card_feature_payload"
     )
+    raw_for_reliability = _raw_features(item, payload_key)
     item.update(
         {
             "history_depth_bucket": _history_depth_bucket(item, raw_for_reliability),
@@ -1153,6 +1160,249 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 ),
             }
         )
+    elif lab_key == "card":
+        raw = _raw_features(item, "card_feature_payload")
+        details = item.get("decision_details")
+        details = details if isinstance(details, dict) else {}
+        signal = details.get("raw_signal")
+        signal = signal if isinstance(signal, dict) else {}
+
+        def scalar(name: str, breaks: tuple[float, ...], *, suffix: str = "", digits: int = 1) -> str:
+            return _scalar_bucket(raw.get(name), breaks=breaks, suffix=suffix, digits=digits)
+
+        def pct_scalar(name: str) -> str:
+            value = _number(raw.get(name))
+            return _scalar_bucket(
+                None if value is None else value * 100.0,
+                breaks=(20, 40, 50, 60, 70, 80, 90),
+                suffix="%",
+                digits=0,
+            )
+
+        consensus = _first_number(signal.get("consensus_cards"), raw.get("raw_consensus_cards"))
+        line = _number(item.get("line"))
+        signal_gap = _first_number(
+            signal.get("line_gap"),
+            None if consensus is None or line is None else consensus - line,
+        )
+        directional_support = _number(signal.get("directional_support"))
+        observed_hit = _number(signal.get("observed_hit_rate"))
+        anchor_count = _first_number(signal.get("anchor_count"), raw.get("raw_anchor_count"))
+
+        item.update(
+            {
+                "card_raw_policy_bucket": (
+                    "RAW_STATS"
+                    if str(item.get("policy_version") or "").startswith("CARDLAB_RAW_STATS_POLICY_")
+                    else "LEGACY_VALUE"
+                ),
+                "card_raw_consensus_bucket": _scalar_bucket(
+                    consensus, breaks=(3, 4, 4.5, 5, 5.5, 6, 7, 8), digits=1
+                ),
+                "card_raw_line_gap_bucket": _signed_gap_bucket(signal_gap),
+                "card_raw_support_bucket": _scalar_bucket(
+                    None if directional_support is None else directional_support * 100,
+                    breaks=(50, 60, 67, 75, 80, 90),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_raw_hit_rate_bucket": _scalar_bucket(
+                    None if observed_hit is None else observed_hit * 100,
+                    breaks=(40, 50, 55, 60, 67, 75, 80),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_raw_anchor_count_bucket": _scalar_bucket(
+                    anchor_count, breaks=(2, 3, 4, 5, 6, 7), digits=0
+                ),
+                "card_referee_cards_l5_bucket": scalar(
+                    "referee_l5_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_referee_cards_l10_bucket": scalar(
+                    "referee_l10_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_referee_yellows_l10_bucket": scalar(
+                    "referee_l10_yellows", (2, 3, 4, 5, 6, 7), digits=1
+                ),
+                "card_referee_reds_l10_bucket": scalar(
+                    "referee_l10_reds", (0.05, 0.15, 0.25, 0.4, 0.6, 1.0), digits=2
+                ),
+                "card_referee_fouls_l10_bucket": scalar(
+                    "referee_l10_fouls", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_referee_cards_per_foul_bucket": scalar(
+                    "referee_l10_cards_per_foul", (0.10, 0.14, 0.18, 0.22, 0.26, 0.30), digits=2
+                ),
+                "card_referee_home_bias_bucket": _signed_gap_bucket(
+                    raw.get("referee_home_away_bias_l10")
+                ),
+                "card_referee_over35_bucket": pct_scalar("referee_over_3_5_rate_l10"),
+                "card_referee_over45_bucket": pct_scalar("referee_over_4_5_rate_l10"),
+                "card_referee_over55_bucket": pct_scalar("referee_over_5_5_rate_l10"),
+                "card_home_cards_l5_bucket": scalar(
+                    "home_l5_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_home_cards_l10_bucket": scalar(
+                    "home_l10_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_away_cards_l5_bucket": scalar(
+                    "away_l5_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_away_cards_l10_bucket": scalar(
+                    "away_l10_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_home_cards_against_l10_bucket": scalar(
+                    "home_l10_cards_against", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_away_cards_against_l10_bucket": scalar(
+                    "away_l10_cards_against", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_home_fouls_l10_bucket": scalar(
+                    "home_l10_fouls_committed", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_away_fouls_l10_bucket": scalar(
+                    "away_l10_fouls_committed", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_home_fouls_suffered_l10_bucket": scalar(
+                    "home_l10_fouls_suffered", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_away_fouls_suffered_l10_bucket": scalar(
+                    "away_l10_fouls_suffered", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_home_cards_per_foul_bucket": scalar(
+                    "home_l10_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
+                ),
+                "card_away_cards_per_foul_bucket": scalar(
+                    "away_l10_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
+                ),
+                "card_home_venue_cards_bucket": scalar(
+                    "home_venue_l5_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_away_venue_cards_bucket": scalar(
+                    "away_venue_l5_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_home_2plus_bucket": pct_scalar("home_cards_2plus_rate_l10"),
+                "card_home_3plus_bucket": pct_scalar("home_cards_3plus_rate_l10"),
+                "card_home_4plus_bucket": pct_scalar("home_cards_4plus_rate_l10"),
+                "card_away_2plus_bucket": pct_scalar("away_cards_2plus_rate_l10"),
+                "card_away_3plus_bucket": pct_scalar("away_cards_3plus_rate_l10"),
+                "card_away_4plus_bucket": pct_scalar("away_cards_4plus_rate_l10"),
+                "card_combined_cards_l5_bucket": scalar(
+                    "combined_team_cards_for_l5", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_combined_cards_l10_bucket": scalar(
+                    "combined_team_cards_for_l10", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_combined_fouls_l10_bucket": scalar(
+                    "combined_fouls_committed_l10", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_matchup_cards_bucket": scalar(
+                    "matchup_expected_cards_l10", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_matchup_fouls_bucket": scalar(
+                    "matchup_expected_fouls_l10", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_aggression_foul_draw_bucket": scalar(
+                    "aggression_foul_draw_interaction", (1, 1.5, 2, 2.5, 3, 4), digits=1
+                ),
+                "card_h2h_total_bucket": scalar(
+                    "h2h_total_cards_l5", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_h2h_n_bucket": scalar("h2h_n", (1, 2, 3, 4, 5), digits=0),
+                "card_league_total_bucket": scalar(
+                    "league_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_referee_vs_league_bucket": _signed_gap_bucket(
+                    raw.get("referee_vs_league_cards_delta")
+                ),
+                "card_referee_vs_teams_bucket": _signed_gap_bucket(
+                    raw.get("referee_vs_teams_cards_delta")
+                ),
+                "card_home_league_percentile_bucket": pct_scalar(
+                    "home_cards_for_league_percentile"
+                ),
+                "card_away_league_percentile_bucket": pct_scalar(
+                    "away_cards_for_league_percentile"
+                ),
+                "card_home_foul_percentile_bucket": pct_scalar(
+                    "home_fouls_league_percentile"
+                ),
+                "card_away_foul_percentile_bucket": pct_scalar(
+                    "away_fouls_league_percentile"
+                ),
+                "card_stage_bucket": scalar(
+                    "stage_of_season", (0.25, 0.50, 0.75, 0.90), digits=2
+                ),
+                "card_importance_bucket": scalar(
+                    "match_importance", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_table_pressure_bucket": scalar(
+                    "table_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_must_win_bucket": scalar(
+                    "must_win_proxy", (0.20, 0.40, 0.60, 0.75, 0.90), digits=2
+                ),
+                "card_rank_gap_bucket": scalar("rank_gap", (2, 4, 6, 10, 15), digits=0),
+                "card_points_gap_bucket": scalar("points_gap", (3, 6, 10, 15, 25), digits=0),
+                "card_derby_bucket": (
+                    "DERBY" if _number(raw.get("derby_rivalry_indicator")) == 1 else "NON_DERBY"
+                    if _number(raw.get("derby_rivalry_indicator")) == 0 else "—"
+                ),
+                "card_cup_bucket": (
+                    "CUP" if _number(raw.get("cup_indicator")) == 1 else "LEAGUE"
+                    if _number(raw.get("cup_indicator")) == 0 else "—"
+                ),
+                "card_late_season_bucket": (
+                    "LATE" if _number(raw.get("late_season_indicator")) == 1 else "EARLY_MID"
+                    if _number(raw.get("late_season_indicator")) == 0 else "—"
+                ),
+                "card_similar_strength_bucket": (
+                    "SIMILAR" if _number(raw.get("similar_strength_indicator")) == 1 else "UNEQUAL"
+                    if _number(raw.get("similar_strength_indicator")) == 0 else "—"
+                ),
+                "card_favorite_probability_bucket": _scalar_bucket(
+                    None
+                    if _number(raw.get("market_favorite_fair_probability")) is None
+                    else _number(raw.get("market_favorite_fair_probability")) * 100,
+                    breaks=(40, 50, 60, 70, 80),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_1x2_balance_bucket": _scalar_bucket(
+                    None
+                    if _number(raw.get("market_one_x_two_balance")) is None
+                    else _number(raw.get("market_one_x_two_balance")) * 100,
+                    breaks=(50, 60, 70, 80, 90),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_goal_over25_bucket": _scalar_bucket(
+                    None
+                    if _number(raw.get("market_goals_over_2_5_fair_probability")) is None
+                    else _number(raw.get("market_goals_over_2_5_fair_probability")) * 100,
+                    breaks=(35, 45, 50, 55, 65, 75),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_btts_bucket": _scalar_bucket(
+                    None
+                    if _number(raw.get("market_btts_yes_fair_probability")) is None
+                    else _number(raw.get("market_btts_yes_fair_probability")) * 100,
+                    breaks=(35, 45, 50, 55, 65, 75),
+                    suffix="%",
+                    digits=0,
+                ),
+                "card_handicap_bucket": _signed_gap_bucket(
+                    raw.get("market_favorite_handicap_line")
+                ),
+                "card_possession_imbalance_bucket": scalar(
+                    "expected_possession_imbalance", (5, 10, 15, 20, 30), digits=0
+                ),
+                "card_cards_trend_bucket": _trend_bucket(raw, "cards_for"),
+                "card_fouls_trend_bucket": _trend_bucket(raw, "fouls_committed"),
+                "card_venue_cards_trend_bucket": _venue_trend_bucket(raw, "cards_for"),
+            }
+        )
     return item
 
 
@@ -1161,7 +1411,17 @@ def _analytics_rows(
     *,
     lab_key: str,
 ) -> tuple[dict[str, Any], ...]:
-    return tuple(_analytics_row(row, lab_key=lab_key) for row in rows)
+    enriched = [_analytics_row(row, lab_key=lab_key) for row in rows]
+    if lab_key == "card":
+        counts: dict[str, int] = defaultdict(int)
+        for row in enriched:
+            counts[str(row.get("fixture_id") or "")] += 1
+        for row in enriched:
+            count = counts[str(row.get("fixture_id") or "")]
+            row["card_fixture_pick_count_bucket"] = (
+                "1" if count == 1 else "2" if count == 2 else "3+"
+            )
+    return tuple(enriched)
 
 
 def _dimension_available(
