@@ -137,6 +137,11 @@ class PostgreSQLQuantLabRepository:
                 " ELSE q.result_detail END AS result_detail, "
                 "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
                 "cs.feature_payload AS corner_feature_payload, "
+                "card.referee, card.referee_card_rate, card.referee_sample_size, "
+                "card.referee_foul_rate, card.referee_foul_sample_size, "
+                "card.derby_rivalry_indicator, card.home_table_pressure, "
+                "card.away_table_pressure, card.table_pressure, card.match_importance, "
+                "card.feature_payload AS card_feature_payload, "
                 "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
                 "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
                 "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
@@ -174,6 +179,16 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY s.decision_at DESC, s.feature_snapshot_id DESC LIMIT 1"
                 ") cs ON TRUE "
                 "LEFT JOIN LATERAL ("
+                " SELECT referee, referee_card_rate, referee_sample_size, referee_foul_rate, "
+                "        referee_foul_sample_size, derby_rivalry_indicator, "
+                "        home_table_pressure, away_table_pressure, table_pressure, "
+                "        match_importance, feature_payload "
+                " FROM quantlab_card_feature_snapshots s "
+                " WHERE q.lab = 'CARD' AND s.fixture_id = q.fixture_id "
+                " AND s.decision_at <= q.decision_at AND s.available_at <= q.decision_at "
+                " ORDER BY s.decision_at DESC, s.feature_snapshot_id DESC LIMIT 1"
+                ") card ON TRUE "
+                "LEFT JOIN LATERAL ("
                 " SELECT home_team, away_team, competition_name, country, kickoff_at "
                 " FROM quantlab_fixture_observations o WHERE o.fixture_id = q.fixture_id "
                 " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
@@ -189,7 +204,7 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         for row in rows:
-            for key in ("result_detail", "corner_feature_payload", "decision_details"):
+            for key in ("result_detail", "corner_feature_payload", "card_feature_payload", "decision_details"):
                 value = row.get(key)
                 if isinstance(value, str):
                     row[key] = json.loads(value)
