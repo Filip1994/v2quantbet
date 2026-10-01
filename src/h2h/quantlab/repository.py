@@ -20,6 +20,14 @@ def _identifier(prefix: str, payload: dict[str, Any]) -> str:
     return prefix + sha256(_json(payload).encode()).hexdigest()
 
 
+def _bounded_percentage(value: Any) -> Any:
+    """Discard impossible provider percentages while preserving the raw payload."""
+    if value is None:
+        return None
+    numeric = float(value)
+    return value if 0.0 <= numeric <= 100.0 else None
+
+
 def _row_dicts(cursor: Any) -> tuple[dict[str, Any], ...]:
     columns = tuple(item.name for item in cursor.description)
     return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
@@ -2890,8 +2898,8 @@ class PostgreSQLQuantLabRepository:
                     item.away_total_passes,
                     item.home_passes_accurate,
                     item.away_passes_accurate,
-                    item.home_pass_accuracy,
-                    item.away_pass_accuracy,
+                    _bounded_percentage(item.home_pass_accuracy),
+                    _bounded_percentage(item.away_pass_accuracy),
                     item.available_at,
                     _json(item.raw_payload),
                 ),
