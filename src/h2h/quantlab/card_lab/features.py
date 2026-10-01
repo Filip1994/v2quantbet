@@ -776,6 +776,23 @@ def _raw_card_features(
     raw["away_rank"] = _standings_fact(away_pressure, "team_rank")
     raw["home_points"] = _standings_fact(home_pressure, "team_points")
     raw["away_points"] = _standings_fact(away_pressure, "team_points")
+
+    for side, datum in (("home", home_pressure), ("away", away_pressure)):
+        for race in ("title", "continental", "promotion", "playoff", "relegation"):
+            component = datum.components.get(race)
+            component = component if isinstance(component, dict) else {}
+            raw[f"{side}_{race}_pressure"] = _number(component.get("pressure"))
+            raw[f"{side}_{race}_points_gap"] = _number(component.get("points_gap"))
+    for race in ("title", "continental", "promotion", "playoff", "relegation"):
+        race_values = [
+            value
+            for value in (
+                _number(raw.get(f"home_{race}_pressure")),
+                _number(raw.get(f"away_{race}_pressure")),
+            )
+            if value is not None
+        ]
+        raw[f"{race}_pressure"] = max(race_values) if race_values else None
     raw["rank_gap"] = (
         None if raw["home_rank"] is None or raw["away_rank"] is None
         else abs(float(raw["home_rank"]) - float(raw["away_rank"]))
@@ -787,6 +804,26 @@ def _raw_card_features(
     pressure = _number(raw.get("table_pressure"))
     raw["must_win_proxy"] = (
         None if pressure is None else pressure * (0.5 + 0.5 * (stage if stage is not None else 0.5))
+    )
+    raw["last_rounds_indicator"] = None if stage is None else int(stage >= 0.85)
+    rank_gap_value = _number(raw.get("rank_gap"))
+    points_gap_value = _number(raw.get("points_gap"))
+    raw["close_table_position_indicator"] = int(
+        (rank_gap_value is not None and rank_gap_value <= 3.0)
+        or (points_gap_value is not None and points_gap_value <= 4.0)
+    )
+    raw["relegation_battle_indicator"] = int(
+        (_number(raw.get("relegation_pressure")) or 0.0) >= 0.65
+    )
+    raw["title_race_indicator"] = int(
+        (_number(raw.get("title_pressure")) or 0.0) >= 0.65
+    )
+    raw["promotion_race_indicator"] = int(
+        max(
+            _number(raw.get("promotion_pressure")) or 0.0,
+            _number(raw.get("playoff_pressure")) or 0.0,
+        )
+        >= 0.65
     )
 
     for key, value in market_context.items():
