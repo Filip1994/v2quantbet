@@ -1041,6 +1041,19 @@ class PostgreSQLQuantLabRepository:
                 )
                 if cursor.fetchone() is not None:
                     return False
+            elif item.lab == "CARD" and str(item.policy_version).startswith("CARDLAB_RAW_STATS_POLICY_"):
+                # Raw CardLab intentionally carries one independent exposure per match.
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"quantlab:card:{item.fixture_id}",),
+                )
+                cursor.execute(
+                    "SELECT 1 FROM quantlab_shadow_bets "
+                    "WHERE fixture_id = %s AND lab = 'CARD' LIMIT 1",
+                    (item.fixture_id,),
+                )
+                if cursor.fetchone() is not None:
+                    return False
 
             cursor.execute(
                 "INSERT INTO quantlab_shadow_bets ("
