@@ -3694,6 +3694,7 @@ class PostgreSQLQuantLabRepository:
                 "SELECT provider_bet_name, raw_selection, parsed_line, odds, captured_at "
                 "FROM quantlab_market_observations "
                 "WHERE fixture_id = %s AND bookmaker_id = 11 "
+                "AND lab_owner = 'UNCLASSIFIED' "
                 "AND lower(provider_bet_name) LIKE '%%handicap%%' "
                 "AND parsed_line IS NOT NULL AND captured_at <= %s "
                 "ORDER BY captured_at DESC, market_observation_id DESC LIMIT 20",
