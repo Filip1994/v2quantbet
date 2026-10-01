@@ -212,87 +212,70 @@ def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
         pick_id = _pick_id(row)
         if not pick_id:
             continue
-
         details = row.get("decision_details")
         details = details if isinstance(details, dict) else {}
         context = details.get("card_context")
         context = context if isinstance(context, dict) else {}
+        payload = context.get("feature_payload")
+        payload = payload if isinstance(payload, dict) else {}
+        raw = payload.get("raw_features")
+        raw = raw if isinstance(raw, dict) else {}
+        signal = details.get("raw_signal")
+        signal = signal if isinstance(signal, dict) else {}
         thresholds = details.get("thresholds")
         thresholds = thresholds if isinstance(thresholds, dict) else {}
-        probability_model = details.get("probability_model")
-        probability_model = probability_model if isinstance(probability_model, dict) else {}
 
-        expected = _number(details.get("expected_total_cards"))
-        if expected is None:
-            expected = _number(context.get("referee_card_rate"))
-        referee = str(context.get("referee") or "—")
-        referee_cards = _number(context.get("referee_card_rate"))
-        referee_n = int(_number(context.get("referee_sample_size")) or 0)
-        referee_fouls = _number(context.get("referee_foul_rate"))
-        referee_foul_n = int(_number(context.get("referee_foul_sample_size")) or 0)
-        rivalry = context.get("derby_rivalry_indicator")
-        rivalry_text = "DA" if rivalry == 1 else "NE" if rivalry == 0 else "—"
-        home_pressure = _number(context.get("home_table_pressure"))
-        away_pressure = _number(context.get("away_table_pressure"))
-        importance = _number(context.get("match_importance"))
-
-        decision_reason = str(row.get("decision_reason") or "VALUE_THRESHOLD_PASSED")
-        model_name = str(probability_model.get("name") or row.get("model_name") or "CardLab model")
-        distribution = str(probability_model.get("distribution") or "Poisson")
-        lambda_source = str(probability_model.get("lambda_source") or "referee_card_rate")
+        consensus = _first_number(signal.get("consensus_cards"), raw.get("raw_consensus_cards"))
+        gap = _number(signal.get("line_gap"))
+        support = _number(signal.get("directional_support"))
+        hit_rate = _number(signal.get("observed_hit_rate"))
+        anchor_count = int(_first_number(signal.get("anchor_count"), raw.get("raw_anchor_count")) or 0)
 
         summary = (
-            f"{_pick_text(row)} @ {_odd(row.get('odds'))}: model {_pct(row.get('model_probability'))} "
-            f"naspram market {_pct(row.get('market_probability'))}; "
-            f"edge {_pct(row.get('edge'), signed=True)}, EV {_pct(row.get('expected_value'), signed=True)}."
-        )
-        model_text = (
-            f"{model_name} koristi {distribution} raspodelu; očekivani total je {rate(expected)}. "
-            f"λ izvor: {lambda_source}."
+            f"{_pick_text(row)} @ {_odd(row.get('odds'))}: raw consensus {rate(consensus)} kartona, "
+            f"gap prema liniji {rate(gap)}, podrška sidara {_pct(support)}, "
+            f"istorijski raw hit {_pct(hit_rate)}."
         )
         referee_text = (
-            f"Sudija {referee}: {rate(referee_cards)} kartona/meč (n={referee_n}), "
-            f"{rate(referee_fouls)} faulova/meč (n={referee_foul_n})."
+            f"Sudija: L5 {rate(raw.get('referee_l5_cards'))}, "
+            f"L10 {rate(raw.get('referee_l10_cards'))} kartona; "
+            f"L10 {rate(raw.get('referee_l10_fouls'))} faulova; "
+            f"cards/foul {rate(raw.get('referee_l10_cards_per_foul'))}."
+        )
+        teams_text = (
+            f"Timovi: home L10 {rate(raw.get('home_l10_cards_for'))}, "
+            f"away L10 {rate(raw.get('away_l10_cards_for'))}; "
+            f"combined {rate(raw.get('combined_team_cards_for_l10'))}; "
+            f"matchup {rate(raw.get('matchup_expected_cards_l10'))}; "
+            f"combined fouls {rate(raw.get('combined_fouls_committed_l10'))}."
         )
         context_text = (
-            f"Kontekst: derbi {rivalry_text}; pritisak domaćin {rate(home_pressure)}, "
-            f"gost {rate(away_pressure)}; važnost {rate(importance)}."
+            f"Kontekst: H2H {rate(raw.get('h2h_total_cards_l5'))}; "
+            f"liga {rate(raw.get('league_total_cards'))}; "
+            f"važnost {rate(raw.get('match_importance'))}; "
+            f"table pressure {rate(raw.get('table_pressure'))}; "
+            f"1X2 balance {_pct(raw.get('market_one_x_two_balance'))}."
         )
-
-        threshold_bits: list[str] = []
-        if thresholds.get("min_edge") is not None:
-            threshold_bits.append(f"edge ≥ {_pct(thresholds.get('min_edge'))}")
-        if thresholds.get("min_expected_value") is not None:
-            threshold_bits.append(f"EV ≥ {_pct(thresholds.get('min_expected_value'))}")
-        if thresholds.get("min_odds") is not None and thresholds.get("max_odds") is not None:
-            threshold_bits.append(
-                f"odds {_odd(thresholds.get('min_odds'))}–{_odd(thresholds.get('max_odds'))}"
-            )
-        if thresholds.get("min_referee_sample_size") is not None:
-            threshold_bits.append(
-                f"referee n ≥ {int(_number(thresholds.get('min_referee_sample_size')) or 0)}"
-            )
         gate_text = (
-            "Gate: " + ", ".join(threshold_bits) + f"; odluka {decision_reason}."
-            if threshold_bits
-            else f"Odluka: {decision_reason}."
+            f"Raw gate: anchors {anchor_count} "
+            f"(min {int(_number(thresholds.get('minimum_raw_anchors')) or 0)}), "
+            f"support min {_pct(thresholds.get('minimum_directional_support'))}, "
+            f"|raw−line| min {rate(thresholds.get('minimum_abs_line_gap'))}. "
+            f"Odluka: {str(row.get('decision_reason') or 'RAW_STAT_CONSENSUS_PICK')}."
         )
-
         rendered[pick_id] = (
             '<details class="pick-note"><summary title="Zašto je CardLab izabrao ovaj pik">📝</summary>'
-            '<div class="note-popover"><b>Zašto ovaj CardLab pik</b>'
+            '<div class="note-popover"><b>Zašto ovaj CardLab raw-stat pik</b>'
             f'<p>{escape(summary)}</p>'
-            f'<p>{escape(model_text)}</p>'
             f'<p>{escape(referee_text)}</p>'
+            f'<p>{escape(teams_text)}</p>'
             f'<p>{escape(context_text)}</p>'
             f'<p>{escape(gate_text)}</p>'
-            '<p><b>Važno:</b> u aktuelnom CardLab modelu referee_card_rate je probability input; '
-            'faulovi, derbi, table pressure i match importance su audit/research kontekst, '
-            'ne ručno dodati koeficijenti u verovatnoću.</p>'
+            '<p><b>Selekcija je price-independent:</b> EV, edge i raspon kvota se čuvaju samo kao '
+            'dijagnostika/return analiza i ne odlučuju da li je nešto PICK.</p>'
             '</div></details>'
         )
     return rendered
-
 
 def _nav(view: str, lab_key: str) -> tuple[str, str]:
     analytics_lab = lab_key if lab_key in ANALYTICS_LABS else "goal"
