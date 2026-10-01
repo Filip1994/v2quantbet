@@ -296,30 +296,59 @@ def _card_repo_with_total_cards() -> Repo:
                 bet_id=80,
                 bet_name="Cards Over/Under",
                 line=4.5,
-                over=1.80,
-                under=2.00,
+                over=1.20,
+                under=4.00,
             ),
         ),
         card_feature={
             "referee": "Ref Example",
-            "referee_card_rate": 5.8,
+            "referee_card_rate": 6.0,
             "referee_sample_size": 12,
             "referee_foul_rate": 24.0,
             "referee_foul_sample_size": 12,
             "derby_rivalry_indicator": 1,
             "table_pressure": 0.8,
             "match_importance": 0.7,
-            "feature_version": "CARDLAB_FEATURES_V1",
+            "feature_version": "CARDLAB_FEATURES_V3",
+            "feature_payload": {
+                "raw_features": {
+                    "raw_anchor_count": 5,
+                    "raw_consensus_cards": 5.0,
+                    "referee_l10_cards": 6.0,
+                    "combined_team_cards_for_l10": 5.5,
+                    "matchup_expected_cards_l10": 5.0,
+                    "home_l10_match_total_cards": 4.3,
+                    "away_l10_match_total_cards": 4.1,
+                },
+                "raw_anchors": {
+                    "referee_l10_cards": 6.0,
+                    "combined_team_cards_for_l10": 5.5,
+                    "matchup_expected_cards_l10": 5.0,
+                    "home_match_total_cards_l10": 4.3,
+                    "away_match_total_cards_l10": 4.1,
+                },
+                "raw_samples": {
+                    "referee_total_cards": [5.2, 4.0, 5.0, 4.2],
+                    "home_match_total_cards": [5.1, 4.1, 5.2, 4.0],
+                    "away_match_total_cards": [5.0, 4.2, 4.8, 4.1],
+                },
+                "raw_stat_contract": {
+                    "version": "CARDLAB_RAW_STATS_V1",
+                    "price_independent_selection": True,
+                    "ev_is_pick_gate": False,
+                    "edge_is_pick_gate": False,
+                },
+            },
         },
     )
 
 
-def test_card_engine_uses_only_1xbet_and_its_own_poisson_probability():
+def test_card_engine_uses_only_1xbet_raw_statistics_and_ignores_negative_ev():
     repo = _card_repo_with_total_cards()
 
     result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
 
-    assert result.decisions_inserted == 2
+    assert result.decisions_inserted == 1
     assert result.picks_inserted == 1
     pick = next(item for item in repo.decisions if item.decision == "PICK")
     assert pick.lab == "CARD"
@@ -333,12 +362,19 @@ def test_card_engine_uses_only_1xbet_and_its_own_poisson_probability():
     assert pick.reference_companion_observation_id is None
     assert pick.reference_odds is None
     assert pick.reference_companion_odds is None
-    assert pick.details["card_context"]["referee_card_rate"] == 5.8
-    assert pick.details["expected_total_cards"] == 5.8
-    assert pick.details["probability_model"]["reference_bookmaker_used"] is False
-    assert pick.details["settlement_contract"]["status"] == "VERIFIED_1XBET_TARGET"
-    assert pick.model_probability > pick.market_probability
-    assert {item.bookmaker_id for item in repo.decisions} == {11}
+    assert pick.policy_version == "CARDLAB_RAW_STATS_POLICY_V6_MARKET80"
+    assert pick.model_name == "CardLab raw-stat consensus"
+    assert pick.reason == "RAW_STAT_CONSENSUS_PICK"
+    assert pick.details["raw_signal"]["consensus_cards"] == 5.0
+    assert pick.details["raw_signal"]["directional_support"] == 0.6
+    assert pick.details["raw_stat_policy"]["price_independent_selection"] is True
+    assert pick.details["raw_stat_policy"]["ev_is_pick_gate"] is False
+    assert pick.details["raw_stat_policy"]["edge_is_pick_gate"] is False
+    assert pick.details["raw_stat_policy"]["odds_is_pick_gate"] is False
+    assert pick.details["price_diagnostics"]["used_for_selection"] is False
+    assert pick.edge < 0
+    assert pick.expected_value < 0
+    assert len(repo.shadows) == 1
 
 
 def test_card_engine_does_not_require_bet365_reference():
@@ -346,22 +382,27 @@ def test_card_engine_does_not_require_bet365_reference():
 
     result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
 
-    assert result.decisions_inserted == 2
+    assert result.decisions_inserted == 1
     assert result.picks_inserted == 1
     assert all(item.reference_bookmaker_id is None for item in repo.decisions)
 
 
-def test_card_engine_passes_before_market_lookup_when_referee_sample_is_too_small():
+def test_card_engine_passes_before_market_lookup_when_raw_history_is_too_small():
     class NoMarketRepo(Repo):
         def total_market_pairs(self, *_args, **_kwargs):
-            raise AssertionError("market lookup must not occur with insufficient referee history")
+            raise AssertionError("market lookup must not occur with insufficient raw history")
 
     repo = NoMarketRepo(
         card_feature={
-            "referee": "New Ref",
-            "referee_card_rate": 4.9,
-            "referee_sample_size": 3,
-            "feature_version": "CARDLAB_FEATURES_V1",
+            "feature_version": "CARDLAB_FEATURES_V3",
+            "feature_payload": {
+                "raw_features": {"raw_anchor_count": 2},
+                "raw_anchors": {
+                    "referee_l10_cards": 5.0,
+                    "league_total_cards": 4.8,
+                },
+                "raw_samples": {},
+            },
         }
     )
 
@@ -369,7 +410,42 @@ def test_card_engine_passes_before_market_lookup_when_referee_sample_is_too_smal
 
     assert result.decisions_inserted == 1
     assert result.picks_inserted == 0
-    assert repo.decisions[0].reason == "INSUFFICIENT_REFEREE_HISTORY"
+    assert repo.decisions[0].reason == "INSUFFICIENT_RAW_STAT_HISTORY"
+
+
+def test_card_engine_emits_only_strongest_raw_line_per_fixture():
+    repo = _card_repo_with_total_cards()
+    repo.pairs = (
+        market_pair(
+            11,
+            "1xBet",
+            bet_id=80,
+            bet_name="Cards Over/Under",
+            line=4.5,
+            over=1.20,
+            under=4.00,
+        ),
+        market_pair(
+            11,
+            "1xBet",
+            bet_id=80,
+            bet_name="Cards Over/Under",
+            line=5.5,
+            over=3.20,
+            under=1.35,
+        ),
+    )
+
+    result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.decisions_inserted == 2
+    assert result.picks_inserted == 1
+    picks = [item for item in repo.decisions if item.decision == "PICK"]
+    assert len(picks) == 1
+    assert picks[0].line == 5.5
+    assert picks[0].selection == "UNDER"
+    assert picks[0].reason == "RAW_STAT_CONSENSUS_PICK"
+    assert len(repo.shadows) == 1
 
 
 def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
