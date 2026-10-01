@@ -790,7 +790,7 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
     assert "Model versions" not in html
     assert "Policy versions" not in html
     assert "GoalLab Research / Audit" not in html
-    assert ">CardLab<" not in html
+    assert ">CardLab<" in html
 
     assert html.index("Watchlist · ROI discovery") < html.index("Last 7 days")
 
