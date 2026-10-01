@@ -1678,23 +1678,39 @@ def _cohort_table(
         for dimension in dimensions
     )
     metric_headers = (
-        ("N", "n", "desc"),
-        ("W-L-V", "record", "desc"),
-        ("Win%", "win_rate_pct", "desc"),
-        ("Exp%", "expected_win_rate_pct", "desc"),
-        ("Cal gap", "calibration_gap_pp", "desc"),
-        ("ROI", "roi_pct", "desc"),
-        ("P/L", "pnl_minor", "desc"),
-        ("Avg odds", "avg_odds", "desc"),
-        ("Brier", "brier_score", "asc"),
-        ("Log loss", "log_loss", "asc"),
-        ("Avg CLV", "avg_clv_pct", "desc"),
-        ("CLV N", "clv_n", "desc"),
-        ("CLV cov", "closing_coverage_pct", "desc"),
-        ("Max DD", "max_drawdown_minor", "asc"),
-        ("Avg edge", "avg_edge_pct", "desc"),
-        ("Avg EV", "avg_ev_pct", "desc"),
-        ("Evidence", "sample_band", "asc"),
+        (
+            ("N", "n", "desc"),
+            ("W-L-V", "record", "desc"),
+            ("Win%", "win_rate_pct", "desc"),
+            ("ROI", "roi_pct", "desc"),
+            ("P/L", "pnl_minor", "desc"),
+            ("Avg odds", "avg_odds", "desc"),
+            ("Avg CLV", "avg_clv_pct", "desc"),
+            ("CLV N", "clv_n", "desc"),
+            ("CLV cov", "closing_coverage_pct", "desc"),
+            ("Max DD", "max_drawdown_minor", "asc"),
+            ("Evidence", "sample_band", "asc"),
+        )
+        if lab_key == "card"
+        else (
+            ("N", "n", "desc"),
+            ("W-L-V", "record", "desc"),
+            ("Win%", "win_rate_pct", "desc"),
+            ("Exp%", "expected_win_rate_pct", "desc"),
+            ("Cal gap", "calibration_gap_pp", "desc"),
+            ("ROI", "roi_pct", "desc"),
+            ("P/L", "pnl_minor", "desc"),
+            ("Avg odds", "avg_odds", "desc"),
+            ("Brier", "brier_score", "asc"),
+            ("Log loss", "log_loss", "asc"),
+            ("Avg CLV", "avg_clv_pct", "desc"),
+            ("CLV N", "clv_n", "desc"),
+            ("CLV cov", "closing_coverage_pct", "desc"),
+            ("Max DD", "max_drawdown_minor", "asc"),
+            ("Avg edge", "avg_edge_pct", "desc"),
+            ("Avg EV", "avg_ev_pct", "desc"),
+            ("Evidence", "sample_band", "asc"),
+        )
     )
     headers += "".join(
         _sortable_th(
@@ -1732,31 +1748,45 @@ def _cohort_table(
         )
         pnl = row.get("pnl_minor")
         max_dd = row.get("max_drawdown_minor")
-        rendered.append(
-            "<tr>"
-            + dimension_cells
-            + f"<td>{row['n']}</td>"
-            + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
-            + f"<td>{_metric(row['win_rate_pct'], suffix='%')}</td>"
-            + f"<td>{_metric(row['expected_win_rate_pct'], suffix='%')}</td>"
-            + f"<td>{_metric(row['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
-            + f"<td>{_metric(row['roi_pct'], suffix='%', signed=True)}</td>"
-            + f"<td>{_money(None if pnl is None else int(pnl), currency)}</td>"
-            + f"<td>{_metric(row['avg_odds'], digits=2)}</td>"
-            + f"<td>{_metric(row['brier_score'], digits=3)}</td>"
-            + f"<td>{_metric(row['log_loss'], digits=3)}</td>"
-            + f"<td>{_metric(row['avg_clv_pct'], suffix='%', signed=True)}</td>"
-            + f"<td>{row['clv_n']}</td>"
-            + f"<td>{_metric(row['closing_coverage_pct'], suffix='%')}</td>"
-            + f"<td>{_money(None if max_dd is None else int(max_dd), currency)}</td>"
-            + f"<td>{_metric(row['avg_edge_pct'], suffix='%', signed=True)}</td>"
-            + f"<td>{_metric(row['avg_ev_pct'], suffix='%', signed=True)}</td>"
-            + f"<td>{escape(str(row['sample_band']))}</td>"
-            + "</tr>"
-        )
+        if lab_key == "card":
+            metric_cells = (
+                f"<td>{row['n']}</td>"
+                + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
+                + f"<td>{_metric(row['win_rate_pct'], suffix='%')}</td>"
+                + f"<td>{_metric(row['roi_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{_money(None if pnl is None else int(pnl), currency)}</td>"
+                + f"<td>{_metric(row['avg_odds'], digits=2)}</td>"
+                + f"<td>{_metric(row['avg_clv_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{row['clv_n']}</td>"
+                + f"<td>{_metric(row['closing_coverage_pct'], suffix='%')}</td>"
+                + f"<td>{_money(None if max_dd is None else int(max_dd), currency)}</td>"
+                + f"<td>{escape(str(row['sample_band']))}</td>"
+            )
+        else:
+            metric_cells = (
+                f"<td>{row['n']}</td>"
+                + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
+                + f"<td>{_metric(row['win_rate_pct'], suffix='%')}</td>"
+                + f"<td>{_metric(row['expected_win_rate_pct'], suffix='%')}</td>"
+                + f"<td>{_metric(row['calibration_gap_pp'], suffix='pp', signed=True)}</td>"
+                + f"<td>{_metric(row['roi_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{_money(None if pnl is None else int(pnl), currency)}</td>"
+                + f"<td>{_metric(row['avg_odds'], digits=2)}</td>"
+                + f"<td>{_metric(row['brier_score'], digits=3)}</td>"
+                + f"<td>{_metric(row['log_loss'], digits=3)}</td>"
+                + f"<td>{_metric(row['avg_clv_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{row['clv_n']}</td>"
+                + f"<td>{_metric(row['closing_coverage_pct'], suffix='%')}</td>"
+                + f"<td>{_money(None if max_dd is None else int(max_dd), currency)}</td>"
+                + f"<td>{_metric(row['avg_edge_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{_metric(row['avg_ev_pct'], suffix='%', signed=True)}</td>"
+                + f"<td>{escape(str(row['sample_band']))}</td>"
+            )
+        rendered.append("<tr>" + dimension_cells + metric_cells + "</tr>")
     if not rendered:
+        metric_count = 11 if lab_key == "card" else 17
         rendered.append(
-            f'<tr><td class="empty" colspan="{len(dimensions) + 17}">No settled picks for this breakdown.</td></tr>'
+            f'<tr><td class="empty" colspan="{len(dimensions) + metric_count}">No settled picks for this breakdown.</td></tr>'
         )
     return (
         f'<section class="panel" id="{anchor}">'
