@@ -1,5 +1,8 @@
 """Shared modal presentation for pick explanations on QuantLab pages."""
 
+import base64
+import hashlib
+
 NOTE_DIALOG_CSS = """
 .pick-note-dialog{width:min(680px,calc(100vw - 24px));max-width:none;max-height:min(85vh,800px);padding:20px;border:1px solid #3b434a;border-radius:14px;background:#111518;color:#edf0f2;box-shadow:0 24px 70px rgba(0,0,0,.6);overflow:auto}
 .pick-note-dialog::backdrop{background:rgba(0,0,0,.72)}
@@ -8,9 +11,7 @@ NOTE_DIALOG_CSS = """
 .pick-note-dialog .note-close:hover{background:#39434b}
 """
 
-NOTE_DIALOG_HTML = """<dialog class="pick-note-dialog" aria-label="Objašnjenje pika"></dialog>
-<script>
-(() => {
+NOTE_DIALOG_SCRIPT = """(() => {
   const dialog = document.querySelector('.pick-note-dialog');
   document.addEventListener('click', (event) => {
     const summary = event.target.closest('.pick-note > summary');
@@ -35,5 +36,12 @@ NOTE_DIALOG_HTML = """<dialog class="pick-note-dialog" aria-label="Objašnjenje 
     if (event.clientX < bounds.left || event.clientX > bounds.right ||
         event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
   });
-})();
-</script>"""
+})();"""
+
+NOTE_DIALOG_HTML = (
+    '<dialog class="pick-note-dialog" aria-label="Objašnjenje pika"></dialog>'
+    f"<script>{NOTE_DIALOG_SCRIPT}</script>"
+)
+NOTE_DIALOG_SCRIPT_HASH = base64.b64encode(
+    hashlib.sha256(NOTE_DIALOG_SCRIPT.encode("utf-8")).digest()
+).decode("ascii")

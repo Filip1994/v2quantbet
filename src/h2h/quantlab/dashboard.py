@@ -25,7 +25,7 @@ from h2h.quantlab.goal_analytics import (
 )
 from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
-from h2h.quantlab.note_dialog import NOTE_DIALOG_CSS, NOTE_DIALOG_HTML
+from h2h.quantlab.note_dialog import NOTE_DIALOG_CSS, NOTE_DIALOG_HTML, NOTE_DIALOG_SCRIPT_HASH
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 from h2h.quantlab.scope import goal_scope
 
@@ -1369,7 +1369,11 @@ class QuantLabDashboardHTTPService:
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        handler.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            f"script-src 'sha256-{NOTE_DIALOG_SCRIPT_HASH}'",
+        )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")
         handler.send_header("Content-Length", str(len(encoded)))
