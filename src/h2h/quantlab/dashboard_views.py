@@ -3094,11 +3094,15 @@ def render_analytics(
         + domain
         + timing
         + cross_sections
-        + _analytics_section(
-            "Calibration",
-            "probability reliability and exact graded constituents",
+        + (
+            ""
+            if lab_key == "card"
+            else _analytics_section(
+                "Calibration",
+                "probability reliability and exact graded constituents",
+            )
+            + _calibration_table(rows, lab_key=lab_key, params=params)
         )
-        + _calibration_table(rows, lab_key=lab_key, params=params)
         + (
             _analytics_section(
                 "GoalLab decision audit",
