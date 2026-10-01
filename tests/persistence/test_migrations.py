@@ -390,3 +390,18 @@ def test_referee_history_scope_capture_migration_is_immutable() -> None:
     assert "referee_fixture_count" in migration
     assert "quantlab_referee_history_scope_captures_immutable" in migration
     assert "quantlab_reject_mutation()" in migration
+
+
+def test_cardlab_raw_stats_migration_allows_v3_and_single_book_policy() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "059_quantlab_cardlab_raw_stats_v3.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CARDLAB_FEATURES_V3" in migration
+    assert "quantlab_context_market_decisions_pick_evidence_v3_check" in migration
+    assert "CARDLAB_RAW_STATS_POLICY_%" in migration
+    assert "bookmaker_id = 11" in migration
+    assert "reference_bookmaker_id IS NULL" in migration
+    assert "expected_value IS NOT NULL" in migration

@@ -252,16 +252,23 @@ def test_cardlab_dashboard_shows_pick_explanation_notes() -> None:
                     "market_key": "TOTAL_CARDS",
                     "selection": "OVER",
                     "line": 4.5,
-                    "model_name": "Card referee Poisson",
-                    "model_version": "CARD_REFEREE_POISSON_V1:test",
-                    "model_probability": 0.68,
-                    "market_probability": 0.54,
-                    "edge": 0.14,
-                    "expected_value": 0.224,
-                    "odds": 1.80,
-                    "decision_reason": "VALUE_THRESHOLD_PASSED",
+                    "model_name": "CardLab raw-stat consensus",
+                    "model_version": "CARDLAB_RAW_STATS_V1",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                    "model_probability": 0.60,
+                    "market_probability": 0.75,
+                    "edge": -0.15,
+                    "expected_value": -0.28,
+                    "odds": 1.20,
+                    "decision_reason": "RAW_STAT_CONSENSUS_PICK",
                     "decision_details": {
-                        "expected_total_cards": 5.8,
+                        "raw_signal": {
+                            "consensus_cards": 5.2,
+                            "line_gap": 0.7,
+                            "anchor_count": 5,
+                            "directional_support": 0.60,
+                            "observed_hit_rate": 0.55,
+                        },
                         "card_context": {
                             "referee": "Ref Example",
                             "referee_card_rate": 5.8,
@@ -272,19 +279,37 @@ def test_cardlab_dashboard_shows_pick_explanation_notes() -> None:
                             "home_table_pressure": 0.8,
                             "away_table_pressure": 0.7,
                             "match_importance": 0.75,
+                            "feature_payload": {
+                                "raw_features": {
+                                    "raw_consensus_cards": 5.2,
+                                    "raw_anchor_count": 5,
+                                    "referee_l5_cards": 5.6,
+                                    "referee_l10_cards": 5.8,
+                                    "referee_l10_fouls": 24.0,
+                                    "referee_l10_cards_per_foul": 0.24,
+                                    "home_l10_cards_for": 2.7,
+                                    "away_l10_cards_for": 2.5,
+                                    "combined_team_cards_for_l10": 5.2,
+                                    "matchup_expected_cards_l10": 5.1,
+                                    "combined_fouls_committed_l10": 27.0,
+                                    "h2h_total_cards_l5": 5.4,
+                                    "league_total_cards": 4.9,
+                                    "match_importance": 0.75,
+                                    "table_pressure": 0.8,
+                                    "market_one_x_two_balance": 0.86,
+                                }
+                            },
                         },
-                        "probability_model": {
-                            "name": "Card referee Poisson",
-                            "distribution": "Poisson",
-                            "lambda_source": "referee_card_rate",
-                            "reference_bookmaker_used": False,
+                        "raw_stat_policy": {
+                            "price_independent_selection": True,
+                            "ev_is_pick_gate": False,
+                            "edge_is_pick_gate": False,
+                            "odds_is_pick_gate": False,
                         },
                         "thresholds": {
-                            "min_edge": 0.03,
-                            "min_expected_value": 0.03,
-                            "min_odds": 1.40,
-                            "max_odds": 4.00,
-                            "min_referee_sample_size": 5,
+                            "minimum_raw_anchors": 3,
+                            "minimum_directional_support": 0.60,
+                            "minimum_abs_line_gap": 0.35,
                         },
                     },
                 }
@@ -297,13 +322,13 @@ def test_cardlab_dashboard_shows_pick_explanation_notes() -> None:
     assert repository.labs == ["CARD"]
     assert "<th>Notes</th>" in html
     assert "📝" in html
-    assert "Zašto ovaj CardLab pik" in html
+    assert "Zašto ovaj CardLab raw-stat pik" in html
     assert "Ref Example" in html
-    assert "5.80 kartona/meč (n=12)" in html
-    assert "edge +14.0%" in html
-    assert "EV +22.4%" in html
-    assert "referee_card_rate je probability input" in html
-    assert "faulovi, derbi, table pressure i match importance" in html
+    assert "raw consensus 5.20 kartona" in html
+    assert "Timovi: home L10 2.70" in html
+    assert "H2H 5.40" in html
+    assert "EV, edge i raspon kvota" in html
+    assert "ne odlučuju da li je nešto PICK" in html
 
 
 class FailingGoalRepository(StubRepository):
@@ -765,7 +790,7 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
     assert "Model versions" not in html
     assert "Policy versions" not in html
     assert "GoalLab Research / Audit" not in html
-    assert ">CardLab<" not in html
+    assert ">CardLab<" in html
 
     assert html.index("Watchlist · ROI discovery") < html.index("Last 7 days")
 
@@ -816,10 +841,113 @@ def test_cornerlab_calibration_watchlist_drilldown_is_exact() -> None:
     assert "Corner Watch Out" not in drilldown
 
 
-def test_cardlab_does_not_get_an_analytics_surface_yet() -> None:
-    html = QuantLabDashboardService(StubRepository()).render_html(
+def test_cardlab_gets_raw_statistics_analytics_surface() -> None:
+    class CardAnalyticsRepository(StubRepository):
+        def list_all_bets(self, lab: str):
+            assert lab == "CARD"
+            row = corner_pick(outcome="WIN", suffix="card-analytics")
+            row.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-analytics",
+                    "provider_bet_id": 80,
+                    "provider_bet_name": "Cards Over/Under",
+                    "market_key": "TOTAL_CARDS",
+                    "selection": "OVER",
+                    "line": 4.5,
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                    "model_name": "CardLab raw-stat consensus",
+                    "model_version": "CARDLAB_RAW_STATS_V1",
+                    "odds": 1.85,
+                    "stake_minor": 10_000,
+                    "pnl_minor": 8_500,
+                    "decision_reason": "RAW_STAT_CONSENSUS_PICK",
+                    "card_feature_payload": {
+                        "raw_features": {
+                            "home_history_n": 12,
+                            "away_history_n": 11,
+                            "raw_anchor_count": 6,
+                            "raw_consensus_cards": 5.4,
+                            "referee_l10_cards": 5.8,
+                            "referee_l10_fouls": 25.0,
+                            "combined_team_cards_for_l10": 5.2,
+                            "combined_fouls_committed_l10": 28.0,
+                            "matchup_expected_cards_l10": 5.3,
+                            "matchup_expected_fouls_l10": 27.5,
+                            "home_l10_cards_per_foul": 0.21,
+                            "away_l10_cards_per_foul": 0.20,
+                            "away_l10_fouls_suffered": 13.0,
+                            "home_l10_fouls_suffered": 12.5,
+                            "aggression_foul_draw_interaction": 2.6,
+                            "h2h_total_cards_l5": 5.1,
+                            "h2h_n": 3,
+                            "league_total_cards": 4.7,
+                            "referee_vs_league_cards_delta": 1.1,
+                            "referee_vs_teams_cards_delta": 0.6,
+                            "home_cards_for_league_percentile": 0.75,
+                            "away_cards_for_league_percentile": 0.70,
+                            "home_fouls_league_percentile": 0.65,
+                            "away_fouls_league_percentile": 0.72,
+                            "stage_of_season": 0.80,
+                            "match_importance": 0.82,
+                            "table_pressure": 0.78,
+                            "must_win_proxy": 0.70,
+                            "rank_gap": 2,
+                            "points_gap": 3,
+                            "derby_rivalry_indicator": 1,
+                            "cup_indicator": 0,
+                            "late_season_indicator": 1,
+                            "similar_strength_indicator": 1,
+                            "market_favorite_fair_probability": 0.52,
+                            "market_one_x_two_balance": 0.92,
+                            "market_goals_over_2_5_fair_probability": 0.58,
+                            "market_btts_yes_fair_probability": 0.56,
+                            "market_favorite_handicap_line": -0.5,
+                            "expected_possession_imbalance": 6.0,
+                            "home_l5_cards_for": 3.0,
+                            "home_l10_cards_for": 2.7,
+                            "away_l5_cards_for": 2.8,
+                            "away_l10_cards_for": 2.5,
+                            "home_venue_l5_cards_for": 3.1,
+                            "away_venue_l5_cards_for": 2.9,
+                            "home_l5_fouls_committed": 14.0,
+                            "home_l10_fouls_committed": 13.0,
+                            "away_l5_fouls_committed": 15.0,
+                            "away_l10_fouls_committed": 14.0,
+                        }
+                    },
+                    "decision_details": {
+                        "raw_signal": {
+                            "consensus_cards": 5.4,
+                            "line_gap": 0.9,
+                            "anchor_count": 6,
+                            "directional_support": 0.83,
+                            "observed_hit_rate": 0.72,
+                        }
+                    },
+                }
+            )
+            return (row,)
+
+    html = QuantLabDashboardService(CardAnalyticsRepository()).render_html(
         "view=analytics&lab=card"
     )
 
-    assert "GoalLab Analytics" in html
-    assert ">CardLab<" not in html
+    assert "CardLab Analytics" in html
+    assert "Watchlist · ROI discovery" in html
+    assert "RAW consensus × line × support" in html
+    assert "Referee × team discipline × price" in html
+    assert "Referee × fouls × matchup" in html
+    assert "Discipline × foul-drawing interaction" in html
+    assert "Importance × derby/cup × competitiveness" in html
+    assert "CardLab raw-stat bucket universe" in html
+    assert "CardLab cross-buckets" in html
+    assert "Referee cards L10" in html
+    assert "Home cards-for L10" in html
+    assert "Matchup expected cards" in html
+    assert "1X2 balance" in html
+    assert "Feature missingness" in html
+    assert "Raw policy regime" in html
+    assert "Expected value" not in html
+    assert "Avg EV" not in html
+    assert "Calibration" not in html

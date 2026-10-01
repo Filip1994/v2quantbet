@@ -828,7 +828,8 @@ class QuantLabRuntime:
             fixture_id = str(fixture["fixture_id"])
             if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
                 continue
-            if "CORNER" not in self._repository.market_labs_for_fixture(fixture_id):
+            market_labs = self._repository.market_labs_for_fixture(fixture_id)
+            if not ({"CORNER", "CARD"} & set(market_labs)):
                 continue
             for key in ("home_team_id", "away_team_id"):
                 team_id = int(fixture[key])
@@ -934,7 +935,7 @@ class QuantLabRuntime:
                     raise
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.warning(
-                        "QuantLab targeted CornerLab statistics failed fixture=%s "
+                        "QuantLab targeted Card/Corner statistics failed fixture=%s "
                         "team_id=%s error_class=%s error=%s",
                         fixture_id,
                         team_id,
@@ -1306,7 +1307,7 @@ class QuantLabRuntime:
                     raise ValueError("provider_fixture_id must be positive")
                 allowed_labs = {"GOAL"} if goal_allowed else set()
                 if context_allowed:
-                    allowed_labs.update({"CORNER", "CARD", "UNCLASSIFIED"})
+                    allowed_labs.update({"CORNER", "CARD", "GOAL", "UNCLASSIFIED"})
                 if self._repository.market_capture_due(
                     fixture_id,
                     now=now,
@@ -1365,11 +1366,35 @@ class QuantLabRuntime:
                     referee=None if referee is None else str(referee),
                     referee_available_at=context.get("available_at"),
                     referee_history=history,
+                    team_history=self._repository.card_team_history(
+                        home_team_id,
+                        away_team_id,
+                        before=now,
+                    ),
+                    league_history=self._repository.card_league_history(
+                        str(fixture["competition_name"]),
+                        before=now,
+                        league_id=(
+                            int(fixture["league_id"])
+                            if fixture.get("league_id") is not None
+                            else None
+                        ),
+                        season=(
+                            int(fixture["season"])
+                            if fixture.get("season") is not None
+                            else None
+                        ),
+                    ),
+                    market_context=self._repository.card_market_context(
+                        fixture_id,
+                        decision_at=now,
+                    ),
                     home_team=str(fixture["home_team"]),
                     away_team=str(fixture["away_team"]),
                     home_team_id=home_team_id,
                     away_team_id=away_team_id,
                     competition_name=str(fixture["competition_name"]),
+                    competition_type=str(fixture.get("competition_type") or ""),
                     standings_payload=None if standings is None else standings["raw_payload"],
                     standings_available_at=(
                         None if standings is None else standings["available_at"]
