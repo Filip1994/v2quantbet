@@ -1374,6 +1374,16 @@ class QuantLabRuntime:
                     league_history=self._repository.card_league_history(
                         str(fixture["competition_name"]),
                         before=now,
+                        league_id=(
+                            int(fixture["league_id"])
+                            if fixture.get("league_id") is not None
+                            else None
+                        ),
+                        season=(
+                            int(fixture["season"])
+                            if fixture.get("season") is not None
+                            else None
+                        ),
                     ),
                     market_context=self._repository.card_market_context(
                         fixture_id,
