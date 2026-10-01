@@ -583,7 +583,13 @@ def _raw_card_features(
     competition_name: str,
     competition_type: str,
     decision_at: datetime,
-) -> tuple[dict[str, Any], dict[str, float], dict[str, list[float]]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, float],
+    dict[str, float],
+    dict[str, list[float]],
+    dict[str, float],
+]:
     team_rows = _valid_history_rows(team_history, decision_at=decision_at)
     league_rows = _valid_history_rows(league_history, decision_at=decision_at)
     home_samples = _team_samples(team_rows, team_id=home_team_id)
