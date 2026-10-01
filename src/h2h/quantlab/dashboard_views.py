@@ -1223,6 +1223,72 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_referee_over35_bucket": pct_scalar("referee_over_3_5_rate_l10"),
                 "card_referee_over45_bucket": pct_scalar("referee_over_4_5_rate_l10"),
                 "card_referee_over55_bucket": pct_scalar("referee_over_5_5_rate_l10"),
+                "card_home_cards_against_l5_bucket": scalar(
+                    "home_l5_cards_against", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_away_cards_against_l5_bucket": scalar(
+                    "away_l5_cards_against", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
+                ),
+                "card_home_fouls_l5_bucket": scalar(
+                    "home_l5_fouls_committed", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_away_fouls_l5_bucket": scalar(
+                    "away_l5_fouls_committed", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_home_fouls_suffered_l5_bucket": scalar(
+                    "home_l5_fouls_suffered", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_away_fouls_suffered_l5_bucket": scalar(
+                    "away_l5_fouls_suffered", (8, 10, 12, 14, 16, 18, 20), digits=0
+                ),
+                "card_home_cards_per_foul_l5_bucket": scalar(
+                    "home_l5_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
+                ),
+                "card_away_cards_per_foul_l5_bucket": scalar(
+                    "away_l5_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
+                ),
+                "card_home_match_cards_l5_bucket": scalar(
+                    "home_l5_match_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_home_match_cards_l10_bucket": scalar(
+                    "home_l10_match_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_away_match_cards_l5_bucket": scalar(
+                    "away_l5_match_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_away_match_cards_l10_bucket": scalar(
+                    "away_l10_match_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_home_match_fouls_l5_bucket": scalar(
+                    "home_l5_match_total_fouls", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_home_match_fouls_l10_bucket": scalar(
+                    "home_l10_match_total_fouls", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_away_match_fouls_l5_bucket": scalar(
+                    "away_l5_match_total_fouls", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_away_match_fouls_l10_bucket": scalar(
+                    "away_l10_match_total_fouls", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_home_possession_l5_bucket": scalar(
+                    "home_l5_possession", (35, 40, 45, 50, 55, 60, 65), suffix="%", digits=0
+                ),
+                "card_home_possession_l10_bucket": scalar(
+                    "home_l10_possession", (35, 40, 45, 50, 55, 60, 65), suffix="%", digits=0
+                ),
+                "card_away_possession_l5_bucket": scalar(
+                    "away_l5_possession", (35, 40, 45, 50, 55, 60, 65), suffix="%", digits=0
+                ),
+                "card_away_possession_l10_bucket": scalar(
+                    "away_l10_possession", (35, 40, 45, 50, 55, 60, 65), suffix="%", digits=0
+                ),
+                "card_home_match_over35_bucket": pct_scalar("home_match_over_3_5_rate_l10"),
+                "card_home_match_over45_bucket": pct_scalar("home_match_over_4_5_rate_l10"),
+                "card_home_match_over55_bucket": pct_scalar("home_match_over_5_5_rate_l10"),
+                "card_away_match_over35_bucket": pct_scalar("away_match_over_3_5_rate_l10"),
+                "card_away_match_over45_bucket": pct_scalar("away_match_over_4_5_rate_l10"),
+                "card_away_match_over55_bucket": pct_scalar("away_match_over_5_5_rate_l10"),
                 "card_home_cards_l5_bucket": scalar(
                     "home_l5_cards_for", (1, 1.5, 2, 2.5, 3, 3.5, 4), digits=1
                 ),
@@ -1277,8 +1343,14 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_combined_cards_l10_bucket": scalar(
                     "combined_team_cards_for_l10", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
                 ),
+                "card_combined_fouls_l5_bucket": scalar(
+                    "combined_fouls_committed_l5", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
                 "card_combined_fouls_l10_bucket": scalar(
                     "combined_fouls_committed_l10", (18, 22, 26, 30, 34, 38, 42), digits=0
+                ),
+                "card_referee_x_team_cards_bucket": scalar(
+                    "referee_x_team_cards", (15, 20, 25, 30, 35, 40), digits=0
                 ),
                 "card_matchup_cards_bucket": scalar(
                     "matchup_expected_cards_l10", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
@@ -1326,6 +1398,33 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_must_win_bucket": scalar(
                     "must_win_proxy", (0.20, 0.40, 0.60, 0.75, 0.90), digits=2
                 ),
+                "card_title_pressure_bucket": scalar(
+                    "title_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_continental_pressure_bucket": scalar(
+                    "continental_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_promotion_pressure_bucket": scalar(
+                    "promotion_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_playoff_pressure_bucket": scalar(
+                    "playoff_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_relegation_pressure_bucket": scalar(
+                    "relegation_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_home_title_pressure_bucket": scalar(
+                    "home_title_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_away_title_pressure_bucket": scalar(
+                    "away_title_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_home_relegation_pressure_bucket": scalar(
+                    "home_relegation_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
+                "card_away_relegation_pressure_bucket": scalar(
+                    "away_relegation_pressure", (0.25, 0.50, 0.65, 0.80, 0.90), digits=2
+                ),
                 "card_rank_gap_bucket": scalar("rank_gap", (2, 4, 6, 10, 15), digits=0),
                 "card_points_gap_bucket": scalar("points_gap", (3, 6, 10, 15, 25), digits=0),
                 "card_derby_bucket": (
@@ -1339,6 +1438,26 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_late_season_bucket": (
                     "LATE" if _number(raw.get("late_season_indicator")) == 1 else "EARLY_MID"
                     if _number(raw.get("late_season_indicator")) == 0 else "—"
+                ),
+                "card_last_rounds_bucket": (
+                    "LAST_ROUNDS" if _number(raw.get("last_rounds_indicator")) == 1 else "NOT_LAST_ROUNDS"
+                    if _number(raw.get("last_rounds_indicator")) == 0 else "—"
+                ),
+                "card_close_table_position_bucket": (
+                    "CLOSE_TABLE" if _number(raw.get("close_table_position_indicator")) == 1 else "NOT_CLOSE"
+                    if _number(raw.get("close_table_position_indicator")) == 0 else "—"
+                ),
+                "card_relegation_battle_bucket": (
+                    "RELEGATION_BATTLE" if _number(raw.get("relegation_battle_indicator")) == 1 else "NO"
+                    if _number(raw.get("relegation_battle_indicator")) == 0 else "—"
+                ),
+                "card_title_race_bucket": (
+                    "TITLE_RACE" if _number(raw.get("title_race_indicator")) == 1 else "NO"
+                    if _number(raw.get("title_race_indicator")) == 0 else "—"
+                ),
+                "card_promotion_race_bucket": (
+                    "PROMOTION_RACE" if _number(raw.get("promotion_race_indicator")) == 1 else "NO"
+                    if _number(raw.get("promotion_race_indicator")) == 0 else "—"
                 ),
                 "card_similar_strength_bucket": (
                     "SIMILAR" if _number(raw.get("similar_strength_indicator")) == 1 else "UNEQUAL"
