@@ -237,7 +237,7 @@ def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
             f"istorijski raw hit {_pct(hit_rate)}."
         )
         referee_text = (
-            f"Sudija {str(context.get('referee') or '—')}: "
+            f"Sudija {context.get('referee') or '—'!s}: "
             f"L5 {rate(raw.get('referee_l5_cards'))}, "
             f"L10 {rate(raw.get('referee_l10_cards'))} kartona; "
             f"L10 {rate(raw.get('referee_l10_fouls'))} faulova; "
@@ -262,7 +262,7 @@ def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
             f"(min {int(_number(thresholds.get('minimum_raw_anchors')) or 0)}), "
             f"support min {_pct(thresholds.get('minimum_directional_support'))}, "
             f"|raw−line| min {rate(thresholds.get('minimum_abs_line_gap'))}. "
-            f"Odluka: {str(row.get('decision_reason') or 'RAW_STAT_CONSENSUS_PICK')}."
+            f"Odluka: {row.get('decision_reason') or 'RAW_STAT_CONSENSUS_PICK'!s}."
         )
         rendered[pick_id] = (
             '<details class="pick-note"><summary title="Zašto je CardLab izabrao ovaj pik">📝</summary>'
