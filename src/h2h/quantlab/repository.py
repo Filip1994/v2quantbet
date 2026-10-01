@@ -1779,11 +1779,15 @@ class PostgreSQLQuantLabRepository:
                 "WHERE latest.provider_status IN ('FT', 'AET', 'PEN') "
                 "AND NOT EXISTS ("
                 " SELECT 1 FROM quantlab_match_statistics_observations s "
-                " WHERE s.fixture_id = c.fixture_id AND s.available_at <= %s"
+                " WHERE s.fixture_id = c.fixture_id AND s.available_at <= %s "
+                " AND s.home_yellow_cards IS NOT NULL "
+                " AND s.away_yellow_cards IS NOT NULL "
+                " AND s.home_red_cards IS NOT NULL "
+                " AND s.away_red_cards IS NOT NULL"
                 ") "
                 "AND (capture.captured_at IS NULL "
                 " OR capture.captured_at <= %s - (%s * interval '1 second')) "
-                "ORDER BY c.kickoff_at DESC LIMIT %s",
+                "ORDER BY (capture.captured_at IS NOT NULL), c.kickoff_at DESC LIMIT %s",
                 (
                     referee,
                     decision_at,
