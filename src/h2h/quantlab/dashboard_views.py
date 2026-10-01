@@ -2202,21 +2202,34 @@ def render_analytics(
     last_30 = goal_pick_metrics(_window_rows(rows, days=30, now=now))
 
     top_cards = (
-        ("Settled", str(metrics["n"])),
-        ("W-L-V", f'{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}'),
-        ("Win rate", _metric(metrics["win_rate_pct"], suffix="%")),
-        ("Expected", _metric(metrics["expected_win_rate_pct"], suffix="%")),
-        ("Calibration", _metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)),
-        ("ROI", _metric(metrics["roi_pct"], suffix="%", signed=True)),
-        ("P/L", _money(int(metrics["pnl_minor"]), currency)),
-        ("Avg odds", _metric(metrics["avg_odds"], digits=2)),
-        ("Brier", _metric(metrics["brier_score"], digits=3)),
-        ("Log loss", _metric(metrics["log_loss"], digits=3)),
-        ("Avg CLV", _metric(metrics["avg_clv_pct"], suffix="%", signed=True)),
-        ("CLV coverage", _metric(metrics["closing_coverage_pct"], suffix="%")),
-        ("Max DD", _money(int(metrics["max_drawdown_minor"]), currency)),
-        ("Avg edge", _metric(metrics["avg_edge_pct"], suffix="%", signed=True)),
-        ("Avg EV", _metric(metrics["avg_ev_pct"], suffix="%", signed=True)),
+        (
+            ("Settled", str(metrics["n"])),
+            ("Unique matches", str(len({str(row.get("fixture_id") or "") for row in rows if _result(row) in {"WIN", "LOSS", "VOID"}}))),
+            ("W-L-V", f'{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}'),
+            ("Win rate", _metric(metrics["win_rate_pct"], suffix="%")),
+            ("ROI", _metric(metrics["roi_pct"], suffix="%", signed=True)),
+            ("P/L", _money(int(metrics["pnl_minor"]), currency)),
+            ("Avg odds", _metric(metrics["avg_odds"], digits=2)),
+            ("Max DD", _money(int(metrics["max_drawdown_minor"]), currency)),
+        )
+        if lab_key == "card"
+        else (
+            ("Settled", str(metrics["n"])),
+            ("W-L-V", f'{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}'),
+            ("Win rate", _metric(metrics["win_rate_pct"], suffix="%")),
+            ("Expected", _metric(metrics["expected_win_rate_pct"], suffix="%")),
+            ("Calibration", _metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)),
+            ("ROI", _metric(metrics["roi_pct"], suffix="%", signed=True)),
+            ("P/L", _money(int(metrics["pnl_minor"]), currency)),
+            ("Avg odds", _metric(metrics["avg_odds"], digits=2)),
+            ("Brier", _metric(metrics["brier_score"], digits=3)),
+            ("Log loss", _metric(metrics["log_loss"], digits=3)),
+            ("Avg CLV", _metric(metrics["avg_clv_pct"], suffix="%", signed=True)),
+            ("CLV coverage", _metric(metrics["closing_coverage_pct"], suffix="%")),
+            ("Max DD", _money(int(metrics["max_drawdown_minor"]), currency)),
+            ("Avg edge", _metric(metrics["avg_edge_pct"], suffix="%", signed=True)),
+            ("Avg EV", _metric(metrics["avg_ev_pct"], suffix="%", signed=True)),
+        )
     )
     cards_html = "".join(
         f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
@@ -2227,9 +2240,12 @@ def render_analytics(
         "GoalLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
         "version regimes, calibration and exact constituent-pick drilldowns."
         if lab_key == "goal"
-        else
-        "CornerLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
+        else "CornerLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
         "version regimes, calibration and exact constituent-pick drilldowns."
+        if lab_key == "corner"
+        else "CardLab is raw-statistics first: PICK decisions do not require EV, edge or an odds band. "
+        "Analytics exposes referee, team discipline, foul, matchup, league, H2H, importance, game-state, "
+        "trend and reliability buckets with exact constituent-pick drilldowns."
     )
 
     def table(
