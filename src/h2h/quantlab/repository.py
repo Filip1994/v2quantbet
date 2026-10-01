@@ -3766,10 +3766,29 @@ class PostgreSQLQuantLabRepository:
         if handicap_rows:
             latest_capture = handicap_rows[0]["captured_at"]
             current = [row for row in handicap_rows if row["captured_at"] == latest_capture]
-            if current:
-                favorite = min(current, key=lambda row: float(row["odds"]))
+            home_p = result.get("home_win_fair_probability")
+            away_p = result.get("away_win_fair_probability")
+            favorite_side = (
+                "home"
+                if home_p is not None and away_p is not None and float(home_p) >= float(away_p)
+                else "away"
+                if home_p is not None and away_p is not None
+                else None
+            )
+            favorite_rows = [
+                row
+                for row in current
+                if favorite_side is not None
+                and str(row.get("raw_selection") or "").strip().casefold().startswith(favorite_side)
+            ]
+            candidates = favorite_rows or current
+            if candidates:
+                # Main handicap prices are normally closest to an even-money quote.
+                # This avoids mistaking a very short extreme handicap for the market's
+                # central strength estimate.
+                central = min(candidates, key=lambda row: abs(float(row["odds"]) - 1.90))
                 try:
-                    result["favorite_handicap_line"] = float(favorite["parsed_line"])
+                    result["favorite_handicap_line"] = float(central["parsed_line"])
                 except (TypeError, ValueError):
                     pass
         return result
