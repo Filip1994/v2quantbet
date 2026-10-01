@@ -67,6 +67,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
+            # CardLab raw-stat V3 is intentionally the current schema tip.
             assert applied[-1] == "059_quantlab_cardlab_raw_stats_v3.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
