@@ -202,6 +202,11 @@ def _goal_notes(
 
 def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
     rendered: dict[str, str] = {}
+
+    def rate(value: Any) -> str:
+        number = _number(value)
+        return "—" if number is None else f"{number:.2f}"
+
     for row in rows:
         pick_id = _pick_id(row)
         if not pick_id:
@@ -241,16 +246,16 @@ def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
             f"edge {_pct(row.get('edge'), signed=True)}, EV {_pct(row.get('expected_value'), signed=True)}."
         )
         model_text = (
-            f"{model_name} koristi {distribution} raspodelu; očekivani total je {_rate(expected)}. "
+            f"{model_name} koristi {distribution} raspodelu; očekivani total je {rate(expected)}. "
             f"λ izvor: {lambda_source}."
         )
         referee_text = (
-            f"Sudija {referee}: {_rate(referee_cards)} kartona/meč (n={referee_n}), "
-            f"{_rate(referee_fouls)} faulova/meč (n={referee_foul_n})."
+            f"Sudija {referee}: {rate(referee_cards)} kartona/meč (n={referee_n}), "
+            f"{rate(referee_fouls)} faulova/meč (n={referee_foul_n})."
         )
         context_text = (
-            f"Kontekst: derbi {rivalry_text}; pritisak domaćin {_rate(home_pressure)}, "
-            f"gost {_rate(away_pressure)}; važnost {_rate(importance)}."
+            f"Kontekst: derbi {rivalry_text}; pritisak domaćin {rate(home_pressure)}, "
+            f"gost {rate(away_pressure)}; važnost {rate(importance)}."
         )
 
         threshold_bits: list[str] = []
