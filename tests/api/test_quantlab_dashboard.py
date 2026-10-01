@@ -666,6 +666,9 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
 
     assert "CornerLab Analytics" in html
     assert "Watchlist · ROI discovery" in html
+    assert "Calibration watch · line × price" in html
+    assert "Watch regime" in html
+    assert "OVER model P 60–70%" in html
     assert "Model-line gap × price" in html
     assert "Pressure trend × matchup" in html
     assert "Model vs market × price" in html
@@ -696,6 +699,51 @@ def test_cornerlab_has_dedicated_analytics_tab() -> None:
 
     assert html.index("Watchlist · ROI discovery") < html.index("Last 7 days")
 
+
+
+def test_cornerlab_calibration_watchlist_drilldown_is_exact() -> None:
+    class CornerWatchRepository(StubRepository):
+        def list_all_bets(self, lab: str):
+            matching = corner_pick(outcome="WIN", suffix="u")
+            matching["fixture_id"] = "api-football:801"
+            matching["home_team"] = "Corner Watch In"
+            matching["selection"] = "UNDER"
+            matching["line"] = 8.5
+            matching["model_probability"] = 0.56
+            matching["market_probability"] = 0.52
+            matching["odds"] = 1.95
+
+            other = corner_pick(outcome="LOSS", suffix="o")
+            other["fixture_id"] = "api-football:802"
+            other["home_team"] = "Corner Watch Out"
+            other["selection"] = "OVER"
+            other["line"] = 11.5
+            other["model_probability"] = 0.55
+            other["market_probability"] = 0.50
+            other["odds"] = 1.95
+            return (matching, other)
+
+    dashboard = QuantLabDashboardService(CornerWatchRepository())
+    analytics = dashboard.render_html("view=analytics&lab=corner")
+
+    assert "UNDER mid-lines 7.5–10.5" in analytics
+    assert "bucket_corner_calibration_watch_bucket=" in analytics
+    assert "bucket_line_bucket=8.5" in analytics
+
+    drilldown = dashboard.render_html(
+        "view=analytics&lab=corner"
+        "&bucket=1"
+        "&bucket_corner_calibration_watch_bucket=UNDER+mid-lines+7.5%E2%80%9310.5"
+        "&bucket_selection=UNDER"
+        "&bucket_line_bucket=8.5"
+        "&bucket_model_probability_bucket=55%E2%80%9360%25"
+        "&bucket_market_probability_bucket=50%E2%80%9355%25"
+        "&bucket_entry_odds_bucket=1.81%E2%80%932.00"
+    )
+
+    assert "1 exact settled picks" in drilldown
+    assert "Corner Watch In" in drilldown
+    assert "Corner Watch Out" not in drilldown
 
 
 def test_cardlab_does_not_get_an_analytics_surface_yet() -> None:
