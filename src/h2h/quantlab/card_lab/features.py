@@ -1,9 +1,10 @@
-"""Timestamp-safe CardLab v1 context feature calculations."""
+"""Timestamp-safe CardLab raw-statistics feature calculations."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from statistics import median
 from typing import Any
 
 from h2h.quantlab.card_lab.rivalry import (
@@ -13,7 +14,7 @@ from h2h.quantlab.card_lab.rivalry import (
 from h2h.quantlab.card_lab.referee import referee_key
 
 
-CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V2"
+CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V3"
 CARD_COUNT_RULE_VERSION = "CARD_COUNT_RULE_V2"
 TABLE_PRESSURE_VERSION = "TABLE_PRESSURE_V1"
 MATCH_IMPORTANCE_VERSION = "MATCH_IMPORTANCE_V1"
@@ -370,6 +371,472 @@ def match_importance(
     )
 
 
+
+def _mean(values: list[float]) -> float | None:
+    return None if not values else sum(values) / len(values)
+
+
+def _recent_mean(samples: list[dict[str, float | str | None]], key: str, count: int) -> float | None:
+    values = [
+        float(value)
+        for sample in samples[-count:]
+        if (value := sample.get(key)) is not None
+    ]
+    return _mean(values)
+
+
+def _recent_rate(
+    samples: list[dict[str, float | str | None]],
+    key: str,
+    count: int,
+    predicate: Any,
+) -> float | None:
+    values = [
+        float(value)
+        for sample in samples[-count:]
+        if (value := sample.get(key)) is not None
+    ]
+    return None if not values else sum(bool(predicate(value)) for value in values) / len(values)
+
+
+def _cards_for_side(row: dict[str, Any], side: str) -> float | None:
+    yellow = _number(row.get(f"{side}_yellow_cards"))
+    red = _number(row.get(f"{side}_red_cards"))
+    second = _number(row.get(f"{side}_second_yellow_cards"))
+    if yellow is None or red is None:
+        return None
+    return yellow + red + (0.0 if second is None else second)
+
+
+def _row_total_cards(row: dict[str, Any]) -> float | None:
+    home = _cards_for_side(row, "home")
+    away = _cards_for_side(row, "away")
+    return None if home is None or away is None else home + away
+
+
+def _valid_history_rows(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    decision_at: datetime,
+) -> list[dict[str, Any]]:
+    decision = _utc(decision_at, "decision_at")
+    valid: list[dict[str, Any]] = []
+    for row in rows:
+        kickoff = row.get("kickoff_at")
+        available = row.get("available_at")
+        if not isinstance(kickoff, datetime) or not isinstance(available, datetime):
+            continue
+        if _utc(kickoff, "history.kickoff_at") >= decision:
+            continue
+        if _utc(available, "history.available_at") > decision:
+            continue
+        valid.append(row)
+    valid.sort(key=lambda row: _utc(row["kickoff_at"], "history.kickoff_at"))
+    return valid
+
+
+def _team_samples(
+    rows: list[dict[str, Any]],
+    *,
+    team_id: int,
+) -> list[dict[str, float | str | None]]:
+    samples: list[dict[str, float | str | None]] = []
+    for row in rows:
+        home_id = row.get("home_team_id")
+        away_id = row.get("away_team_id")
+        if team_id == home_id:
+            side, opponent = "home", "away"
+            venue = "HOME"
+        elif team_id == away_id:
+            side, opponent = "away", "home"
+            venue = "AWAY"
+        else:
+            continue
+        cards_for = _cards_for_side(row, side)
+        cards_against = _cards_for_side(row, opponent)
+        fouls_for = _number(row.get(f"{side}_fouls"))
+        fouls_against = _number(row.get(f"{opponent}_fouls"))
+        possession = _number(row.get(f"{side}_ball_possession"))
+        total_cards = (
+            None if cards_for is None or cards_against is None
+            else cards_for + cards_against
+        )
+        total_fouls = (
+            None if fouls_for is None or fouls_against is None
+            else fouls_for + fouls_against
+        )
+        samples.append(
+            {
+                "venue": venue,
+                "cards_for": cards_for,
+                "cards_against": cards_against,
+                "fouls_committed": fouls_for,
+                "fouls_suffered": fouls_against,
+                "cards_per_foul": (
+                    None
+                    if cards_for is None or fouls_for is None or fouls_for <= 0
+                    else cards_for / fouls_for
+                ),
+                "match_total_cards": total_cards,
+                "match_total_fouls": total_fouls,
+                "possession": possession,
+            }
+        )
+    return samples
+
+
+def _venue_samples(
+    samples: list[dict[str, float | str | None]],
+    venue: str,
+) -> list[dict[str, float | str | None]]:
+    return [sample for sample in samples if sample.get("venue") == venue]
+
+
+def _team_raw_features(
+    samples: list[dict[str, float | str | None]],
+    *,
+    prefix: str,
+    venue: str,
+) -> dict[str, float | int | None]:
+    venue_rows = _venue_samples(samples, venue)
+    result: dict[str, float | int | None] = {
+        f"{prefix}_history_n": len(samples),
+    }
+    for window in (5, 10):
+        for metric in (
+            "cards_for",
+            "cards_against",
+            "fouls_committed",
+            "fouls_suffered",
+            "cards_per_foul",
+            "match_total_cards",
+            "match_total_fouls",
+            "possession",
+        ):
+            result[f"{prefix}_l{window}_{metric}"] = _recent_mean(samples, metric, window)
+    for metric in (
+        "cards_for",
+        "cards_against",
+        "fouls_committed",
+        "fouls_suffered",
+        "match_total_cards",
+        "possession",
+    ):
+        result[f"{prefix}_venue_l5_{metric}"] = _recent_mean(venue_rows, metric, 5)
+
+    for threshold in (2.0, 3.0, 4.0):
+        key = str(int(threshold))
+        result[f"{prefix}_cards_{key}plus_rate_l10"] = _recent_rate(
+            samples, "cards_for", 10, lambda value, t=threshold: value >= t
+        )
+    for line in (3.5, 4.5, 5.5):
+        key = str(line).replace(".", "_")
+        result[f"{prefix}_match_over_{key}_rate_l10"] = _recent_rate(
+            samples, "match_total_cards", 10, lambda value, t=line: value > t
+        )
+
+    l5_cards = result.get(f"{prefix}_l5_cards_for")
+    l10_cards = result.get(f"{prefix}_l10_cards_for")
+    result[f"{prefix}_cards_trend_l5_minus_l10"] = (
+        None if l5_cards is None or l10_cards is None else float(l5_cards) - float(l10_cards)
+    )
+    l5_fouls = result.get(f"{prefix}_l5_fouls_committed")
+    l10_fouls = result.get(f"{prefix}_l10_fouls_committed")
+    result[f"{prefix}_fouls_trend_l5_minus_l10"] = (
+        None if l5_fouls is None or l10_fouls is None else float(l5_fouls) - float(l10_fouls)
+    )
+    return result
+
+
+def _percentile(value: float | None, population: list[float]) -> float | None:
+    if value is None or not population:
+        return None
+    return sum(item <= value for item in population) / len(population)
+
+
+def _standings_fact(datum: FeatureDatum, key: str) -> float | None:
+    value = datum.components.get(key)
+    return _number(value)
+
+
+def _raw_card_features(
+    *,
+    referee_history: tuple[dict[str, Any], ...],
+    team_history: tuple[dict[str, Any], ...],
+    league_history: tuple[dict[str, Any], ...],
+    market_context: dict[str, Any],
+    home_team_id: int,
+    away_team_id: int,
+    home_pressure: FeatureDatum,
+    away_pressure: FeatureDatum,
+    stage: float | None,
+    derby: FeatureDatum,
+    importance: FeatureDatum,
+    competition_name: str,
+    competition_type: str,
+    decision_at: datetime,
+) -> tuple[dict[str, Any], dict[str, float], dict[str, list[float]]]:
+    team_rows = _valid_history_rows(team_history, decision_at=decision_at)
+    league_rows = _valid_history_rows(league_history, decision_at=decision_at)
+    home_samples = _team_samples(team_rows, team_id=home_team_id)
+    away_samples = _team_samples(team_rows, team_id=away_team_id)
+
+    raw: dict[str, Any] = {}
+    raw.update(_team_raw_features(home_samples, prefix="home", venue="HOME"))
+    raw.update(_team_raw_features(away_samples, prefix="away", venue="AWAY"))
+
+    referee_rows: list[dict[str, Any]] = []
+    decision = _utc(decision_at, "decision_at")
+    for row in referee_history:
+        kickoff = row.get("kickoff_at")
+        available = row.get("available_at")
+        if not isinstance(kickoff, datetime) or not isinstance(available, datetime):
+            continue
+        if _utc(kickoff, "referee.kickoff_at") >= decision or _utc(available, "referee.available_at") > decision:
+            continue
+        referee_rows.append(row)
+    referee_rows.sort(key=lambda row: _utc(row["kickoff_at"], "referee.kickoff_at"))
+
+    referee_samples: list[dict[str, float | str | None]] = []
+    for row in referee_rows:
+        yellow = _number(row.get("yellow_cards"))
+        red = _number(row.get("red_cards"))
+        second = _number(row.get("second_yellow_cards"))
+        total = _number(row.get("card_total"))
+        if total is None and yellow is not None and red is not None:
+            total = yellow + red + (0.0 if second is None else second)
+        home_cards = None
+        away_cards = None
+        hy = _number(row.get("home_yellow_cards"))
+        ay = _number(row.get("away_yellow_cards"))
+        hr = _number(row.get("home_red_cards"))
+        ar = _number(row.get("away_red_cards"))
+        hs = _number(row.get("home_second_yellow_cards"))
+        ass = _number(row.get("away_second_yellow_cards"))
+        if hy is not None and hr is not None:
+            home_cards = hy + hr + (0.0 if hs is None else hs)
+        if ay is not None and ar is not None:
+            away_cards = ay + ar + (0.0 if ass is None else ass)
+        fouls = _number(row.get("fouls"))
+        referee_samples.append(
+            {
+                "cards": total,
+                "yellows": yellow,
+                "reds": red,
+                "fouls": fouls,
+                "cards_per_foul": (
+                    None if total is None or fouls is None or fouls <= 0 else total / fouls
+                ),
+                "home_cards": home_cards,
+                "away_cards": away_cards,
+            }
+        )
+    raw["referee_history_n"] = len(referee_samples)
+    for window in (5, 10):
+        for metric in ("cards", "yellows", "reds", "fouls", "cards_per_foul", "home_cards", "away_cards"):
+            raw[f"referee_l{window}_{metric}"] = _recent_mean(referee_samples, metric, window)
+    home_ref = raw.get("referee_l10_home_cards")
+    away_ref = raw.get("referee_l10_away_cards")
+    raw["referee_home_away_bias_l10"] = (
+        None if home_ref is None or away_ref is None else float(home_ref) - float(away_ref)
+    )
+    for line in (3.5, 4.5, 5.5):
+        key = str(line).replace(".", "_")
+        raw[f"referee_over_{key}_rate_l10"] = _recent_rate(
+            referee_samples, "cards", 10, lambda value, t=line: value > t
+        )
+
+    def combine(a: Any, b: Any) -> float | None:
+        left, right = _number(a), _number(b)
+        return None if left is None or right is None else left + right
+
+    raw["combined_team_cards_for_l5"] = combine(raw.get("home_l5_cards_for"), raw.get("away_l5_cards_for"))
+    raw["combined_team_cards_for_l10"] = combine(raw.get("home_l10_cards_for"), raw.get("away_l10_cards_for"))
+    raw["combined_fouls_committed_l5"] = combine(raw.get("home_l5_fouls_committed"), raw.get("away_l5_fouls_committed"))
+    raw["combined_fouls_committed_l10"] = combine(raw.get("home_l10_fouls_committed"), raw.get("away_l10_fouls_committed"))
+
+    home_for = _number(raw.get("home_l10_cards_for"))
+    home_against = _number(raw.get("home_l10_cards_against"))
+    away_for = _number(raw.get("away_l10_cards_for"))
+    away_against = _number(raw.get("away_l10_cards_against"))
+    raw["matchup_expected_cards_l10"] = (
+        None
+        if None in (home_for, home_against, away_for, away_against)
+        else ((home_for + away_against) / 2.0) + ((away_for + home_against) / 2.0)
+    )
+    home_fc = _number(raw.get("home_l10_fouls_committed"))
+    home_fs = _number(raw.get("home_l10_fouls_suffered"))
+    away_fc = _number(raw.get("away_l10_fouls_committed"))
+    away_fs = _number(raw.get("away_l10_fouls_suffered"))
+    raw["matchup_expected_fouls_l10"] = (
+        None
+        if None in (home_fc, home_fs, away_fc, away_fs)
+        else ((home_fc + away_fs) / 2.0) + ((away_fc + home_fs) / 2.0)
+    )
+    home_cpf = _number(raw.get("home_l10_cards_per_foul"))
+    away_cpf = _number(raw.get("away_l10_cards_per_foul"))
+    raw["home_aggression_x_away_foul_draw"] = (
+        None if home_cpf is None or away_fs is None else home_cpf * away_fs
+    )
+    raw["away_aggression_x_home_foul_draw"] = (
+        None if away_cpf is None or home_fs is None else away_cpf * home_fs
+    )
+    interaction_values = [
+        value for value in (
+            _number(raw.get("home_aggression_x_away_foul_draw")),
+            _number(raw.get("away_aggression_x_home_foul_draw")),
+        )
+        if value is not None
+    ]
+    raw["aggression_foul_draw_interaction"] = _mean(interaction_values)
+
+    home_pos = _number(raw.get("home_l10_possession"))
+    away_pos = _number(raw.get("away_l10_possession"))
+    raw["expected_possession_imbalance"] = (
+        None if home_pos is None or away_pos is None else abs(home_pos - away_pos)
+    )
+
+    h2h = [
+        row for row in team_rows
+        if {row.get("home_team_id"), row.get("away_team_id")} == {home_team_id, away_team_id}
+    ][-5:]
+    h2h_cards = [value for row in h2h if (value := _row_total_cards(row)) is not None]
+    h2h_fouls = [
+        float(row["home_fouls"]) + float(row["away_fouls"])
+        for row in h2h
+        if row.get("home_fouls") is not None and row.get("away_fouls") is not None
+    ]
+    raw["h2h_n"] = len(h2h_cards)
+    raw["h2h_total_cards_l5"] = _mean(h2h_cards)
+    raw["h2h_total_fouls_l5"] = _mean(h2h_fouls)
+
+    league_total_cards: list[float] = []
+    league_total_fouls: list[float] = []
+    league_team_cards: list[float] = []
+    league_team_fouls: list[float] = []
+    for row in league_rows:
+        hc = _cards_for_side(row, "home")
+        ac = _cards_for_side(row, "away")
+        hf = _number(row.get("home_fouls"))
+        af = _number(row.get("away_fouls"))
+        if hc is not None and ac is not None:
+            league_total_cards.append(hc + ac)
+            league_team_cards.extend((hc, ac))
+        if hf is not None and af is not None:
+            league_total_fouls.append(hf + af)
+            league_team_fouls.extend((hf, af))
+    raw["league_history_n"] = len(league_total_cards)
+    raw["league_total_cards"] = _mean(league_total_cards[-200:])
+    raw["league_total_fouls"] = _mean(league_total_fouls[-200:])
+    raw["league_cards_per_team"] = _mean(league_team_cards[-400:])
+    raw["league_fouls_per_team"] = _mean(league_team_fouls[-400:])
+    raw["home_cards_for_league_percentile"] = _percentile(
+        _number(raw.get("home_l10_cards_for")), league_team_cards[-400:]
+    )
+    raw["away_cards_for_league_percentile"] = _percentile(
+        _number(raw.get("away_l10_cards_for")), league_team_cards[-400:]
+    )
+    raw["home_fouls_league_percentile"] = _percentile(
+        _number(raw.get("home_l10_fouls_committed")), league_team_fouls[-400:]
+    )
+    raw["away_fouls_league_percentile"] = _percentile(
+        _number(raw.get("away_l10_fouls_committed")), league_team_fouls[-400:]
+    )
+    referee_cards = _number(raw.get("referee_l10_cards"))
+    league_cards = _number(raw.get("league_total_cards"))
+    raw["referee_vs_league_cards_delta"] = (
+        None if referee_cards is None or league_cards is None else referee_cards - league_cards
+    )
+    team_cards = _number(raw.get("combined_team_cards_for_l10"))
+    raw["referee_vs_teams_cards_delta"] = (
+        None if referee_cards is None or team_cards is None else referee_cards - team_cards
+    )
+    raw["referee_x_team_cards"] = (
+        None if referee_cards is None or team_cards is None else referee_cards * team_cards
+    )
+
+    raw["stage_of_season"] = stage
+    raw["late_season_indicator"] = None if stage is None else int(stage >= 0.75)
+    competition_key = f"{competition_type} {competition_name}".casefold()
+    cup = int(any(token in competition_key for token in ("cup", "copa", "coppa", "pokal", "coupe")))
+    raw["cup_indicator"] = cup
+    raw["knockout_proxy"] = cup
+    raw["derby_rivalry_indicator"] = derby.value
+    raw["home_table_pressure"] = home_pressure.value
+    raw["away_table_pressure"] = away_pressure.value
+    raw["table_pressure"] = max(
+        [float(v) for v in (home_pressure.value, away_pressure.value) if v is not None],
+        default=None,
+    )
+    raw["match_importance"] = importance.value
+    raw["home_rank"] = _standings_fact(home_pressure, "team_rank")
+    raw["away_rank"] = _standings_fact(away_pressure, "team_rank")
+    raw["home_points"] = _standings_fact(home_pressure, "team_points")
+    raw["away_points"] = _standings_fact(away_pressure, "team_points")
+    raw["rank_gap"] = (
+        None if raw["home_rank"] is None or raw["away_rank"] is None
+        else abs(float(raw["home_rank"]) - float(raw["away_rank"]))
+    )
+    raw["points_gap"] = (
+        None if raw["home_points"] is None or raw["away_points"] is None
+        else abs(float(raw["home_points"]) - float(raw["away_points"]))
+    )
+    pressure = _number(raw.get("table_pressure"))
+    raw["must_win_proxy"] = (
+        None if pressure is None else pressure * (0.5 + 0.5 * (stage if stage is not None else 0.5))
+    )
+
+    for key, value in market_context.items():
+        if key != "available_at":
+            raw[f"market_{key}"] = value
+    balance = _number(raw.get("market_one_x_two_balance"))
+    rank_gap = _number(raw.get("rank_gap"))
+    raw["similar_strength_indicator"] = int(
+        (balance is not None and balance >= 0.80)
+        or (rank_gap is not None and rank_gap <= 3.0)
+    )
+
+    raw["referee_penalties_per_match"] = None
+    raw["referee_penalty_source_coverage"] = 0
+
+    anchors: dict[str, float] = {}
+    candidates = {
+        "referee_l10_cards": raw.get("referee_l10_cards"),
+        "combined_team_cards_for_l10": raw.get("combined_team_cards_for_l10"),
+        "matchup_expected_cards_l10": raw.get("matchup_expected_cards_l10"),
+        "home_match_total_cards_l10": raw.get("home_l10_match_total_cards"),
+        "away_match_total_cards_l10": raw.get("away_l10_match_total_cards"),
+        "h2h_total_cards_l5": raw.get("h2h_total_cards_l5") if int(raw.get("h2h_n") or 0) >= 2 else None,
+        "league_total_cards": raw.get("league_total_cards"),
+    }
+    for key, value in candidates.items():
+        number = _number(value)
+        if number is not None:
+            anchors[key] = number
+    raw["raw_anchor_count"] = len(anchors)
+    raw["raw_consensus_cards"] = None if not anchors else float(median(anchors.values()))
+
+    raw_samples = {
+        "referee_total_cards": [
+            float(value)
+            for sample in referee_samples[-10:]
+            if (value := sample.get("cards")) is not None
+        ],
+        "home_match_total_cards": [
+            float(value)
+            for sample in home_samples[-10:]
+            if (value := sample.get("match_total_cards")) is not None
+        ],
+        "away_match_total_cards": [
+            float(value)
+            for sample in away_samples[-10:]
+            if (value := sample.get("match_total_cards")) is not None
+        ],
+        "h2h_total_cards": h2h_cards,
+    }
+    return raw, anchors, raw_samples
+
+
 def build_cardlab_snapshot(
     *,
     fixture_id: str,
@@ -378,11 +845,15 @@ def build_cardlab_snapshot(
     referee: str | None,
     referee_available_at: datetime | None,
     referee_history: tuple[dict[str, Any], ...],
+    team_history: tuple[dict[str, Any], ...] = (),
+    league_history: tuple[dict[str, Any], ...] = (),
+    market_context: dict[str, Any] | None = None,
     home_team: str,
     away_team: str,
     home_team_id: int,
     away_team_id: int,
     competition_name: str,
+    competition_type: str = "",
     standings_payload: dict[str, Any] | None,
     standings_available_at: datetime | None,
 ) -> CardLabFeatureSnapshot:
@@ -449,10 +920,7 @@ def build_cardlab_snapshot(
         max(pressure_available) if pressure_available else None,
         TABLE_PRESSURE_VERSION,
         "UNAVAILABLE" if not pressure_values else "OBSERVED",
-        {
-            "home": home_pressure.value,
-            "away": away_pressure.value,
-        },
+        {"home": home_pressure.value, "away": away_pressure.value},
     )
     stage = stage_of_season(standings_payload, home_team_id)
     importance = match_importance(
@@ -464,6 +932,23 @@ def build_cardlab_snapshot(
         decision_at=decision,
     )
 
+    raw_features, raw_anchors, raw_samples = _raw_card_features(
+        referee_history=referee_history,
+        team_history=team_history,
+        league_history=league_history,
+        market_context=dict(market_context or {}),
+        home_team_id=home_team_id,
+        away_team_id=away_team_id,
+        home_pressure=home_pressure,
+        away_pressure=away_pressure,
+        stage=stage,
+        derby=derby,
+        importance=importance,
+        competition_name=competition_name,
+        competition_type=competition_type,
+        decision_at=decision,
+    )
+
     features = {
         "referee_card_rate": card_rate.payload(),
         "referee_foul_rate": foul_rate.payload(),
@@ -472,12 +957,37 @@ def build_cardlab_snapshot(
         "away_table_pressure": away_pressure.payload(),
         "table_pressure": overall_pressure.payload(),
         "match_importance": importance.payload(),
+        "raw_features": raw_features,
+        "raw_anchors": raw_anchors,
+        "raw_samples": raw_samples,
+        "market_context": dict(market_context or {}),
+        "raw_stat_contract": {
+            "version": "CARDLAB_RAW_STATS_V1",
+            "price_independent_selection": True,
+            "ev_is_pick_gate": False,
+            "edge_is_pick_gate": False,
+            "penalty_rate_available": False,
+        },
     }
     available_candidates = [
         datum.available_at
-        for datum in (card_rate, foul_rate, derby, home_pressure, away_pressure, overall_pressure, importance)
+        for datum in (
+            card_rate,
+            foul_rate,
+            derby,
+            home_pressure,
+            away_pressure,
+            overall_pressure,
+            importance,
+        )
         if datum.available_at is not None
     ]
+    for row in (*team_history, *league_history):
+        available = row.get("available_at")
+        if isinstance(available, datetime):
+            available_utc = _utc(available, "history.available_at")
+            if available_utc <= decision:
+                available_candidates.append(available_utc)
     snapshot_available_at = max(available_candidates) if available_candidates else decision
     if snapshot_available_at > decision:
         raise FeatureLeakageError("feature snapshot contains post-decision information")
