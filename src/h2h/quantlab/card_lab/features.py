@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from statistics import median
 from typing import Any
 
 from h2h.quantlab.card_lab.rivalry import (
