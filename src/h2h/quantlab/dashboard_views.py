@@ -1217,6 +1217,15 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_referee_cards_per_foul_bucket": scalar(
                     "referee_l10_cards_per_foul", (0.10, 0.14, 0.18, 0.22, 0.26, 0.30), digits=2
                 ),
+                "card_referee_fouls_per_card_bucket": scalar(
+                    "referee_l10_fouls_per_card", (3, 4, 5, 6, 7, 8), digits=1
+                ),
+                "card_referee_foul_conversion_bucket": scalar(
+                    "referee_foul_conversion_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_team_foul_conversion_bucket": scalar(
+                    "team_foul_conversion_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
                 "card_referee_home_bias_bucket": _signed_gap_bucket(
                     raw.get("referee_home_away_bias_l10")
                 ),
@@ -1244,8 +1253,20 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 "card_home_cards_per_foul_l5_bucket": scalar(
                     "home_l5_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
                 ),
+                "card_home_fouls_per_card_l5_bucket": scalar(
+                    "home_l5_fouls_per_card", (3, 4, 5, 6, 7, 8), digits=1
+                ),
+                "card_home_fouls_per_card_l10_bucket": scalar(
+                    "home_l10_fouls_per_card", (3, 4, 5, 6, 7, 8), digits=1
+                ),
                 "card_away_cards_per_foul_l5_bucket": scalar(
                     "away_l5_cards_per_foul", (0.08, 0.12, 0.16, 0.20, 0.24, 0.30), digits=2
+                ),
+                "card_away_fouls_per_card_l5_bucket": scalar(
+                    "away_l5_fouls_per_card", (3, 4, 5, 6, 7, 8), digits=1
+                ),
+                "card_away_fouls_per_card_l10_bucket": scalar(
+                    "away_l10_fouls_per_card", (3, 4, 5, 6, 7, 8), digits=1
                 ),
                 "card_home_match_cards_l5_bucket": scalar(
                     "home_l5_match_total_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
@@ -2962,6 +2983,9 @@ def render_analytics(
             ("card_referee_reds_l10_bucket", "Referee reds L10"),
             ("card_referee_fouls_l10_bucket", "Referee fouls L10"),
             ("card_referee_cards_per_foul_bucket", "Referee cards / foul"),
+            ("card_referee_fouls_per_card_bucket", "Referee fouls / card"),
+            ("card_referee_foul_conversion_bucket", "Referee foul-conversion cards"),
+            ("card_team_foul_conversion_bucket", "Team foul-conversion cards"),
             ("card_referee_home_bias_bucket", "Referee home − away cards"),
             ("card_referee_over35_bucket", "Referee O3.5 rate"),
             ("card_referee_over45_bucket", "Referee O4.5 rate"),
@@ -2984,8 +3008,12 @@ def render_analytics(
             ("card_away_fouls_suffered_l10_bucket", "Away fouls suffered L10"),
             ("card_home_cards_per_foul_l5_bucket", "Home cards / foul L5"),
             ("card_home_cards_per_foul_bucket", "Home cards / foul L10"),
+            ("card_home_fouls_per_card_l5_bucket", "Home fouls / card L5"),
+            ("card_home_fouls_per_card_l10_bucket", "Home fouls / card L10"),
             ("card_away_cards_per_foul_l5_bucket", "Away cards / foul L5"),
             ("card_away_cards_per_foul_bucket", "Away cards / foul L10"),
+            ("card_away_fouls_per_card_l5_bucket", "Away fouls / card L5"),
+            ("card_away_fouls_per_card_l10_bucket", "Away fouls / card L10"),
             ("card_home_match_cards_l5_bucket", "Home-match total cards L5"),
             ("card_home_match_cards_l10_bucket", "Home-match total cards L10"),
             ("card_away_match_cards_l5_bucket", "Away-match total cards L5"),
@@ -3114,6 +3142,18 @@ def render_analytics(
                 labels={
                     "card_combined_cards_l10_bucket": "Cards",
                     "card_combined_fouls_l10_bucket": "Fouls",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Expected fouls × referee/team conversion",
+                ("card_matchup_fouls_bucket", "card_referee_foul_conversion_bucket", "card_team_foul_conversion_bucket", "selection"),
+                "card_cross_foul_conversion",
+                labels={
+                    "card_matchup_fouls_bucket": "Expected fouls",
+                    "card_referee_foul_conversion_bucket": "Ref conversion",
+                    "card_team_foul_conversion_bucket": "Team conversion",
                     "selection": "Pick",
                 },
                 drop_missing=True,
