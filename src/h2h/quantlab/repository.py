@@ -106,7 +106,8 @@ class PostgreSQLQuantLabRepository:
                 "SELECT q.shadow_bet_id, q.fixture_id, q.lab, q.bookmaker_id, "
                 "q.bookmaker_name, q.provider_bet_id, q.provider_bet_name, "
                 "q.market_key, q.selection, q.line, q.model_name, q.model_version, "
-                "decision.policy_version, q.model_probability, q.market_probability, "
+                "decision.policy_version, decision.decision_reason, decision.decision_details, "
+                "q.model_probability, q.market_probability, "
                 "q.edge, q.expected_value, "
                 "q.odds, q.quote_observed_at, q.decision_at, q.closing_odds, "
                 "q.closing_observed_at, q.stake_minor, "
@@ -147,7 +148,8 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY e.occurred_at DESC, e.card_settlement_event_id DESC LIMIT 1"
                 ") card_event ON TRUE "
                 "LEFT JOIN LATERAL ("
-                " SELECT d.policy_version FROM quantlab_context_market_decisions d "
+                " SELECT d.policy_version, d.reason AS decision_reason, "
+                " d.details AS decision_details FROM quantlab_context_market_decisions d "
                 " WHERE d.fixture_id = q.fixture_id AND d.lab = q.lab AND d.decision = 'PICK' "
                 " AND d.decision_at = q.decision_at "
                 " AND d.model_version IS NOT DISTINCT FROM q.model_version "
@@ -179,7 +181,7 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         for row in rows:
-            for key in ("result_detail", "corner_feature_payload"):
+            for key in ("result_detail", "corner_feature_payload", "decision_details"):
                 value = row.get(key)
                 if isinstance(value, str):
                     row[key] = json.loads(value)
