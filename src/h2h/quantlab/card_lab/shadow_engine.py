@@ -7,7 +7,6 @@ import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import isfinite
-from statistics import median
 from typing import Any
 
 from h2h.quantlab.card_lab.settlement_contract import (
@@ -114,7 +113,9 @@ def _raw_line_signal(card_context: dict[str, Any], line: float) -> dict[str, Any
         return None
     raw_features = payload.get("raw_features")
     raw_anchors = payload.get("raw_anchors")
+    raw_anchor_weights = payload.get("raw_anchor_weights")
     raw_samples = payload.get("raw_samples")
+    raw_sample_weights = payload.get("raw_sample_weights")
     if not isinstance(raw_features, dict) or not isinstance(raw_anchors, dict):
         return None
     anchors = {
@@ -125,16 +126,37 @@ def _raw_line_signal(card_context: dict[str, Any], line: float) -> dict[str, Any
     if len(anchors) < MIN_RAW_ANCHORS:
         return None
 
-    consensus = float(median(anchors.values()))
+    weights = {
+        key: max(
+            0.0,
+            _number(raw_anchor_weights.get(key)) or 1.0,
+        )
+        if isinstance(raw_anchor_weights, dict)
+        else 1.0
+        for key in anchors
+    }
+    if sum(weights.values()) <= 0:
+        weights = {key: 1.0 for key in anchors}
+    ordered = sorted((value, weights[key]) for key, value in anchors.items())
+    half_weight = sum(weight for _, weight in ordered) / 2.0
+    cumulative = 0.0
+    consensus = ordered[-1][0]
+    for value, weight in ordered:
+        cumulative += weight
+        if cumulative >= half_weight:
+            consensus = value
+            break
+
     if abs(consensus - line) <= 1e-9:
         return None
     selection = "OVER" if consensus > line else "UNDER"
     directional_support = sum(
-        (value > line if selection == "OVER" else value < line)
-        for value in anchors.values()
-    ) / len(anchors)
+        weights[key]
+        for key, value in anchors.items()
+        if (value > line if selection == "OVER" else value < line)
+    ) / sum(weights.values())
 
-    rates: list[float] = []
+    weighted_rates: list[tuple[float, float]] = []
     sample_sizes: dict[str, int] = {}
     if isinstance(raw_samples, dict):
         for key, values in raw_samples.items():
@@ -147,9 +169,19 @@ def _raw_line_signal(card_context: dict[str, Any], line: float) -> dict[str, Any
                 (value > line if selection == "OVER" else value < line)
                 for value in clean
             )
-            rates.append(hits / len(clean))
+            sample_weight = (
+                max(0.0, _number(raw_sample_weights.get(key)) or 1.0)
+                if isinstance(raw_sample_weights, dict)
+                else 1.0
+            )
+            weighted_rates.append((hits / len(clean), sample_weight))
             sample_sizes[str(key)] = len(clean)
-    observed_hit_rate = None if not rates else sum(rates) / len(rates)
+    total_rate_weight = sum(weight for _, weight in weighted_rates)
+    observed_hit_rate = (
+        None
+        if not weighted_rates or total_rate_weight <= 0
+        else sum(rate * weight for rate, weight in weighted_rates) / total_rate_weight
+    )
     gap = consensus - line
 
     reason: str | None = None
@@ -175,6 +207,7 @@ def _raw_line_signal(card_context: dict[str, Any], line: float) -> dict[str, Any
         "line_gap": gap,
         "anchor_count": len(anchors),
         "anchors": anchors,
+        "anchor_weights": weights,
         "directional_support": directional_support,
         "observed_hit_rate": observed_hit_rate,
         "sample_sizes": sample_sizes,
