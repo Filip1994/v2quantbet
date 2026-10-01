@@ -2377,7 +2377,7 @@ def render_analytics(
                 drop_missing=True,
             )
         )
-    else:
+    elif lab_key == "corner":
         watchlist_content = (
             table(
                 "Calibration watch · line × price",
@@ -2467,6 +2467,137 @@ def render_analytics(
                     "selection": "Selection",
                     "history_depth_bucket": "Min history",
                     "feature_missingness_bucket": "Missing features",
+                },
+                drop_missing=True,
+            )
+        )
+
+    else:
+        watchlist_content = (
+            table(
+                "RAW consensus × line × support",
+                (
+                    "selection",
+                    "line_bucket",
+                    "card_raw_consensus_bucket",
+                    "card_raw_line_gap_bucket",
+                    "card_raw_support_bucket",
+                    "card_raw_hit_rate_bucket",
+                ),
+                "watch_card_raw_signal",
+                labels={
+                    "selection": "Pick",
+                    "line_bucket": "Line",
+                    "card_raw_consensus_bucket": "Raw total",
+                    "card_raw_line_gap_bucket": "Raw − line",
+                    "card_raw_support_bucket": "Anchor support",
+                    "card_raw_hit_rate_bucket": "Observed hit",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Referee × team discipline × price",
+                (
+                    "selection",
+                    "card_referee_cards_l10_bucket",
+                    "card_combined_cards_l10_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_card_ref_team",
+                labels={
+                    "selection": "Pick",
+                    "card_referee_cards_l10_bucket": "Ref L10 cards",
+                    "card_combined_cards_l10_bucket": "Teams L10 cards",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Referee × fouls × matchup",
+                (
+                    "selection",
+                    "card_referee_fouls_l10_bucket",
+                    "card_combined_fouls_l10_bucket",
+                    "card_matchup_fouls_bucket",
+                ),
+                "watch_card_fouls",
+                labels={
+                    "selection": "Pick",
+                    "card_referee_fouls_l10_bucket": "Ref fouls",
+                    "card_combined_fouls_l10_bucket": "Team fouls",
+                    "card_matchup_fouls_bucket": "Matchup fouls",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Discipline × foul-drawing interaction",
+                (
+                    "selection",
+                    "card_home_cards_per_foul_bucket",
+                    "card_away_cards_per_foul_bucket",
+                    "card_aggression_foul_draw_bucket",
+                ),
+                "watch_card_discipline_draw",
+                labels={
+                    "selection": "Pick",
+                    "card_home_cards_per_foul_bucket": "Home cards/foul",
+                    "card_away_cards_per_foul_bucket": "Away cards/foul",
+                    "card_aggression_foul_draw_bucket": "Aggression × draw",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Importance × derby/cup × competitiveness",
+                (
+                    "selection",
+                    "card_importance_bucket",
+                    "card_derby_bucket",
+                    "card_cup_bucket",
+                    "card_similar_strength_bucket",
+                ),
+                "watch_card_context",
+                labels={
+                    "selection": "Pick",
+                    "card_importance_bucket": "Importance",
+                    "card_derby_bucket": "Derby",
+                    "card_cup_bucket": "Competition",
+                    "card_similar_strength_bucket": "Strength",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Trend × venue × referee delta",
+                (
+                    "selection",
+                    "card_cards_trend_bucket",
+                    "card_venue_cards_trend_bucket",
+                    "card_referee_vs_teams_bucket",
+                ),
+                "watch_card_trend",
+                labels={
+                    "selection": "Pick",
+                    "card_cards_trend_bucket": "L5−L10 cards",
+                    "card_venue_cards_trend_bucket": "Venue−L10",
+                    "card_referee_vs_teams_bucket": "Ref − teams",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Reliability × unique-match exposure",
+                (
+                    "selection",
+                    "history_depth_bucket",
+                    "feature_missingness_bucket",
+                    "card_raw_anchor_count_bucket",
+                    "card_fixture_pick_count_bucket",
+                ),
+                "watch_card_reliability",
+                labels={
+                    "selection": "Pick",
+                    "history_depth_bucket": "Min team history",
+                    "feature_missingness_bucket": "Missing",
+                    "card_raw_anchor_count_bucket": "Anchors",
+                    "card_fixture_pick_count_bucket": "Picks/match",
                 },
                 drop_missing=True,
             )
