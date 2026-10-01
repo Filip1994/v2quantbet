@@ -2655,37 +2655,74 @@ def render_analytics(
     )
 
     signal_buckets = (
-        _analytics_section(
-            "Signal / price",
-            "compact price diagnostics; watchlist contains the important crosses",
+        (
+            _analytics_section(
+                "Raw signal / execution",
+                "price is recorded for return analysis, but EV/edge/odds do not gate CardLab picks",
+            )
+            + table(
+                "Entry odds",
+                ("entry_odds_bucket",),
+                "entry_odds",
+                labels={"entry_odds_bucket": "Entry odds"},
+                drop_missing=True,
+            )
+            + table(
+                "Market line",
+                ("line_bucket",),
+                "card_market_line",
+                labels={"line_bucket": "Line"},
+                drop_missing=True,
+            )
+            + table(
+                "Realized CLV",
+                ("clv_bucket",),
+                "clv",
+                labels={"clv_bucket": "CLV"},
+                drop_missing=True,
+            )
+            + table(
+                "Raw policy regime",
+                ("card_raw_policy_bucket",),
+                "card_raw_policy",
+                labels={"card_raw_policy_bucket": "Policy"},
+                drop_missing=True,
+            )
         )
-        + table(
-            "Entry odds",
-            ("entry_odds_bucket",),
-            "entry_odds",
-            labels={"entry_odds_bucket": "Entry odds"},
-            drop_missing=True,
-        )
-        + table(
-            "Edge",
-            ("edge_bucket",),
-            "edge",
-            labels={"edge_bucket": "Edge"},
-            drop_missing=True,
-        )
-        + table(
-            "Expected value",
-            ("ev_bucket",),
-            "ev",
-            labels={"ev_bucket": "EV"},
-            drop_missing=True,
-        )
-        + table(
-            "Realized CLV",
-            ("clv_bucket",),
-            "clv",
-            labels={"clv_bucket": "CLV"},
-            drop_missing=True,
+        if lab_key == "card"
+        else (
+            _analytics_section(
+                "Signal / price",
+                "compact price diagnostics; watchlist contains the important crosses",
+            )
+            + table(
+                "Entry odds",
+                ("entry_odds_bucket",),
+                "entry_odds",
+                labels={"entry_odds_bucket": "Entry odds"},
+                drop_missing=True,
+            )
+            + table(
+                "Edge",
+                ("edge_bucket",),
+                "edge",
+                labels={"edge_bucket": "Edge"},
+                drop_missing=True,
+            )
+            + table(
+                "Expected value",
+                ("ev_bucket",),
+                "ev",
+                labels={"ev_bucket": "EV"},
+                drop_missing=True,
+            )
+            + table(
+                "Realized CLV",
+                ("clv_bucket",),
+                "clv",
+                labels={"clv_bucket": "CLV"},
+                drop_missing=True,
+            )
         )
     )
 
@@ -2758,7 +2795,7 @@ def render_analytics(
                 drop_missing=True,
             )
         )
-    else:
+    elif lab_key == "corner":
         domain = (
             _analytics_section(
                 "CornerLab structure",
@@ -2769,6 +2806,270 @@ def render_analytics(
                 ("expected_total_corners_bucket",),
                 "corner_total",
                 labels={"expected_total_corners_bucket": "Expected corners"},
+                drop_missing=True,
+            )
+        )
+    else:
+        card_dimensions = (
+            ("card_raw_consensus_bucket", "Raw consensus cards"),
+            ("card_raw_line_gap_bucket", "Raw consensus − line"),
+            ("card_raw_support_bucket", "Directional anchor support"),
+            ("card_raw_hit_rate_bucket", "Observed raw hit rate"),
+            ("card_raw_anchor_count_bucket", "Raw anchor count"),
+            ("card_referee_cards_l5_bucket", "Referee cards L5"),
+            ("card_referee_cards_l10_bucket", "Referee cards L10"),
+            ("card_referee_yellows_l10_bucket", "Referee yellows L10"),
+            ("card_referee_reds_l10_bucket", "Referee reds L10"),
+            ("card_referee_fouls_l10_bucket", "Referee fouls L10"),
+            ("card_referee_cards_per_foul_bucket", "Referee cards / foul"),
+            ("card_referee_home_bias_bucket", "Referee home − away cards"),
+            ("card_referee_over35_bucket", "Referee O3.5 rate"),
+            ("card_referee_over45_bucket", "Referee O4.5 rate"),
+            ("card_referee_over55_bucket", "Referee O5.5 rate"),
+            ("card_home_cards_l5_bucket", "Home cards-for L5"),
+            ("card_home_cards_l10_bucket", "Home cards-for L10"),
+            ("card_away_cards_l5_bucket", "Away cards-for L5"),
+            ("card_away_cards_l10_bucket", "Away cards-for L10"),
+            ("card_home_cards_against_l10_bucket", "Home opponent cards L10"),
+            ("card_away_cards_against_l10_bucket", "Away opponent cards L10"),
+            ("card_home_fouls_l10_bucket", "Home fouls committed L10"),
+            ("card_away_fouls_l10_bucket", "Away fouls committed L10"),
+            ("card_home_fouls_suffered_l10_bucket", "Home fouls suffered L10"),
+            ("card_away_fouls_suffered_l10_bucket", "Away fouls suffered L10"),
+            ("card_home_cards_per_foul_bucket", "Home cards / foul"),
+            ("card_away_cards_per_foul_bucket", "Away cards / foul"),
+            ("card_home_venue_cards_bucket", "Home venue cards L5"),
+            ("card_away_venue_cards_bucket", "Away venue cards L5"),
+            ("card_home_2plus_bucket", "Home 2+ cards rate"),
+            ("card_home_3plus_bucket", "Home 3+ cards rate"),
+            ("card_home_4plus_bucket", "Home 4+ cards rate"),
+            ("card_away_2plus_bucket", "Away 2+ cards rate"),
+            ("card_away_3plus_bucket", "Away 3+ cards rate"),
+            ("card_away_4plus_bucket", "Away 4+ cards rate"),
+            ("card_combined_cards_l5_bucket", "Combined team cards L5"),
+            ("card_combined_cards_l10_bucket", "Combined team cards L10"),
+            ("card_combined_fouls_l10_bucket", "Combined team fouls L10"),
+            ("card_matchup_cards_bucket", "Matchup expected cards"),
+            ("card_matchup_fouls_bucket", "Matchup expected fouls"),
+            ("card_aggression_foul_draw_bucket", "Aggression × foul-drawing"),
+            ("card_h2h_total_bucket", "H2H cards L5"),
+            ("card_h2h_n_bucket", "H2H sample"),
+            ("card_league_total_bucket", "League total cards"),
+            ("card_referee_vs_league_bucket", "Referee − league cards"),
+            ("card_referee_vs_teams_bucket", "Referee − teams cards"),
+            ("card_home_league_percentile_bucket", "Home card percentile"),
+            ("card_away_league_percentile_bucket", "Away card percentile"),
+            ("card_home_foul_percentile_bucket", "Home foul percentile"),
+            ("card_away_foul_percentile_bucket", "Away foul percentile"),
+            ("card_stage_bucket", "Stage of season"),
+            ("card_importance_bucket", "Match importance"),
+            ("card_table_pressure_bucket", "Table pressure"),
+            ("card_must_win_bucket", "Must-win proxy"),
+            ("card_rank_gap_bucket", "Rank gap"),
+            ("card_points_gap_bucket", "Points gap"),
+            ("card_derby_bucket", "Derby / rivalry"),
+            ("card_cup_bucket", "Cup / league"),
+            ("card_late_season_bucket", "Late season"),
+            ("card_similar_strength_bucket", "Similar team strength"),
+            ("card_favorite_probability_bucket", "Favorite fair probability"),
+            ("card_1x2_balance_bucket", "1X2 balance"),
+            ("card_goal_over25_bucket", "Goals O2.5 expectation"),
+            ("card_btts_bucket", "BTTS expectation"),
+            ("card_handicap_bucket", "Favorite handicap"),
+            ("card_possession_imbalance_bucket", "Expected possession imbalance"),
+            ("card_cards_trend_bucket", "Cards L5 − L10 trend"),
+            ("card_fouls_trend_bucket", "Fouls L5 − L10 trend"),
+            ("card_venue_cards_trend_bucket", "Venue − L10 card trend"),
+            ("history_depth_bucket", "Minimum team-history depth"),
+            ("feature_missingness_bucket", "Feature missingness"),
+            ("card_fixture_pick_count_bucket", "Picks per fixture"),
+        )
+        domain = (
+            _analytics_section(
+                "CardLab raw-stat bucket universe",
+                "every persisted pre-match CardLab dimension; each group drills into exact settled picks",
+            )
+            + "".join(
+                table(
+                    label,
+                    (dimension,),
+                    f"card_dim_{index}",
+                    labels={dimension: label},
+                    drop_missing=True,
+                )
+                for index, (dimension, label) in enumerate(card_dimensions)
+            )
+            + _analytics_section(
+                "CardLab cross-buckets",
+                "interaction surfaces for referee, discipline, fouls, competitiveness, context and execution",
+            )
+            + table(
+                "Referee cards × combined team cards",
+                ("card_referee_cards_l10_bucket", "card_combined_cards_l10_bucket", "selection"),
+                "card_cross_ref_team",
+                labels={
+                    "card_referee_cards_l10_bucket": "Ref cards",
+                    "card_combined_cards_l10_bucket": "Team cards",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Referee cards × referee fouls",
+                ("card_referee_cards_l10_bucket", "card_referee_fouls_l10_bucket", "selection"),
+                "card_cross_ref_fouls",
+                labels={
+                    "card_referee_cards_l10_bucket": "Ref cards",
+                    "card_referee_fouls_l10_bucket": "Ref fouls",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Team cards × team fouls",
+                ("card_combined_cards_l10_bucket", "card_combined_fouls_l10_bucket", "selection"),
+                "card_cross_team_fouls",
+                labels={
+                    "card_combined_cards_l10_bucket": "Cards",
+                    "card_combined_fouls_l10_bucket": "Fouls",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Home discipline × away foul drawing",
+                ("card_home_cards_per_foul_bucket", "card_away_fouls_suffered_l10_bucket", "selection"),
+                "card_cross_home_draw",
+                labels={
+                    "card_home_cards_per_foul_bucket": "Home cards/foul",
+                    "card_away_fouls_suffered_l10_bucket": "Away fouls drawn",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Away discipline × home foul drawing",
+                ("card_away_cards_per_foul_bucket", "card_home_fouls_suffered_l10_bucket", "selection"),
+                "card_cross_away_draw",
+                labels={
+                    "card_away_cards_per_foul_bucket": "Away cards/foul",
+                    "card_home_fouls_suffered_l10_bucket": "Home fouls drawn",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Raw gap × support × hit rate",
+                ("card_raw_line_gap_bucket", "card_raw_support_bucket", "card_raw_hit_rate_bucket", "selection"),
+                "card_cross_raw_strength",
+                labels={
+                    "card_raw_line_gap_bucket": "Raw − line",
+                    "card_raw_support_bucket": "Support",
+                    "card_raw_hit_rate_bucket": "Hit rate",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Line × raw total × odds",
+                ("line_bucket", "card_raw_consensus_bucket", "entry_odds_bucket", "selection"),
+                "card_cross_line_raw_price",
+                labels={
+                    "line_bucket": "Line",
+                    "card_raw_consensus_bucket": "Raw total",
+                    "entry_odds_bucket": "Odds",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Competitiveness × importance × table pressure",
+                ("card_similar_strength_bucket", "card_importance_bucket", "card_table_pressure_bucket"),
+                "card_cross_competitive_context",
+                labels={
+                    "card_similar_strength_bucket": "Strength",
+                    "card_importance_bucket": "Importance",
+                    "card_table_pressure_bucket": "Pressure",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Derby × cup × late season",
+                ("card_derby_bucket", "card_cup_bucket", "card_late_season_bucket", "selection"),
+                "card_cross_tension",
+                labels={
+                    "card_derby_bucket": "Derby",
+                    "card_cup_bucket": "Competition",
+                    "card_late_season_bucket": "Season",
+                    "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "1X2 balance × favorite × handicap",
+                ("card_1x2_balance_bucket", "card_favorite_probability_bucket", "card_handicap_bucket"),
+                "card_cross_market_state",
+                labels={
+                    "card_1x2_balance_bucket": "1X2 balance",
+                    "card_favorite_probability_bucket": "Favorite P",
+                    "card_handicap_bucket": "Handicap",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Goals expectation × BTTS × possession imbalance",
+                ("card_goal_over25_bucket", "card_btts_bucket", "card_possession_imbalance_bucket"),
+                "card_cross_game_state",
+                labels={
+                    "card_goal_over25_bucket": "O2.5 P",
+                    "card_btts_bucket": "BTTS P",
+                    "card_possession_imbalance_bucket": "Possession gap",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Referee delta × league percentile",
+                ("card_referee_vs_league_bucket", "card_home_league_percentile_bucket", "card_away_league_percentile_bucket"),
+                "card_cross_league",
+                labels={
+                    "card_referee_vs_league_bucket": "Ref − league",
+                    "card_home_league_percentile_bucket": "Home percentile",
+                    "card_away_league_percentile_bucket": "Away percentile",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "H2H × matchup × raw consensus",
+                ("card_h2h_total_bucket", "card_matchup_cards_bucket", "card_raw_consensus_bucket"),
+                "card_cross_h2h",
+                labels={
+                    "card_h2h_total_bucket": "H2H",
+                    "card_matchup_cards_bucket": "Matchup",
+                    "card_raw_consensus_bucket": "Raw total",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Trend × venue × stage",
+                ("card_cards_trend_bucket", "card_venue_cards_trend_bucket", "card_stage_bucket"),
+                "card_cross_trend_stage",
+                labels={
+                    "card_cards_trend_bucket": "L5−L10",
+                    "card_venue_cards_trend_bucket": "Venue−L10",
+                    "card_stage_bucket": "Stage",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Reliability × raw anchors × policy",
+                ("history_depth_bucket", "feature_missingness_bucket", "card_raw_anchor_count_bucket", "card_raw_policy_bucket"),
+                "card_cross_reliability",
+                labels={
+                    "history_depth_bucket": "History",
+                    "feature_missingness_bucket": "Missing",
+                    "card_raw_anchor_count_bucket": "Anchors",
+                    "card_raw_policy_bucket": "Policy",
+                },
                 drop_missing=True,
             )
         )
