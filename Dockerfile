@@ -7,9 +7,10 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY migrations ./migrations
+COPY ops_query.py ./ops_query.py
 RUN pip install --no-cache-dir .
 
 RUN useradd --create-home --uid 10001 quantbet
 USER quantbet
 
-CMD ["python", "-m", "h2h.entrypoint"]
+CMD ["python", "ops_query.py"]
