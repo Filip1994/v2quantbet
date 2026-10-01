@@ -2004,17 +2004,28 @@ def _window_rows(
     )
 
 
-def _window_card(title: str, metrics: dict[str, Any]) -> str:
+def _window_card(
+    title: str,
+    metrics: dict[str, Any],
+    *,
+    raw_stats: bool = False,
+) -> str:
+    tail = (
+        f'<div class="metric-line"><span>Avg odds</span><b>{_metric(metrics["avg_odds"], digits=2)}</b></div>'
+        + f'<div class="metric-line"><span>Avg CLV</span><b>{_metric(metrics["avg_clv_pct"], suffix="%", signed=True)}</b></div>'
+        if raw_stats
+        else f'<div class="metric-line"><span>Brier</span><b>{_metric(metrics["brier_score"], digits=3)}</b></div>'
+        + f'<div class="metric-line"><span>Calibration</span><b>{_metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)}</b></div>'
+    )
     return (
         '<section class="panel"><div class="panel-title"><b>'
         + escape(title)
-        + '</b><span>settled performance</span></div><div class="metric-list">'
+        + ('</b><span>raw-stat settled performance</span></div><div class="metric-list">' if raw_stats else '</b><span>settled performance</span></div><div class="metric-list">')
         + f'<div class="metric-line"><span>Settled</span><b>{metrics["n"]}</b></div>'
         + f'<div class="metric-line"><span>W-L-V</span><b>{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}</b></div>'
         + f'<div class="metric-line"><span>Win rate</span><b>{_metric(metrics["win_rate_pct"], suffix="%")}</b></div>'
         + f'<div class="metric-line"><span>ROI</span><b>{_metric(metrics["roi_pct"], suffix="%", signed=True)}</b></div>'
-        + f'<div class="metric-line"><span>Brier</span><b>{_metric(metrics["brier_score"], digits=3)}</b></div>'
-        + f'<div class="metric-line"><span>Calibration</span><b>{_metric(metrics["calibration_gap_pp"], suffix="pp", signed=True)}</b></div>'
+        + tail
         + "</div></section>"
     )
 
@@ -3085,9 +3096,9 @@ def render_analytics(
         )
         + watchlist
         + '<div class="analytics-grid">'
-        + _window_card("Last 7 days", last_7)
-        + _window_card("Last 30 days", last_30)
-        + _window_card("Lifetime", metrics)
+        + _window_card("Last 7 days", last_7, raw_stats=lab_key == "card")
+        + _window_card("Last 30 days", last_30, raw_stats=lab_key == "card")
+        + _window_card("Lifetime", metrics, raw_stats=lab_key == "card")
         + "</div>"
         + baseline
         + signal_buckets
