@@ -1307,7 +1307,7 @@ class QuantLabRuntime:
                     raise ValueError("provider_fixture_id must be positive")
                 allowed_labs = {"GOAL"} if goal_allowed else set()
                 if context_allowed:
-                    allowed_labs.update({"CORNER", "CARD", "UNCLASSIFIED"})
+                    allowed_labs.update({"CORNER", "CARD", "GOAL", "UNCLASSIFIED"})
                 if self._repository.market_capture_due(
                     fixture_id,
                     now=now,
