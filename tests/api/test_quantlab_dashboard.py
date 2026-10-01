@@ -236,6 +236,76 @@ def test_quantlab_dashboard_routes_corner_tab_to_corner_lab() -> None:
     assert "📝" not in html
 
 
+def test_cardlab_dashboard_shows_pick_explanation_notes() -> None:
+    class CardRepository(StubRepository):
+        def list_bets(self, lab: str):
+            self.labs.append(lab)
+            row = corner_pick(outcome="PENDING", suffix="k")
+            row.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:909",
+                    "home_team": "Cards Home",
+                    "away_team": "Cards Away",
+                    "provider_bet_id": 80,
+                    "provider_bet_name": "Cards Over/Under",
+                    "market_key": "TOTAL_CARDS",
+                    "selection": "OVER",
+                    "line": 4.5,
+                    "model_name": "Card referee Poisson",
+                    "model_version": "CARD_REFEREE_POISSON_V1:test",
+                    "model_probability": 0.68,
+                    "market_probability": 0.54,
+                    "edge": 0.14,
+                    "expected_value": 0.224,
+                    "odds": 1.80,
+                    "decision_reason": "VALUE_THRESHOLD_PASSED",
+                    "decision_details": {
+                        "expected_total_cards": 5.8,
+                        "card_context": {
+                            "referee": "Ref Example",
+                            "referee_card_rate": 5.8,
+                            "referee_sample_size": 12,
+                            "referee_foul_rate": 24.0,
+                            "referee_foul_sample_size": 12,
+                            "derby_rivalry_indicator": 1,
+                            "home_table_pressure": 0.8,
+                            "away_table_pressure": 0.7,
+                            "match_importance": 0.75,
+                        },
+                        "probability_model": {
+                            "name": "Card referee Poisson",
+                            "distribution": "Poisson",
+                            "lambda_source": "referee_card_rate",
+                            "reference_bookmaker_used": False,
+                        },
+                        "thresholds": {
+                            "min_edge": 0.03,
+                            "min_expected_value": 0.03,
+                            "min_odds": 1.40,
+                            "max_odds": 4.00,
+                            "min_referee_sample_size": 5,
+                        },
+                    },
+                }
+            )
+            return (row,)
+
+    repository = CardRepository()
+    html = QuantLabDashboardService(repository).render_html("lab=card")
+
+    assert repository.labs == ["CARD"]
+    assert "<th>Notes</th>" in html
+    assert "📝" in html
+    assert "Zašto ovaj CardLab pik" in html
+    assert "Ref Example" in html
+    assert "5.80 kartona/meč (n=12)" in html
+    assert "edge +14.0%" in html
+    assert "EV +22.4%" in html
+    assert "referee_card_rate je probability input" in html
+    assert "faulovi, derbi, table pressure i match importance" in html
+
+
 class FailingGoalRepository(StubRepository):
     def list_goal_picks(self):
         raise RuntimeError("ledger unavailable")
