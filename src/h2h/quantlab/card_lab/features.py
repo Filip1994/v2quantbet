@@ -480,6 +480,11 @@ def _team_samples(
                     if cards_for is None or fouls_for is None or fouls_for <= 0
                     else cards_for / fouls_for
                 ),
+                "fouls_per_card": (
+                    None
+                    if cards_for is None or cards_for <= 0 or fouls_for is None
+                    else fouls_for / cards_for
+                ),
                 "match_total_cards": total_cards,
                 "match_total_fouls": total_fouls,
                 "possession": possession,
@@ -512,6 +517,7 @@ def _team_raw_features(
             "fouls_committed",
             "fouls_suffered",
             "cards_per_foul",
+            "fouls_per_card",
             "match_total_cards",
             "match_total_fouls",
             "possession",
@@ -630,13 +636,16 @@ def _raw_card_features(
                 "cards_per_foul": (
                     None if total is None or fouls is None or fouls <= 0 else total / fouls
                 ),
+                "fouls_per_card": (
+                    None if total is None or total <= 0 or fouls is None else fouls / total
+                ),
                 "home_cards": home_cards,
                 "away_cards": away_cards,
             }
         )
     raw["referee_history_n"] = len(referee_samples)
     for window in (5, 10):
-        for metric in ("cards", "yellows", "reds", "fouls", "cards_per_foul", "home_cards", "away_cards"):
+        for metric in ("cards", "yellows", "reds", "fouls", "cards_per_foul", "fouls_per_card", "home_cards", "away_cards"):
             raw[f"referee_l{window}_{metric}"] = _recent_mean(referee_samples, metric, window)
     home_ref = raw.get("referee_l10_home_cards")
     away_ref = raw.get("referee_l10_away_cards")
@@ -676,8 +685,21 @@ def _raw_card_features(
         if None in (home_fc, home_fs, away_fc, away_fs)
         else ((home_fc + away_fs) / 2.0) + ((away_fc + home_fs) / 2.0)
     )
+    expected_fouls = _number(raw.get("matchup_expected_fouls_l10"))
+    referee_cpf = _number(raw.get("referee_l10_cards_per_foul"))
+    raw["referee_foul_conversion_cards"] = (
+        None if expected_fouls is None or referee_cpf is None
+        else expected_fouls * referee_cpf
+    )
     home_cpf = _number(raw.get("home_l10_cards_per_foul"))
     away_cpf = _number(raw.get("away_l10_cards_per_foul"))
+    team_cpf_values = [value for value in (home_cpf, away_cpf) if value is not None]
+    raw["team_cards_per_foul_l10"] = _mean(team_cpf_values)
+    raw["team_foul_conversion_cards"] = (
+        None
+        if expected_fouls is None or raw["team_cards_per_foul_l10"] is None
+        else expected_fouls * float(raw["team_cards_per_foul_l10"])
+    )
     raw["home_aggression_x_away_foul_draw"] = (
         None if home_cpf is None or away_fs is None else home_cpf * away_fs
     )
@@ -840,21 +862,41 @@ def _raw_card_features(
     raw["referee_penalty_source_coverage"] = 0
 
     anchors: dict[str, float] = {}
+    anchor_weights: dict[str, float] = {}
     candidates = {
-        "referee_l10_cards": raw.get("referee_l10_cards"),
-        "combined_team_cards_for_l10": raw.get("combined_team_cards_for_l10"),
-        "matchup_expected_cards_l10": raw.get("matchup_expected_cards_l10"),
-        "home_match_total_cards_l10": raw.get("home_l10_match_total_cards"),
-        "away_match_total_cards_l10": raw.get("away_l10_match_total_cards"),
-        "h2h_total_cards_l5": raw.get("h2h_total_cards_l5") if int(raw.get("h2h_n") or 0) >= 2 else None,
-        "league_total_cards": raw.get("league_total_cards"),
+        "referee_l10_cards": (raw.get("referee_l10_cards"), 1.25),
+        "combined_team_cards_for_l10": (raw.get("combined_team_cards_for_l10"), 1.00),
+        "matchup_expected_cards_l10": (raw.get("matchup_expected_cards_l10"), 1.00),
+        "home_match_total_cards_l10": (raw.get("home_l10_match_total_cards"), 0.75),
+        "away_match_total_cards_l10": (raw.get("away_l10_match_total_cards"), 0.75),
+        "referee_foul_conversion_cards": (raw.get("referee_foul_conversion_cards"), 1.00),
+        "team_foul_conversion_cards": (raw.get("team_foul_conversion_cards"), 1.00),
+        "h2h_total_cards_l5": (
+            raw.get("h2h_total_cards_l5") if int(raw.get("h2h_n") or 0) >= 2 else None,
+            0.35,
+        ),
+        "league_total_cards": (raw.get("league_total_cards"), 0.60),
     }
-    for key, value in candidates.items():
+    for key, (value, weight) in candidates.items():
         number = _number(value)
         if number is not None:
             anchors[key] = number
+            anchor_weights[key] = weight
+
+    weighted = sorted((anchors[key], anchor_weights[key]) for key in anchors)
+    total_weight = sum(weight for _, weight in weighted)
+    halfway = total_weight / 2.0
+    cumulative = 0.0
+    weighted_consensus: float | None = None
+    for value, weight in weighted:
+        cumulative += weight
+        if cumulative >= halfway:
+            weighted_consensus = value
+            break
+
     raw["raw_anchor_count"] = len(anchors)
-    raw["raw_consensus_cards"] = None if not anchors else float(median(anchors.values()))
+    raw["raw_anchor_weight_sum"] = total_weight
+    raw["raw_consensus_cards"] = weighted_consensus
 
     raw_samples = {
         "referee_total_cards": [
@@ -874,7 +916,13 @@ def _raw_card_features(
         ],
         "h2h_total_cards": h2h_cards,
     }
-    return raw, anchors, raw_samples
+    sample_weights = {
+        "referee_total_cards": 1.25,
+        "home_match_total_cards": 1.00,
+        "away_match_total_cards": 1.00,
+        "h2h_total_cards": 0.35,
+    }
+    return raw, anchors, anchor_weights, raw_samples, sample_weights
 
 
 def build_cardlab_snapshot(
@@ -972,7 +1020,7 @@ def build_cardlab_snapshot(
         decision_at=decision,
     )
 
-    raw_features, raw_anchors, raw_samples = _raw_card_features(
+    raw_features, raw_anchors, raw_anchor_weights, raw_samples, raw_sample_weights = _raw_card_features(
         referee_history=referee_history,
         team_history=team_history,
         league_history=league_history,
@@ -999,7 +1047,9 @@ def build_cardlab_snapshot(
         "match_importance": importance.payload(),
         "raw_features": raw_features,
         "raw_anchors": raw_anchors,
+        "raw_anchor_weights": raw_anchor_weights,
         "raw_samples": raw_samples,
+        "raw_sample_weights": raw_sample_weights,
         "market_context": dict(market_context or {}),
         "raw_stat_contract": {
             "version": "CARDLAB_RAW_STATS_V1",
