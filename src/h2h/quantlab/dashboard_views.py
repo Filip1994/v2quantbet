@@ -200,6 +200,94 @@ def _goal_notes(
     return rendered
 
 
+def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
+    rendered: dict[str, str] = {}
+    for row in rows:
+        pick_id = _pick_id(row)
+        if not pick_id:
+            continue
+
+        details = row.get("decision_details")
+        details = details if isinstance(details, dict) else {}
+        context = details.get("card_context")
+        context = context if isinstance(context, dict) else {}
+        thresholds = details.get("thresholds")
+        thresholds = thresholds if isinstance(thresholds, dict) else {}
+        probability_model = details.get("probability_model")
+        probability_model = probability_model if isinstance(probability_model, dict) else {}
+
+        expected = _number(details.get("expected_total_cards"))
+        if expected is None:
+            expected = _number(context.get("referee_card_rate"))
+        referee = str(context.get("referee") or "—")
+        referee_cards = _number(context.get("referee_card_rate"))
+        referee_n = int(_number(context.get("referee_sample_size")) or 0)
+        referee_fouls = _number(context.get("referee_foul_rate"))
+        referee_foul_n = int(_number(context.get("referee_foul_sample_size")) or 0)
+        rivalry = context.get("derby_rivalry_indicator")
+        rivalry_text = "DA" if rivalry == 1 else "NE" if rivalry == 0 else "—"
+        home_pressure = _number(context.get("home_table_pressure"))
+        away_pressure = _number(context.get("away_table_pressure"))
+        importance = _number(context.get("match_importance"))
+
+        decision_reason = str(row.get("decision_reason") or "VALUE_THRESHOLD_PASSED")
+        model_name = str(probability_model.get("name") or row.get("model_name") or "CardLab model")
+        distribution = str(probability_model.get("distribution") or "Poisson")
+        lambda_source = str(probability_model.get("lambda_source") or "referee_card_rate")
+
+        summary = (
+            f"{_pick_text(row)} @ {_odd(row.get('odds'))}: model {_pct(row.get('model_probability'))} "
+            f"naspram market {_pct(row.get('market_probability'))}; "
+            f"edge {_pct(row.get('edge'), signed=True)}, EV {_pct(row.get('expected_value'), signed=True)}."
+        )
+        model_text = (
+            f"{model_name} koristi {distribution} raspodelu; očekivani total je {_rate(expected)}. "
+            f"λ izvor: {lambda_source}."
+        )
+        referee_text = (
+            f"Sudija {referee}: {_rate(referee_cards)} kartona/meč (n={referee_n}), "
+            f"{_rate(referee_fouls)} faulova/meč (n={referee_foul_n})."
+        )
+        context_text = (
+            f"Kontekst: derbi {rivalry_text}; pritisak domaćin {_rate(home_pressure)}, "
+            f"gost {_rate(away_pressure)}; važnost {_rate(importance)}."
+        )
+
+        threshold_bits: list[str] = []
+        if thresholds.get("min_edge") is not None:
+            threshold_bits.append(f"edge ≥ {_pct(thresholds.get('min_edge'))}")
+        if thresholds.get("min_expected_value") is not None:
+            threshold_bits.append(f"EV ≥ {_pct(thresholds.get('min_expected_value'))}")
+        if thresholds.get("min_odds") is not None and thresholds.get("max_odds") is not None:
+            threshold_bits.append(
+                f"odds {_odd(thresholds.get('min_odds'))}–{_odd(thresholds.get('max_odds'))}"
+            )
+        if thresholds.get("min_referee_sample_size") is not None:
+            threshold_bits.append(
+                f"referee n ≥ {int(_number(thresholds.get('min_referee_sample_size')) or 0)}"
+            )
+        gate_text = (
+            "Gate: " + ", ".join(threshold_bits) + f"; odluka {decision_reason}."
+            if threshold_bits
+            else f"Odluka: {decision_reason}."
+        )
+
+        rendered[pick_id] = (
+            '<details class="pick-note"><summary title="Zašto je CardLab izabrao ovaj pik">📝</summary>'
+            '<div class="note-popover"><b>Zašto ovaj CardLab pik</b>'
+            f'<p>{escape(summary)}</p>'
+            f'<p>{escape(model_text)}</p>'
+            f'<p>{escape(referee_text)}</p>'
+            f'<p>{escape(context_text)}</p>'
+            f'<p>{escape(gate_text)}</p>'
+            '<p><b>Važno:</b> u aktuelnom CardLab modelu referee_card_rate je probability input; '
+            'faulovi, derbi, table pressure i match importance su audit/research kontekst, '
+            'ne ručno dodati koeficijenti u verovatnoću.</p>'
+            '</div></details>'
+        )
+    return rendered
+
+
 def _nav(view: str, lab_key: str) -> tuple[str, str]:
     analytics_lab = lab_key if lab_key in ANALYTICS_LABS else "goal"
     primary = (
@@ -324,7 +412,7 @@ def _active_rows_html(
     for row in rows:
         note_cell = (
             f'<td class="notes-cell">{notes.get(_pick_id(row), "—")}</td>'
-            if lab_key == "goal"
+            if lab_key in {"goal", "card"}
             else ""
         )
         rendered.append(
@@ -342,7 +430,7 @@ def _active_rows_html(
             + "</tr>"
         )
     if not rendered:
-        colspan = 10 if lab_key == "goal" else 9
+        colspan = 10 if lab_key in {"goal", "card"} else 9
         return f'<tr><td class="empty" colspan="{colspan}">No active picks.</td></tr>'
     return "".join(rendered)
 
@@ -362,7 +450,7 @@ def _history_rows_html(
         pnl_class = "positive" if (pnl or 0) > 0 else "negative" if (pnl or 0) < 0 else "neutral"
         note_cell = (
             f'<td class="notes-cell">{notes.get(_pick_id(row), "—")}</td>'
-            if lab_key == "goal"
+            if lab_key in {"goal", "card"}
             else ""
         )
         rendered.append(
@@ -378,7 +466,7 @@ def _history_rows_html(
             + "</tr>"
         )
     if not rendered:
-        colspan = 8 if lab_key == "goal" else 7
+        colspan = 8 if lab_key in {"goal", "card"} else 7
         return f'<tr><td class="empty" colspan="{colspan}">No settled picks yet.</td></tr>'
     return "".join(rendered)
 
@@ -423,7 +511,13 @@ def render_dashboard(
         row for row in metric_rows if _result(row) in {"WIN", "LOSS", "VOID"}
     )
 
-    notes = _goal_notes(repository, rows) if lab == "GOAL" else {}
+    notes = (
+        _goal_notes(repository, rows)
+        if lab == "GOAL"
+        else _card_notes(rows)
+        if lab == "CARD"
+        else {}
+    )
 
     wins = sum(_result(row) == "WIN" for row in metric_history)
     losses = sum(_result(row) == "LOSS" for row in metric_history)
@@ -464,7 +558,7 @@ def render_dashboard(
         '<div class="table"><table><thead><tr>'
         '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Model / market</th>'
         '<th>Odds</th><th>Edge</th><th>EV</th>'
-        + ('<th>Notes</th>' if lab_key == "goal" else '')
+        + ('<th>Notes</th>' if lab_key in {"goal", "card"} else '')
         + '<th>Status</th><th>Decision</th>'
         f'</tr></thead><tbody>{_active_rows_html(active, lab_key=lab_key, notes=notes)}</tbody></table></div>'
         '</section>'
@@ -473,7 +567,7 @@ def render_dashboard(
         f'<span>{len(history)} settled · WIN / LOSS / VOID</span></div>'
         '<div class="table"><table><thead><tr>'
         '<th>Match</th><th>Pick</th><th>Bookmaker</th><th>Odds</th>'
-        + ('<th>Notes</th>' if lab_key == "goal" else '')
+        + ('<th>Notes</th>' if lab_key in {"goal", "card"} else '')
         + '<th>Result</th><th>P/L</th><th>Settled</th>'
         f'</tr></thead><tbody>{_history_rows_html(history, lab_key=lab_key, currency=currency, notes=notes)}</tbody></table></div>'
         '</section>'
