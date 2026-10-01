@@ -848,6 +848,25 @@ def _corner_matchup_pressure_bucket(raw: dict[str, Any]) -> str:
     )
 
 
+def _corner_calibration_watch_bucket(row: dict[str, Any]) -> str:
+    """Research-only CornerLab regimes motivated by repeated line-calibration bias."""
+    selection = str(row.get("selection") or "").upper()
+    line = _number(row.get("line"))
+    model_probability = _number(row.get("model_probability"))
+
+    if selection == "UNDER" and line is not None and 7.5 <= line <= 10.5:
+        return "UNDER mid-lines 7.5–10.5"
+    if (
+        selection == "OVER"
+        and model_probability is not None
+        and 0.60 <= model_probability < 0.70
+    ):
+        return "OVER model P 60–70%"
+    if selection == "OVER" and line is not None and 12.5 <= line <= 13.5:
+        return "OVER high-lines 12.5–13.5"
+    return "—"
+
+
 def _watchlist_block(content: str, *, lab_key: str) -> str:
     if not content:
         return ""
@@ -855,7 +874,7 @@ def _watchlist_block(content: str, *, lab_key: str) -> str:
         "λ shape · price · trend · matchup · reliability"
         if lab_key == "goal"
         else
-        "model-line gap · price · pressure trend · matchup · reliability"
+        "calibration regimes · model-line gap · price · pressure trend · matchup · reliability"
     )
     return (
         '<section class="watchlist" id="analytics-watchlist">'
@@ -998,6 +1017,7 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                     breaks=(7, 8, 9, 10, 11, 12, 13),
                     digits=0,
                 ),
+                "corner_calibration_watch_bucket": _corner_calibration_watch_bucket(item),
                 "corner_model_line_gap_bucket": _signed_gap_bucket(
                     None if expected is None or line is None else expected - line
                 ),
@@ -1953,6 +1973,27 @@ def render_analytics(
     else:
         watchlist_content = (
             table(
+                "Calibration watch · line × price",
+                (
+                    "corner_calibration_watch_bucket",
+                    "selection",
+                    "line_bucket",
+                    "model_probability_bucket",
+                    "market_probability_bucket",
+                    "entry_odds_bucket",
+                ),
+                "watch_corner_calibration",
+                labels={
+                    "corner_calibration_watch_bucket": "Watch regime",
+                    "selection": "Selection",
+                    "line_bucket": "Line",
+                    "model_probability_bucket": "Model P",
+                    "market_probability_bucket": "Market P",
+                    "entry_odds_bucket": "Odds",
+                },
+                drop_missing=True,
+            )
+            + table(
                 "Model-line gap × price",
                 (
                     "market_key",
