@@ -1,4 +1,4 @@
-"""CardLab single-book 1xBet shadow pick engine."""
+"""CardLab 1xBet shadow picks driven by raw pre-match statistics only."""
 
 from __future__ import annotations
 
@@ -7,35 +7,30 @@ import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import isfinite
+from statistics import median
 from typing import Any
 
-from h2h.quantlab.card_lab.model import (
-    MODEL_NAME,
-    MODEL_VERSION,
-    total_cards_probability,
-)
 from h2h.quantlab.card_lab.settlement_contract import (
     API_FOOTBALL_CARDS_OVER_UNDER_BET_ID,
     card_settlement_contract_status,
 )
-from h2h.quantlab.reference_shadow_engine import (
-    ContextMarketDecision,
-    ReferenceEngineResult,
-)
+from h2h.quantlab.reference_shadow_engine import ContextMarketDecision, ReferenceEngineResult
 from h2h.quantlab.scope import card_corner_scope
 
 
-POLICY_VERSION = "CARDLAB_1XBET_POISSON_POLICY_V5_MARKET80"
+POLICY_VERSION = "CARDLAB_RAW_STATS_POLICY_V6_MARKET80"
+MODEL_NAME = "CardLab raw-stat consensus"
+MODEL_VERSION = "CARDLAB_RAW_STATS_V1"
 MARKET_KEY = "TOTAL_CARDS"
 BOOKMAKER_ID = 11
 PROVIDER_BET_ID = API_FOOTBALL_CARDS_OVER_UNDER_BET_ID
-MIN_EDGE = 0.03
-MIN_EXPECTED_VALUE = 0.03
-MIN_ODDS = 1.40
-MAX_ODDS = 4.00
+
 MAX_QUOTE_AGE_SECONDS = 13 * 60 * 60
 MIN_SECONDS_TO_KICKOFF = 15 * 60
-MIN_REFEREE_SAMPLE_SIZE = 5
+MIN_RAW_ANCHORS = 3
+MIN_DIRECTIONAL_SUPPORT = 0.60
+MIN_ABS_LINE_GAP = 0.35
+MIN_OBSERVED_HIT_RATE = 0.50
 FLAT_STAKE_MINOR = 10_000
 
 
@@ -45,6 +40,16 @@ def _utc(value: datetime, field: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field} must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def _number(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isfinite(parsed) else None
 
 
 def _fingerprint(payload: object) -> str:
@@ -103,8 +108,85 @@ def _supported_market(pair: dict[str, Any]) -> bool:
     return _is_half_line(float(pair["line"]))
 
 
+def _raw_line_signal(card_context: dict[str, Any], line: float) -> dict[str, Any] | None:
+    payload = card_context.get("feature_payload")
+    if not isinstance(payload, dict):
+        return None
+    raw_features = payload.get("raw_features")
+    raw_anchors = payload.get("raw_anchors")
+    raw_samples = payload.get("raw_samples")
+    if not isinstance(raw_features, dict) or not isinstance(raw_anchors, dict):
+        return None
+    anchors = {
+        str(key): number
+        for key, value in raw_anchors.items()
+        if (number := _number(value)) is not None
+    }
+    if len(anchors) < MIN_RAW_ANCHORS:
+        return None
+
+    consensus = float(median(anchors.values()))
+    if abs(consensus - line) <= 1e-9:
+        return None
+    selection = "OVER" if consensus > line else "UNDER"
+    directional_support = sum(
+        (value > line if selection == "OVER" else value < line)
+        for value in anchors.values()
+    ) / len(anchors)
+
+    rates: list[float] = []
+    sample_sizes: dict[str, int] = {}
+    if isinstance(raw_samples, dict):
+        for key, values in raw_samples.items():
+            if not isinstance(values, list):
+                continue
+            clean = [number for value in values if (number := _number(value)) is not None]
+            if not clean:
+                continue
+            hits = sum(
+                (value > line if selection == "OVER" else value < line)
+                for value in clean
+            )
+            rates.append(hits / len(clean))
+            sample_sizes[str(key)] = len(clean)
+    observed_hit_rate = None if not rates else sum(rates) / len(rates)
+    gap = consensus - line
+
+    reason: str | None = None
+    if abs(gap) < MIN_ABS_LINE_GAP:
+        reason = "RAW_LINE_GAP_TOO_SMALL"
+    elif directional_support < MIN_DIRECTIONAL_SUPPORT:
+        reason = "RAW_DIRECTION_SUPPORT_TOO_LOW"
+    elif observed_hit_rate is not None and observed_hit_rate < MIN_OBSERVED_HIT_RATE:
+        reason = "RAW_HISTORICAL_HIT_RATE_TOO_LOW"
+
+    support_probability = directional_support
+    if observed_hit_rate is not None:
+        support_probability = (directional_support + observed_hit_rate) / 2.0
+    support_probability = min(0.999999, max(0.000001, support_probability))
+    strength = abs(gap) * directional_support * (
+        1.0 if observed_hit_rate is None else (0.75 + 0.25 * observed_hit_rate)
+    )
+
+    return {
+        "selection": selection,
+        "line": line,
+        "consensus_cards": consensus,
+        "line_gap": gap,
+        "anchor_count": len(anchors),
+        "anchors": anchors,
+        "directional_support": directional_support,
+        "observed_hit_rate": observed_hit_rate,
+        "sample_sizes": sample_sizes,
+        "support_probability": support_probability,
+        "strength": strength,
+        "reason": reason,
+        "raw_features": raw_features,
+    }
+
+
 class CardLabShadowPickEngine:
-    """Evaluate only 1xBet Cards Over/Under against CardLab's own probability model."""
+    """Choose one CardLab exposure per fixture from raw-statistical consensus."""
 
     def __init__(self, repository: Any) -> None:
         self._repository = repository
@@ -192,42 +274,26 @@ class CardLabShadowPickEngine:
         now = _utc(decision_at, "decision_at")
         kickoff = _utc(fixture["kickoff_at"], "kickoff_at")
         if not card_corner_scope(**self._scope_kwargs(fixture)).allowed:
-            return self._fixture_pass(
-                fixture,
-                now,
-                reason="OUTSIDE_CARD_CORNER_SCOPE",
-            )
+            return self._fixture_pass(fixture, now, reason="OUTSIDE_CARD_CORNER_SCOPE")
 
         card_context = self._repository.latest_card_feature_snapshot(
             str(fixture["fixture_id"]),
             decision_at=now,
         )
         if card_context is None:
+            return self._fixture_pass(fixture, now, reason="NO_CARD_FEATURE_SNAPSHOT")
+
+        payload = card_context.get("feature_payload")
+        raw_anchors = payload.get("raw_anchors") if isinstance(payload, dict) else None
+        if not isinstance(raw_anchors, dict) or len(raw_anchors) < MIN_RAW_ANCHORS:
             return self._fixture_pass(
                 fixture,
                 now,
-                reason="NO_CARD_FEATURE_SNAPSHOT",
-            )
-        referee_card_rate = card_context.get("referee_card_rate")
-        referee_sample_size = int(card_context.get("referee_sample_size") or 0)
-        if referee_card_rate is None or referee_sample_size < MIN_REFEREE_SAMPLE_SIZE:
-            return self._fixture_pass(
-                fixture,
-                now,
-                reason="INSUFFICIENT_REFEREE_HISTORY",
+                reason="INSUFFICIENT_RAW_STAT_HISTORY",
                 details={
-                    "referee_card_rate": referee_card_rate,
-                    "referee_sample_size": referee_sample_size,
-                    "minimum_sample_size": MIN_REFEREE_SAMPLE_SIZE,
+                    "raw_anchor_count": 0 if not isinstance(raw_anchors, dict) else len(raw_anchors),
+                    "minimum_raw_anchors": MIN_RAW_ANCHORS,
                 },
-            )
-        expected_total_cards = float(referee_card_rate)
-        if not isfinite(expected_total_cards) or expected_total_cards <= 0:
-            return self._fixture_pass(
-                fixture,
-                now,
-                reason="INVALID_REFEREE_CARD_RATE",
-                details={"referee_card_rate": referee_card_rate},
             )
 
         pairs = tuple(
@@ -247,6 +313,7 @@ class CardLabShadowPickEngine:
             )
 
         evaluated: list[dict[str, Any]] = []
+        seconds_to_kickoff = (kickoff - now).total_seconds()
         for target in pairs:
             settlement_contract = card_settlement_contract_status(
                 provider_bet_id=int(target["provider_bet_id"]),
@@ -257,103 +324,90 @@ class CardLabShadowPickEngine:
                 continue
 
             line = float(target["line"])
+            signal = _raw_line_signal(card_context, line)
+            if signal is None:
+                continue
+            selection = str(signal["selection"])
+            companion_selection = "UNDER" if selection == "OVER" else "OVER"
+            selected = target["selections"][selection]
+            companion = target["selections"][companion_selection]
+            odds = float(selected["odds"])
+            companion_odds = float(companion["odds"])
             target_capture = _utc(target["captured_at"], "captured_at")
             quote_age = (now - target_capture).total_seconds()
-            seconds_to_kickoff = (kickoff - now).total_seconds()
-            for selection, companion_selection in (("OVER", "UNDER"), ("UNDER", "OVER")):
-                selected = target["selections"][selection]
-                companion = target["selections"][companion_selection]
-                odds = float(selected["odds"])
-                companion_odds = float(companion["odds"])
-                market_probability = _fair_probability(odds, companion_odds)
-                model_probability = total_cards_probability(
-                    referee_card_rate=expected_total_cards,
-                    selection=selection,
-                    line=line,
-                )
-                edge = model_probability - market_probability
-                expected_value = model_probability * odds - 1.0
 
-                reason: str | None = None
-                if seconds_to_kickoff < MIN_SECONDS_TO_KICKOFF:
-                    reason = "KICKOFF_TOO_CLOSE"
-                elif quote_age < 0:
-                    reason = "QUOTE_FROM_FUTURE"
-                elif quote_age > MAX_QUOTE_AGE_SECONDS:
-                    reason = "STALE_QUOTE"
-                elif not MIN_ODDS <= odds <= MAX_ODDS:
-                    reason = "ODDS_OUTSIDE_RANGE"
-                elif edge < MIN_EDGE:
-                    reason = "EDGE_BELOW_MINIMUM"
-                elif expected_value < MIN_EXPECTED_VALUE:
-                    reason = "EV_BELOW_MINIMUM"
+            reason = signal.get("reason")
+            if seconds_to_kickoff < MIN_SECONDS_TO_KICKOFF:
+                reason = "KICKOFF_TOO_CLOSE"
+            elif quote_age < 0:
+                reason = "QUOTE_FROM_FUTURE"
+            elif quote_age > MAX_QUOTE_AGE_SECONDS:
+                reason = "STALE_QUOTE"
 
-                evaluated.append(
-                    {
-                        "target": target,
-                        "selection": selection,
-                        "companion_selection": companion_selection,
-                        "selected": selected,
-                        "companion": companion,
-                        "odds": odds,
-                        "companion_odds": companion_odds,
-                        "market_probability": market_probability,
-                        "model_probability": model_probability,
-                        "edge": edge,
-                        "expected_value": expected_value,
-                        "quote_age_seconds": quote_age,
-                        "seconds_to_kickoff": seconds_to_kickoff,
-                        "settlement_contract": settlement_contract,
-                        "reason": reason,
-                    }
-                )
+            market_probability = _fair_probability(odds, companion_odds)
+            support_probability = float(signal["support_probability"])
+            # These remain compatibility/diagnostic ledger fields only. They never gate PICK.
+            edge = support_probability - market_probability
+            expected_value = support_probability * odds - 1.0
+
+            evaluated.append(
+                {
+                    "target": target,
+                    "signal": signal,
+                    "selection": selection,
+                    "companion_selection": companion_selection,
+                    "selected": selected,
+                    "companion": companion,
+                    "odds": odds,
+                    "companion_odds": companion_odds,
+                    "market_probability": market_probability,
+                    "model_probability": support_probability,
+                    "edge": edge,
+                    "expected_value": expected_value,
+                    "quote_age_seconds": quote_age,
+                    "seconds_to_kickoff": seconds_to_kickoff,
+                    "settlement_contract": settlement_contract,
+                    "reason": reason,
+                }
+            )
 
         if not evaluated:
             return self._fixture_pass(
                 fixture,
                 now,
-                reason="NO_CANONICAL_SETTLEMENT_CONTRACT",
+                reason="NO_RAW_STAT_LINE_SIGNAL",
+                details={"minimum_raw_anchors": MIN_RAW_ANCHORS},
             )
 
-        winners: dict[float, dict[str, Any]] = {}
-        for item in evaluated:
-            if item["reason"] is not None:
-                continue
-            line = float(item["target"]["line"])
-            current = winners.get(line)
-            score = (
-                float(item["expected_value"]),
-                float(item["edge"]),
-                float(item["odds"]),
-                1 if item["selection"] == "OVER" else 0,
+        eligible = [item for item in evaluated if item["reason"] is None]
+        canonical = (
+            max(
+                eligible,
+                key=lambda item: (
+                    float(item["signal"]["strength"]),
+                    float(item["signal"]["directional_support"]),
+                    abs(float(item["signal"]["line_gap"])),
+                    -float(item["target"]["line"]),
+                ),
             )
-            if current is None:
-                winners[line] = item
-                continue
-            current_score = (
-                float(current["expected_value"]),
-                float(current["edge"]),
-                float(current["odds"]),
-                1 if current["selection"] == "OVER" else 0,
-            )
-            if score > current_score:
-                winners[line] = item
+            if eligible
+            else None
+        )
 
         decisions_inserted = 0
         picks_inserted = 0
         for item in evaluated:
-            target = item["target"]
-            line = float(target["line"])
-            if item["reason"] is None:
-                if winners.get(line) is item:
-                    decision_value, reason = "PICK", "VALUE_THRESHOLD_PASSED"
-                else:
-                    decision_value, reason = "PASS", "BETTER_VALUE_AVAILABLE"
-            else:
+            if item["reason"] is not None:
                 decision_value, reason = "PASS", str(item["reason"])
+            elif item is canonical:
+                decision_value, reason = "PICK", "RAW_STAT_CONSENSUS_PICK"
+            else:
+                decision_value, reason = "PASS", "STRONGER_RAW_STAT_LINE_AVAILABLE"
 
+            target = item["target"]
             selected = item["selected"]
             companion = item["companion"]
+            signal = item["signal"]
             evidence = _fingerprint(
                 {
                     "fixture_id": fixture["fixture_id"],
@@ -364,8 +418,19 @@ class CardLabShadowPickEngine:
                         selected["market_observation_id"],
                         companion["market_observation_id"],
                     ],
-                    "referee_card_rate": expected_total_cards,
-                    "referee_sample_size": referee_sample_size,
+                    "raw_signal": {
+                        key: signal[key]
+                        for key in (
+                            "selection",
+                            "line",
+                            "consensus_cards",
+                            "line_gap",
+                            "anchor_count",
+                            "directional_support",
+                            "observed_hit_rate",
+                            "strength",
+                        )
+                    },
                 }
             )
             decision = ContextMarketDecision(
@@ -394,7 +459,7 @@ class CardLabShadowPickEngine:
                 provider_bet_name=str(target["provider_bet_name"]),
                 market_key=MARKET_KEY,
                 selection=str(item["selection"]),
-                line=line,
+                line=float(target["line"]),
                 selected_observation_id=str(selected["market_observation_id"]),
                 companion_observation_id=str(companion["market_observation_id"]),
                 reference_observation_id=None,
@@ -413,27 +478,30 @@ class CardLabShadowPickEngine:
                 reason=reason,
                 evidence_fingerprint=evidence,
                 details={
-                    "companion_selection": item["companion_selection"],
-                    "target_quote_age_seconds": item["quote_age_seconds"],
-                    "seconds_to_kickoff": item["seconds_to_kickoff"],
                     "card_context": card_context,
-                    "expected_total_cards": expected_total_cards,
-                    "probability_model": {
-                        "name": MODEL_NAME,
-                        "version": MODEL_VERSION,
-                        "distribution": "Poisson",
-                        "lambda_source": "referee_card_rate",
-                        "reference_bookmaker_used": False,
+                    "raw_signal": signal,
+                    "raw_stat_policy": {
+                        "price_independent_selection": True,
+                        "ev_is_pick_gate": False,
+                        "edge_is_pick_gate": False,
+                        "odds_is_pick_gate": False,
+                        "one_pick_per_fixture": True,
+                    },
+                    "price_diagnostics": {
+                        "market_probability": item["market_probability"],
+                        "raw_support_probability": item["model_probability"],
+                        "edge": item["edge"],
+                        "expected_value": item["expected_value"],
+                        "used_for_selection": False,
                     },
                     "settlement_contract": item["settlement_contract"],
                     "thresholds": {
-                        "min_edge": MIN_EDGE,
-                        "min_expected_value": MIN_EXPECTED_VALUE,
-                        "min_odds": MIN_ODDS,
-                        "max_odds": MAX_ODDS,
+                        "minimum_raw_anchors": MIN_RAW_ANCHORS,
+                        "minimum_directional_support": MIN_DIRECTIONAL_SUPPORT,
+                        "minimum_abs_line_gap": MIN_ABS_LINE_GAP,
+                        "minimum_observed_hit_rate": MIN_OBSERVED_HIT_RATE,
                         "max_quote_age_seconds": MAX_QUOTE_AGE_SECONDS,
                         "min_seconds_to_kickoff": MIN_SECONDS_TO_KICKOFF,
-                        "min_referee_sample_size": MIN_REFEREE_SAMPLE_SIZE,
                     },
                 },
             )
