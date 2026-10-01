@@ -24,6 +24,7 @@ from h2h.quantlab.goal_analytics import (
     goal_pick_metrics,
 )
 from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
+from h2h.quantlab.note_dialog import NOTE_DIALOG_CSS, NOTE_DIALOG_HTML
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
 
@@ -374,6 +375,7 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .note-popover h4{{margin:12px 0 5px;font-size:11px}}
 .note-popover ul{{margin:5px 0 8px;padding-left:18px;color:#b8c0c7;font-size:11px;line-height:1.55;white-space:normal}}
 .note-detail-link{{display:inline-block;margin-top:8px;color:#9bc7ff;font-weight:900;font-size:11px}}
+{NOTE_DIALOG_CSS}
 .empty{{text-align:center;padding:34px!important;color:var(--muted)}}
 .analytics-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
 .analytics-section{{margin:22px 2px 10px;padding-top:5px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#c8d0d7}}
@@ -404,7 +406,7 @@ footer{{margin-top:14px;color:#7f878e;font-size:11px;line-height:1.6}}
 {secondary}
 {body}
 <footer>QuantLab remains isolated from production registration and bankroll. This UI is read-only. Times are Europe/Belgrade.</footer>
-</main></body></html>"""
+</main>{NOTE_DIALOG_HTML}</body></html>"""
 
 
 def _active_rows_html(
