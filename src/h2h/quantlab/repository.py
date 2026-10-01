@@ -1785,6 +1785,11 @@ class PostgreSQLQuantLabRepository:
                 " AND s.home_red_cards IS NOT NULL "
                 " AND s.away_red_cards IS NOT NULL"
                 ") "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_event_observations ce "
+                " WHERE ce.fixture_id = c.fixture_id "
+                " AND ce.settlement_rule_version = 'CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1'"
+                ") "
                 "AND (capture.captured_at IS NULL "
                 " OR capture.captured_at <= %s - (%s * interval '1 second')) "
                 "ORDER BY (capture.captured_at IS NOT NULL), c.kickoff_at DESC LIMIT %s",
@@ -1798,6 +1803,52 @@ class PostgreSQLQuantLabRepository:
                     retry_after_seconds,
                     limit,
                 ),
+            )
+            return _row_dicts(cursor)
+
+    def referee_card_event_backfill_candidates(
+        self, referee: str, *, decision_at: datetime, limit: int = 12
+    ) -> tuple[dict[str, Any], ...]:
+        """Find finished referee matches whose card totals need event evidence."""
+        if not referee.strip():
+            return ()
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH context AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, kickoff_at "
+                " FROM quantlab_fixture_context_observations "
+                " WHERE lower(btrim(split_part(referee, ',', 1))) = "
+                " lower(btrim(split_part(%s, ',', 1))) AND available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, context_observation_id DESC"
+                ") "
+                "SELECT c.fixture_id, f.provider_fixture_id::BIGINT AS provider_fixture_id, "
+                "s.home_yellow_cards, s.away_yellow_cards "
+                "FROM context c "
+                "JOIN quantlab_fixtures f ON f.fixture_id = c.fixture_id "
+                "JOIN LATERAL ("
+                " SELECT o.provider_status FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = c.fixture_id AND o.captured_at <= %s "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "JOIN LATERAL ("
+                " SELECT s.home_yellow_cards, s.away_yellow_cards, "
+                " s.home_red_cards, s.away_red_cards "
+                " FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = c.fixture_id AND s.available_at <= %s "
+                " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
+                ") s ON TRUE "
+                "WHERE c.kickoff_at < %s AND latest.provider_status IN ('FT', 'AET', 'PEN') "
+                "AND s.home_yellow_cards IS NOT NULL AND s.away_yellow_cards IS NOT NULL "
+                "AND (s.home_red_cards IS NULL OR s.away_red_cards IS NULL) "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM quantlab_card_event_observations ce "
+                " WHERE ce.fixture_id = c.fixture_id "
+                " AND ce.settlement_rule_version = 'CARDLAB_1XBET_TOTAL_CARDS_SETTLEMENT_V1'"
+                ") "
+                "ORDER BY c.kickoff_at DESC LIMIT %s",
+                (referee, decision_at, decision_at, decision_at, decision_at, limit),
             )
             return _row_dicts(cursor)
 
@@ -3453,9 +3504,15 @@ class PostgreSQLQuantLabRepository:
                 " home_red_cards, away_red_cards, home_second_yellow_cards, away_second_yellow_cards "
                 " FROM quantlab_match_statistics_observations WHERE available_at <= %s "
                 " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                "), events AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, total_cards_1xbet "
+                " FROM quantlab_card_event_observations WHERE available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, card_event_observation_id DESC"
                 ") "
                 "SELECT context.referee, context.kickoff_at, "
-                "GREATEST(context.available_at, stats.available_at) AS available_at, "
+                "GREATEST(context.available_at, stats.available_at, "
+                " COALESCE(events.available_at, stats.available_at)) AS available_at, "
+                "events.total_cards_1xbet AS card_total, "
                 "CASE WHEN stats.home_yellow_cards IS NULL OR stats.away_yellow_cards IS NULL "
                 " THEN NULL ELSE stats.home_yellow_cards + stats.away_yellow_cards END AS yellow_cards, "
                 "CASE WHEN stats.home_red_cards IS NULL OR stats.away_red_cards IS NULL "
@@ -3465,9 +3522,10 @@ class PostgreSQLQuantLabRepository:
                 "CASE WHEN stats.home_fouls IS NULL OR stats.away_fouls IS NULL "
                 " THEN NULL ELSE stats.home_fouls + stats.away_fouls END AS fouls "
                 "FROM context JOIN stats USING (fixture_id) "
+                "LEFT JOIN events USING (fixture_id) "
                 "WHERE context.kickoff_at < %s "
                 "ORDER BY context.kickoff_at DESC LIMIT %s",
-                (referee, decision_at, decision_at, decision_at, limit),
+                (referee, decision_at, decision_at, decision_at, decision_at, limit),
             )
             return _row_dicts(cursor)
 

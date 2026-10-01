@@ -13,8 +13,8 @@ from h2h.quantlab.card_lab.rivalry import (
 from h2h.quantlab.card_lab.referee import referee_key
 
 
-CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V1"
-CARD_COUNT_RULE_VERSION = "CARD_COUNT_RULE_V1"
+CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V2"
+CARD_COUNT_RULE_VERSION = "CARD_COUNT_RULE_V2"
 TABLE_PRESSURE_VERSION = "TABLE_PRESSURE_V1"
 MATCH_IMPORTANCE_VERSION = "MATCH_IMPORTANCE_V1"
 RIVALRY_REGISTRY_RELEASED_AT = datetime(2026, 9, 26, 1, 0, tzinfo=UTC)
@@ -92,6 +92,7 @@ def referee_rates(
     """Use only matches completed and observed before decision_at."""
     decision = _utc(decision_at, "decision_at")
     card_totals: list[float] = []
+    event_samples = 0
     foul_totals: list[float] = []
     used_available_at: list[datetime] = []
     for row in history:
@@ -109,9 +110,15 @@ def referee_rates(
         yellow = _number(row.get("yellow_cards"))
         red = _number(row.get("red_cards"))
         second_yellow = _number(row.get("second_yellow_cards"))
+        event_total = _number(row.get("card_total"))
         fouls = _number(row.get("fouls"))
-        if yellow is not None and red is not None:
-            total = yellow + red + (0.0 if second_yellow is None else second_yellow)
+        if event_total is not None or (yellow is not None and red is not None):
+            total = (
+                event_total
+                if event_total is not None
+                else yellow + red + (0.0 if second_yellow is None else second_yellow)
+            )
+            event_samples += int(event_total is not None)
             card_totals.append(total)
             used_available_at.append(available_utc)
         if fouls is not None:
@@ -133,15 +140,16 @@ def referee_rates(
     )
     card = FeatureDatum(
         card_rate,
-        "quantlab_completed_fixture_statistics",
+        "quantlab_card_events_and_fixture_statistics",
         latest,
         CARD_COUNT_RULE_VERSION,
         card_quality,
         {
             "sample_size": len(card_totals),
+            "event_samples": event_samples,
             "count_rule": (
-                "one per provider-reported yellow, red and second-yellow; "
-                "second-yellow contributes only when separately reported"
+                "verified 1xBet event total where available; otherwise provider-reported "
+                "yellow, red and separately reported second-yellow"
             ),
         },
     )

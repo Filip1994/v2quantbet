@@ -746,11 +746,11 @@ class _DashboardRepo:
                 "away_table_pressure": 0.7,
                 "match_importance": 0.81,
                 "available_at": NOW,
-                "feature_version": "CARDLAB_FEATURES_V1",
+                "feature_version": "CARDLAB_FEATURES_V2",
                 "feature_payload": {
                     "referee_card_rate": {
                         "source": "quantlab_completed_fixture_statistics",
-                        "version": "CARD_COUNT_RULE_V1",
+                        "version": "CARD_COUNT_RULE_V2",
                         "available_at": NOW.isoformat(),
                     },
                     "match_importance": {

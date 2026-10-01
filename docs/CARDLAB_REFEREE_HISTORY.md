@@ -12,6 +12,6 @@ The default scan window is 1,100 days and the collector processes 12 previously 
 - `QUANTBET_QUANTLAB_CARD_REFEREE_SCOPES_PER_CYCLE` (default `24`)
 - `QUANTBET_QUANTLAB_CARD_REFEREE_STATS_PER_CYCLE` (default `128`)
 
-A statistics observation with missing yellow or red cards does not satisfy the referee sample requirement. Targeted backfill can retry it after `QUANTBET_QUANTLAB_CARD_REFEREE_STATS_RETRY_SECONDS` (default one day), and prioritizes fixtures with no previous statistics request before retries.
+A statistics observation with missing yellow or red cards does not by itself satisfy the referee sample requirement. For matches where the provider supplies both yellow counts but omits a red count, the collector also fetches the card event timeline. It accepts the canonical 1xBet card total only when the event yellow count agrees with fixture statistics. An event backed match then counts toward the referee sample. Targeted statistics backfill can retry other incomplete matches after `QUANTBET_QUANTLAB_CARD_REFEREE_STATS_RETRY_SECONDS` (default one day), and prioritizes fixtures with no previous statistics request before retries. The statistics cycle cap also bounds event requests separately.
 
 To check progress, count rows in `quantlab_referee_day_scans` and group `quantlab_card_feature_snapshots` by `referee_sample_size`. CardLab V5's decision reasons should move beyond `INSUFFICIENT_REFEREE_HISTORY` only when snapshots reach at least five complete referee matches. More history does not guarantee a value pick.

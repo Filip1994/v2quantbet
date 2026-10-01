@@ -65,6 +65,67 @@ def test_team_history_fixture_payload_yields_referee_context_without_extra_call(
     assert all(row.provider_status == "FT" for row in rows)
 
 
+def test_verified_card_events_fill_missing_red_statistics() -> None:
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    class Repo:
+        def __init__(self) -> None:
+            self.saved = None
+
+        def save_card_event_observation(self, observation):
+            self.saved = observation
+            return True
+
+    class Provider:
+        def fetch_events(self, _fixture_id):
+            return {
+                "errors": [],
+                "response": [
+                    {
+                        "type": "Card",
+                        "detail": "Yellow Card",
+                        "time": {"elapsed": 79, "extra": None},
+                        "player": {"id": 39165},
+                        "team": {"id": 10},
+                    }
+                ],
+            }
+
+    repo = Repo()
+    runtime = QuantLabRuntime(repo, Provider(), clock=lambda: NOW)
+    fixture = {
+        "fixture_id": "api-football:1494763",
+        "provider_fixture_id": 1494763,
+        "home_yellow_cards": 0,
+        "away_yellow_cards": 1,
+    }
+    assert runtime._capture_referee_card_events(fixture, NOW)
+    assert repo.saved.total_cards_1xbet == 1
+    assert runtime._card_history_sample_size(({"card_total": 1, "red_cards": None},)) == 1
+
+    repo.saved = None
+    fixture["away_yellow_cards"] = 2
+    assert not runtime._capture_referee_card_events(fixture, NOW)
+    assert repo.saved is None
+
+    card, _foul, count, _ = referee_rates(
+        ({
+            "referee": "Ref A",
+            "kickoff_at": NOW.replace(day=26),
+            "available_at": NOW,
+            "card_total": 1,
+            "yellow_cards": 1,
+            "red_cards": None,
+            "fouls": 10,
+        },),
+        referee="Ref A",
+        decision_at=NOW,
+    )
+    assert count == 1
+    assert card.value == 1
+    assert card.components["event_samples"] == 1
+
+
 def _league_history_payload(count: int = 10) -> dict:
     response = []
     for index in range(count):
@@ -158,6 +219,9 @@ def test_targeted_referee_bootstrap_uses_one_scope_call_and_stops_at_target() ->
                 }
                 for index in range(12)
             )
+
+        def referee_card_event_backfill_candidates(self, *_args, **_kwargs):
+            return ()
 
     class Provider:
         def __init__(self) -> None:
@@ -330,6 +394,9 @@ def test_referee_bootstrap_checks_prior_seasons_with_wider_date_window() -> None
             self.captures.append(kwargs)
 
         def referee_statistics_backfill_candidates(self, *_args, **_kwargs):
+            return ()
+
+        def referee_card_event_backfill_candidates(self, *_args, **_kwargs):
             return ()
 
     class Provider:
