@@ -3628,20 +3628,29 @@ class PostgreSQLQuantLabRepository:
         competition_name: str,
         *,
         before: datetime,
+        league_id: int | None = None,
+        season: int | None = None,
         limit: int = 400,
     ) -> tuple[dict[str, Any], ...]:
-        """Recent same-competition card/foul statistics for league baselines."""
-        if not competition_name.strip():
+        """Recent same-league card/foul statistics for a leakage-safe baseline."""
+        if not competition_name.strip() and league_id is None:
             return ()
         if limit <= 0:
             raise ValueError("limit must be positive")
+        if league_id is not None and league_id <= 0:
+            raise ValueError("league_id must be positive when supplied")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "WITH meta AS ("
-                " SELECT DISTINCT ON (fixture_id) fixture_id, home_team_id, away_team_id, "
-                " competition_name, kickoff_at "
+                " SELECT DISTINCT ON (fixture_id) fixture_id, league_id, season, "
+                " home_team_id, away_team_id, competition_name, kickoff_at "
                 " FROM quantlab_fixture_observations "
-                " WHERE kickoff_at < %s AND lower(competition_name) = lower(%s) "
+                " WHERE kickoff_at < %s "
+                " AND ("
+                "   (%s IS NOT NULL AND league_id = %s) "
+                "   OR (%s IS NULL AND lower(competition_name) = lower(%s))"
+                " ) "
+                " AND (%s IS NULL OR season = %s) "
                 " ORDER BY fixture_id, captured_at DESC, fixture_observation_id DESC"
                 "), stats AS ("
                 " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
@@ -3657,7 +3666,17 @@ class PostgreSQLQuantLabRepository:
                 "stats.home_second_yellow_cards, stats.away_second_yellow_cards "
                 "FROM meta JOIN stats USING (fixture_id) "
                 "ORDER BY meta.kickoff_at DESC LIMIT %s",
-                (before, competition_name, before, limit),
+                (
+                    before,
+                    league_id,
+                    league_id,
+                    league_id,
+                    competition_name,
+                    season,
+                    season,
+                    before,
+                    limit,
+                ),
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
