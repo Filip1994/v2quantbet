@@ -3523,6 +3523,10 @@ class PostgreSQLQuantLabRepository:
                 "GREATEST(context.available_at, stats.available_at, "
                 " COALESCE(events.available_at, stats.available_at)) AS available_at, "
                 "events.total_cards_1xbet AS card_total, "
+                "stats.home_fouls, stats.away_fouls, "
+                "stats.home_yellow_cards, stats.away_yellow_cards, "
+                "stats.home_red_cards, stats.away_red_cards, "
+                "stats.home_second_yellow_cards, stats.away_second_yellow_cards, "
                 "CASE WHEN stats.home_yellow_cards IS NULL OR stats.away_yellow_cards IS NULL "
                 " THEN NULL ELSE stats.home_yellow_cards + stats.away_yellow_cards END AS yellow_cards, "
                 "CASE WHEN stats.home_red_cards IS NULL OR stats.away_red_cards IS NULL "
@@ -3538,6 +3542,189 @@ class PostgreSQLQuantLabRepository:
                 (referee, decision_at, decision_at, decision_at, decision_at, limit),
             )
             return _row_dicts(cursor)
+
+    def card_team_history(
+        self,
+        home_team_id: int,
+        away_team_id: int,
+        *,
+        before: datetime,
+        limit: int = 120,
+    ) -> tuple[dict[str, Any], ...]:
+        """Timestamp-safe recent statistics for both CardLab teams."""
+        if home_team_id <= 0 or away_team_id <= 0 or home_team_id == away_team_id:
+            raise ValueError("card team IDs must be distinct positive integers")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH meta AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, league_id, season, "
+                " home_team_id, away_team_id, home_team, away_team, competition_name, "
+                " country, competition_type, kickoff_at "
+                " FROM quantlab_fixture_observations "
+                " WHERE kickoff_at < %s "
+                " AND (home_team_id IN (%s, %s) OR away_team_id IN (%s, %s)) "
+                " ORDER BY fixture_id, captured_at DESC, fixture_observation_id DESC"
+                "), stats AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
+                " home_fouls, away_fouls, home_yellow_cards, away_yellow_cards, "
+                " home_red_cards, away_red_cards, home_second_yellow_cards, away_second_yellow_cards, "
+                " home_ball_possession, away_ball_possession "
+                " FROM quantlab_match_statistics_observations "
+                " WHERE available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT meta.*, stats.available_at, stats.home_fouls, stats.away_fouls, "
+                "stats.home_yellow_cards, stats.away_yellow_cards, "
+                "stats.home_red_cards, stats.away_red_cards, "
+                "stats.home_second_yellow_cards, stats.away_second_yellow_cards, "
+                "stats.home_ball_possession, stats.away_ball_possession "
+                "FROM meta JOIN stats USING (fixture_id) "
+                "ORDER BY meta.kickoff_at DESC LIMIT %s",
+                (
+                    before,
+                    home_team_id,
+                    away_team_id,
+                    home_team_id,
+                    away_team_id,
+                    before,
+                    limit,
+                ),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def card_league_history(
+        self,
+        competition_name: str,
+        *,
+        before: datetime,
+        limit: int = 400,
+    ) -> tuple[dict[str, Any], ...]:
+        """Recent same-competition card/foul statistics for league baselines."""
+        if not competition_name.strip():
+            return ()
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH meta AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, home_team_id, away_team_id, "
+                " competition_name, kickoff_at "
+                " FROM quantlab_fixture_observations "
+                " WHERE kickoff_at < %s AND lower(competition_name) = lower(%s) "
+                " ORDER BY fixture_id, captured_at DESC, fixture_observation_id DESC"
+                "), stats AS ("
+                " SELECT DISTINCT ON (fixture_id) fixture_id, available_at, "
+                " home_fouls, away_fouls, home_yellow_cards, away_yellow_cards, "
+                " home_red_cards, away_red_cards, home_second_yellow_cards, away_second_yellow_cards "
+                " FROM quantlab_match_statistics_observations "
+                " WHERE available_at <= %s "
+                " ORDER BY fixture_id, available_at DESC, statistics_observation_id DESC"
+                ") "
+                "SELECT meta.*, stats.available_at, stats.home_fouls, stats.away_fouls, "
+                "stats.home_yellow_cards, stats.away_yellow_cards, "
+                "stats.home_red_cards, stats.away_red_cards, "
+                "stats.home_second_yellow_cards, stats.away_second_yellow_cards "
+                "FROM meta JOIN stats USING (fixture_id) "
+                "ORDER BY meta.kickoff_at DESC LIMIT %s",
+                (before, competition_name, before, limit),
+            )
+            rows = _row_dicts(cursor)
+        return tuple(reversed(rows))
+
+    def card_market_context(
+        self,
+        fixture_id: str,
+        *,
+        decision_at: datetime,
+    ) -> dict[str, Any]:
+        """Prematch game-state prices used only as CardLab context, never as value gates."""
+        result: dict[str, Any] = {
+            "home_win_fair_probability": None,
+            "draw_fair_probability": None,
+            "away_win_fair_probability": None,
+            "favorite_fair_probability": None,
+            "one_x_two_balance": None,
+            "goals_over_2_5_fair_probability": None,
+            "btts_yes_fair_probability": None,
+            "favorite_handicap_line": None,
+        }
+
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT raw_selection, odds, captured_at "
+                "FROM quantlab_market_observations "
+                "WHERE fixture_id = %s AND bookmaker_id = 11 AND provider_bet_id = 1 "
+                "AND captured_at <= %s "
+                "ORDER BY captured_at DESC, market_observation_id DESC LIMIT 12",
+                (fixture_id, decision_at),
+            )
+            winner_rows = _row_dicts(cursor)
+            cursor.execute(
+                "SELECT provider_bet_name, raw_selection, parsed_line, odds, captured_at "
+                "FROM quantlab_market_observations "
+                "WHERE fixture_id = %s AND bookmaker_id = 11 "
+                "AND lower(provider_bet_name) LIKE '%%handicap%%' "
+                "AND parsed_line IS NOT NULL AND captured_at <= %s "
+                "ORDER BY captured_at DESC, market_observation_id DESC LIMIT 20",
+                (fixture_id, decision_at),
+            )
+            handicap_rows = _row_dicts(cursor)
+
+        if winner_rows:
+            latest_capture = winner_rows[0]["captured_at"]
+            prices: dict[str, float] = {}
+            for row in winner_rows:
+                if row["captured_at"] != latest_capture:
+                    continue
+                key = str(row.get("raw_selection") or "").strip().casefold()
+                if key in {"home", "draw", "away"}:
+                    prices[key] = float(row["odds"])
+            if set(prices) == {"home", "draw", "away"}:
+                inverses = {key: 1.0 / value for key, value in prices.items()}
+                total = sum(inverses.values())
+                fair = {key: value / total for key, value in inverses.items()}
+                result.update(
+                    {
+                        "home_win_fair_probability": fair["home"],
+                        "draw_fair_probability": fair["draw"],
+                        "away_win_fair_probability": fair["away"],
+                        "favorite_fair_probability": max(fair["home"], fair["away"]),
+                        "one_x_two_balance": 1.0 - abs(fair["home"] - fair["away"]),
+                    }
+                )
+
+        for pair in self.goal_market_pairs(fixture_id, decision_at=decision_at):
+            selections = pair.get("selections") or {}
+            market_key = str(pair.get("market_key") or "")
+            preferred = int(pair.get("bookmaker_id") or 0) == 11
+            if market_key == "OU_25" and {"OVER", "UNDER"} <= set(selections):
+                over = float(selections["OVER"]["odds"])
+                under = float(selections["UNDER"]["odds"])
+                raw_over, raw_under = 1.0 / over, 1.0 / under
+                value = raw_over / (raw_over + raw_under)
+                if result["goals_over_2_5_fair_probability"] is None or preferred:
+                    result["goals_over_2_5_fair_probability"] = value
+            elif market_key == "BTTS" and {"YES", "NO"} <= set(selections):
+                yes = float(selections["YES"]["odds"])
+                no = float(selections["NO"]["odds"])
+                raw_yes, raw_no = 1.0 / yes, 1.0 / no
+                value = raw_yes / (raw_yes + raw_no)
+                if result["btts_yes_fair_probability"] is None or preferred:
+                    result["btts_yes_fair_probability"] = value
+
+        if handicap_rows:
+            latest_capture = handicap_rows[0]["captured_at"]
+            current = [row for row in handicap_rows if row["captured_at"] == latest_capture]
+            if current:
+                favorite = min(current, key=lambda row: float(row["odds"]))
+                try:
+                    result["favorite_handicap_line"] = float(favorite["parsed_line"])
+                except (TypeError, ValueError):
+                    pass
+        return result
 
     def save_card_feature_snapshot(self, item: Any) -> str:
         snapshot_id = _identifier(
