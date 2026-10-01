@@ -1912,6 +1912,8 @@ def _bucket_pick_table(
         "odds",
         "edge",
         "expected_value",
+        "card_raw_consensus_bucket",
+        "card_raw_support_bucket",
         "result",
         "pnl_minor",
         "settled_at",
@@ -1925,16 +1927,30 @@ def _bucket_pick_table(
     selected = _sort_pick_rows(selected, key=sort_key, direction=sort_dir)
 
     header_specs = (
-        ("Match", "match", "asc"),
-        ("Pick", "pick", "asc"),
-        ("Bookmaker", "bookmaker_name", "asc"),
-        ("Model P", "model_probability", "desc"),
-        ("Odds", "odds", "desc"),
-        ("Edge", "edge", "desc"),
-        ("EV", "expected_value", "desc"),
-        ("Result", "result", "asc"),
-        ("P/L", "pnl_minor", "desc"),
-        ("Settled", "settled_at", "desc"),
+        (
+            ("Match", "match", "asc"),
+            ("Pick", "pick", "asc"),
+            ("Bookmaker", "bookmaker_name", "asc"),
+            ("Raw total", "card_raw_consensus_bucket", "desc"),
+            ("Support", "card_raw_support_bucket", "desc"),
+            ("Odds", "odds", "desc"),
+            ("Result", "result", "asc"),
+            ("P/L", "pnl_minor", "desc"),
+            ("Settled", "settled_at", "desc"),
+        )
+        if lab_key == "card"
+        else (
+            ("Match", "match", "asc"),
+            ("Pick", "pick", "asc"),
+            ("Bookmaker", "bookmaker_name", "asc"),
+            ("Model P", "model_probability", "desc"),
+            ("Odds", "odds", "desc"),
+            ("Edge", "edge", "desc"),
+            ("EV", "expected_value", "desc"),
+            ("Result", "result", "asc"),
+            ("P/L", "pnl_minor", "desc"),
+            ("Settled", "settled_at", "desc"),
+        )
     )
     headers = "".join(
         _sortable_th(
@@ -1956,15 +1972,25 @@ def _bucket_pick_table(
         pnl_raw = row.get("pnl_minor")
         pnl = None if pnl_raw is None else int(pnl_raw)
         pnl_class = "positive" if (pnl or 0) > 0 else "negative" if (pnl or 0) < 0 else "neutral"
+        if lab_key == "card":
+            value_cells = (
+                f"<td>{escape(str(row.get('card_raw_consensus_bucket') or '—'))}</td>"
+                + f"<td>{escape(str(row.get('card_raw_support_bucket') or '—'))}</td>"
+                + f"<td>{_odd(row.get('odds'))}</td>"
+            )
+        else:
+            value_cells = (
+                f"<td>{_pct(row.get('model_probability'))}</td>"
+                + f"<td>{_odd(row.get('odds'))}</td>"
+                + f"<td>{_pct(row.get('edge'), signed=True)}</td>"
+                + f"<td>{_pct(row.get('expected_value'), signed=True)}</td>"
+            )
         rendered.append(
             "<tr>"
             + _match_html(row, lab_key=lab_key)
             + f'<td><b>{escape(_pick_text(row))}</b></td>'
             + f"<td>{_bookmaker(row.get('bookmaker_name'))}</td>"
-            + f"<td>{_pct(row.get('model_probability'))}</td>"
-            + f"<td>{_odd(row.get('odds'))}</td>"
-            + f"<td>{_pct(row.get('edge'), signed=True)}</td>"
-            + f"<td>{_pct(row.get('expected_value'), signed=True)}</td>"
+            + value_cells
             + f"<td>{_result_badge(result)}</td>"
             + f'<td class="{pnl_class}">{_money(pnl, currency)}</td>'
             + f"<td>{_time(row.get('settled_at'))}</td>"
@@ -1972,7 +1998,7 @@ def _bucket_pick_table(
         )
     if not rendered:
         rendered.append(
-            '<tr><td class="empty" colspan="10">No settled picks match this bucket.</td></tr>'
+            f'<tr><td class="empty" colspan="{9 if lab_key == "card" else 10}">No settled picks match this bucket.</td></tr>'
         )
     clear_href = _analytics_href(
         params,
