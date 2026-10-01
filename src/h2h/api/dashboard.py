@@ -922,38 +922,38 @@ class DashboardService:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>QuantBet · Operations</title>
 <style>
-:root{{--bg:#070b0d;--panel:#101719;--panel2:#151f22;--line:#263337;--text:#eef4f1;
---muted:#899891;--blue:#74a7ff;--green:#45d58b;--pitch:#38b978;--pitch-soft:#143326;--red:#fb7185;--amber:#f5b942}}
+:root{{--bg:#07121d;--panel:#0d1a28;--panel2:#13263a;--line:#25445d;--text:#f3f8fb;
+--muted:#8fa7b8;--blue:#55b8ff;--cyan:#71cfff;--yellow:#ffd31a;--green:#45d58b;--red:#fb7185;--amber:#ffd05a}}
 *{{box-sizing:border-box}}body{{margin:0;background:
-radial-gradient(circle at 78% -10%,rgba(56,185,120,.13),transparent 31%),
-linear-gradient(180deg,#0a1111 0,#070b0d 270px,var(--bg) 100%);color:var(--text);font:13px/1.45
+radial-gradient(circle at 78% -10%,rgba(53,146,224,.18),transparent 33%),
+linear-gradient(180deg,#0b1d2d 0,#07121d 280px,var(--bg) 100%);color:var(--text);font:13px/1.45
 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}}.shell{{max-width:1800px;margin:auto;padding:26px 24px 34px}}
-header{{position:relative;display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:20px;padding:4px 0 16px;border-bottom:1px solid #22302d}}
-header:before{{content:"";position:absolute;left:0;bottom:-1px;width:150px;height:2px;background:linear-gradient(90deg,var(--pitch),transparent)}}
-.eyebrow,.section-label{{color:#78d6a8;font-size:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}}
+header{{position:relative;display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:20px;padding:4px 0 16px;border-bottom:1px solid #1f3c54}}
+header:before{{content:"";position:absolute;left:0;bottom:-1px;width:150px;height:2px;background:linear-gradient(90deg,var(--yellow),var(--blue),transparent)}}
+.eyebrow,.section-label{{color:#71cfff;font-size:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}}
 h1{{font-size:29px;letter-spacing:-.035em;margin:3px 0 2px;font-weight:850}}.subtitle{{color:var(--muted);font-size:12px}}
-.live{{display:flex;align-items:center;gap:8px;color:#9dafaa;font-size:11px;padding:7px 10px;border:1px solid #263731;background:#0d1514;border-radius:999px}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(69,213,139,.09)}}
+.live{{display:flex;align-items:center;gap:8px;color:#a9c3d5;font-size:11px;padding:7px 10px;border:1px solid #244a66;background:#0a1a28;border-radius:999px}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(69,213,139,.09)}}
 .kpis{{display:grid;grid-template-columns:repeat(8,minmax(140px,1fr));gap:9px;margin-bottom:12px}}
 .kpi{{background:var(--panel);border:1px solid var(--line);padding:13px 14px;min-height:76px}}
 .kpi span{{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}}.kpi strong{{font-size:17px;font-variant-numeric:tabular-nums}}
 .kpi.primary{{border-top:2px solid var(--blue)}}.kpi.value strong,.value strong{{color:var(--green)}}.kpi.warn strong{{color:var(--amber)}}
 .kpi.pnl-positive strong{{color:var(--green)}}.kpi.pnl-negative strong{{color:var(--red)}}.kpi.pnl-zero strong{{color:var(--muted)}}
-.overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:linear-gradient(180deg,#111a1c 0,var(--panel) 100%);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.14)}}
+.overview{{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}}.panel{{background:linear-gradient(180deg,#102238 0,var(--panel) 100%);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.14)}}
 .overview .panel:first-child{{display:flex;flex-direction:column}}
-.panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid #273538;background:linear-gradient(90deg,rgba(56,185,120,.055),transparent 34%)}}
-.panel-head h2:before{{content:"";display:inline-block;width:4px;height:13px;margin-right:8px;border-radius:3px;background:var(--pitch);vertical-align:-2px}}h2{{font-size:14px;margin:0;letter-spacing:-.01em}}
+.panel-head{{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid #264861;background:linear-gradient(90deg,rgba(85,184,255,.08),rgba(255,211,26,.025) 34%,transparent 58%)}}
+.panel-head h2:before{{content:"";display:inline-block;width:4px;height:13px;margin-right:8px;border-radius:3px;background:var(--yellow);vertical-align:-2px}}h2{{font-size:14px;margin:0;letter-spacing:-.01em}}
 .scoreboard{{display:grid;grid-template-columns:repeat(8,1fr);padding:14px;flex:1;align-items:center}}.score{{padding:0 14px;border-right:1px solid var(--line)}}
 .score:last-child{{border:0}}.score span{{display:block;color:var(--muted)}}.score strong{{font-size:22px;font-variant-numeric:tabular-nums}}
 .won{{color:var(--green)}}.lost{{color:var(--red)}}.ops{{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}}
-.fact{{background:#131d1f;padding:10px;border:1px solid #223033;border-radius:8px}}.fact span{{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em}}.fact strong{{display:block;margin-top:5px;font-size:12px}}
+.fact{{background:#102235;padding:10px;border:1px solid #23445e;border-radius:8px}}.fact span{{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em}}.fact strong{{display:block;margin-top:5px;font-size:12px}}
 .table-wrap{{overflow:auto}}table{{border-collapse:separate;border-spacing:0;width:100%;min-width:1680px}}th,td{{padding:11px 12px;border-bottom:1px solid #233033;text-align:left;vertical-align:middle}}
-th{{background:#142023;color:#90a09a;font-size:9px;letter-spacing:.1em;text-transform:uppercase;position:sticky;top:0;z-index:1;border-bottom-color:#30413f}}
-tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#13211f}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px;letter-spacing:-.01em}}
+th{{background:#10253a;color:#93adbe;font-size:9px;letter-spacing:.1em;text-transform:uppercase;position:sticky;top:0;z-index:1;border-bottom-color:#2a506d}}
+tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}td small{{display:block;color:var(--muted);margin-top:4px}}.fixture{{min-width:250px}}.fixture strong{{font-size:14px;letter-spacing:-.01em}}
 .league-meta{{display:flex;align-items:center;gap:5px}}.country-flag{{display:inline-flex;font-size:11px;line-height:1;flex:0 0 auto}}.kickoff-countdown{{display:block;color:var(--amber)!important;font-weight:700;margin-top:3px!important}}
 .market{{display:block;color:var(--muted);font-size:10px}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
 .odds-grid{{display:grid;grid-template-columns:repeat(4,minmax(108px,1fr));gap:7px;font-variant-numeric:tabular-nums;min-width:455px}}
-.odds-grid>span{{background:#142023;padding:9px 8px;text-align:center;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border:1px solid #263638;border-radius:8px}}
-.odds-grid>span>b{{display:block;color:#8ea099;font-size:8px;text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}}
+.odds-grid>span{{background:#10253a;padding:9px 8px;text-align:center;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border:1px solid #264b66;border-radius:8px}}
+.odds-grid>span>b{{display:block;color:#91aabd;font-size:8px;text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}}
 .quote-age{{font-size:7px;line-height:1.1;margin-top:3px;color:#dfff63;font-weight:600}}
 .check-age{{font-size:7px!important;line-height:1.1;margin-top:2px!important;color:var(--muted)!important;font-weight:500}}
 .pick-book{{display:flex;align-items:center;margin-top:8px;width:max-content}}
@@ -992,7 +992,7 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#13211f}}t
 .history-clv.good strong,.history-clv.good small{{color:var(--green)!important}}
 .history-clv.bad strong,.history-clv.bad small{{color:var(--red)!important}}
 .history-clv.flat strong{{color:var(--muted)}}.history-clv.unavailable strong{{color:var(--muted)}}
-.history{{margin-top:12px}}.workers{{border-color:#253234!important}}.glossary{{margin-top:12px;padding:15px 16px;background:#0d1415}}.glossary dl{{display:grid;grid-template-columns:170px 1fr;gap:7px 18px;margin:12px 0 0}}.glossary dt{{color:#b9c7c1;font-weight:800}}.glossary dd{{margin:0;color:#7f9089}}footer{{border-top:1px solid #1e2b2a!important;padding-top:13px!important;color:#72827c!important}}
+.history{{margin-top:12px}}.workers{{border-color:#24455f!important}}.glossary{{margin-top:12px;padding:15px 16px;background:#091724}}.glossary dl{{display:grid;grid-template-columns:170px 1fr;gap:7px 18px;margin:12px 0 0}}.glossary dt{{color:#bfd0dc;font-weight:800}}.glossary dd{{margin:0;color:#829bab}}footer{{border-top:1px solid #1d374b!important;padding-top:13px!important;color:#718b9d!important}}
 @media(max-width:1150px){{.kpis{{grid-template-columns:repeat(4,1fr)}}.overview{{grid-template-columns:1fr}}}}
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
