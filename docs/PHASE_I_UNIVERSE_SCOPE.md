@@ -68,6 +68,7 @@ The initial scope may retain the German Bundesliga and 2. Bundesliga, subject to
 
 Exclude all football competitions whose normalized provider country is:
 
+- Bolivia;
 - Ecuador.
 
 This is a hard universe gate for production and QuantLab research, applied before

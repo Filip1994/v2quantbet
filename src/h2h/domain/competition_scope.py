@@ -51,7 +51,7 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 
 BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
-BLOCKED_COUNTRIES = frozenset({"ecuador"})
+BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador"})
 
 
 def is_blacklisted_country(country: object) -> bool:
