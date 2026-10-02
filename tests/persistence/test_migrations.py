@@ -405,3 +405,19 @@ def test_cardlab_raw_stats_migration_allows_v3_and_single_book_policy() -> None:
     assert "bookmaker_id = 11" in migration
     assert "reference_bookmaker_id IS NULL" in migration
     assert "expected_value IS NOT NULL" in migration
+
+
+def test_cardlab_referee_web_migration_adds_append_only_profiles_and_v4() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "060_quantlab_cardlab_referee_web.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE quantlab_referee_web_captures" in migration
+    assert "CREATE TABLE quantlab_referee_web_profiles" in migration
+    assert "source_name TEXT NOT NULL CHECK (source_name = 'STATBUNKER')" in migration
+    assert "quantlab_referee_web_captures_immutable" in migration
+    assert "quantlab_referee_web_profiles_immutable" in migration
+    assert "quantlab_reject_mutation()" in migration
+    assert "CARDLAB_FEATURES_V4" in migration
