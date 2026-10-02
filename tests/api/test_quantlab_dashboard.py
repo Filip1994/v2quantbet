@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from h2h.quantlab.dashboard import QuantLabDashboardService
+from h2h.quantlab.dashboard_views import _dedupe_corner_settlements
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 
 
@@ -138,6 +139,29 @@ def corner_pick(*, outcome: str = "WIN", suffix: str = "c"):
     }
 
 
+def test_cornerlab_legacy_settlement_dedupe_keeps_pick_closest_to_two() -> None:
+    candidates = []
+    for suffix, odds, outcome in (
+        ("a", 1.55, "WIN"),
+        ("b", 1.88, "LOSS"),
+        ("c", 2.04, "WIN"),
+        ("d", 2.35, "LOSS"),
+    ):
+        row = corner_pick(outcome=outcome, suffix=suffix)
+        row["odds"] = odds
+        candidates.append(row)
+
+    pending = corner_pick(outcome="PENDING", suffix="p")
+    pending["fixture_id"] = "api-football:778"
+
+    result = _dedupe_corner_settlements(tuple((*candidates, pending)))
+    settled = [row for row in result if row["outcome"] in {"WIN", "LOSS", "VOID"}]
+
+    assert len(settled) == 1
+    assert settled[0]["odds"] == 2.04
+    assert pending in result
+
+
 class StubRepository:
     def __init__(self) -> None:
         self.labs: list[str] = []
@@ -173,6 +197,44 @@ def test_quantlab_dashboard_is_operational_only() -> None:
     assert "GoalLab Research / Audit" not in html
     assert "Sve analizirane utakmice · PASS + PICK" not in html
     assert "DC+ model contract / active variables" not in html
+
+
+def test_cornerlab_dashboard_and_analytics_use_deduped_settlements() -> None:
+    class LegacyCornerRepository(StubRepository):
+        @staticmethod
+        def _rows():
+            rows = []
+            for suffix, odds, home in (
+                ("a", 1.55, "Far 155"),
+                ("b", 1.88, "Near 188"),
+                ("c", 2.04, "Closest 204"),
+                ("d", 2.35, "Far 235"),
+            ):
+                row = corner_pick(outcome="WIN", suffix=suffix)
+                row["odds"] = odds
+                row["home_team"] = home
+                rows.append(row)
+            return tuple(rows)
+
+        def list_bets(self, lab: str):
+            assert lab == "CORNER"
+            return self._rows()
+
+        def list_all_bets(self, lab: str):
+            assert lab == "CORNER"
+            return self._rows()
+
+    dashboard = QuantLabDashboardService(LegacyCornerRepository())
+    home = dashboard.render_html("lab=corner")
+    analytics = dashboard.render_html("view=analytics&lab=corner")
+
+    history = home.split("<b>Pick History</b>", 1)[1]
+    assert "Closest 204 – Away" in history
+    assert "Near 188 – Away" not in history
+    assert "Far 155 – Away" not in history
+    assert "Far 235 – Away" not in history
+    assert '<small>Settled</small><b>1</b>' in home
+    assert '<small>Settled</small><b>1</b>' in analytics
 
 
 def test_goallab_dashboard_restores_plain_serbian_pick_notes() -> None:
