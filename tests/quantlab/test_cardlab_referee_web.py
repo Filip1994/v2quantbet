@@ -62,4 +62,4 @@ def test_statbunker_parser_extracts_referee_card_profile() -> None:
 
 def test_supported_web_seasons_uses_only_known_source_ids() -> None:
     assert supported_web_seasons("england_premier_league", 2026, limit=3) == (2026, 2025)
-    assert supported_web_seasons("germany_bundesliga", 2026, limit=3) == (2026, 2025, 2024)
+    assert supported_web_seasons("germany_bundesliga", 2026, limit=3) == (2026, 2024)
