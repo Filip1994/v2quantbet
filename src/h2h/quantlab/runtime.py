@@ -17,6 +17,11 @@ from h2h.quantlab.card_lab.context import (
 )
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
 from h2h.quantlab.card_lab.referee import referee_key
+from h2h.quantlab.card_lab.referee_web import (
+    referee_web_league_key,
+    statbunker_competition_id,
+    supported_web_seasons,
+)
 from h2h.quantlab.card_lab.settlement import (
     parse_1xbet_card_events,
     settle_card_shadow_bet,
@@ -74,6 +79,8 @@ class QuantLabRuntimeSettings:
     card_referee_statistics_per_cycle: int = 128
     card_referee_history_refresh_seconds: int = 604800
     card_referee_statistics_retry_seconds: int = 86400
+    card_referee_web_refresh_seconds: int = 21600
+    card_referee_web_seasons: int = 3
     league_coverage_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
@@ -105,6 +112,8 @@ class QuantLabRuntimeSettings:
             ("card_referee_statistics_per_cycle", self.card_referee_statistics_per_cycle),
             ("card_referee_history_refresh_seconds", self.card_referee_history_refresh_seconds),
             ("card_referee_statistics_retry_seconds", self.card_referee_statistics_retry_seconds),
+            ("card_referee_web_refresh_seconds", self.card_referee_web_refresh_seconds),
+            ("card_referee_web_seasons", self.card_referee_web_seasons),
             ("league_coverage_refresh_seconds", self.league_coverage_refresh_seconds),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -130,6 +139,7 @@ class QuantLabRuntime:
         corner_engine: Any | None = None,
         card_engine: Any | None = None,
         market_archive_writer: Any | None = None,
+        referee_web_source: Any | None = None,
     ) -> None:
         self._repository = repository
         self._provider = provider
@@ -143,6 +153,7 @@ class QuantLabRuntime:
         self._goal_engine = goal_engine
         self._corner_engine = corner_engine
         self._card_engine = card_engine
+        self._referee_web_source = referee_web_source
 
     @staticmethod
     def _scope_kwargs(fixture: dict[str, Any]) -> dict[str, object]:
@@ -1273,6 +1284,68 @@ class QuantLabRuntime:
             LOGGER.info("QuantLab CardLab referee date scans completed days=%d", scanned)
         return scanned
 
+    def _refresh_referee_web_for_fixture(
+        self,
+        fixture: dict[str, Any],
+        now: datetime,
+    ) -> tuple[str | None, int]:
+        league_key = referee_web_league_key(
+            fixture.get("country"),
+            fixture.get("competition_name"),
+        )
+        if league_key is None or self._referee_web_source is None:
+            return league_key, 0
+        season = int(fixture.get("season") or 0)
+        if season <= 0:
+            return league_key, 0
+        refreshed = 0
+        seasons = supported_web_seasons(
+            league_key,
+            season,
+            limit=self._settings.card_referee_web_seasons,
+        )
+        for history_season in seasons:
+            comp_id = statbunker_competition_id(league_key, history_season)
+            if comp_id is None:
+                continue
+            if not self._repository.referee_web_profile_due(
+                league_key,
+                history_season,
+                now=now,
+                refresh_seconds=self._settings.card_referee_web_refresh_seconds,
+            ):
+                continue
+            try:
+                source_url, profiles = self._referee_web_source.fetch_profiles(
+                    league_key,
+                    history_season,
+                )
+                self._repository.save_referee_web_capture(
+                    league_key=league_key,
+                    season=history_season,
+                    source_competition_id=comp_id,
+                    source_url=source_url,
+                    captured_at=now,
+                    profiles=profiles,
+                )
+                refreshed += 1
+                LOGGER.info(
+                    "QuantLab CardLab referee web refreshed league=%s season=%d profiles=%d",
+                    league_key,
+                    history_season,
+                    len(profiles),
+                )
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "QuantLab CardLab referee web refresh failed league=%s season=%d "
+                    "error_class=%s error=%s",
+                    league_key,
+                    history_season,
+                    type(exc).__name__,
+                    str(exc),
+                )
+        return league_key, refreshed
+
     def _collect_upcoming(
         self,
         now: datetime,
@@ -1333,6 +1406,10 @@ class QuantLabRuntime:
                     continue
                 if "CARD" not in market_labs:
                     continue
+                referee_web_key, referee_web_refreshes = self._refresh_referee_web_for_fixture(
+                    fixture,
+                    now,
+                )
                 context = self._capture_context(fixture, now)
                 if standings is None:
                     standings = self._standings(fixture, now)
@@ -1340,7 +1417,10 @@ class QuantLabRuntime:
                     continue
                 referee = context.get("referee")
                 referee_key_value = referee_key(referee)
-                force_snapshot = bool(referee_key_value and referee_key_value in force_card_referees)
+                force_snapshot = bool(
+                    (referee_key_value and referee_key_value in force_card_referees)
+                    or referee_web_refreshes
+                )
                 if (
                     not force_snapshot
                     and not self._repository.feature_snapshot_due(
@@ -1366,6 +1446,18 @@ class QuantLabRuntime:
                     referee=None if referee is None else str(referee),
                     referee_available_at=context.get("available_at"),
                     referee_history=history,
+                    referee_web_profiles=(
+                        self._repository.referee_web_profiles(
+                            str(referee),
+                            referee_web_key,
+                            season=int(fixture.get("season") or 0),
+                            decision_at=now,
+                            season_lookback=self._settings.card_referee_web_seasons,
+                        )
+                        if referee and referee_web_key and int(fixture.get("season") or 0) > 0
+                        else ()
+                    ),
+                    referee_web_league_key=referee_web_key,
                     team_history=self._repository.card_team_history(
                         home_team_id,
                         away_team_id,
