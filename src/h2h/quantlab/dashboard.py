@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
-from h2h.quantlab.dashboard_views import render_quantlab_view
+from h2h.quantlab.dashboard_views import _analytics_universe_rows, render_quantlab_view
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     render_goal_analytics_html,
@@ -331,7 +331,7 @@ class QuantLabDashboardService:
         return self._filter_rows(tuple(rows), params)
 
     def render_goal_analytics(self) -> str:
-        picks = tuple(self._repository.list_all_goal_picks())
+        picks = _analytics_universe_rows(tuple(self._repository.list_all_goal_picks()))
         loader = getattr(self._repository, "list_all_goal_decision_evidence", None)
         decisions = tuple(
             loader() if callable(loader) else self._repository.list_all_goal_decisions()
@@ -349,7 +349,9 @@ class QuantLabDashboardService:
             raise LookupError("goal model version not found")
         picks = tuple(
             row
-            for row in self._repository.list_all_goal_picks()
+            for row in _analytics_universe_rows(
+                tuple(self._repository.list_all_goal_picks())
+            )
             if str(row.get("model_version") or "") == model_version
         )
         return render_goal_model_html(contract, picks)
