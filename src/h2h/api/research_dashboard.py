@@ -30,6 +30,7 @@ from h2h.api.research_analytics import (
     market_fair_probability_bucket,
     render_research_analytics_html,
 )
+from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 
@@ -703,9 +704,23 @@ class ResearchDashboardService:
 
         return tuple(row for row in rows if keep(row))
 
+    def _analytics_signal_rows(self) -> tuple[dict[str, Any], ...]:
+        """Keep Analytics V2 aligned with the current shared universe hard gate."""
+        return tuple(
+            row
+            for row in self.signals({})
+            if not is_universe_blocked_competition(
+                country=row.get("country"),
+                competition_name=row.get("competition_name"),
+                league_id=row.get("league_id"),
+                home_team=row.get("home_team"),
+                away_team=row.get("away_team"),
+            )
+        )
+
     def analytics_snapshot(self) -> dict[str, Any]:
         return build_research_analytics_snapshot(
-            self.signals({}),
+            self._analytics_signal_rows(),
             fixed_stake_minor=self._stake,
         )
 
@@ -717,7 +732,7 @@ class ResearchDashboardService:
 
         settled = tuple(
             row
-            for row in self.signals({})
+            for row in self._analytics_signal_rows()
             if row.get("outcome") in {"WIN", "LOSS", "VOID"}
             and diagnostic_bucket(row) == name
         )
@@ -818,7 +833,7 @@ class ResearchDashboardService:
 
         settled = tuple(
             row
-            for row in self.signals({})
+            for row in self._analytics_signal_rows()
             if row.get("outcome") in {"WIN", "LOSS", "VOID"}
             and belongs_to_model(row)
         )
@@ -910,7 +925,7 @@ class ResearchDashboardService:
 
         settled = tuple(
             row
-            for row in self.signals({})
+            for row in self._analytics_signal_rows()
             if row.get("outcome") in {"WIN", "LOSS", "VOID"}
             and int(row.get("league_id") or 0) == league_id
             and int(row.get("season") or 0) == season

@@ -51,7 +51,7 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 
 BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
-BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador"})
+BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
 
 
 def is_blacklisted_country(country: object) -> bool:
@@ -199,25 +199,74 @@ def is_womens_football(
             return True
     return False
 
+
+def universe_block_reason(
+    *,
+    country: object,
+    competition_name: object,
+    league_id: object = None,
+    competition_type: object = "",
+    home_team: object = "",
+    away_team: object = "",
+    level: object = None,
+) -> str | None:
+    """Return the shared hard-block reason used across the football universe."""
+    if is_blacklisted_country(country):
+        return RejectionReason.BLOCKED_COUNTRY
+    if is_blacklisted_league_id(league_id):
+        return RejectionReason.BLACKLISTED_LEAGUE
+    if is_womens_football(
+        competition_name=competition_name,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+    ):
+        return RejectionReason.WOMEN
+    return blocked_domestic_tier_reason(
+        country=country,
+        competition_name=competition_name,
+        level=level,
+    )
+
+
+def is_universe_blocked_competition(
+    *,
+    country: object,
+    competition_name: object,
+    league_id: object = None,
+    competition_type: object = "",
+    home_team: object = "",
+    away_team: object = "",
+    level: object = None,
+) -> bool:
+    """Return True for competitions disabled before collection/modeling/analytics."""
+    return universe_block_reason(
+        country=country,
+        competition_name=competition_name,
+        league_id=league_id,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+        level=level,
+    ) is not None
+
 def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     """Return a fail-closed Phase I inclusion decision."""
     country = _normalise(metadata.country)
     name = _normalise(metadata.name)
     competition_type = _normalise(metadata.type)
 
-    if is_blacklisted_country(metadata.country):
-        return ScopeDecision(False, RejectionReason.BLOCKED_COUNTRY)
-
-    if is_blacklisted_league_id(metadata.league_id):
-        return ScopeDecision(False, RejectionReason.BLACKLISTED_LEAGUE)
-
-    if is_womens_football(
+    universe_rejection = universe_block_reason(
+        country=metadata.country,
         competition_name=metadata.name,
+        league_id=metadata.league_id,
         competition_type=metadata.type,
         home_team=metadata.home_team,
         away_team=metadata.away_team,
-    ):
-        return ScopeDecision(False, RejectionReason.WOMEN)
+        level=metadata.level,
+    )
+    if universe_rejection is not None:
+        return ScopeDecision(False, universe_rejection)
 
     if not country or not name or not competition_type:
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)
@@ -295,13 +344,5 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
 
     if competition_type != "league":
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)
-
-    tier_rejection = blocked_domestic_tier_reason(
-        country=metadata.country,
-        competition_name=metadata.name,
-        level=metadata.level,
-    )
-    if tier_rejection is not None:
-        return ScopeDecision(False, tier_rejection)
 
     return ScopeDecision(True)

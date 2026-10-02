@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
+from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
@@ -204,6 +205,24 @@ def _all_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
     loader = getattr(repository, "list_all_bets", None)
     rows = tuple(loader(lab)) if callable(loader) else tuple(repository.list_bets(lab))
     return _dedupe_corner_settlements(rows) if lab == "CORNER" else rows
+
+
+def _analytics_universe_rows(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """Exclude historical rows that the current universe hard gate rejects."""
+    return tuple(
+        row
+        for row in rows
+        if not is_universe_blocked_competition(
+            country=row.get("country"),
+            competition_name=row.get("competition_name"),
+            league_id=row.get("league_id"),
+            competition_type=row.get("competition_type"),
+            home_team=row.get("home_team"),
+            away_team=row.get("away_team"),
+        )
+    )
 
 
 CARDLAB_CURRENT_POLICY_MIN_GENERATION = 7
@@ -2470,7 +2489,7 @@ def render_analytics(
     params: dict[str, list[str]] | None = None,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
-    source_rows = _sorted(_all_rows(repository, lab))
+    source_rows = _sorted(_analytics_universe_rows(_all_rows(repository, lab)))
     legacy_rows: tuple[dict[str, Any], ...] = ()
     if lab == "CARD":
         source_rows, legacy_rows = _partition_card_policy_rows(source_rows)
