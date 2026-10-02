@@ -560,12 +560,29 @@ def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
         ("England", "Championship"),
         ("Poland", "Ekstraklasa"),
         ("World", "UEFA Champions League"),
-        ("Sweden", "Division 2 - Norrland"),
+        ("Sweden", "Allsvenskan"),
+        ("Sweden", "Superettan"),
+        ("Finland", "Veikkausliiga"),
+        ("Finland", "Ykkösliiga"),
+        ("Norway", "Eliteserien"),
+        ("Norway", "OBOS-ligaen"),
         ("Japan", "J1 League"),
     ):
         decision = card_corner_scope(country=country, competition_name=competition)
         assert decision.allowed
         assert decision.reason == "market_driven_candidate"
+
+    for country, competition in (
+        ("Sweden", "Division 2 - Norrland"),
+        ("Sweden", "Ettan Norra"),
+        ("Finland", "Ykkönen"),
+        ("Finland", "Kakkonen"),
+        ("Norway", "2. Division - Group 1"),
+        ("Norway", "3. Division - Group 4"),
+    ):
+        decision = card_corner_scope(country=country, competition_name=competition)
+        assert not decision.allowed
+        assert decision.reason == "blocked_domestic_tier"
 
     assert goal_scope(country="Poland", competition_name="III Liga").allowed
     assert not goal_scope(
