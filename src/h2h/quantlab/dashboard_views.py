@@ -574,7 +574,7 @@ def render_dashboard(
     legacy_rows: tuple[dict[str, Any], ...] = ()
     legacy_metric_rows: tuple[dict[str, Any], ...] = ()
     try:
-        rows = _sorted(_display_rows(repository, lab))
+        rows = _sorted(_analytics_universe_rows(_display_rows(repository, lab)))
         if lab == "CARD":
             rows, legacy_rows = _partition_card_policy_rows(rows)
     except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
@@ -587,10 +587,18 @@ def render_dashboard(
     try:
         if lab == "GOAL":
             loader = getattr(repository, "list_all_goal_picks", None)
-            metric_rows = _sorted(tuple(loader())) if callable(loader) else rows
+            metric_rows = (
+                _sorted(_analytics_universe_rows(tuple(loader())))
+                if callable(loader)
+                else rows
+            )
         else:
             loader = getattr(repository, "list_all_bets", None)
-            metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
+            metric_rows = (
+                _sorted(_analytics_universe_rows(tuple(loader(lab))))
+                if callable(loader)
+                else rows
+            )
             if lab == "CORNER":
                 metric_rows = _dedupe_corner_settlements(metric_rows)
             elif lab == "CARD":
