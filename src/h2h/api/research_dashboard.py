@@ -603,7 +603,17 @@ class ResearchDashboardService:
         return tuple(self._repository.list_signals(limit=5000))
 
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
-        canonical = _one_signal_per_fixture(self._all_signal_rows())
+        canonical = tuple(
+            row
+            for row in _one_signal_per_fixture(self._all_signal_rows())
+            if not is_universe_blocked_competition(
+                country=row.get("country"),
+                competition_name=row.get("competition_name"),
+                league_id=row.get("league_id"),
+                home_team=row.get("home_team"),
+                away_team=row.get("away_team"),
+            )
+        )
         rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
         selection = params.get("selection", [""])[0].strip().upper()
