@@ -17,6 +17,13 @@ from h2h.domain.competition_scope import (
         CompetitionMetadata("Germany", "2. Bundesliga", "league", 2),
         CompetitionMetadata("England", "League One", "league", 3),
         CompetitionMetadata("USA", "Major League Soccer", "league", 1),
+        CompetitionMetadata("Sweden", "Allsvenskan", "league", 1),
+        CompetitionMetadata("Sweden", "Superettan", "league", 2),
+        CompetitionMetadata("Finland", "Veikkausliiga", "league", 1),
+        CompetitionMetadata("Finland", "Ykkösliiga", "league", 2),
+        CompetitionMetadata("Norway", "Eliteserien", "league", 1),
+        CompetitionMetadata("Norway", "OBOS-ligaen", "league", 2),
+        CompetitionMetadata("Norway", "1. Division", "league", 2),
     ],
 )
 def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) -> None:
@@ -97,6 +104,30 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
         (
             CompetitionMetadata("Czech-Republic", "3. liga - MSFL", "league", 3),
             RejectionReason.EXPLICIT_COMPETITION,
+        ),
+        (
+            CompetitionMetadata("Sweden", "Ettan Norra", "league", 3),
+            RejectionReason.SWEDEN_TIER,
+        ),
+        (
+            CompetitionMetadata("Sweden", "Division 2 - Norrland", "league", 4),
+            RejectionReason.SWEDEN_TIER,
+        ),
+        (
+            CompetitionMetadata("Finland", "Ykkönen", "league", 3),
+            RejectionReason.FINLAND_TIER,
+        ),
+        (
+            CompetitionMetadata("Finland", "Kakkonen", "league", 4),
+            RejectionReason.FINLAND_TIER,
+        ),
+        (
+            CompetitionMetadata("Norway", "2. Division - Group 1", "league", 3),
+            RejectionReason.NORWAY_TIER,
+        ),
+        (
+            CompetitionMetadata("Norway", "3. Division - Group 4", "league", 4),
+            RejectionReason.NORWAY_TIER,
         ),
     ],
 )
