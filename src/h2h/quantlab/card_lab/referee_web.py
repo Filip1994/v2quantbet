@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 
@@ -57,6 +58,32 @@ def referee_web_league_key(country: object, competition_name: object) -> str | N
 
 def statbunker_competition_id(league_key: str, season: int) -> int | None:
     return STATBUNKER_COMPETITION_IDS.get((league_key, season))
+
+
+def current_web_season(now: datetime) -> int:
+    """Return the domestic season start year for the top-five league bootstrap."""
+    return now.year if now.month >= 7 else now.year - 1
+
+
+def proactive_web_targets(
+    now: datetime,
+    *,
+    seasons_per_league: int = 3,
+) -> tuple[tuple[str, int, int], ...]:
+    if seasons_per_league <= 0:
+        raise ValueError("seasons_per_league must be positive")
+    current_season = current_web_season(now)
+    targets: list[tuple[str, int, int]] = []
+    for league_key in TOP_LEAGUES:
+        for season in supported_web_seasons(
+            league_key,
+            current_season,
+            limit=seasons_per_league,
+        ):
+            comp_id = statbunker_competition_id(league_key, season)
+            if comp_id is not None:
+                targets.append((league_key, season, comp_id))
+    return tuple(targets)
 
 
 def supported_web_seasons(
@@ -196,10 +223,13 @@ class StatBunkerRefereeSource:
 
         _country, display_name, _aliases = TOP_LEAGUES[league_key]
         page_key = _ascii(re.sub(r"<[^>]+>", " ", html))
+        compact_season = _ascii(
+            f"{str(season)[-2:]}/{str(season + 1)[-2:]}"
+        )
+        full_season = _ascii(f"{season}/{season + 1}")
         if (
             _ascii(display_name) not in page_key
-            or str(season) not in page_key
-            or str(season + 1) not in page_key
+            or (compact_season not in page_key and full_season not in page_key)
         ):
             raise ValueError("StatBunker league/season validation failed")
 
