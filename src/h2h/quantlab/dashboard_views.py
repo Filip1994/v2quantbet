@@ -241,7 +241,10 @@ def _card_notes(rows: tuple[dict[str, Any], ...]) -> dict[str, str]:
             f"L5 {rate(raw.get('referee_l5_cards'))}, "
             f"L10 {rate(raw.get('referee_l10_cards'))} kartona; "
             f"L10 {rate(raw.get('referee_l10_fouls'))} faulova; "
-            f"cards/foul {rate(raw.get('referee_l10_cards_per_foul'))}."
+            f"cards/foul {rate(raw.get('referee_l10_cards_per_foul'))}. "
+            f"Web {raw.get('web_referee_league_key') or '—'!s}: "
+            f"{rate(raw.get('web_referee_cards_per_match'))} cards/match "
+            f"na {int(_number(raw.get('web_referee_matches')) or 0)} mečeva."
         )
         teams_text = (
             f"Timovi: home L10 {rate(raw.get('home_l10_cards_for'))}, "
@@ -1198,6 +1201,31 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 ),
                 "card_raw_anchor_count_bucket": _scalar_bucket(
                     anchor_count, breaks=(2, 3, 4, 5, 6, 7), digits=0
+                ),
+                "card_web_referee_league_bucket": str(
+                    raw.get("web_referee_league_key") or "MISSING"
+                ),
+                "card_web_referee_matches_bucket": _scalar_bucket(
+                    raw.get("web_referee_matches"),
+                    breaks=(5, 10, 15, 20, 30, 50, 75),
+                    digits=0,
+                ),
+                "card_web_referee_cards_bucket": scalar(
+                    "web_referee_cards_per_match", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
+                ),
+                "card_web_referee_yellows_bucket": scalar(
+                    "web_referee_yellows_per_match", (2, 3, 4, 4.5, 5, 5.5, 6), digits=1
+                ),
+                "card_web_referee_reds_bucket": scalar(
+                    "web_referee_reds_per_match", (0.05, 0.10, 0.20, 0.30, 0.50, 0.75), digits=2
+                ),
+                "card_web_referee_home_bias_bucket": _signed_gap_bucket(
+                    raw.get("web_referee_home_away_bias")
+                ),
+                "card_web_referee_coverage_bucket": (
+                    "10+ MATCHES"
+                    if int(_number(raw.get("web_referee_matches")) or 0) >= 10
+                    else "<10 MATCHES"
                 ),
                 "card_referee_cards_l5_bucket": scalar(
                     "referee_l5_cards", (3, 4, 4.5, 5, 5.5, 6, 7), digits=1
@@ -2977,6 +3005,13 @@ def render_analytics(
             ("card_raw_support_bucket", "Directional anchor support"),
             ("card_raw_hit_rate_bucket", "Observed raw hit rate"),
             ("card_raw_anchor_count_bucket", "Raw anchor count"),
+            ("card_web_referee_league_bucket", "Web referee league"),
+            ("card_web_referee_matches_bucket", "Web referee sample"),
+            ("card_web_referee_cards_bucket", "Web referee cards / match"),
+            ("card_web_referee_yellows_bucket", "Web referee yellows / match"),
+            ("card_web_referee_reds_bucket", "Web referee reds / match"),
+            ("card_web_referee_home_bias_bucket", "Web referee home − away cards"),
+            ("card_web_referee_coverage_bucket", "Web referee 10+ match coverage"),
             ("card_referee_cards_l5_bucket", "Referee cards L5"),
             ("card_referee_cards_l10_bucket", "Referee cards L10"),
             ("card_referee_yellows_l10_bucket", "Referee yellows L10"),
