@@ -12,6 +12,9 @@ class RejectionReason:
     WOMEN = "EXCLUDED_WOMENS_FOOTBALL"
     ENGLISH_TIER = "EXCLUDED_ENGLISH_TIER_4_OR_LOWER"
     GERMAN_TIER = "EXCLUDED_GERMAN_TIER_3_OR_LOWER"
+    SWEDEN_TIER = "EXCLUDED_SWEDEN_TIER_3_OR_LOWER"
+    FINLAND_TIER = "EXCLUDED_FINLAND_TIER_3_OR_LOWER"
+    NORWAY_TIER = "EXCLUDED_NORWAY_TIER_3_OR_LOWER"
     CUP = "EXCLUDED_CUP_COMPETITION"
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
@@ -185,15 +188,36 @@ def is_national_team_football(
     )
 
 
+_NORDIC_TOP_TWO_LEAGUES = {
+    "sweden": frozenset({"allsvenskan", "superettan"}),
+    "finland": frozenset({"veikkausliiga", "ykkosliiga"}),
+    "norway": frozenset({"eliteserien", "1 division", "obos ligaen"}),
+}
+
+_NORDIC_TIER_REASONS = {
+    "sweden": RejectionReason.SWEDEN_TIER,
+    "finland": RejectionReason.FINLAND_TIER,
+    "norway": RejectionReason.NORWAY_TIER,
+}
+
+
 def blocked_domestic_tier_reason(
     *,
     country: object,
     competition_name: object,
     level: object = None,
 ) -> str | None:
-    """Return the shared hard-block reason for low English/German domestic tiers."""
+    """Return the shared hard-block reason for configured domestic league tiers."""
     country_key = _normalise(str(country or ""))
     name_key = _normalise(str(competition_name or ""))
+
+    # For Sweden, Finland and Norway the policy is fail-closed: only the
+    # current men's first and second domestic league names are eligible.
+    # All other domestic competition names in these countries are outside
+    # the QuantBet universe before collection/modeling/analytics.
+    nordic_allowlist = _NORDIC_TOP_TWO_LEAGUES.get(country_key)
+    if nordic_allowlist is not None and name_key not in nordic_allowlist:
+        return _NORDIC_TIER_REASONS[country_key]
 
     parsed_level: int | None = None
     if level is not None and not isinstance(level, bool):
