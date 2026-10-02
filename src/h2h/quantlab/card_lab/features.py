@@ -1136,7 +1136,7 @@ def build_cardlab_snapshot(
         if datum.available_at is not None
     ]
     for row in (*team_history, *league_history, *referee_web_profiles):
-        available = row.get("available_at")
+        available = row.get("available_at") or row.get("captured_at")
         if isinstance(available, datetime):
             available_utc = _utc(available, "history.available_at")
             if available_utc <= decision:
