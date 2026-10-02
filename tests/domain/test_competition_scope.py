@@ -14,6 +14,8 @@ from h2h.domain.competition_scope import (
         CompetitionMetadata("Spain", "La Liga", "league", 1),
         CompetitionMetadata("Italy", "Serie A", "league", 1),
         CompetitionMetadata("Germany", "Bundesliga", "league", 1),
+        CompetitionMetadata("Germany", "2. Bundesliga", "league", 2),
+        CompetitionMetadata("England", "League One", "league", 3),
         CompetitionMetadata("USA", "Major League Soccer", "league", 1),
     ],
 )
@@ -83,6 +85,10 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
         (
             CompetitionMetadata("England", "League Two", "league", 4),
             RejectionReason.ENGLISH_TIER,
+        ),
+        (
+            CompetitionMetadata("Germany", "3. Liga", "league", 3),
+            RejectionReason.GERMAN_TIER,
         ),
         (
             CompetitionMetadata("Germany", "Regionalliga West", "league", 4),
