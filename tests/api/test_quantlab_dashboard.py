@@ -154,7 +154,7 @@ def test_cornerlab_legacy_settlement_dedupe_keeps_pick_closest_to_two() -> None:
     pending = corner_pick(outcome="PENDING", suffix="p")
     pending["fixture_id"] = "api-football:778"
 
-    result = _dedupe_corner_settlements(tuple((*candidates, pending)))
+    result = _dedupe_corner_settlements((*candidates, pending))
     settled = [row for row in result if row["outcome"] in {"WIN", "LOSS", "VOID"}]
 
     assert len(settled) == 1
