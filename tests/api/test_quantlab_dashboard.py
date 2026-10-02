@@ -477,9 +477,10 @@ def test_quantlab_kpis_use_complete_history_not_latest_display_page() -> None:
     assert "Older – Loss" not in html
 
 
-def test_quantlab_analytics_excludes_current_universe_hard_blocks() -> None:
+def test_quantlab_dashboard_and_analytics_exclude_current_universe_hard_blocks() -> None:
     class UniverseRepository(StubRepository):
-        def list_all_goal_picks(self):
+        @staticmethod
+        def _rows():
             allowed = goal_pick(outcome="WIN", suffix="a")
             allowed["fixture_id"] = "api-football:610"
             allowed["competition_name"] = "Allowed Premier"
@@ -514,22 +515,65 @@ def test_quantlab_analytics_excludes_current_universe_hard_blocks() -> None:
             women["competition_name"] = "Women's Super League"
             women["home_team"] = "Women Home"
 
-            return (allowed, ireland, ecuador, league_id, lower_tier, women)
+            friendly = goal_pick(outcome="LOSS", suffix="f")
+            friendly["fixture_id"] = "api-football:616"
+            friendly["league_id"] = 10
+            friendly["competition_name"] = "Friendlies Clubs"
+            friendly["home_team"] = "Friendly Home"
+
+            nations = goal_pick(outcome="LOSS", suffix="n")
+            nations["fixture_id"] = "api-football:617"
+            nations["league_id"] = 5
+            nations["competition_name"] = "UEFA Nations League"
+            nations["country"] = "World"
+            nations["home_team"] = "Serbia"
+
+            asian_cup = goal_pick(outcome="LOSS", suffix="q")
+            asian_cup["fixture_id"] = "api-football:618"
+            asian_cup["league_id"] = 7
+            asian_cup["competition_name"] = "FIFA Asian Cup"
+            asian_cup["country"] = "World"
+            asian_cup["home_team"] = "Thailand"
+
+            return (
+                allowed,
+                ireland,
+                ecuador,
+                league_id,
+                lower_tier,
+                women,
+                friendly,
+                nations,
+                asian_cup,
+            )
+
+        def list_goal_picks(self):
+            return self._rows()
+
+        def list_all_goal_picks(self):
+            return self._rows()
 
         def list_all_goal_decisions(self):
             return ()
 
-    analytics = QuantLabDashboardService(UniverseRepository()).render_html(
-        "view=analytics&lab=goal"
-    )
+    dashboard = QuantLabDashboardService(UniverseRepository())
+    operational = dashboard.render_html("lab=goal")
+    analytics = dashboard.render_html("view=analytics&lab=goal")
 
+    for html in (operational, analytics):
+        assert "Allowed Premier" in html
+        assert "Ireland Premier Division" not in html
+        assert "Ecuador Serie A" not in html
+        assert "Blacklisted By ID" not in html
+        assert "League Two" not in html
+        assert "Women's Super League" not in html
+        assert "Friendlies Clubs" not in html
+        assert "UEFA Nations League" not in html
+        assert "FIFA Asian Cup" not in html
+
+    assert '<div class="card"><small>Settled</small><b>1</b></div>' in operational
     assert '<div class="card"><small>Settled</small><b>1</b></div>' in analytics
-    assert "Allowed Premier" in analytics
-    assert "Ireland Premier Division" not in analytics
-    assert "Ecuador Serie A" not in analytics
-    assert "Blacklisted By ID" not in analytics
-    assert "League Two" not in analytics
-    assert "Women's Super League" not in analytics
+    assert '<div class="card"><small>Losses</small><b>0</b></div>' in operational
 
 
 def test_goallab_analytics_is_a_separate_tab() -> None:
