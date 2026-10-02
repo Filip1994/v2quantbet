@@ -68,7 +68,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
             # CardLab referee web ingestion is intentionally the current schema tip.
-            assert applied[-1] == "061_auto_skip_open_production_picks.sql"
+            assert applied[-1] == "062_cleanup_production_auto_skip_stragglers.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
