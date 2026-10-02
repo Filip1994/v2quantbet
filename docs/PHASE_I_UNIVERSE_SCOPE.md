@@ -64,6 +64,19 @@ Exclude:
 
 The initial scope may retain the German Bundesliga and 2. Bundesliga, subject to normal data-quality checks.
 
+### 6. Sweden, Finland and Norway: top two domestic leagues only
+
+For men's domestic football in Sweden, Finland and Norway, keep only the first and
+second league levels in the current QuantBet universe:
+
+- Sweden: Allsvenskan and Superettan;
+- Finland: Veikkausliiga and Ykkösliiga;
+- Norway: Eliteserien and the second tier (`1. Division` / `OBOS-ligaen`).
+
+All other competition names from these three countries are hard-blocked before
+fixture-specific collection, modeling decisions and analytics. Historical audit facts
+remain immutable, but blocked rows are excluded from current QuantLab and Research
+ROI/P&L/analytics views.
 ### 6. Explicit country blocklist
 
 Exclude all football competitions whose normalized provider country is:
