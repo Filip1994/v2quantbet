@@ -244,7 +244,7 @@ def _card_legacy_audit_html(rows: tuple[dict[str, Any], ...]) -> str:
         f'<span>{len(rows)} excluded rows · {active} active · {settled} settled</span></div>'
         '<p class="analytics-note">'
         'Pre-V7 CardLab rows remain immutable in the ledger for audit, but are excluded from '
-        'current Active Picks, W/L, P&L, ROI and CardLab Analytics. '
+        'current Active Picks, W/L, P&amp;L, ROI and CardLab Analytics. '
         f'Policies: {escape(policy_text)}.'
         '</p></section>'
     )
