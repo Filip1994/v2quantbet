@@ -1195,3 +1195,31 @@ def test_quantlab_fixture_discovery_drops_low_english_and_german_tiers() -> None
         "2. Bundesliga",
     ]
 
+def test_quantlab_scopes_hard_block_ecuador() -> None:
+    fixture = {
+        "country": "Ecuador",
+        "competition_name": "Serie B",
+    }
+
+    goal = goal_scope(**fixture)
+    context = card_corner_scope(**fixture)
+
+    assert not goal.allowed
+    assert not context.allowed
+    assert goal.reason == "blocked_country"
+    assert context.reason == "blocked_country"
+
+
+def test_quantlab_fixture_discovery_drops_ecuador_before_persistence() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(3001, 242, "Liga Pro", "Ecuador"),
+            _fixture_payload(3002, 243, "Serie B", "Ecuador"),
+            _fixture_payload(3003, 39, "Premier League", "England"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.provider_fixture_id for row in rows] == ["3003"]
+
