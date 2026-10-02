@@ -17,9 +17,9 @@ from h2h.quantlab.reference_shadow_engine import ContextMarketDecision, Referenc
 from h2h.quantlab.scope import card_corner_scope
 
 
-POLICY_VERSION = "CARDLAB_RAW_STATS_POLICY_V6_MARKET80"
+POLICY_VERSION = "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB"
 MODEL_NAME = "CardLab raw-stat consensus"
-MODEL_VERSION = "CARDLAB_RAW_STATS_V1"
+MODEL_VERSION = "CARDLAB_RAW_STATS_V2"
 MARKET_KEY = "TOTAL_CARDS"
 BOOKMAKER_ID = 11
 PROVIDER_BET_ID = API_FOOTBALL_CARDS_OVER_UNDER_BET_ID
@@ -30,6 +30,7 @@ MIN_RAW_ANCHORS = 3
 MIN_DIRECTIONAL_SUPPORT = 0.60
 MIN_ABS_LINE_GAP = 0.35
 MIN_OBSERVED_HIT_RATE = 0.50
+MIN_REFEREE_WEB_MATCHES = 10
 FLAT_STAKE_MINOR = 10_000
 
 
@@ -317,6 +318,31 @@ class CardLabShadowPickEngine:
             return self._fixture_pass(fixture, now, reason="NO_CARD_FEATURE_SNAPSHOT")
 
         payload = card_context.get("feature_payload")
+        raw_features = payload.get("raw_features") if isinstance(payload, dict) else None
+        if card_context.get("feature_version") == "CARDLAB_FEATURES_V4":
+            if not isinstance(raw_features, dict):
+                return self._fixture_pass(fixture, now, reason="NO_CARD_RAW_FEATURES")
+            if int(raw_features.get("web_referee_supported_league") or 0) != 1:
+                return self._fixture_pass(
+                    fixture,
+                    now,
+                    reason="UNSUPPORTED_REFEREE_WEB_LEAGUE",
+                    details={
+                        "supported_leagues": "Premier League, La Liga, Serie A, Bundesliga, Ligue 1"
+                    },
+                )
+            web_matches = int(raw_features.get("web_referee_matches") or 0)
+            if web_matches < MIN_REFEREE_WEB_MATCHES:
+                return self._fixture_pass(
+                    fixture,
+                    now,
+                    reason="INSUFFICIENT_REFEREE_WEB_HISTORY",
+                    details={
+                        "web_referee_matches": web_matches,
+                        "minimum_web_referee_matches": MIN_REFEREE_WEB_MATCHES,
+                        "web_referee_league_key": raw_features.get("web_referee_league_key"),
+                    },
+                )
         raw_anchors = payload.get("raw_anchors") if isinstance(payload, dict) else None
         if not isinstance(raw_anchors, dict) or len(raw_anchors) < MIN_RAW_ANCHORS:
             return self._fixture_pass(
@@ -519,6 +545,8 @@ class CardLabShadowPickEngine:
                         "edge_is_pick_gate": False,
                         "odds_is_pick_gate": False,
                         "one_pick_per_fixture": True,
+                        "referee_web_top_league_gate": True,
+                        "minimum_referee_web_matches": MIN_REFEREE_WEB_MATCHES,
                     },
                     "price_diagnostics": {
                         "market_probability": item["market_probability"],
@@ -533,6 +561,7 @@ class CardLabShadowPickEngine:
                         "minimum_directional_support": MIN_DIRECTIONAL_SUPPORT,
                         "minimum_abs_line_gap": MIN_ABS_LINE_GAP,
                         "minimum_observed_hit_rate": MIN_OBSERVED_HIT_RATE,
+                        "minimum_referee_web_matches": MIN_REFEREE_WEB_MATCHES,
                         "max_quote_age_seconds": MAX_QUOTE_AGE_SECONDS,
                         "min_seconds_to_kickoff": MIN_SECONDS_TO_KICKOFF,
                     },
