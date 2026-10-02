@@ -168,6 +168,9 @@ def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
         CompetitionMetadata("Ecuador", "Any Competition", "cup"),
         CompetitionMetadata("Bolivia", "Primera División", "league", 1),
         CompetitionMetadata("BOLIVIA", "Any Competition", "cup"),
+        CompetitionMetadata("Ireland", "Premier Division", "league", 1),
+        CompetitionMetadata("IRELAND", "First Division", "league", 2),
+        CompetitionMetadata("Republic of Ireland", "Senior League", "league", 1),
     ],
 )
 def test_rejects_blocked_country_across_entire_universe(
