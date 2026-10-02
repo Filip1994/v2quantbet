@@ -190,7 +190,7 @@ class StatBunkerRefereeSource:
                 "Accept": "text/html,application/xhtml+xml",
             },
         )
-        with urlopen(request, timeout=self._timeout) as response:  # noqa: S310
+        with urlopen(request, timeout=self._timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             html = response.read().decode(charset, errors="replace")
 
