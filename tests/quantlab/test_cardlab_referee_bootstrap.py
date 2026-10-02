@@ -365,7 +365,7 @@ def test_prior_season_country_suffix_matches_current_referee() -> None:
     assert cards.value == 5
 
 
-def test_referee_bootstrap_checks_prior_seasons_with_wider_date_window() -> None:
+def test_referee_bootstrap_does_not_persist_blocked_national_team_history() -> None:
     from types import MethodType
 
     from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -447,8 +447,7 @@ def test_referee_bootstrap_checks_prior_seasons_with_wider_date_window() -> None
     assert stats == 0
     assert [call[1] for call in provider.calls] == [2026, 2025, 2024]
     assert provider.calls[-1][2].year <= 2024
-    assert len(repo.contexts) == 1
-    assert repo.contexts[0].referee == "Espen Eskas, Norway"
+    assert repo.contexts == []
 
 
 def test_cross_competition_day_scan_persists_only_finished_referee_fixtures() -> None:
