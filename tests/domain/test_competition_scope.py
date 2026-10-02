@@ -159,3 +159,20 @@ def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
 
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.BLACKLISTED_LEAGUE
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        CompetitionMetadata("Ecuador", "Liga Pro", "league", 1),
+        CompetitionMetadata("ECUADOR", "Serie B", "league", 2),
+        CompetitionMetadata("Ecuador", "Any Competition", "cup"),
+    ],
+)
+def test_rejects_blocked_country_across_entire_universe(
+    metadata: CompetitionMetadata,
+) -> None:
+    decision = classify_phase_i(metadata)
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.BLOCKED_COUNTRY
+

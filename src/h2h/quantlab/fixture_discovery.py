@@ -10,6 +10,7 @@ from hashlib import sha256
 from typing import Any
 
 from h2h.domain.competition_scope import (
+    is_blacklisted_country,
     is_blacklisted_league_id,
     is_blocked_domestic_tier,
     is_womens_football,
@@ -66,6 +67,8 @@ def parse_fixture_discovery_response(
         if not isinstance(raw, Mapping):
             continue
         fixture = adapter.adapt(raw)
+        if is_blacklisted_country(fixture.country):
+            continue
         if is_blacklisted_league_id(fixture.competition_id):
             continue
         if is_blocked_domestic_tier(

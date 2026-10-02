@@ -15,6 +15,7 @@ class RejectionReason:
     CUP = "EXCLUDED_CUP_COMPETITION"
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
+    BLOCKED_COUNTRY = "EXCLUDED_BLOCKED_COUNTRY"
     AMBIGUOUS = "AMBIGUOUS_COMPETITION_METADATA"
 
 
@@ -50,6 +51,12 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 
 BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
+BLOCKED_COUNTRIES = frozenset({"ecuador"})
+
+
+def is_blacklisted_country(country: object) -> bool:
+    """Return True for countries disabled across the entire football universe."""
+    return _normalise(str(country or "")) in BLOCKED_COUNTRIES
 
 
 def is_blacklisted_league_id(league_id: object) -> bool:
@@ -197,6 +204,9 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     country = _normalise(metadata.country)
     name = _normalise(metadata.name)
     competition_type = _normalise(metadata.type)
+
+    if is_blacklisted_country(metadata.country):
+        return ScopeDecision(False, RejectionReason.BLOCKED_COUNTRY)
 
     if is_blacklisted_league_id(metadata.league_id):
         return ScopeDecision(False, RejectionReason.BLACKLISTED_LEAGUE)
