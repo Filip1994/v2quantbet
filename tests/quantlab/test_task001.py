@@ -1159,3 +1159,39 @@ def test_quantlab_fixture_discovery_drops_globally_blacklisted_leagues() -> None
     rows = parse_fixture_discovery_response(payload, captured_at=NOW)
 
     assert [row.fixture.competition_id for row in rows] == [39]
+
+def test_quantlab_scopes_hard_block_low_english_and_german_tiers() -> None:
+    cases = (
+        {"country": "England", "competition_name": "League Two"},
+        {"country": "England", "competition_name": "National League"},
+        {"country": "Germany", "competition_name": "3. Liga"},
+        {"country": "Germany", "competition_name": "Regionalliga West"},
+    )
+    for fixture in cases:
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == "blocked_domestic_tier"
+        assert context.reason == "blocked_domestic_tier"
+
+
+def test_quantlab_fixture_discovery_drops_low_english_and_german_tiers() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(2001, 42, "League Two", "England"),
+            _fixture_payload(2002, 43, "National League", "England"),
+            _fixture_payload(2003, 80, "3. Liga", "Germany"),
+            _fixture_payload(2004, 9004, "Regionalliga West", "Germany"),
+            _fixture_payload(2005, 41, "League One", "England"),
+            _fixture_payload(2006, 79, "2. Bundesliga", "Germany"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.competition_name for row in rows] == [
+        "League One",
+        "2. Bundesliga",
+    ]
+

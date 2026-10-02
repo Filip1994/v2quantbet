@@ -6,11 +6,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from h2h.domain.competition_scope import is_womens_football
+from h2h.domain.competition_scope import is_blocked_domestic_tier, is_womens_football
 
 
-GOAL_SCOPE_VERSION = "GOAL_SCOPE_V2"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V4"
+GOAL_SCOPE_VERSION = "GOAL_SCOPE_V3"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V5"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -154,6 +154,11 @@ def goal_scope(
         away_team=away_team,
     ):
         return ScopeDecision(False, GOAL_SCOPE_VERSION, "womens_football")
+    if is_blocked_domestic_tier(
+        country=country,
+        competition_name=competition_name,
+    ):
+        return ScopeDecision(False, GOAL_SCOPE_VERSION, "blocked_domestic_tier")
     if _is_youth_or_amateur(
         competition_name,
         competition_type,
@@ -195,7 +200,11 @@ def card_corner_scope(
         away_team=away_team,
     ):
         return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "womens_football")
-    del country
+    if is_blocked_domestic_tier(
+        country=country,
+        competition_name=competition_name,
+    ):
+        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "blocked_domestic_tier")
     return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "market_driven_candidate")
 
 
