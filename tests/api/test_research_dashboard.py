@@ -430,7 +430,7 @@ def test_research_dashboard_exposes_exact_diagnostic_rows() -> None:
     assert payload["rows"][0]["clv_pct"] == 10.0
 
 
-def test_research_analytics_excludes_universe_blocked_rows_but_board_keeps_audit_rows() -> None:
+def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
     class UniverseAnalyticsRepository:
         def list_signals(self, *, limit):
             assert limit == 5000
@@ -463,21 +463,63 @@ def test_research_analytics_excludes_universe_blocked_rows_but_board_keeps_audit
             women["league_id"] = 990
             women["competition_name"] = "Women's Test League"
 
-            return (allowed, ireland, blocked_id, women)
+            friendly = signal_row()
+            friendly["research_signal_id"] = "research-signal-v1:" + "f" * 64
+            friendly["evaluation_id"] = "value-evaluation-v1:" + "f" * 64
+            friendly["fixture_id"] = "api-football:704"
+            friendly["provider_fixture_id"] = "704"
+            friendly["league_id"] = 10
+            friendly["country"] = "World"
+            friendly["competition_name"] = "Friendlies Clubs"
+
+            nations = signal_row()
+            nations["research_signal_id"] = "research-signal-v1:" + "n" * 64
+            nations["evaluation_id"] = "value-evaluation-v1:" + "n" * 64
+            nations["fixture_id"] = "api-football:705"
+            nations["provider_fixture_id"] = "705"
+            nations["league_id"] = 5
+            nations["country"] = "World"
+            nations["competition_name"] = "UEFA Nations League"
+
+            asian_cup = signal_row()
+            asian_cup["research_signal_id"] = "research-signal-v1:" + "q" * 64
+            asian_cup["evaluation_id"] = "value-evaluation-v1:" + "q" * 64
+            asian_cup["fixture_id"] = "api-football:706"
+            asian_cup["provider_fixture_id"] = "706"
+            asian_cup["league_id"] = 7
+            asian_cup["country"] = "World"
+            asian_cup["competition_name"] = "FIFA Asian Cup"
+
+            return (
+                allowed,
+                ireland,
+                blocked_id,
+                women,
+                friendly,
+                nations,
+                asian_cup,
+            )
 
     dashboard = ResearchDashboardService(UniverseAnalyticsRepository())
 
-    assert len(dashboard.signals({})) == 4
+    board_rows = dashboard.signals({})
+    assert len(board_rows) == 1
+    assert board_rows[0]["competition_name"] == "Allowed Research League"
 
     snapshot = dashboard.analytics_snapshot()
     assert snapshot["windows"]["lifetime"]["n"] == 1
     assert snapshot["cohorts"]["league_season"][0]["league_id"] == "39"
 
-    html = dashboard.render_analytics_html()
-    assert "Allowed Research League" in html
-    assert "Ireland Premier Division" not in html
-    assert "Blacklisted League ID" not in html
-    assert "Women's Test League" not in html
+    board_html = dashboard.render_html("tab=history")
+    analytics_html = dashboard.render_analytics_html()
+    for html in (board_html, analytics_html):
+        assert "Allowed Research League" in html
+        assert "Ireland Premier Division" not in html
+        assert "Blacklisted League ID" not in html
+        assert "Women's Test League" not in html
+        assert "Friendlies Clubs" not in html
+        assert "UEFA Nations League" not in html
+        assert "FIFA Asian Cup" not in html
 
     blocked_drilldown = dashboard.league_details(72, 2026)
     assert blocked_drilldown["summary"]["n"] == 0

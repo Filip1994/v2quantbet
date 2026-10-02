@@ -6,15 +6,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from h2h.domain.competition_scope import (
-    is_blacklisted_country,
-    is_blocked_domestic_tier,
-    is_womens_football,
-)
+from h2h.domain.competition_scope import RejectionReason, universe_block_reason
 
 
-GOAL_SCOPE_VERSION = "GOAL_SCOPE_V4"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V6"
+GOAL_SCOPE_VERSION = "GOAL_SCOPE_V5"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V7"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -142,6 +138,37 @@ class ScopeDecision:
     reason: str
 
 
+_UNIVERSE_REASON_LABELS = {
+    RejectionReason.BLOCKED_COUNTRY: "blocked_country",
+    RejectionReason.BLACKLISTED_LEAGUE: "blacklisted_league",
+    RejectionReason.FRIENDLY: "friendly_football",
+    RejectionReason.NATIONAL_TEAM: "national_team_football",
+    RejectionReason.WOMEN: "womens_football",
+    RejectionReason.ENGLISH_TIER: "blocked_domestic_tier",
+    RejectionReason.GERMAN_TIER: "blocked_domestic_tier",
+}
+
+
+def _universe_scope_reason(
+    *,
+    country: object,
+    competition_name: object,
+    league_id: object = None,
+    competition_type: object = "",
+    home_team: object = "",
+    away_team: object = "",
+) -> str | None:
+    reason = universe_block_reason(
+        country=country,
+        competition_name=competition_name,
+        league_id=league_id,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+    )
+    return None if reason is None else _UNIVERSE_REASON_LABELS.get(reason, reason)
+
+
 def goal_scope(
     *,
     country: object,
@@ -149,22 +176,19 @@ def goal_scope(
     competition_type: object = "",
     home_team: object = "",
     away_team: object = "",
+    league_id: object = None,
 ) -> ScopeDecision:
     """Return GoalLab eligibility without making a provider request."""
-    if is_blacklisted_country(country):
-        return ScopeDecision(False, GOAL_SCOPE_VERSION, "blocked_country")
-    if is_womens_football(
+    universe_reason = _universe_scope_reason(
+        country=country,
         competition_name=competition_name,
+        league_id=league_id,
         competition_type=competition_type,
         home_team=home_team,
         away_team=away_team,
-    ):
-        return ScopeDecision(False, GOAL_SCOPE_VERSION, "womens_football")
-    if is_blocked_domestic_tier(
-        country=country,
-        competition_name=competition_name,
-    ):
-        return ScopeDecision(False, GOAL_SCOPE_VERSION, "blocked_domestic_tier")
+    )
+    if universe_reason is not None:
+        return ScopeDecision(False, GOAL_SCOPE_VERSION, universe_reason)
     if _is_youth_or_amateur(
         competition_name,
         competition_type,
@@ -192,6 +216,7 @@ def card_corner_scope(
     competition_type: object = "",
     home_team: object = "",
     away_team: object = "",
+    league_id: object = None,
 ) -> ScopeDecision:
     """Allow market-driven CardLab/CornerLab research across the discovered universe.
 
@@ -199,20 +224,16 @@ def card_corner_scope(
     settlement support, not a league allowlist, determine whether a CARD/CORNER
     candidate can become an actionable shadow decision.
     """
-    if is_blacklisted_country(country):
-        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "blocked_country")
-    if is_womens_football(
+    universe_reason = _universe_scope_reason(
+        country=country,
         competition_name=competition_name,
+        league_id=league_id,
         competition_type=competition_type,
         home_team=home_team,
         away_team=away_team,
-    ):
-        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "womens_football")
-    if is_blocked_domestic_tier(
-        country=country,
-        competition_name=competition_name,
-    ):
-        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "blocked_domestic_tier")
+    )
+    if universe_reason is not None:
+        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, universe_reason)
     return ScopeDecision(True, CONTEXT_SCOPE_VERSION, "market_driven_candidate")
 
 

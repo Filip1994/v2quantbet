@@ -16,6 +16,8 @@ class RejectionReason:
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
     BLOCKED_COUNTRY = "EXCLUDED_BLOCKED_COUNTRY"
+    FRIENDLY = "EXCLUDED_FRIENDLY_COMPETITION"
+    NATIONAL_TEAM = "EXCLUDED_NATIONAL_TEAM_COMPETITION"
     AMBIGUOUS = "AMBIGUOUS_COMPETITION_METADATA"
 
 
@@ -52,6 +54,8 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
 BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
+FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})
+NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS = frozenset({1, 4, 5, 6, 7, 8, 9})
 
 
 def is_blacklisted_country(country: object) -> bool:
@@ -68,6 +72,117 @@ def is_blacklisted_league_id(league_id: object) -> bool:
     except (TypeError, ValueError):
         return False
     return parsed in BLACKLISTED_API_FOOTBALL_LEAGUE_IDS
+
+
+_FRIENDLY_MARKERS = (
+    "friendly",
+    "friendlies",
+    "club friendly",
+    "club friendlies",
+    "friendly clubs",
+    "friendlies clubs",
+    "international friendly",
+    "international friendlies",
+)
+
+_NATIONAL_TEAM_MARKERS = (
+    "uefa nations league",
+    "concacaf nations league",
+    "nations league",
+    "world cup",
+    "euro championship",
+    "european championship",
+    "copa america",
+    "africa cup of nations",
+    "african nations championship",
+    "asian cup",
+    "gold cup",
+    "cup of nations",
+    "nations cup",
+    "fifa series",
+    "finalissima",
+    "world cup qualification",
+    "world cup qualifiers",
+    "wc qualification",
+    "euro qualification",
+    "european qualifiers",
+    "cosafa cup",
+    "cecafa senior challenge cup",
+    "saff championship",
+    "waff championship",
+    "aff championship",
+    "eaff e 1 football championship",
+    "asean championship",
+    "gulf cup of nations",
+    "arab cup",
+    "baltic cup",
+    "ofc nations cup",
+    "olympics men",
+    "olympics women",
+    "olympic qualifying",
+    "king s cup",
+    "kirin cup",
+    "china cup",
+)
+
+
+def _parsed_league_id(league_id: object) -> int | None:
+    if isinstance(league_id, bool):
+        return None
+    try:
+        return int(league_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_friendly_football(
+    *,
+    country: object = "",
+    competition_name: object,
+    competition_type: object = "",
+    league_id: object = None,
+) -> bool:
+    """Return True for club or international friendly competitions."""
+    parsed_league_id = _parsed_league_id(league_id)
+    country_key = _normalise(str(country or ""))
+    name = _normalise(str(competition_name or ""))
+    competition_kind = _normalise(str(competition_type or ""))
+    return (
+        _contains_phrase(name, _FRIENDLY_MARKERS)
+        or _contains_phrase(competition_kind, _FRIENDLY_MARKERS)
+        or (
+            parsed_league_id in FRIENDLY_API_FOOTBALL_LEAGUE_IDS
+            and country_key == "world"
+        )
+    )
+
+
+def is_national_team_football(
+    *,
+    country: object = "",
+    competition_name: object,
+    competition_type: object = "",
+    league_id: object = None,
+) -> bool:
+    """Return True for representative / national-team football competitions."""
+    parsed_league_id = _parsed_league_id(league_id)
+    country_key = _normalise(str(country or ""))
+    name = _normalise(str(competition_name or ""))
+    competition_kind = _normalise(str(competition_type or ""))
+
+    # Keep club competitions such as the FIFA Club World Cup eligible for
+    # independent club-level policy decisions.
+    if "club world cup" in name:
+        return False
+
+    return (
+        _contains_phrase(name, _NATIONAL_TEAM_MARKERS)
+        or _contains_phrase(competition_kind, ("national team", "international team"))
+        or (
+            parsed_league_id in NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS
+            and country_key == "world"
+        )
+    )
 
 
 def blocked_domestic_tier_reason(
@@ -215,6 +330,20 @@ def universe_block_reason(
         return RejectionReason.BLOCKED_COUNTRY
     if is_blacklisted_league_id(league_id):
         return RejectionReason.BLACKLISTED_LEAGUE
+    if is_friendly_football(
+        country=country,
+        competition_name=competition_name,
+        competition_type=competition_type,
+        league_id=league_id,
+    ):
+        return RejectionReason.FRIENDLY
+    if is_national_team_football(
+        country=country,
+        competition_name=competition_name,
+        competition_type=competition_type,
+        league_id=league_id,
+    ):
+        return RejectionReason.NATIONAL_TEAM
     if is_womens_football(
         competition_name=competition_name,
         competition_type=competition_type,

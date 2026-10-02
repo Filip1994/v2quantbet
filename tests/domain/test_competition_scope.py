@@ -146,6 +146,45 @@ def test_rejects_womens_football_globally(metadata: CompetitionMetadata) -> None
     assert decision.rejection_reason == RejectionReason.WOMEN
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        CompetitionMetadata("World", "Friendlies", "Cup", league_id=10),
+        CompetitionMetadata("World", "Friendlies Clubs", "Cup"),
+        CompetitionMetadata("World", "Club Friendlies", "Cup"),
+        CompetitionMetadata("England", "International Friendly", "Friendly"),
+    ],
+)
+def test_rejects_friendlies_globally(metadata: CompetitionMetadata) -> None:
+    decision = classify_phase_i(metadata)
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.FRIENDLY
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        CompetitionMetadata("World", "World Cup", "Cup", league_id=1),
+        CompetitionMetadata("World", "Euro Championship", "Cup", league_id=4),
+        CompetitionMetadata("World", "UEFA Nations League", "Cup", league_id=5),
+        CompetitionMetadata("World", "Africa Cup of Nations", "Cup", league_id=6),
+        CompetitionMetadata("World", "Asian Cup", "Cup", league_id=7),
+        CompetitionMetadata("World", "Copa America", "Cup", league_id=9),
+        CompetitionMetadata("World", "CONCACAF Nations League", "Cup"),
+        CompetitionMetadata("World", "World Cup - Qualification Europe", "Cup"),
+        CompetitionMetadata("World", "Concacaf Gold Cup", "Cup"),
+        CompetitionMetadata("World", "FIFA Series", "Cup"),
+        CompetitionMetadata("World", "CONMEBOL-UEFA Finalissima", "Cup"),
+    ],
+)
+def test_rejects_national_team_football_globally(metadata: CompetitionMetadata) -> None:
+    decision = classify_phase_i(metadata)
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.NATIONAL_TEAM
+
+
 @pytest.mark.parametrize("league_id", [72, 75, 236, 595])
 def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
     decision = classify_phase_i(
