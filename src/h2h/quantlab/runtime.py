@@ -162,6 +162,7 @@ class QuantLabRuntime:
             "competition_type": fixture.get("competition_type"),
             "home_team": fixture.get("home_team"),
             "away_team": fixture.get("away_team"),
+            "league_id": fixture.get("league_id"),
         }
 
     def _capture_context(self, fixture: dict[str, Any], now: datetime) -> dict[str, Any] | None:
