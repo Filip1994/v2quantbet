@@ -11,7 +11,7 @@ class RejectionReason:
     YOUTH = "EXCLUDED_YOUTH_COMPETITION"
     WOMEN = "EXCLUDED_WOMENS_FOOTBALL"
     ENGLISH_TIER = "EXCLUDED_ENGLISH_TIER_4_OR_LOWER"
-    GERMAN_TIER = "EXCLUDED_GERMAN_TIER_4_OR_LOWER"
+    GERMAN_TIER = "EXCLUDED_GERMAN_TIER_3_OR_LOWER"
     CUP = "EXCLUDED_CUP_COMPETITION"
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
@@ -61,6 +61,70 @@ def is_blacklisted_league_id(league_id: object) -> bool:
     except (TypeError, ValueError):
         return False
     return parsed in BLACKLISTED_API_FOOTBALL_LEAGUE_IDS
+
+
+def blocked_domestic_tier_reason(
+    *,
+    country: object,
+    competition_name: object,
+    level: object = None,
+) -> str | None:
+    """Return the shared hard-block reason for low English/German domestic tiers."""
+    country_key = _normalise(str(country or ""))
+    name_key = _normalise(str(competition_name or ""))
+
+    parsed_level: int | None = None
+    if level is not None and not isinstance(level, bool):
+        try:
+            parsed_level = int(level)
+        except (TypeError, ValueError):
+            parsed_level = None
+
+    if country_key in {"england", "england uk", "united kingdom"}:
+        excluded_english_tiers = (
+            "counties league",
+            "isthmian",
+            "league two",
+            "national league",
+            "non league",
+            "northern premier league",
+            "southern league",
+        )
+        if _contains_phrase(name_key, excluded_english_tiers) or (
+            parsed_level is not None and parsed_level >= 4
+        ):
+            return RejectionReason.ENGLISH_TIER
+
+    if country_key == "germany":
+        excluded_german_tiers = (
+            "3 liga",
+            "bezirksliga",
+            "kreisliga",
+            "landesliga",
+            "oberliga",
+            "regionalliga",
+            "verbandsliga",
+        )
+        if _contains_phrase(name_key, excluded_german_tiers) or (
+            parsed_level is not None and parsed_level >= 3
+        ):
+            return RejectionReason.GERMAN_TIER
+
+    return None
+
+
+def is_blocked_domestic_tier(
+    *,
+    country: object,
+    competition_name: object,
+    level: object = None,
+) -> bool:
+    """Return True when the shared domestic-tier hard gate rejects a league."""
+    return blocked_domestic_tier_reason(
+        country=country,
+        competition_name=competition_name,
+        level=level,
+    ) is not None
 
 
 _WOMEN_MARKERS = (
@@ -222,33 +286,12 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     if competition_type != "league":
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)
 
-    if country in {"england", "england uk", "united kingdom"}:
-        excluded_english_tiers = (
-            "counties league",
-            "isthmian",
-            "league two",
-            "national league",
-            "non league",
-            "northern premier league",
-            "southern league",
-        )
-        if _contains_phrase(name, excluded_english_tiers):
-            return ScopeDecision(False, RejectionReason.ENGLISH_TIER)
-        if metadata.level is not None and metadata.level >= 4:
-            return ScopeDecision(False, RejectionReason.ENGLISH_TIER)
-
-    if country == "germany":
-        excluded_german_tiers = (
-            "bezirksliga",
-            "kreisliga",
-            "landesliga",
-            "oberliga",
-            "regionalliga",
-            "verbandsliga",
-        )
-        if _contains_phrase(name, excluded_german_tiers) or (
-            metadata.level is not None and metadata.level >= 4
-        ):
-            return ScopeDecision(False, RejectionReason.GERMAN_TIER)
+    tier_rejection = blocked_domestic_tier_reason(
+        country=metadata.country,
+        competition_name=metadata.name,
+        level=metadata.level,
+    )
+    if tier_rejection is not None:
+        return ScopeDecision(False, tier_rejection)
 
     return ScopeDecision(True)
