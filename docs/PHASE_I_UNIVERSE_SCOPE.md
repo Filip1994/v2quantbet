@@ -54,15 +54,15 @@ Exclude:
 
 The initial scope may retain the English Premier League, Championship and League One, subject to normal data-quality checks.
 
-### 5. German fourth tier and below
+### 5. German third tier and below
 
 Exclude:
 
-- German fourth tier and lower competitions;
-- Regionalliga and lower levels;
-- other competitions identified as fourth tier or below in the German league hierarchy.
+- German 3. Liga, the third tier of the German league system;
+- Regionalliga and all lower levels;
+- other competitions identified as third tier or below in the German league hierarchy.
 
-The initial scope may retain the German Bundesliga, 2. Bundesliga and 3. Liga, subject to normal data-quality checks.
+The initial scope may retain the German Bundesliga and 2. Bundesliga, subject to normal data-quality checks.
 
 ### 6. Explicit competition blocklist
 
@@ -106,7 +106,7 @@ Rejected fixtures should expose a stable reason code, for example:
 - `EXCLUDED_YOUTH_COMPETITION`;
 - `EXCLUDED_WOMENS_FOOTBALL`;
 - `EXCLUDED_ENGLISH_TIER_4_OR_LOWER`;
-- `EXCLUDED_GERMAN_TIER_4_OR_LOWER`;
+- `EXCLUDED_GERMAN_TIER_3_OR_LOWER`;
 - `EXCLUDED_CUP_COMPETITION`;
 - `EXCLUDED_EXPLICIT_COMPETITION`;
 - `AMBIGUOUS_COMPETITION_METADATA`.
