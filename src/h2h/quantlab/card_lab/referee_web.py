@@ -41,6 +41,10 @@ def _ascii(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
 
 
+def referee_web_referee_key(value: object) -> str:
+    return _ascii(str(value or "").split(",", 1)[0])
+
+
 def referee_web_league_key(country: object, competition_name: object) -> str | None:
     country_key = _ascii(country)
     competition_key = _ascii(competition_name)
