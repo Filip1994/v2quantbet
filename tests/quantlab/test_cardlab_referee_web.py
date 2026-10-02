@@ -1,5 +1,9 @@
+from datetime import UTC, datetime
+
 from h2h.quantlab.card_lab.referee_web import (
+    current_web_season,
     parse_statbunker_referee_profiles,
+    proactive_web_targets,
     referee_web_league_key,
     referee_web_referee_key,
     supported_web_seasons,
@@ -63,3 +67,30 @@ def test_statbunker_parser_extracts_referee_card_profile() -> None:
 def test_supported_web_seasons_uses_only_known_source_ids() -> None:
     assert supported_web_seasons("england_premier_league", 2026, limit=3) == (2026, 2025)
     assert supported_web_seasons("germany_bundesliga", 2026, limit=3) == (2026, 2024)
+
+
+
+def test_current_web_season_uses_domestic_july_boundary() -> None:
+    assert current_web_season(datetime(2026, 10, 2, tzinfo=UTC)) == 2026
+    assert current_web_season(datetime(2026, 2, 2, tzinfo=UTC)) == 2025
+
+
+def test_proactive_web_targets_cover_all_top_five_leagues_without_fixtures() -> None:
+    targets = proactive_web_targets(
+        datetime(2026, 10, 2, tzinfo=UTC),
+        seasons_per_league=3,
+    )
+
+    league_keys = {league_key for league_key, _season, _comp_id in targets}
+    assert league_keys == {
+        "england_premier_league",
+        "spain_la_liga",
+        "italy_serie_a",
+        "germany_bundesliga",
+        "france_ligue_1",
+    }
+    assert ("england_premier_league", 2026, 791) in targets
+    assert ("spain_la_liga", 2026, 792) in targets
+    assert ("france_ligue_1", 2026, 796) in targets
+    assert ("italy_serie_a", 2026, 797) in targets
+    assert ("germany_bundesliga", 2026, 798) in targets

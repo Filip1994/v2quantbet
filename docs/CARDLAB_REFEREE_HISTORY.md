@@ -60,3 +60,26 @@ Configuration:
 League/season source IDs are validated against page content before data is
 accepted. A stale or repurposed source page therefore fails closed and leaves the
 existing API-Football referee evidence untouched.
+
+
+## Proactive web bootstrap
+
+The StatBunker enrichment is no longer fixture-triggered. Every QuantLab collector
+cycle checks a cached top-five-league target set before API-Football collection:
+
+1. derive the current domestic season from the collector timestamp;
+2. enumerate every verified StatBunker league/season target for Premier League,
+   La Liga, Serie A, Bundesliga and Ligue 1;
+3. refresh only targets whose latest capture is older than
+   `QUANTBET_QUANTLAB_CARD_REFEREE_WEB_REFRESH_SECONDS` (default six hours);
+4. persist every successful response to the append-only referee web ledger;
+5. force fresh CardLab V4 snapshots for upcoming fixtures in any league whose web
+   profile set was refreshed.
+
+This bootstrap is independent of today's fixture list and independent of the shared
+API-Football request budget. A day with no top-five CARD fixture still enriches the
+referee ledger, so future CardLab decisions read already-cached referee evidence.
+
+StatBunker season validation accepts the site's compact season notation (for example
+`26/27`) as well as full-year notation. League-name validation remains mandatory and
+mismatched pages fail closed.
