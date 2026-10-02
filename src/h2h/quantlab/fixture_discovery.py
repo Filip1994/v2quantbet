@@ -9,12 +9,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
-from h2h.domain.competition_scope import (
-    is_blacklisted_country,
-    is_blacklisted_league_id,
-    is_blocked_domestic_tier,
-    is_womens_football,
-)
+from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
 
@@ -67,17 +62,10 @@ def parse_fixture_discovery_response(
         if not isinstance(raw, Mapping):
             continue
         fixture = adapter.adapt(raw)
-        if is_blacklisted_country(fixture.country):
-            continue
-        if is_blacklisted_league_id(fixture.competition_id):
-            continue
-        if is_blocked_domestic_tier(
+        if is_universe_blocked_competition(
             country=fixture.country,
             competition_name=fixture.competition_name,
-        ):
-            continue
-        if is_womens_football(
-            competition_name=fixture.competition_name,
+            league_id=fixture.competition_id,
             competition_type=fixture.competition_type,
             home_team=fixture.home_team,
             away_team=fixture.away_team,
