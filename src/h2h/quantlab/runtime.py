@@ -18,9 +18,8 @@ from h2h.quantlab.card_lab.context import (
 from h2h.quantlab.card_lab.features import FeatureLeakageError, build_cardlab_snapshot
 from h2h.quantlab.card_lab.referee import referee_key
 from h2h.quantlab.card_lab.referee_web import (
+    proactive_web_targets,
     referee_web_league_key,
-    statbunker_competition_id,
-    supported_web_seasons,
 )
 from h2h.quantlab.card_lab.settlement import (
     parse_1xbet_card_events,
@@ -1284,33 +1283,24 @@ class QuantLabRuntime:
             LOGGER.info("QuantLab CardLab referee date scans completed days=%d", scanned)
         return scanned
 
-    def _refresh_referee_web_for_fixture(
+    def _bootstrap_referee_web(
         self,
-        fixture: dict[str, Any],
         now: datetime,
-    ) -> tuple[str | None, int]:
-        league_key = referee_web_league_key(
-            fixture.get("country"),
-            fixture.get("competition_name"),
+    ) -> tuple[int, int, frozenset[str]]:
+        if self._referee_web_source is None:
+            return 0, 0, frozenset()
+
+        captures = 0
+        profiles_saved = 0
+        refreshed_leagues: set[str] = set()
+        targets = proactive_web_targets(
+            now,
+            seasons_per_league=self._settings.card_referee_web_seasons,
         )
-        if league_key is None or self._referee_web_source is None:
-            return league_key, 0
-        season = int(fixture.get("season") or 0)
-        if season <= 0:
-            return league_key, 0
-        refreshed = 0
-        seasons = supported_web_seasons(
-            league_key,
-            season,
-            limit=self._settings.card_referee_web_seasons,
-        )
-        for history_season in seasons:
-            comp_id = statbunker_competition_id(league_key, history_season)
-            if comp_id is None:
-                continue
+        for league_key, season, comp_id in targets:
             if not self._repository.referee_web_profile_due(
                 league_key,
-                history_season,
+                season,
                 now=now,
                 refresh_seconds=self._settings.card_referee_web_refresh_seconds,
             ):
@@ -1318,21 +1308,23 @@ class QuantLabRuntime:
             try:
                 source_url, profiles = self._referee_web_source.fetch_profiles(
                     league_key,
-                    history_season,
+                    season,
                 )
                 self._repository.save_referee_web_capture(
                     league_key=league_key,
-                    season=history_season,
+                    season=season,
                     source_competition_id=comp_id,
                     source_url=source_url,
                     captured_at=now,
                     profiles=profiles,
                 )
-                refreshed += 1
+                captures += 1
+                profiles_saved += len(profiles)
+                refreshed_leagues.add(league_key)
                 LOGGER.info(
                     "QuantLab CardLab referee web refreshed league=%s season=%d profiles=%d",
                     league_key,
-                    history_season,
+                    season,
                     len(profiles),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -1340,17 +1332,27 @@ class QuantLabRuntime:
                     "QuantLab CardLab referee web refresh failed league=%s season=%d "
                     "error_class=%s error=%s",
                     league_key,
-                    history_season,
+                    season,
                     type(exc).__name__,
                     str(exc),
                 )
-        return league_key, refreshed
+
+        LOGGER.info(
+            "QuantLab CardLab proactive referee web bootstrap completed "
+            "targets=%d captures=%d profiles=%d refreshed_leagues=%d",
+            len(targets),
+            captures,
+            profiles_saved,
+            len(refreshed_leagues),
+        )
+        return captures, profiles_saved, frozenset(refreshed_leagues)
 
     def _collect_upcoming(
         self,
         now: datetime,
         *,
         force_card_referees: frozenset[str] = frozenset(),
+        force_card_web_leagues: frozenset[str] = frozenset(),
     ) -> tuple[int, int]:
         goal_queue = self._repository.upcoming_fixtures(
             start_at=now,
@@ -1406,9 +1408,9 @@ class QuantLabRuntime:
                     continue
                 if "CARD" not in market_labs:
                     continue
-                referee_web_key, referee_web_refreshes = self._refresh_referee_web_for_fixture(
-                    fixture,
-                    now,
+                referee_web_key = referee_web_league_key(
+                    fixture.get("country"),
+                    fixture.get("competition_name"),
                 )
                 context = self._capture_context(fixture, now)
                 if standings is None:
@@ -1419,7 +1421,10 @@ class QuantLabRuntime:
                 referee_key_value = referee_key(referee)
                 force_snapshot = bool(
                     (referee_key_value and referee_key_value in force_card_referees)
-                    or referee_web_refreshes
+                    or (
+                        referee_web_key is not None
+                        and referee_web_key in force_card_web_leagues
+                    )
                 )
                 if (
                     not force_snapshot
@@ -1751,6 +1756,8 @@ class QuantLabRuntime:
             "corner_team_statistics_backfilled": 0,
             "card_referee_scopes_refreshed": 0,
             "card_referee_statistics_backfilled": 0,
+            "card_referee_web_captures": 0,
+            "card_referee_web_profiles": 0,
             "market_fixtures": 0,
             "card_snapshots": 0,
             "goal_decisions": 0,
@@ -1856,6 +1863,16 @@ class QuantLabRuntime:
         except Exception:
             LOGGER.exception("QuantLab CardLab settlement failed")
 
+        refreshed_card_web_leagues: frozenset[str] = frozenset()
+        try:
+            (
+                result["card_referee_web_captures"],
+                result["card_referee_web_profiles"],
+                refreshed_card_web_leagues,
+            ) = self._bootstrap_referee_web(now)
+        except Exception:
+            LOGGER.exception("QuantLab CardLab proactive referee web bootstrap failed")
+
         collection_budget_exhausted = False
         updated_card_referees: frozenset[str] = frozenset()
         try:
@@ -1879,6 +1896,7 @@ class QuantLabRuntime:
                 market_fixtures, card_snapshots = self._collect_upcoming(
                     now,
                     force_card_referees=updated_card_referees,
+                    force_card_web_leagues=refreshed_card_web_leagues,
                 )
                 result["market_fixtures"] = market_fixtures
                 result["card_snapshots"] = card_snapshots
@@ -1947,6 +1965,7 @@ class QuantLabRuntime:
             "goal_player_history_backfilled=%d "
             "corner_team_history_discovered=%d corner_team_statistics_backfilled=%d "
             "card_referee_scopes_refreshed=%d card_referee_statistics_backfilled=%d "
+            "card_referee_web_captures=%d card_referee_web_profiles=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "goal_result_refreshes=%d goal_settlements=%d corner_decisions=%d "
             "corner_picks=%d corner_settlements=%d "
@@ -1960,6 +1979,8 @@ class QuantLabRuntime:
             result["corner_team_statistics_backfilled"],
             result["card_referee_scopes_refreshed"],
             result["card_referee_statistics_backfilled"],
+            result["card_referee_web_captures"],
+            result["card_referee_web_profiles"],
             result["market_fixtures"],
             result["card_snapshots"],
             result["goal_decisions"],
