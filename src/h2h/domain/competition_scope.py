@@ -137,33 +137,36 @@ def _parsed_league_id(league_id: object) -> int | None:
 
 def is_friendly_football(
     *,
+    country: object = "",
     competition_name: object,
     competition_type: object = "",
     league_id: object = None,
 ) -> bool:
     """Return True for club or international friendly competitions."""
     parsed_league_id = _parsed_league_id(league_id)
-    if parsed_league_id in FRIENDLY_API_FOOTBALL_LEAGUE_IDS:
-        return True
+    country_key = _normalise(str(country or ""))
     name = _normalise(str(competition_name or ""))
     competition_kind = _normalise(str(competition_type or ""))
     return (
         _contains_phrase(name, _FRIENDLY_MARKERS)
         or _contains_phrase(competition_kind, _FRIENDLY_MARKERS)
+        or (
+            parsed_league_id in FRIENDLY_API_FOOTBALL_LEAGUE_IDS
+            and country_key == "world"
+        )
     )
 
 
 def is_national_team_football(
     *,
+    country: object = "",
     competition_name: object,
     competition_type: object = "",
     league_id: object = None,
 ) -> bool:
     """Return True for representative / national-team football competitions."""
     parsed_league_id = _parsed_league_id(league_id)
-    if parsed_league_id in NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS:
-        return True
-
+    country_key = _normalise(str(country or ""))
     name = _normalise(str(competition_name or ""))
     competition_kind = _normalise(str(competition_type or ""))
 
@@ -175,6 +178,10 @@ def is_national_team_football(
     return (
         _contains_phrase(name, _NATIONAL_TEAM_MARKERS)
         or _contains_phrase(competition_kind, ("national team", "international team"))
+        or (
+            parsed_league_id in NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS
+            and country_key == "world"
+        )
     )
 
 
@@ -324,12 +331,14 @@ def universe_block_reason(
     if is_blacklisted_league_id(league_id):
         return RejectionReason.BLACKLISTED_LEAGUE
     if is_friendly_football(
+        country=country,
         competition_name=competition_name,
         competition_type=competition_type,
         league_id=league_id,
     ):
         return RejectionReason.FRIENDLY
     if is_national_team_football(
+        country=country,
         competition_name=competition_name,
         competition_type=competition_type,
         league_id=league_id,
