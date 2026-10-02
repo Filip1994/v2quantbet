@@ -362,7 +362,7 @@ def test_card_engine_uses_only_1xbet_raw_statistics_and_ignores_negative_ev():
     assert pick.reference_companion_observation_id is None
     assert pick.reference_odds is None
     assert pick.reference_companion_odds is None
-    assert pick.policy_version == "CARDLAB_RAW_STATS_POLICY_V6_MARKET80"
+    assert pick.policy_version == "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB"
     assert pick.model_name == "CardLab raw-stat consensus"
     assert pick.reason == "RAW_STAT_CONSENSUS_PICK"
     assert pick.details["raw_signal"]["consensus_cards"] == 5.0
