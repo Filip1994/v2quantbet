@@ -206,6 +206,50 @@ def _all_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
     return _dedupe_corner_settlements(rows) if lab == "CORNER" else rows
 
 
+CARDLAB_CURRENT_POLICY_MIN_GENERATION = 7
+
+
+def _card_policy_generation(row: dict[str, Any]) -> int | None:
+    value = str(row.get("policy_version") or "")
+    match = re.match(r"^CARDLAB_RAW_STATS_POLICY_V(\d+)(?:_|$)", value)
+    return None if match is None else int(match.group(1))
+
+
+def _partition_card_policy_rows(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+    current: list[dict[str, Any]] = []
+    legacy: list[dict[str, Any]] = []
+    for row in rows:
+        generation = _card_policy_generation(row)
+        if generation is not None and generation >= CARDLAB_CURRENT_POLICY_MIN_GENERATION:
+            current.append(row)
+        else:
+            legacy.append(row)
+    return tuple(current), tuple(legacy)
+
+
+def _card_legacy_audit_html(rows: tuple[dict[str, Any], ...]) -> str:
+    if not rows:
+        return ""
+    active = sum(_result(row) == "PENDING" for row in rows)
+    settled = sum(_result(row) in {"WIN", "LOSS", "VOID"} for row in rows)
+    policies = sorted({str(row.get("policy_version") or "UNKNOWN") for row in rows})
+    policy_text = ", ".join(policies[:4])
+    if len(policies) > 4:
+        policy_text += f" +{len(policies) - 4} more"
+    return (
+        '<section class="panel">'
+        '<div class="panel-title"><b>LEGACY CardLab audit</b>'
+        f'<span>{len(rows)} excluded rows · {active} active · {settled} settled</span></div>'
+        '<p class="analytics-note">'
+        'Pre-V7 CardLab rows remain immutable in the ledger for audit, but are excluded from '
+        'current Active Picks, W/L, P&L, ROI and CardLab Analytics. '
+        f'Policies: {escape(policy_text)}.'
+        '</p></section>'
+    )
+
+
 def _goal_notes(
     repository: Any,
     rows: tuple[dict[str, Any], ...],
@@ -508,8 +552,12 @@ def render_dashboard(
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
     warning = ""
+    legacy_rows: tuple[dict[str, Any], ...] = ()
+    legacy_metric_rows: tuple[dict[str, Any], ...] = ()
     try:
         rows = _sorted(_display_rows(repository, lab))
+        if lab == "CARD":
+            rows, legacy_rows = _partition_card_policy_rows(rows)
     except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         rows = ()
         warning = (
@@ -526,6 +574,8 @@ def render_dashboard(
             metric_rows = _sorted(tuple(loader(lab))) if callable(loader) else rows
             if lab == "CORNER":
                 metric_rows = _dedupe_corner_settlements(metric_rows)
+            elif lab == "CARD":
+                metric_rows, legacy_metric_rows = _partition_card_policy_rows(metric_rows)
     except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         metric_rows = rows
         if not warning:
@@ -579,8 +629,12 @@ def render_dashboard(
         for label, value in cards
     )
 
+    legacy_audit_rows = legacy_metric_rows or legacy_rows
+    legacy_audit_html = _card_legacy_audit_html(legacy_audit_rows) if lab == "CARD" else ""
+
     body = (
         warning
+        + legacy_audit_html
         + f'<section class="cards">{cards_html}</section>'
         '<section class="panel">'
         '<div class="panel-title"><b>Active Picks</b>'
@@ -2416,8 +2470,12 @@ def render_analytics(
     params: dict[str, list[str]] | None = None,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
+    source_rows = _sorted(_all_rows(repository, lab))
+    legacy_rows: tuple[dict[str, Any], ...] = ()
+    if lab == "CARD":
+        source_rows, legacy_rows = _partition_card_policy_rows(source_rows)
     rows = _analytics_rows(
-        _sorted(_all_rows(repository, lab)),
+        source_rows,
         lab_key=lab_key,
     )
     params = params or {}
@@ -2436,6 +2494,7 @@ def render_analytics(
             ("P/L", _money(int(metrics["pnl_minor"]), currency)),
             ("Avg odds", _metric(metrics["avg_odds"], digits=2)),
             ("Max DD", _money(int(metrics["max_drawdown_minor"]), currency)),
+            ("LEGACY excluded", str(len(legacy_rows))),
         )
         if lab_key == "card"
         else (
@@ -2471,7 +2530,8 @@ def render_analytics(
         if lab_key == "corner"
         else "CardLab is raw-statistics first: PICK decisions do not require EV, edge or an odds band. "
         "Analytics exposes referee, team discipline, foul, matchup, league, H2H, importance, game-state, "
-        "trend and reliability buckets with exact constituent-pick drilldowns."
+        "trend and reliability buckets with exact constituent-pick drilldowns. "
+        f"{len(legacy_rows)} pre-V7 rows are classified LEGACY and excluded from all current CardLab metrics."
     )
 
     def table(
