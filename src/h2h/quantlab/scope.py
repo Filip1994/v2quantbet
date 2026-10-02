@@ -6,11 +6,15 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from h2h.domain.competition_scope import is_blocked_domestic_tier, is_womens_football
+from h2h.domain.competition_scope import (
+    is_blacklisted_country,
+    is_blocked_domestic_tier,
+    is_womens_football,
+)
 
 
-GOAL_SCOPE_VERSION = "GOAL_SCOPE_V3"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V5"
+GOAL_SCOPE_VERSION = "GOAL_SCOPE_V4"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V6"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -147,6 +151,8 @@ def goal_scope(
     away_team: object = "",
 ) -> ScopeDecision:
     """Return GoalLab eligibility without making a provider request."""
+    if is_blacklisted_country(country):
+        return ScopeDecision(False, GOAL_SCOPE_VERSION, "blocked_country")
     if is_womens_football(
         competition_name=competition_name,
         competition_type=competition_type,
@@ -193,6 +199,8 @@ def card_corner_scope(
     settlement support, not a league allowlist, determine whether a CARD/CORNER
     candidate can become an actionable shadow decision.
     """
+    if is_blacklisted_country(country):
+        return ScopeDecision(False, CONTEXT_SCOPE_VERSION, "blocked_country")
     if is_womens_football(
         competition_name=competition_name,
         competition_type=competition_type,
