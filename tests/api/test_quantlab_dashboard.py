@@ -1021,3 +1021,132 @@ def test_cardlab_gets_raw_statistics_analytics_surface() -> None:
     assert "Expected value" not in html
     assert "Avg EV" not in html
     assert "Calibration" not in html
+
+
+
+def test_cardlab_dashboard_excludes_pre_v7_rows_from_current_metrics_and_lists() -> None:
+    class CardPolicyRepository(StubRepository):
+        @staticmethod
+        def _rows():
+            current_pending = corner_pick(outcome="PENDING", suffix="p")
+            current_pending.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-current-pending",
+                    "home_team": "Current Active",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB",
+                }
+            )
+            legacy_pending = corner_pick(outcome="PENDING", suffix="q")
+            legacy_pending.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-legacy-pending",
+                    "home_team": "Legacy Active",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                }
+            )
+            current_win = corner_pick(outcome="WIN", suffix="r")
+            current_win.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-current-win",
+                    "home_team": "Current Win",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB",
+                }
+            )
+            legacy_loss = corner_pick(outcome="LOSS", suffix="s")
+            legacy_loss.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-legacy-loss",
+                    "home_team": "Legacy Loss",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                }
+            )
+            return (current_pending, legacy_pending, current_win, legacy_loss)
+
+        def list_bets(self, lab: str):
+            assert lab == "CARD"
+            return self._rows()
+
+        def list_all_bets(self, lab: str):
+            assert lab == "CARD"
+            return self._rows()
+
+    dashboard = QuantLabDashboardService(CardPolicyRepository())
+    html = dashboard.render_html("lab=card")
+
+    active = html.split("<b>Active Picks</b>", 1)[1].split("<b>Pick History</b>", 1)[0]
+    history = html.split("<b>Pick History</b>", 1)[1]
+
+    assert "Current Active – Match" in active
+    assert "Legacy Active – Match" not in active
+    assert "Current Win – Match" in history
+    assert "Legacy Loss – Match" not in history
+
+    assert '<small>Active picks</small><b>1</b>' in html
+    assert '<small>Settled</small><b>1</b>' in html
+    assert '<small>Wins</small><b>1</b>' in html
+    assert '<small>Losses</small><b>0</b>' in html
+    assert '<small>ROI</small><b>+100.00%</b>' in html
+
+    assert "LEGACY CardLab audit" in html
+    assert "2 excluded rows · 1 active · 1 settled" in html
+    assert "CARDLAB_RAW_STATS_POLICY_V6_MARKET80" in html
+    assert "excluded from current Active Picks, W/L, P&amp;L, ROI and CardLab Analytics" in html
+
+
+def test_cardlab_analytics_excludes_pre_v7_rows_from_roi_and_buckets() -> None:
+    class CardPolicyAnalyticsRepository(StubRepository):
+        def list_all_bets(self, lab: str):
+            assert lab == "CARD"
+            current = corner_pick(outcome="WIN", suffix="t")
+            current.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-current-analytics",
+                    "home_team": "Current Analytics",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB",
+                    "card_feature_payload": {
+                        "raw_features": {
+                            "web_referee_league_key": "england_premier_league",
+                            "web_referee_matches": 20,
+                            "web_referee_cards_per_match": 5.2,
+                        }
+                    },
+                }
+            )
+            legacy = corner_pick(outcome="LOSS", suffix="u")
+            legacy.update(
+                {
+                    "lab": "CARD",
+                    "fixture_id": "api-football:card-legacy-analytics",
+                    "home_team": "Legacy Analytics",
+                    "away_team": "Match",
+                    "market_key": "TOTAL_CARDS",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                }
+            )
+            return (current, legacy)
+
+    html = QuantLabDashboardService(CardPolicyAnalyticsRepository()).render_html(
+        "view=analytics&lab=card"
+    )
+
+    assert '<small>Settled</small><b>1</b>' in html
+    assert '<small>W-L-V</small><b>1-0-0</b>' in html
+    assert '<small>ROI</small><b>+100.00%</b>' in html
+    assert '<small>LEGACY excluded</small><b>1</b>' in html
+    assert "1 pre-V7 rows are classified LEGACY and excluded from all current CardLab metrics." in html
+    assert "CARDLAB_RAW_STATS_POLICY_V6_MARKET80" not in html
