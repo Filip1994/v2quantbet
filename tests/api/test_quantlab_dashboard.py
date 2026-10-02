@@ -254,7 +254,7 @@ def test_cardlab_dashboard_shows_pick_explanation_notes() -> None:
                     "line": 4.5,
                     "model_name": "CardLab raw-stat consensus",
                     "model_version": "CARDLAB_RAW_STATS_V1",
-                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB",
                     "model_probability": 0.60,
                     "market_probability": 0.75,
                     "edge": -0.15,
@@ -855,7 +855,7 @@ def test_cardlab_gets_raw_statistics_analytics_surface() -> None:
                     "market_key": "TOTAL_CARDS",
                     "selection": "OVER",
                     "line": 4.5,
-                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V6_MARKET80",
+                    "policy_version": "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB",
                     "model_name": "CardLab raw-stat consensus",
                     "model_version": "CARDLAB_RAW_STATS_V1",
                     "odds": 1.85,
@@ -870,6 +870,12 @@ def test_cardlab_gets_raw_statistics_analytics_surface() -> None:
                             "raw_consensus_cards": 5.4,
                             "referee_l10_cards": 5.8,
                             "referee_l10_fouls": 25.0,
+                            "web_referee_league_key": "england_premier_league",
+                            "web_referee_matches": 24,
+                            "web_referee_cards_per_match": 5.6,
+                            "web_referee_yellows_per_match": 5.2,
+                            "web_referee_reds_per_match": 0.17,
+                            "web_referee_home_away_bias": 0.25,
                             "combined_team_cards_for_l10": 5.2,
                             "combined_fouls_committed_l10": 28.0,
                             "matchup_expected_cards_l10": 5.3,
@@ -942,6 +948,8 @@ def test_cardlab_gets_raw_statistics_analytics_surface() -> None:
     assert "Importance × derby/cup × competitiveness" in html
     assert "CardLab raw-stat bucket universe" in html
     assert "CardLab cross-buckets" in html
+    assert "Web referee cards / match" in html
+    assert "Web referee 10+ match coverage" in html
     assert "Referee cards L10" in html
     assert "Home cards-for L10" in html
     assert "Matchup expected cards" in html
