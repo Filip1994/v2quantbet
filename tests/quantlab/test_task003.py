@@ -777,6 +777,9 @@ def test_run_once_prioritizes_goallab_before_provider_backed_work():
     runtime._settle_card_picks = mark("card_settlement", 1)  # type: ignore[method-assign]
     runtime._discover_fixtures = mark("discover", 0)  # type: ignore[method-assign]
     runtime._backfill_history = mark("history", 0)  # type: ignore[method-assign]
+    runtime._bootstrap_referee_web = mark(
+        "card_referee_web", (0, 0, frozenset())
+    )  # type: ignore[method-assign]
     runtime._bootstrap_card_referee_history = mark(
         "card_referee_history", (0, 0, frozenset())
     )  # type: ignore[method-assign]
@@ -802,7 +805,8 @@ def test_run_once_prioritizes_goallab_before_provider_backed_work():
     assert order.index("goal_result_refresh") < order.index("goal_settlement")
     assert order.index("goal_settlement") < order.index("corner_result_refresh")
     assert order.index("corner_settlement") < order.index("card_result_refresh")
-    assert order.index("card_settlement") < order.index("card_referee_history")
+    assert order.index("card_settlement") < order.index("card_referee_web")
+    assert order.index("card_referee_web") < order.index("card_referee_history")
     assert order.index("card_referee_history") < order.index("discover")
     assert order.index("discover") < order.index("history")
     assert order.index("history") < order.index("collect")
