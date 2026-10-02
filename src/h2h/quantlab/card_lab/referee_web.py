@@ -29,7 +29,6 @@ STATBUNKER_COMPETITION_IDS: dict[tuple[str, int], int] = {
     ("england_premier_league", 2025): 776,
     ("spain_la_liga", 2025): 777,
     ("italy_serie_a", 2025): 785,
-    ("germany_bundesliga", 2025): 786,
     ("france_ligue_1", 2025): 787,
     ("germany_bundesliga", 2024): 762,
 }
@@ -196,9 +195,12 @@ class StatBunkerRefereeSource:
             html = response.read().decode(charset, errors="replace")
 
         _country, display_name, _aliases = TOP_LEAGUES[league_key]
-        season_label = f"{str(season)[-2:]}/{str(season + 1)[-2:]}"
         page_key = _ascii(re.sub(r"<[^>]+>", " ", html))
-        if _ascii(display_name) not in page_key or _ascii(season_label) not in page_key:
+        if (
+            _ascii(display_name) not in page_key
+            or str(season) not in page_key
+            or str(season + 1) not in page_key
+        ):
             raise ValueError("StatBunker league/season validation failed")
 
         profiles = parse_statbunker_referee_profiles(html)
