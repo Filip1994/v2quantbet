@@ -639,6 +639,75 @@ def test_transaction_failure_leaves_no_partial_decision_pick_or_reservation() ->
         _cleanup(account, (candidate,))
 
 
+
+def test_auto_skip_registration_releases_exposure_and_uses_operator_bankroll() -> None:
+    _migrate()
+    first = _candidate()
+    second = _candidate()
+    account = f"task10-auto-skip-{uuid4()}"
+    configured = _policy(
+        account,
+        initial_bankroll_minor=30_000,
+        max_open_exposure_minor=30_000,
+    )
+    repository = PostgreSQLPickRegistrationRepository(
+        database_url=DATABASE_URL,
+        auto_skip_registered=True,
+    )
+    operator = PostgreSQLOperatorPickStateRepository(database_url=DATABASE_URL)
+    try:
+        now = datetime.now(UTC)
+        repository.bootstrap_bankroll(configured, occurred_at=now)
+
+        first_result = repository.register(
+            first.evaluation_id,
+            f"first-{account}",
+            configured,
+            decided_at=now,
+        )
+        assert first_result.pick is not None
+        assert (
+            operator.current_state(first_result.pick.pick_id)
+            is OperatorPickState.SKIPPED
+        )
+
+        after_first = repository.risk_exposure_breakdown(account, checked_at=now)
+        assert after_first["open_exposure_minor"] == 0
+        assert after_first["risk_reserved_played_count"] == 0
+        assert after_first["risk_reserved_skipped_count"] == 1
+        assert "MAX_OPEN_EXPOSURE_EXCEEDED" not in repository.preliminary_rejection_codes(
+            second.evaluation_id,
+            configured,
+            checked_at=now + timedelta(seconds=1),
+        )
+        assert "INSUFFICIENT_AVAILABLE_BANKROLL" not in repository.preliminary_rejection_codes(
+            second.evaluation_id,
+            configured,
+            checked_at=now + timedelta(seconds=1),
+        )
+
+        second_result = repository.register(
+            second.evaluation_id,
+            f"second-{account}",
+            configured,
+            decided_at=now + timedelta(seconds=1),
+        )
+        assert second_result.pick is not None
+        assert (
+            operator.current_state(second_result.pick.pick_id)
+            is OperatorPickState.SKIPPED
+        )
+
+        after_second = repository.risk_exposure_breakdown(
+            account,
+            checked_at=now + timedelta(seconds=1),
+        )
+        assert after_second["open_exposure_minor"] == 0
+        assert after_second["risk_reserved_played_count"] == 0
+        assert after_second["risk_reserved_skipped_count"] == 2
+    finally:
+        _cleanup(account, (first, second))
+
 def test_complete_migration_chain_reaches_task10() -> None:
     _migrate()
     assert DATABASE_URL is not None

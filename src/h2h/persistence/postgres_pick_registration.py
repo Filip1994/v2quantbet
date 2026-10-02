@@ -105,12 +105,19 @@ def _utc(value: datetime, name: str) -> datetime:
 
 class PostgreSQLPickRegistrationRepository:
     def __init__(
-        self, database_url: str | None = None, *, connect: ConnectionFactory | None = None
+        self,
+        database_url: str | None = None,
+        *,
+        connect: ConnectionFactory | None = None,
+        auto_skip_registered: bool = False,
     ) -> None:
         self._database_url = database_url or os.environ.get("DATABASE_URL")
         if not self._database_url and connect is None:
             raise ValueError("DATABASE_URL is required")
+        if not isinstance(auto_skip_registered, bool):
+            raise TypeError("auto_skip_registered must be a bool")
         self._connect_factory = connect
+        self._auto_skip_registered = auto_skip_registered
 
     def connect(self) -> Any:
         if self._connect_factory is not None:
@@ -286,10 +293,15 @@ class PostgreSQLPickRegistrationRepository:
             )
             duplicate = bool(cursor.fetchone()[0])
             stake = fixed_stake(policy)
+            balance_before_minor = (
+                self._operator_available_bankroll(cursor, policy.bankroll_account_id)
+                if self._auto_skip_registered
+                else int(ledger[2])
+            )
             snapshot = BankrollRiskSnapshot(
                 policy.bankroll_account_id,
                 ledger[0],
-                int(ledger[2]),
+                balance_before_minor,
                 open_exposure,
                 policy.max_stake_per_pick_minor,
                 policy.max_open_exposure_minor,
@@ -363,6 +375,19 @@ class PostgreSQLPickRegistrationRepository:
                 ),
             )
             self._after_pick_insert(cursor, pick)
+            if self._auto_skip_registered:
+                auto_skip_request_id = f"production-auto-skip-v1:{pick.pick_id}"
+                cursor.execute(
+                    "INSERT INTO pick_operator_state_events "
+                    "(event_id, pick_id, state, occurred_at, request_id) "
+                    "VALUES (%s, %s, 'SKIPPED', %s, %s)",
+                    (
+                        _fact_id("pick-operator-state-event-v1", auto_skip_request_id),
+                        pick.pick_id,
+                        decided,
+                        auto_skip_request_id,
+                    ),
+                )
             cursor.execute(
                 "INSERT INTO bankroll_ledger_entries "
                 "(ledger_entry_id, bankroll_account_id, account_sequence, entry_type, "
@@ -417,6 +442,41 @@ class PostgreSQLPickRegistrationRepository:
             "AND (c.status IS NULL OR c.status = 'ACTIVE')",
             (evaluation.prediction_id, evaluation.fixture_id, evaluation.model_version_id),
         )
+
+    @staticmethod
+    def _operator_available_bankroll(cursor: Any, bankroll_account_id: str) -> int:
+        """Project bankroll from effective PLAYED picks, ignoring SKIPPED research picks."""
+        cursor.execute(
+            "WITH latest_operator AS ("
+            "SELECT DISTINCT ON (pick_id) pick_id, state "
+            "FROM pick_operator_state_events "
+            "ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC"
+            "), played_picks AS ("
+            "SELECT r.pick_id, r.stake_minor FROM registered_picks r "
+            "JOIN latest_operator o ON o.pick_id = r.pick_id AND o.state = 'PLAYED' "
+            "WHERE r.bankroll_account_id = %s"
+            "), effective AS ("
+            "SELECT e.* FROM pick_settlement_events e WHERE NOT EXISTS ("
+            "SELECT 1 FROM pick_settlement_events successor "
+            "WHERE successor.prior_event_id = e.settlement_event_id)"
+            "), initial AS ("
+            "SELECT amount_minor FROM bankroll_ledger_entries "
+            "WHERE bankroll_account_id = %s AND entry_type = 'INITIAL_BANKROLL' "
+            "ORDER BY account_sequence LIMIT 1"
+            ") "
+            "SELECT initial.amount_minor - COALESCE(SUM(p.stake_minor), 0) "
+            "+ COALESCE(SUM(e.gross_return_minor) FILTER (WHERE e.outcome IS NOT NULL), 0) "
+            "FROM initial LEFT JOIN played_picks p ON TRUE "
+            "LEFT JOIN effective e ON e.pick_id = p.pick_id "
+            "GROUP BY initial.amount_minor",
+            (bankroll_account_id, bankroll_account_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise BankrollNotBootstrappedError(
+                "configured bankroll account is not bootstrapped"
+            )
+        return int(row[0])
 
     def risk_exposure_breakdown(
         self,
@@ -485,13 +545,22 @@ class PostgreSQLPickRegistrationRepository:
                 failures.append("DUPLICATE_FIXTURE")
             if policy.fixed_stake_minor > policy.max_stake_per_pick_minor:
                 failures.append("STAKE_EXCEEDS_PER_PICK_LIMIT")
-            cursor.execute(
-                "SELECT balance_after_minor FROM bankroll_ledger_entries "
-                "WHERE bankroll_account_id = %s ORDER BY account_sequence DESC LIMIT 1",
-                (policy.bankroll_account_id,),
-            )
-            ledger = cursor.fetchone()
-            if ledger is None or int(ledger[0]) < policy.fixed_stake_minor:
+            if self._auto_skip_registered:
+                available_bankroll_minor = self._operator_available_bankroll(
+                    cursor, policy.bankroll_account_id
+                )
+            else:
+                cursor.execute(
+                    "SELECT balance_after_minor FROM bankroll_ledger_entries "
+                    "WHERE bankroll_account_id = %s ORDER BY account_sequence DESC LIMIT 1",
+                    (policy.bankroll_account_id,),
+                )
+                ledger = cursor.fetchone()
+                available_bankroll_minor = None if ledger is None else int(ledger[0])
+            if (
+                available_bankroll_minor is None
+                or available_bankroll_minor < policy.fixed_stake_minor
+            ):
                 failures.append("INSUFFICIENT_AVAILABLE_BANKROLL")
             cursor.execute(
                 _EXPOSURE_BREAKDOWN_SQL,
@@ -510,9 +579,7 @@ class PostgreSQLPickRegistrationRepository:
                         "open_exposure_minor": exposure,
                         "fixed_stake_minor": policy.fixed_stake_minor,
                         "max_open_exposure_minor": policy.max_open_exposure_minor,
-                        "available_bankroll_minor": (
-                            None if ledger is None else int(ledger[0])
-                        ),
+                        "available_bankroll_minor": available_bankroll_minor,
                         "risk_reserved_pick_count": int(exposure_row[1]),
                         "risk_reserved_played_count": int(exposure_row[2]),
                         "risk_reserved_skipped_count": int(exposure_row[3]),

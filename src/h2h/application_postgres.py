@@ -274,13 +274,17 @@ def build_postgres_pick_registration_application(
     *,
     clock: Callable[[], datetime] | None = None,
     require_final_quote_verification: bool = False,
+    auto_skip_registered: bool = False,
 ) -> PostgreSQLPickRegistrationApplication:
     """Build the durable Task #10 boundary without bootstrap or registration side effects."""
 
     if not isinstance(policy, RegistrationPolicyConfig):
         raise TypeError("policy must be a RegistrationPolicyConfig")
     registration_clock = clock or (lambda: datetime.now(timezone.utc))
-    repository = PostgreSQLPickRegistrationRepository(database_url=database_url)
+    repository = PostgreSQLPickRegistrationRepository(
+        database_url=database_url,
+        auto_skip_registered=auto_skip_registered,
+    )
     return PostgreSQLPickRegistrationApplication(
         repository=repository,
         register_pick=RegisterEligiblePick(

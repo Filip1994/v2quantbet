@@ -132,6 +132,7 @@ def build_production_application(
         application_settings.registration_policy,
         database_url=application_settings.database_url,
         require_final_quote_verification=True,
+        auto_skip_registered=True,
     )
     research = PostgreSQLResearchSignalRepository(application_settings.database_url)
 
