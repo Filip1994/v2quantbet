@@ -317,32 +317,38 @@ class CardLabShadowPickEngine:
         if card_context is None:
             return self._fixture_pass(fixture, now, reason="NO_CARD_FEATURE_SNAPSHOT")
 
+        if card_context.get("feature_version") != "CARDLAB_FEATURES_V4":
+            return self._fixture_pass(
+                fixture,
+                now,
+                reason="REFEREE_WEB_FEATURES_REQUIRED",
+                details={"required_feature_version": "CARDLAB_FEATURES_V4"},
+            )
         payload = card_context.get("feature_payload")
         raw_features = payload.get("raw_features") if isinstance(payload, dict) else None
-        if card_context.get("feature_version") == "CARDLAB_FEATURES_V4":
-            if not isinstance(raw_features, dict):
-                return self._fixture_pass(fixture, now, reason="NO_CARD_RAW_FEATURES")
-            if int(raw_features.get("web_referee_supported_league") or 0) != 1:
-                return self._fixture_pass(
-                    fixture,
-                    now,
-                    reason="UNSUPPORTED_REFEREE_WEB_LEAGUE",
-                    details={
-                        "supported_leagues": "Premier League, La Liga, Serie A, Bundesliga, Ligue 1"
-                    },
-                )
-            web_matches = int(raw_features.get("web_referee_matches") or 0)
-            if web_matches < MIN_REFEREE_WEB_MATCHES:
-                return self._fixture_pass(
-                    fixture,
-                    now,
-                    reason="INSUFFICIENT_REFEREE_WEB_HISTORY",
-                    details={
-                        "web_referee_matches": web_matches,
-                        "minimum_web_referee_matches": MIN_REFEREE_WEB_MATCHES,
-                        "web_referee_league_key": raw_features.get("web_referee_league_key"),
-                    },
-                )
+        if not isinstance(raw_features, dict):
+            return self._fixture_pass(fixture, now, reason="NO_CARD_RAW_FEATURES")
+        if int(raw_features.get("web_referee_supported_league") or 0) != 1:
+            return self._fixture_pass(
+                fixture,
+                now,
+                reason="UNSUPPORTED_REFEREE_WEB_LEAGUE",
+                details={
+                    "supported_leagues": "Premier League, La Liga, Serie A, Bundesliga, Ligue 1"
+                },
+            )
+        web_matches = int(raw_features.get("web_referee_matches") or 0)
+        if web_matches < MIN_REFEREE_WEB_MATCHES:
+            return self._fixture_pass(
+                fixture,
+                now,
+                reason="INSUFFICIENT_REFEREE_WEB_HISTORY",
+                details={
+                    "web_referee_matches": web_matches,
+                    "minimum_web_referee_matches": MIN_REFEREE_WEB_MATCHES,
+                    "web_referee_league_key": raw_features.get("web_referee_league_key"),
+                },
+            )
         raw_anchors = payload.get("raw_anchors") if isinstance(payload, dict) else None
         if not isinstance(raw_anchors, dict) or len(raw_anchors) < MIN_RAW_ANCHORS:
             return self._fixture_pass(
