@@ -477,6 +477,61 @@ def test_quantlab_kpis_use_complete_history_not_latest_display_page() -> None:
     assert "Older – Loss" not in html
 
 
+def test_quantlab_analytics_excludes_current_universe_hard_blocks() -> None:
+    class UniverseRepository(StubRepository):
+        def list_all_goal_picks(self):
+            allowed = goal_pick(outcome="WIN", suffix="a")
+            allowed["fixture_id"] = "api-football:610"
+            allowed["competition_name"] = "Allowed Premier"
+            allowed["home_team"] = "Allowed Home"
+
+            ireland = goal_pick(outcome="WIN", suffix="i")
+            ireland["fixture_id"] = "api-football:611"
+            ireland["country"] = "Ireland"
+            ireland["competition_name"] = "Ireland Premier Division"
+            ireland["home_team"] = "Irish Home"
+
+            ecuador = goal_pick(outcome="WIN", suffix="e")
+            ecuador["fixture_id"] = "api-football:612"
+            ecuador["country"] = "Ecuador"
+            ecuador["competition_name"] = "Ecuador Serie A"
+            ecuador["home_team"] = "Ecuador Home"
+
+            league_id = goal_pick(outcome="WIN", suffix="b")
+            league_id["fixture_id"] = "api-football:613"
+            league_id["league_id"] = 72
+            league_id["competition_name"] = "Blacklisted By ID"
+            league_id["home_team"] = "ID Home"
+
+            lower_tier = goal_pick(outcome="WIN", suffix="l")
+            lower_tier["fixture_id"] = "api-football:614"
+            lower_tier["country"] = "England"
+            lower_tier["competition_name"] = "League Two"
+            lower_tier["home_team"] = "Tier Home"
+
+            women = goal_pick(outcome="WIN", suffix="w")
+            women["fixture_id"] = "api-football:615"
+            women["competition_name"] = "Women's Super League"
+            women["home_team"] = "Women Home"
+
+            return (allowed, ireland, ecuador, league_id, lower_tier, women)
+
+        def list_all_goal_decisions(self):
+            return ()
+
+    analytics = QuantLabDashboardService(UniverseRepository()).render_html(
+        "view=analytics&lab=goal"
+    )
+
+    assert '<div class="card"><small>Settled</small><b>1</b></div>' in analytics
+    assert "Allowed Premier" in analytics
+    assert "Ireland Premier Division" not in analytics
+    assert "Ecuador Serie A" not in analytics
+    assert "Blacklisted By ID" not in analytics
+    assert "League Two" not in analytics
+    assert "Women's Super League" not in analytics
+
+
 def test_goallab_analytics_is_a_separate_tab() -> None:
     class ResearchRepository(StubRepository):
         def list_all_goal_picks(self):
