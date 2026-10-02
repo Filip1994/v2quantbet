@@ -1130,6 +1130,78 @@ def test_quantlab_scopes_hard_block_womens_football() -> None:
         assert context.reason == "womens_football"
 
 
+def test_quantlab_scopes_hard_block_friendlies_and_national_teams() -> None:
+    cases = (
+        (
+            {
+                "country": "World",
+                "competition_name": "Friendlies Clubs",
+                "competition_type": "Cup",
+                "league_id": 10,
+            },
+            "friendly_football",
+        ),
+        (
+            {
+                "country": "World",
+                "competition_name": "UEFA Nations League",
+                "competition_type": "Cup",
+                "league_id": 5,
+            },
+            "national_team_football",
+        ),
+        (
+            {
+                "country": "World",
+                "competition_name": "FIFA Asian Cup",
+                "competition_type": "Cup",
+                "league_id": 7,
+            },
+            "national_team_football",
+        ),
+    )
+    for fixture, expected_reason in cases:
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == expected_reason
+        assert context.reason == expected_reason
+
+
+def test_quantlab_discovery_drops_friendlies_and_national_teams_before_persistence() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(
+                9001,
+                10,
+                "Friendlies Clubs",
+                "World",
+                competition_type="Cup",
+            ),
+            _fixture_payload(
+                9002,
+                5,
+                "UEFA Nations League",
+                "World",
+                competition_type="Cup",
+            ),
+            _fixture_payload(
+                9003,
+                7,
+                "FIFA Asian Cup",
+                "World",
+                competition_type="Cup",
+            ),
+            _fixture_payload(9004, 39, "Premier League", "England"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.provider_fixture_id for row in rows] == ["9004"]
+
+
 def test_quantlab_discovery_drops_womens_fixtures_before_persistence() -> None:
     payload = {
         "response": [
