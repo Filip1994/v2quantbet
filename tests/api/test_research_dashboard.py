@@ -430,6 +430,60 @@ def test_research_dashboard_exposes_exact_diagnostic_rows() -> None:
     assert payload["rows"][0]["clv_pct"] == 10.0
 
 
+def test_research_analytics_excludes_universe_blocked_rows_but_board_keeps_audit_rows() -> None:
+    class UniverseAnalyticsRepository:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+
+            allowed = signal_row()
+            allowed["competition_name"] = "Allowed Research League"
+
+            ireland = signal_row()
+            ireland["research_signal_id"] = "research-signal-v1:" + "i" * 64
+            ireland["evaluation_id"] = "value-evaluation-v1:" + "i" * 64
+            ireland["fixture_id"] = "api-football:701"
+            ireland["provider_fixture_id"] = "701"
+            ireland["league_id"] = 357
+            ireland["country"] = "Ireland"
+            ireland["competition_name"] = "Ireland Premier Division"
+
+            blocked_id = signal_row()
+            blocked_id["research_signal_id"] = "research-signal-v1:" + "b" * 64
+            blocked_id["evaluation_id"] = "value-evaluation-v1:" + "b" * 64
+            blocked_id["fixture_id"] = "api-football:702"
+            blocked_id["provider_fixture_id"] = "702"
+            blocked_id["league_id"] = 72
+            blocked_id["competition_name"] = "Blacklisted League ID"
+
+            women = signal_row()
+            women["research_signal_id"] = "research-signal-v1:" + "w" * 64
+            women["evaluation_id"] = "value-evaluation-v1:" + "w" * 64
+            women["fixture_id"] = "api-football:703"
+            women["provider_fixture_id"] = "703"
+            women["league_id"] = 990
+            women["competition_name"] = "Women's Test League"
+
+            return (allowed, ireland, blocked_id, women)
+
+    dashboard = ResearchDashboardService(UniverseAnalyticsRepository())
+
+    assert len(dashboard.signals({})) == 4
+
+    snapshot = dashboard.analytics_snapshot()
+    assert snapshot["windows"]["lifetime"]["n"] == 1
+    assert snapshot["cohorts"]["league_season"][0]["league_id"] == "39"
+
+    html = dashboard.render_analytics_html()
+    assert "Allowed Research League" in html
+    assert "Ireland Premier Division" not in html
+    assert "Blacklisted League ID" not in html
+    assert "Women's Test League" not in html
+
+    blocked_drilldown = dashboard.league_details(72, 2026)
+    assert blocked_drilldown["summary"]["n"] == 0
+    assert blocked_drilldown["rows"] == []
+
+
 def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     dashboard = ResearchDashboardService(Repository())
 
