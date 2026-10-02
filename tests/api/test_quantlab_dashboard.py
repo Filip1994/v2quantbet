@@ -535,6 +535,24 @@ def test_quantlab_dashboard_and_analytics_exclude_current_universe_hard_blocks()
             asian_cup["country"] = "World"
             asian_cup["home_team"] = "Thailand"
 
+            sweden_lower = goal_pick(outcome="LOSS", suffix="s")
+            sweden_lower["fixture_id"] = "api-football:619"
+            sweden_lower["country"] = "Sweden"
+            sweden_lower["competition_name"] = "Division 2 - Norrland"
+            sweden_lower["home_team"] = "Sweden Lower"
+
+            finland_lower = goal_pick(outcome="LOSS", suffix="k")
+            finland_lower["fixture_id"] = "api-football:620"
+            finland_lower["country"] = "Finland"
+            finland_lower["competition_name"] = "Kakkonen"
+            finland_lower["home_team"] = "Finland Lower"
+
+            norway_lower = goal_pick(outcome="LOSS", suffix="o")
+            norway_lower["fixture_id"] = "api-football:621"
+            norway_lower["country"] = "Norway"
+            norway_lower["competition_name"] = "2. Division - Group 1"
+            norway_lower["home_team"] = "Norway Lower"
+
             return (
                 allowed,
                 ireland,
@@ -545,6 +563,9 @@ def test_quantlab_dashboard_and_analytics_exclude_current_universe_hard_blocks()
                 friendly,
                 nations,
                 asian_cup,
+                sweden_lower,
+                finland_lower,
+                norway_lower,
             )
 
         def list_goal_picks(self):
@@ -570,6 +591,9 @@ def test_quantlab_dashboard_and_analytics_exclude_current_universe_hard_blocks()
         assert "Friendlies Clubs" not in html
         assert "UEFA Nations League" not in html
         assert "FIFA Asian Cup" not in html
+        assert "Division 2 - Norrland" not in html
+        assert "Kakkonen" not in html
+        assert "2. Division - Group 1" not in html
 
     assert '<div class="card"><small>Settled</small><b>1</b></div>' in operational
     assert '<div class="card"><small>Settled</small><b>1</b></div>' in analytics

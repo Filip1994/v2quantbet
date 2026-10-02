@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from h2h.domain.competition_scope import RejectionReason, universe_block_reason
 
 
-GOAL_SCOPE_VERSION = "GOAL_SCOPE_V5"
-CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V7"
+GOAL_SCOPE_VERSION = "GOAL_SCOPE_V6"
+CONTEXT_SCOPE_VERSION = "CARDCORNER_MARKET_DRIVEN_V8"
 
 _AFRICA_COUNTRIES = frozenset(
     {
@@ -146,6 +146,9 @@ _UNIVERSE_REASON_LABELS = {
     RejectionReason.WOMEN: "womens_football",
     RejectionReason.ENGLISH_TIER: "blocked_domestic_tier",
     RejectionReason.GERMAN_TIER: "blocked_domestic_tier",
+    RejectionReason.SWEDEN_TIER: "blocked_domestic_tier",
+    RejectionReason.FINLAND_TIER: "blocked_domestic_tier",
+    RejectionReason.NORWAY_TIER: "blocked_domestic_tier",
 }
 
 

@@ -560,12 +560,29 @@ def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
         ("England", "Championship"),
         ("Poland", "Ekstraklasa"),
         ("World", "UEFA Champions League"),
-        ("Sweden", "Division 2 - Norrland"),
+        ("Sweden", "Allsvenskan"),
+        ("Sweden", "Superettan"),
+        ("Finland", "Veikkausliiga"),
+        ("Finland", "Ykkösliiga"),
+        ("Norway", "Eliteserien"),
+        ("Norway", "OBOS-ligaen"),
         ("Japan", "J1 League"),
     ):
         decision = card_corner_scope(country=country, competition_name=competition)
         assert decision.allowed
         assert decision.reason == "market_driven_candidate"
+
+    for country, competition in (
+        ("Sweden", "Division 2 - Norrland"),
+        ("Sweden", "Ettan Norra"),
+        ("Finland", "Ykkönen"),
+        ("Finland", "Kakkonen"),
+        ("Norway", "2. Division - Group 1"),
+        ("Norway", "3. Division - Group 4"),
+    ):
+        decision = card_corner_scope(country=country, competition_name=competition)
+        assert not decision.allowed
+        assert decision.reason == "blocked_domestic_tier"
 
     assert goal_scope(country="Poland", competition_name="III Liga").allowed
     assert not goal_scope(
@@ -1266,6 +1283,65 @@ def test_quantlab_fixture_discovery_drops_low_english_and_german_tiers() -> None
         "League One",
         "2. Bundesliga",
     ]
+
+def test_quantlab_scopes_allow_only_top_two_nordic_leagues() -> None:
+    allowed = (
+        {"country": "Sweden", "competition_name": "Allsvenskan"},
+        {"country": "Sweden", "competition_name": "Superettan"},
+        {"country": "Finland", "competition_name": "Veikkausliiga"},
+        {"country": "Finland", "competition_name": "Ykkösliiga"},
+        {"country": "Norway", "competition_name": "Eliteserien"},
+        {"country": "Norway", "competition_name": "1. Division"},
+        {"country": "Norway", "competition_name": "OBOS-ligaen"},
+    )
+    blocked = (
+        {"country": "Sweden", "competition_name": "Ettan Norra"},
+        {"country": "Sweden", "competition_name": "Division 2 - Norrland"},
+        {"country": "Finland", "competition_name": "Ykkönen"},
+        {"country": "Finland", "competition_name": "Kakkonen"},
+        {"country": "Norway", "competition_name": "2. Division - Group 1"},
+        {"country": "Norway", "competition_name": "3. Division - Group 4"},
+    )
+
+    for fixture in allowed:
+        assert goal_scope(**fixture).allowed
+        assert card_corner_scope(**fixture).allowed
+
+    for fixture in blocked:
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == "blocked_domestic_tier"
+        assert context.reason == "blocked_domestic_tier"
+
+
+def test_quantlab_discovery_drops_lower_nordic_leagues_before_persistence() -> None:
+    payload = {
+        "response": [
+            _fixture_payload(4001, 113, "Allsvenskan", "Sweden"),
+            _fixture_payload(4002, 114, "Superettan", "Sweden"),
+            _fixture_payload(4003, 115, "Ettan Norra", "Sweden"),
+            _fixture_payload(4004, 244, "Veikkausliiga", "Finland"),
+            _fixture_payload(4005, 245, "Ykkösliiga", "Finland"),
+            _fixture_payload(4006, 246, "Ykkönen", "Finland"),
+            _fixture_payload(4007, 103, "Eliteserien", "Norway"),
+            _fixture_payload(4008, 104, "1. Division", "Norway"),
+            _fixture_payload(4009, 105, "2. Division - Group 1", "Norway"),
+        ]
+    }
+
+    rows = parse_fixture_discovery_response(payload, captured_at=NOW)
+
+    assert [row.fixture.competition_name for row in rows] == [
+        "Allsvenskan",
+        "Superettan",
+        "Veikkausliiga",
+        "Ykkösliiga",
+        "Eliteserien",
+        "1. Division",
+    ]
+
 
 def test_quantlab_scopes_hard_block_ecuador() -> None:
     fixture = {

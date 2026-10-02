@@ -490,6 +490,30 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
             asian_cup["country"] = "World"
             asian_cup["competition_name"] = "FIFA Asian Cup"
 
+            sweden_lower = signal_row()
+            sweden_lower["research_signal_id"] = "research-signal-v1:" + "s" * 64
+            sweden_lower["evaluation_id"] = "value-evaluation-v1:" + "s" * 64
+            sweden_lower["fixture_id"] = "api-football:707"
+            sweden_lower["provider_fixture_id"] = "707"
+            sweden_lower["country"] = "Sweden"
+            sweden_lower["competition_name"] = "Division 2 - Norrland"
+
+            finland_lower = signal_row()
+            finland_lower["research_signal_id"] = "research-signal-v1:" + "k" * 64
+            finland_lower["evaluation_id"] = "value-evaluation-v1:" + "k" * 64
+            finland_lower["fixture_id"] = "api-football:708"
+            finland_lower["provider_fixture_id"] = "708"
+            finland_lower["country"] = "Finland"
+            finland_lower["competition_name"] = "Kakkonen"
+
+            norway_lower = signal_row()
+            norway_lower["research_signal_id"] = "research-signal-v1:" + "o" * 64
+            norway_lower["evaluation_id"] = "value-evaluation-v1:" + "o" * 64
+            norway_lower["fixture_id"] = "api-football:709"
+            norway_lower["provider_fixture_id"] = "709"
+            norway_lower["country"] = "Norway"
+            norway_lower["competition_name"] = "2. Division - Group 1"
+
             return (
                 allowed,
                 ireland,
@@ -498,6 +522,9 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
                 friendly,
                 nations,
                 asian_cup,
+                sweden_lower,
+                finland_lower,
+                norway_lower,
             )
 
     dashboard = ResearchDashboardService(UniverseAnalyticsRepository())
@@ -520,6 +547,9 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
         assert "Friendlies Clubs" not in html
         assert "UEFA Nations League" not in html
         assert "FIFA Asian Cup" not in html
+        assert "Division 2 - Norrland" not in html
+        assert "Kakkonen" not in html
+        assert "2. Division - Group 1" not in html
 
     blocked_drilldown = dashboard.league_details(72, 2026)
     assert blocked_drilldown["summary"]["n"] == 0

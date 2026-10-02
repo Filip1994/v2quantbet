@@ -505,7 +505,7 @@ def test_runtime_evaluates_corner_and_card_after_api_budget_stops_collection():
     assert corner.calls == [("api-football:3001", NOW)]
     assert card.calls == [("api-football:3001", NOW)]
 
-def test_context_queue_is_broad_and_market_driven():
+def test_context_queue_skips_blocked_lower_nordic_league():
     from types import SimpleNamespace
 
     from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
@@ -548,13 +548,13 @@ def test_context_queue_is_broad_and_market_driven():
 
     decisions, picks = runtime._evaluate_context_picks(engine, "CORNER", NOW)
 
-    assert decisions == 1
+    assert decisions == 0
     assert picks == 0
-    assert engine.calls == ["api-football:low"]
+    assert engine.calls == []
     assert repo.limits == [1]
 
 
-def test_collection_allows_lower_league_and_only_fetches_card_context_when_market_exists():
+def test_collection_skips_blocked_lower_nordic_league_before_context_calls():
     from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
 
     lower = {
@@ -617,7 +617,7 @@ def test_collection_allows_lower_league_and_only_fetches_card_context_when_marke
 
     assert market_fixtures == 0
     assert card_snapshots == 0
-    assert repo.context_checked == ["api-football:low"]
+    assert repo.context_checked == []
     assert repo.limits == [1, 1]
 
 
