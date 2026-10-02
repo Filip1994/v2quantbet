@@ -899,3 +899,102 @@ def test_card_engine_v7_requires_v4_referee_web_snapshot():
 
     assert result.picks_inserted == 0
     assert repo.decisions[0].reason == "REFEREE_WEB_FEATURES_REQUIRED"
+
+
+
+def test_referee_web_bootstrap_is_proactive_and_fixture_independent():
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    class WebRepo:
+        def __init__(self):
+            self.due_calls = []
+            self.saved = []
+
+        def referee_web_profile_due(
+            self,
+            league_key,
+            season,
+            *,
+            now,
+            refresh_seconds,
+        ):
+            self.due_calls.append((league_key, season, now, refresh_seconds))
+            return True
+
+        def save_referee_web_capture(self, **kwargs):
+            self.saved.append(kwargs)
+            return "capture"
+
+    class WebSource:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_profiles(self, league_key, season):
+            self.calls.append((league_key, season))
+            return (
+                f"https://statbunker.example/{league_key}/{season}",
+                (
+                    {
+                        "referee": "Ref One",
+                        "matches": 12,
+                        "home_cards": 30,
+                        "away_cards": 28,
+                        "yellow_cards": 55,
+                        "second_yellow_cards": 2,
+                        "red_cards": 1,
+                        "yellow_cards_per_match": 4.58,
+                        "cards_per_match": 4.83,
+                    },
+                ),
+            )
+
+    repo = WebRepo()
+    source = WebSource()
+    runtime = QuantLabRuntime(
+        repo,
+        object(),
+        clock=lambda: NOW,
+        referee_web_source=source,
+    )
+
+    captures, profiles, leagues = runtime._bootstrap_referee_web(NOW)
+
+    assert captures == 10
+    assert profiles == 10
+    assert len(repo.saved) == 10
+    assert len(source.calls) == 10
+    assert leagues == frozenset(
+        {
+            "england_premier_league",
+            "spain_la_liga",
+            "italy_serie_a",
+            "germany_bundesliga",
+            "france_ligue_1",
+        }
+    )
+    assert ("england_premier_league", 2026) in source.calls
+    assert ("spain_la_liga", 2026) in source.calls
+    assert ("italy_serie_a", 2026) in source.calls
+    assert ("germany_bundesliga", 2026) in source.calls
+    assert ("france_ligue_1", 2026) in source.calls
+
+
+def test_referee_web_bootstrap_respects_six_hour_cache():
+    from h2h.quantlab.runtime import QuantLabRuntime
+
+    class CachedRepo:
+        def referee_web_profile_due(self, *_args, **_kwargs):
+            return False
+
+    class NoFetchSource:
+        def fetch_profiles(self, *_args, **_kwargs):
+            raise AssertionError("cached referee web targets must not be fetched")
+
+    runtime = QuantLabRuntime(
+        CachedRepo(),
+        object(),
+        clock=lambda: NOW,
+        referee_web_source=NoFetchSource(),
+    )
+
+    assert runtime._bootstrap_referee_web(NOW) == (0, 0, frozenset())
