@@ -17,6 +17,7 @@ from h2h.persistence.postgres_model_lifecycle import (
 )
 from h2h.quantlab.budget import QuantLabRequestBudget
 from h2h.quantlab.card_lab.audit import log_cardlab_v5_audit
+from h2h.quantlab.card_lab.referee_web import StatBunkerRefereeSource
 from h2h.quantlab.card_lab.shadow_engine import CardLabShadowPickEngine
 from h2h.quantlab.corner_lab.audit import log_cornerlab_v2_audit
 from h2h.quantlab.corner_lab.readiness_audit import (
@@ -204,6 +205,13 @@ def main() -> None:
         "QuantLab raw odds archive enabled=%s",
         market_archive_writer is not None,
     )
+    referee_web_source = (
+        StatBunkerRefereeSource(
+            timeout=float(os.getenv("QUANTBET_QUANTLAB_REFEREE_WEB_TIMEOUT_SECONDS", "10"))
+        )
+        if _boolean("QUANTBET_QUANTLAB_REFEREE_WEB_ENABLED", "true")
+        else None
+    )
     runtime = QuantLabRuntime(
         repository,
         provider,
@@ -211,6 +219,7 @@ def main() -> None:
         corner_engine=corner_engine,
         card_engine=card_engine,
         market_archive_writer=market_archive_writer,
+        referee_web_source=referee_web_source,
         settings=QuantLabRuntimeSettings(
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
             discovery_lookback_days=_integer(
@@ -297,6 +306,12 @@ def main() -> None:
             ),
             card_referee_statistics_retry_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_CARD_REFEREE_STATS_RETRY_SECONDS", "86400"
+            ),
+            card_referee_web_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_WEB_REFRESH_SECONDS", "21600"
+            ),
+            card_referee_web_seasons=_positive_integer(
+                "QUANTBET_QUANTLAB_CARD_REFEREE_WEB_SEASONS", "3"
             ),
             league_coverage_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_LEAGUE_COVERAGE_REFRESH_SECONDS", "21600"

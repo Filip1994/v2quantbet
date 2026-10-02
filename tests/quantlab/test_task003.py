@@ -309,9 +309,12 @@ def _card_repo_with_total_cards() -> Repo:
             "derby_rivalry_indicator": 1,
             "table_pressure": 0.8,
             "match_importance": 0.7,
-            "feature_version": "CARDLAB_FEATURES_V3",
+            "feature_version": "CARDLAB_FEATURES_V4",
             "feature_payload": {
                 "raw_features": {
+                    "web_referee_supported_league": 1,
+                    "web_referee_matches": 20,
+                    "web_referee_league_key": "england_premier_league",
                     "raw_anchor_count": 5,
                     "raw_consensus_cards": 5.0,
                     "referee_l10_cards": 6.0,
@@ -362,7 +365,7 @@ def test_card_engine_uses_only_1xbet_raw_statistics_and_ignores_negative_ev():
     assert pick.reference_companion_observation_id is None
     assert pick.reference_odds is None
     assert pick.reference_companion_odds is None
-    assert pick.policy_version == "CARDLAB_RAW_STATS_POLICY_V6_MARKET80"
+    assert pick.policy_version == "CARDLAB_RAW_STATS_POLICY_V7_REFEREE_WEB"
     assert pick.model_name == "CardLab raw-stat consensus"
     assert pick.reason == "RAW_STAT_CONSENSUS_PICK"
     assert pick.details["raw_signal"]["consensus_cards"] == 5.0
@@ -394,9 +397,14 @@ def test_card_engine_passes_before_market_lookup_when_raw_history_is_too_small()
 
     repo = NoMarketRepo(
         card_feature={
-            "feature_version": "CARDLAB_FEATURES_V3",
+            "feature_version": "CARDLAB_FEATURES_V4",
             "feature_payload": {
-                "raw_features": {"raw_anchor_count": 2},
+                "raw_features": {
+                    "web_referee_supported_league": 1,
+                    "web_referee_matches": 20,
+                    "web_referee_league_key": "england_premier_league",
+                    "raw_anchor_count": 2,
+                },
                 "raw_anchors": {
                     "referee_l10_cards": 5.0,
                     "league_total_cards": 4.8,
@@ -802,3 +810,92 @@ def test_run_once_prioritizes_goallab_before_provider_backed_work():
     assert order.index("goal_history") < order.index("corner_history")
     assert order.index("corner_history") < order.index("corner_evaluation")
     assert order.index("corner_evaluation") < order.index("card_evaluation")
+
+
+
+def test_card_engine_v4_requires_supported_referee_web_league_before_market_lookup():
+    class NoMarketRepo(Repo):
+        def total_market_pairs(self, *_args, **_kwargs):
+            raise AssertionError("market lookup must not occur outside web-supported leagues")
+
+    repo = NoMarketRepo(
+        card_feature={
+            "feature_version": "CARDLAB_FEATURES_V4",
+            "feature_payload": {
+                "raw_features": {
+                    "web_referee_supported_league": 0,
+                    "web_referee_matches": 40,
+                },
+                "raw_anchors": {
+                    "referee_l10_cards": 5.0,
+                    "league_total_cards": 4.8,
+                    "combined_team_cards_for_l10": 5.1,
+                },
+                "raw_samples": {},
+            },
+        }
+    )
+
+    result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 0
+    assert repo.decisions[0].reason == "UNSUPPORTED_REFEREE_WEB_LEAGUE"
+
+
+def test_card_engine_v4_requires_ten_web_referee_matches_before_market_lookup():
+    class NoMarketRepo(Repo):
+        def total_market_pairs(self, *_args, **_kwargs):
+            raise AssertionError("market lookup must not occur with thin referee web history")
+
+    repo = NoMarketRepo(
+        card_feature={
+            "feature_version": "CARDLAB_FEATURES_V4",
+            "feature_payload": {
+                "raw_features": {
+                    "web_referee_supported_league": 1,
+                    "web_referee_matches": 9,
+                    "web_referee_league_key": "england_premier_league",
+                },
+                "raw_anchors": {
+                    "referee_l10_cards": 5.0,
+                    "league_total_cards": 4.8,
+                    "combined_team_cards_for_l10": 5.1,
+                },
+                "raw_samples": {},
+            },
+        }
+    )
+
+    result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 0
+    assert repo.decisions[0].reason == "INSUFFICIENT_REFEREE_WEB_HISTORY"
+    assert repo.decisions[0].details["web_referee_matches"] == 9
+    assert repo.decisions[0].details["minimum_web_referee_matches"] == 10
+
+
+
+def test_card_engine_v7_requires_v4_referee_web_snapshot():
+    class NoMarketRepo(Repo):
+        def total_market_pairs(self, *_args, **_kwargs):
+            raise AssertionError("market lookup must not occur for legacy CardLab features")
+
+    repo = NoMarketRepo(
+        card_feature={
+            "feature_version": "CARDLAB_FEATURES_V3",
+            "feature_payload": {
+                "raw_features": {"raw_anchor_count": 5},
+                "raw_anchors": {
+                    "referee_l10_cards": 5.0,
+                    "league_total_cards": 4.8,
+                    "combined_team_cards_for_l10": 5.1,
+                },
+                "raw_samples": {},
+            },
+        }
+    )
+
+    result = CardLabShadowPickEngine(repo).run_fixture(fixture(), decision_at=NOW)
+
+    assert result.picks_inserted == 0
+    assert repo.decisions[0].reason == "REFEREE_WEB_FEATURES_REQUIRED"

@@ -10,6 +10,7 @@ from hashlib import sha256
 from typing import Any
 
 from h2h.domain.competition_scope import BLACKLISTED_API_FOOTBALL_LEAGUE_IDS
+from h2h.quantlab.card_lab.referee_web import referee_web_referee_key
 
 
 def _json(value: Any) -> str:
@@ -86,6 +87,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_team_history_captures",
             "quantlab_referee_history_scope_captures",
             "quantlab_referee_day_scans",
+            "quantlab_referee_web_captures",
+            "quantlab_referee_web_profiles",
             "quantlab_league_coverage_captures",
         )
         with self.connect() as connection, connection.cursor() as cursor:
@@ -1772,6 +1775,141 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
         return capture_id
+
+    def referee_web_profile_due(
+        self,
+        league_key: str,
+        season: int,
+        *,
+        now: datetime,
+        refresh_seconds: int,
+    ) -> bool:
+        if not league_key.strip() or season <= 0 or refresh_seconds <= 0:
+            raise ValueError("league_key, season and refresh_seconds must be valid")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(captured_at) FROM quantlab_referee_web_captures "
+                "WHERE league_key = %s AND season = %s",
+                (league_key, season),
+            )
+            row = cursor.fetchone()
+        latest = None if row is None else row[0]
+        return latest is None or latest <= now - timedelta(seconds=refresh_seconds)
+
+    def save_referee_web_capture(
+        self,
+        *,
+        league_key: str,
+        season: int,
+        source_competition_id: int,
+        source_url: str,
+        captured_at: datetime,
+        profiles: tuple[dict[str, Any], ...],
+    ) -> str:
+        if not league_key.strip() or season <= 0 or source_competition_id <= 0:
+            raise ValueError("invalid referee web capture identity")
+        if not source_url.strip():
+            raise ValueError("source_url is required")
+        capture_id = _identifier(
+            "quantlab-referee-web-capture-v1:",
+            {
+                "league_key": league_key,
+                "season": season,
+                "source_competition_id": source_competition_id,
+                "source_url": source_url,
+                "captured_at": captured_at.isoformat(),
+                "profile_count": len(profiles),
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_referee_web_captures ("
+                "referee_web_capture_id, source_name, league_key, season, "
+                "source_competition_id, source_url, captured_at, profile_count"
+                ") VALUES (%s, 'STATBUNKER', %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT DO NOTHING",
+                (
+                    capture_id,
+                    league_key,
+                    season,
+                    source_competition_id,
+                    source_url,
+                    captured_at,
+                    len(profiles),
+                ),
+            )
+            for profile in profiles:
+                referee_name = str(profile.get("referee") or "").strip()
+                referee_key_value = referee_web_referee_key(referee_name)
+                matches = int(profile.get("matches") or 0)
+                if not referee_key_value or matches <= 0:
+                    continue
+                profile_id = _identifier(
+                    "quantlab-referee-web-profile-v1:",
+                    {
+                        "capture_id": capture_id,
+                        "referee_key": referee_key_value,
+                    },
+                )
+                cursor.execute(
+                    "INSERT INTO quantlab_referee_web_profiles ("
+                    "referee_web_profile_id, referee_web_capture_id, source_name, "
+                    "league_key, season, referee_name, referee_key, matches, "
+                    "home_cards, away_cards, yellow_cards, second_yellow_cards, red_cards, "
+                    "yellow_cards_per_match, cards_per_match, captured_at, source_url, raw_payload"
+                    ") VALUES (%s, %s, 'STATBUNKER', %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    "%s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+                    (
+                        profile_id,
+                        capture_id,
+                        league_key,
+                        season,
+                        referee_name,
+                        referee_key_value,
+                        matches,
+                        int(profile.get("home_cards") or 0),
+                        int(profile.get("away_cards") or 0),
+                        int(profile.get("yellow_cards") or 0),
+                        int(profile.get("second_yellow_cards") or 0),
+                        int(profile.get("red_cards") or 0),
+                        profile.get("yellow_cards_per_match"),
+                        profile.get("cards_per_match"),
+                        captured_at,
+                        source_url,
+                        _json(profile),
+                    ),
+                )
+        return capture_id
+
+    def referee_web_profiles(
+        self,
+        referee: str,
+        league_key: str,
+        *,
+        season: int,
+        decision_at: datetime,
+        season_lookback: int = 3,
+    ) -> tuple[dict[str, Any], ...]:
+        referee_key_value = referee_web_referee_key(referee)
+        if not referee_key_value or not league_key.strip():
+            return ()
+        if season <= 0 or season_lookback <= 0:
+            raise ValueError("season and season_lookback must be positive")
+        first_season = max(1, season - season_lookback + 1)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "WITH latest AS ("
+                " SELECT DISTINCT ON (season) season, referee_name, referee_key, matches, "
+                " home_cards, away_cards, yellow_cards, second_yellow_cards, red_cards, "
+                " yellow_cards_per_match, cards_per_match, captured_at, source_url "
+                " FROM quantlab_referee_web_profiles "
+                " WHERE league_key = %s AND referee_key = %s "
+                " AND season BETWEEN %s AND %s AND captured_at <= %s "
+                " ORDER BY season, captured_at DESC, referee_web_profile_id DESC"
+                ") SELECT * FROM latest ORDER BY season DESC",
+                (league_key, referee_key_value, first_season, season, decision_at),
+            )
+            return _row_dicts(cursor)
 
     def referee_statistics_backfill_candidates(
         self,

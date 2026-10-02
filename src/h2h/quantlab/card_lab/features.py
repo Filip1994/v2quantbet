@@ -13,7 +13,7 @@ from h2h.quantlab.card_lab.rivalry import (
 from h2h.quantlab.card_lab.referee import referee_key
 
 
-CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V3"
+CARDLAB_FEATURE_VERSION = "CARDLAB_FEATURES_V4"
 CARD_COUNT_RULE_VERSION = "CARD_COUNT_RULE_V2"
 TABLE_PRESSURE_VERSION = "TABLE_PRESSURE_V1"
 MATCH_IMPORTANCE_VERSION = "MATCH_IMPORTANCE_V1"
@@ -570,6 +570,8 @@ def _standings_fact(datum: FeatureDatum, key: str) -> float | None:
 def _raw_card_features(
     *,
     referee_history: tuple[dict[str, Any], ...],
+    referee_web_profiles: tuple[dict[str, Any], ...],
+    referee_web_league_key: str | None,
     team_history: tuple[dict[str, Any], ...],
     league_history: tuple[dict[str, Any], ...],
     market_context: dict[str, Any],
@@ -662,6 +664,49 @@ def _raw_card_features(
         raw[f"referee_over_{key}_rate_l10"] = _recent_rate(
             referee_samples, "cards", 10, lambda value, t=line: value > t
         )
+
+    web_rows: list[dict[str, Any]] = []
+    for row in referee_web_profiles:
+        captured_at = row.get("captured_at")
+        matches = int(row.get("matches") or 0)
+        if not isinstance(captured_at, datetime) or matches <= 0:
+            continue
+        if _utc(captured_at, "referee_web.captured_at") > decision:
+            continue
+        web_rows.append(row)
+    web_matches = sum(int(row.get("matches") or 0) for row in web_rows)
+    web_yellows = sum(int(row.get("yellow_cards") or 0) for row in web_rows)
+    web_second_yellows = sum(int(row.get("second_yellow_cards") or 0) for row in web_rows)
+    web_reds = sum(int(row.get("red_cards") or 0) for row in web_rows)
+    web_home_cards = sum(int(row.get("home_cards") or 0) for row in web_rows)
+    web_away_cards = sum(int(row.get("away_cards") or 0) for row in web_rows)
+    web_total_cards = web_yellows + web_second_yellows + web_reds
+    raw["web_referee_supported_league"] = int(bool(referee_web_league_key))
+    raw["web_referee_league_key"] = referee_web_league_key
+    raw["web_referee_seasons"] = len(web_rows)
+    raw["web_referee_matches"] = web_matches
+    raw["web_referee_cards_per_match"] = (
+        None if web_matches <= 0 else web_total_cards / web_matches
+    )
+    raw["web_referee_yellows_per_match"] = (
+        None if web_matches <= 0 else web_yellows / web_matches
+    )
+    raw["web_referee_second_yellows_per_match"] = (
+        None if web_matches <= 0 else web_second_yellows / web_matches
+    )
+    raw["web_referee_reds_per_match"] = (
+        None if web_matches <= 0 else web_reds / web_matches
+    )
+    raw["web_referee_home_cards_per_match"] = (
+        None if web_matches <= 0 else web_home_cards / web_matches
+    )
+    raw["web_referee_away_cards_per_match"] = (
+        None if web_matches <= 0 else web_away_cards / web_matches
+    )
+    raw["web_referee_home_away_bias"] = (
+        None if web_matches <= 0 else (web_home_cards - web_away_cards) / web_matches
+    )
+    raw["web_referee_coverage_ok"] = int(web_matches >= 10)
 
     def combine(a: Any, b: Any) -> float | None:
         left, right = _number(a), _number(b)
@@ -870,6 +915,12 @@ def _raw_card_features(
     anchor_weights: dict[str, float] = {}
     candidates = {
         "referee_l10_cards": (raw.get("referee_l10_cards"), 1.25),
+        "web_referee_cards_per_match": (
+            raw.get("web_referee_cards_per_match")
+            if int(raw.get("web_referee_matches") or 0) >= 5
+            else None,
+            1.15,
+        ),
         "combined_team_cards_for_l10": (raw.get("combined_team_cards_for_l10"), 1.00),
         "matchup_expected_cards_l10": (raw.get("matchup_expected_cards_l10"), 1.00),
         "home_match_total_cards_l10": (raw.get("home_l10_match_total_cards"), 0.75),
@@ -938,6 +989,8 @@ def build_cardlab_snapshot(
     referee: str | None,
     referee_available_at: datetime | None,
     referee_history: tuple[dict[str, Any], ...],
+    referee_web_profiles: tuple[dict[str, Any], ...] = (),
+    referee_web_league_key: str | None = None,
     team_history: tuple[dict[str, Any], ...] = (),
     league_history: tuple[dict[str, Any], ...] = (),
     market_context: dict[str, Any] | None = None,
@@ -1027,6 +1080,8 @@ def build_cardlab_snapshot(
 
     raw_features, raw_anchors, raw_anchor_weights, raw_samples, raw_sample_weights = _raw_card_features(
         referee_history=referee_history,
+        referee_web_profiles=referee_web_profiles,
+        referee_web_league_key=referee_web_league_key,
         team_history=team_history,
         league_history=league_history,
         market_context=dict(market_context or {}),
@@ -1057,8 +1112,11 @@ def build_cardlab_snapshot(
         "raw_sample_weights": raw_sample_weights,
         "market_context": dict(market_context or {}),
         "raw_stat_contract": {
-            "version": "CARDLAB_RAW_STATS_V1",
+            "version": "CARDLAB_RAW_STATS_V2",
             "price_independent_selection": True,
+            "referee_web_source": "STATBUNKER",
+            "referee_web_top_league_gate": True,
+            "referee_web_minimum_matches": 10,
             "ev_is_pick_gate": False,
             "edge_is_pick_gate": False,
             "penalty_rate_available": False,
@@ -1077,8 +1135,8 @@ def build_cardlab_snapshot(
         )
         if datum.available_at is not None
     ]
-    for row in (*team_history, *league_history):
-        available = row.get("available_at")
+    for row in (*team_history, *league_history, *referee_web_profiles):
+        available = row.get("available_at") or row.get("captured_at")
         if isinstance(available, datetime):
             available_utc = _utc(available, "history.available_at")
             if available_utc <= decision:
