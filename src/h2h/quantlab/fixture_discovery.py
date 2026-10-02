@@ -9,7 +9,11 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
-from h2h.domain.competition_scope import is_blacklisted_league_id, is_womens_football
+from h2h.domain.competition_scope import (
+    is_blacklisted_league_id,
+    is_blocked_domestic_tier,
+    is_womens_football,
+)
 from h2h.domain.fixture import Fixture
 from h2h.use_cases.api_football_fixture_adapter import ApiFootballFixtureAdapter
 
@@ -45,7 +49,7 @@ def parse_fixture_discovery_response(
     *,
     captured_at: datetime,
 ) -> tuple[QuantLabFixtureObservation, ...]:
-    """Parse one global date shard, dropping globally prohibited women fixtures."""
+    """Parse one global date shard, dropping fixtures blocked across the universe."""
     captured = _aware_utc(captured_at, "captured_at")
     if not isinstance(payload, Mapping):
         raise TypeError("fixture discovery payload must be a mapping")
@@ -63,6 +67,11 @@ def parse_fixture_discovery_response(
             continue
         fixture = adapter.adapt(raw)
         if is_blacklisted_league_id(fixture.competition_id):
+            continue
+        if is_blocked_domestic_tier(
+            country=fixture.country,
+            competition_name=fixture.competition_name,
+        ):
             continue
         if is_womens_football(
             competition_name=fixture.competition_name,
