@@ -818,6 +818,7 @@ class QuantLabDashboardService:
                     "competition_type": item.get("competition_type"),
                     "home_team": item.get("home_team"),
                     "away_team": item.get("away_team"),
+                    "league_id": item.get("league_id"),
                 }
                 goal_allowed = goal_scope(**scope).allowed
                 decision = str(item.get("decision") or "WAITING")
