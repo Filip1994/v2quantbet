@@ -1,4 +1,4 @@
-"""Single-process production composition for the Phase I football universe."""
+"""Single-process production composition for the Phase I football universe.\n\nProduction registrations are research-only by default here: successful registrations are\nautomatically routed to operator state SKIPPED so they do not consume effective exposure.\n"""
 
 from __future__ import annotations
 
