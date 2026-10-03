@@ -192,6 +192,41 @@ def test_quantlab_dashboard_cache_reuses_rendered_view_within_ttl() -> None:
     assert repository.labs == ["GOAL_PICKS"]
 
 
+def test_quantlab_analytics_filters_reuse_one_fresh_history_read(monkeypatch) -> None:
+    class AnalyticsRepository(StubRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reads = 0
+
+        def list_all_goal_picks(self):
+            self.reads += 1
+            return (goal_pick(),)
+
+    clock = [0.0]
+    monkeypatch.setattr("h2h.quantlab.dashboard.monotonic", lambda: clock[0])
+    repository = AnalyticsRepository()
+    dashboard = QuantLabDashboardService(repository, view_cache_ttl_seconds=60)
+
+    overview = dashboard.render_html("view=analytics&lab=goal")
+    clock[0] = 30.0
+    drilldown = dashboard.render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_market_key=OU_25&bucket_selection=OVER"
+    )
+    assert "Universe / regimes" in overview
+    assert "Bucket picks" in drilldown
+    assert repository.reads == 1
+    uncached = QuantLabDashboardService(
+        AnalyticsRepository(), view_cache_ttl_seconds=0
+    ).render_html(
+        "view=analytics&lab=goal&bucket=1&bucket_market_key=OU_25&bucket_selection=OVER"
+    )
+    assert drilldown == uncached
+
+    clock[0] = 61.0
+    dashboard.render_html("view=analytics&lab=goal&sort=roi_pct")
+    assert repository.reads == 2
+
+
 def test_quantlab_repository_dashboard_rows_reuses_complete_first_page() -> None:
     repository = PostgreSQLQuantLabRepository(connect=lambda: None)
     calls: list[tuple[int, int]] = []

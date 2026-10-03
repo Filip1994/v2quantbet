@@ -17,7 +17,11 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from h2h.domain.settlement import realized_clv_ppm
-from h2h.quantlab.dashboard_views import _analytics_universe_rows, render_quantlab_view
+from h2h.quantlab.dashboard_views import (
+    _all_rows,
+    _analytics_universe_rows,
+    render_quantlab_view,
+)
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     render_goal_analytics_html,
@@ -285,6 +289,10 @@ class QuantLabDashboardService:
         self._view_cache_lock = Lock()
         self._view_cache_refreshing: set[str] = set()
         self._view_cache_miss_locks: dict[str, Any] = {}
+        self._analytics_rows_cache: dict[
+            str, tuple[float, tuple[dict[str, Any], ...]]
+        ] = {}
+        self._analytics_rows_locks = {lab: Lock() for lab in LABS}
 
     def _filter_rows(
         self,
@@ -395,11 +403,25 @@ class QuantLabDashboardService:
         return render_goal_pick_html(row, contract)
 
     def _render_html_uncached(self, raw_query: str) -> str:
+        analytics_rows = None
+        if self._view_cache_ttl > 0:
+            params = parse_qs(raw_query, keep_blank_values=True)
+            view = params.get("view", ["dashboard"])[0].strip().casefold()
+            lab = params.get("lab", ["goal"])[0].strip().casefold()
+            if view == "analytics" and lab in LABS:
+                with self._analytics_rows_locks[lab]:
+                    cached = self._analytics_rows_cache.get(lab)
+                    if cached is None or monotonic() - cached[0] >= self._view_cache_ttl:
+                        rows = _all_rows(self._repository, LABS[lab][0])
+                        cached = (monotonic(), rows)
+                        self._analytics_rows_cache[lab] = cached
+                    analytics_rows = cached[1]
         return render_quantlab_view(
             self._repository,
             raw_query,
             api_daily_limit=self._api_limit,
             currency=self._currency,
+            analytics_rows=analytics_rows,
         )
 
     def _refresh_view_cache(self, key: str, raw_query: str) -> None:
