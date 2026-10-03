@@ -217,7 +217,10 @@ class ColdArchiveCatalog:
                 "FROM quantlab_market_observations m "
                 "WHERE m.captured_at < %s AND "
                 + predicate
-                + " ORDER BY m.captured_at, m.market_observation_id LIMIT %s",
+                # The primary key provides an ordered walk that can stop at LIMIT.
+                # Ordering by captured_at sorts every cold row before the limit,
+                # spilling a multi-million-row sort to disk on the live database.
+                + " ORDER BY m.market_observation_id LIMIT %s",
                 (cutoff, limit),
             )
             return _row_dicts(cursor)
