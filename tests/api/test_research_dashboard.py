@@ -269,12 +269,16 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
             "disposition": ["BLOCKED_EXPOSURE"],
             "p_bucket": ["60–65%"],
             "ev_bucket": ["30%+"],
+            "edge_bucket": ["10–15%"],
             "odds_bucket": ["2.01–2.50"],
+            "ttk_bucket": ["1–3h"],
         }
     )
     assert len(signals) == 1
     assert signals[0]["probability_bucket"] == "60–65%"
     assert signals[0]["ev_bucket"] == "30%+"
+    assert signals[0]["edge_bucket"] == "10–15%"
+    assert signals[0]["time_to_kickoff_bucket"] == "1–3h"
     assert signals[0]["freshness"] == "FRESH"
 
     html = dashboard.render_html("tab=history&p_min=60&p_max=65")
@@ -352,7 +356,9 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'name="disposition"' in history_html
     assert 'name="p_bucket"' in history_html
     assert 'name="ev_bucket"' in history_html
+    assert 'name="edge_bucket"' in history_html
     assert 'name="odds_bucket"' in history_html
+    assert 'name="ttk_bucket"' in history_html
     assert 'class="bookmaker-mark bookmaker-bet365"' in history_html
 
 
@@ -387,7 +393,9 @@ def test_research_dashboard_supports_exact_analytics_cohort_filters() -> None:
         "p_bucket": ["60–65%"],
         "fair_bucket": ["45–50%"],
         "ev_bucket": ["30%+"],
+        "edge_bucket": ["10–15%"],
         "odds_bucket": ["2.01–2.50"],
+        "ttk_bucket": ["1–3h"],
         "model_version": [row["model_version_id"]],
         "policy_config": [row["policy_config_fingerprint"]],
         "prediction_method": [row["prediction_method_version"]],
@@ -597,10 +605,14 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
 
     html = dashboard.render_analytics_html()
     assert "Research Analytics V2" in html
-    assert "Core performance" in html
-    assert "Calibration & price" in html
+    assert "ROI decision lab" in html
+    assert "Calibration & CLV" in html
     assert "Audit" in html
-    assert "Production filter cube" in html
+    assert "Production filter cube" not in html
+    assert "Market × selection × entry odds" in html
+    assert "Market × selection × edge" in html
+    assert "Time to kickoff" in html
+    assert "League × market × selection" in html
     assert "Low-scoring diagnostic" in html
     assert "Leagues · all retrains combined" in html
     assert "Model versions · individual retrains" not in html
@@ -610,7 +622,9 @@ def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
     assert "/research?tab=history&amp;p_bucket=60%E2%80%9365%25" in html
     assert "/research?tab=history&amp;fair_bucket=45%E2%80%9350%25" in html
     assert "/research?tab=history&amp;ev_bucket=30%25%2B" in html
+    assert "/research?tab=history&amp;edge_bucket=10%E2%80%9315%25" in html
     assert "/research?tab=history&amp;odds_bucket=2.01%E2%80%932.50" in html
+    assert "/research?tab=history&amp;ttk_bucket=1%E2%80%933h" in html
     assert "/research?tab=history&amp;policy_config=pick-policy-config-v1%3A" in html
     assert (
         "/research/analytics/model?model_version_id=dcm-json-v1%3A"
