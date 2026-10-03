@@ -47,7 +47,16 @@ def row(
             market_fair_probability
         ),
         "ev_bucket": "30%+" if ev >= 0.30 else "10–15%",
+        "edge_bucket": (
+            "30%+" if edge >= 0.30 else
+            "20–30%" if edge >= 0.20 else
+            "15–20%" if edge >= 0.15 else
+            "10–15%" if edge >= 0.10 else
+            "5–10%" if edge >= 0.05 else
+            "0–5%" if edge >= 0 else "<0%"
+        ),
         "odds_bucket": "1.81–2.00",
+        "time_to_kickoff_bucket": "1–3h",
         "disposition": "BLOCKED_EXPOSURE",
         "bookmaker": "Bet365",
         "model_version_id": model_version,
@@ -170,7 +179,13 @@ def test_cohort_metrics_expose_roi_calibration_clv_and_uncertainty() -> None:
     assert metrics["positive_clv_rate_pct"] == pytest.approx(25.0)
     assert metrics["win_rate_wilson_95_low_pct"] < metrics["win_rate_pct"]
     assert metrics["win_rate_wilson_95_high_pct"] > metrics["win_rate_pct"]
-    assert metrics["sample_band"] == "SIGNAL_ONLY"
+    assert metrics["roi_95_low_pct"] is not None
+    assert metrics["roi_95_high_pct"] is not None
+    assert metrics["roi_95_low_pct"] < metrics["roi_pct"] < metrics["roi_95_high_pct"]
+    assert metrics["roi_last_100_pct"] is None
+    assert metrics["roi_last_250_pct"] is None
+    assert metrics["roi_last_500_pct"] is None
+    assert metrics["sample_band"] == "COLLECT"
 
 
 def test_snapshot_contains_continuous_windows_cohorts_and_low_scoring_diagnostic() -> None:
@@ -231,7 +246,12 @@ def test_snapshot_contains_continuous_windows_cohorts_and_low_scoring_diagnostic
     assert snapshot["windows"]["last_30d"]["n"] == 2
     assert snapshot["weekly"][0]["week"] == "2026-W39"
     assert snapshot["cohorts"]["market_selection"]
-    assert snapshot["cohorts"]["production_filter_cube"]
+    assert snapshot["cohorts"]["market_selection_odds"]
+    assert snapshot["cohorts"]["market_selection_edge"]
+    assert snapshot["cohorts"]["edge_bucket"]
+    assert snapshot["cohorts"]["time_to_kickoff_bucket"]
+    assert snapshot["cohorts"]["league_market"]
+    assert "production_filter_cube" not in snapshot["cohorts"]
     assert snapshot["version_summary"]["mixed_model_versions"] is False
     assert snapshot["version_summary"]["mixed_policy_configs"] is False
     assert snapshot["cohorts"]["model_policy"][0]["graded_n"] == 2
