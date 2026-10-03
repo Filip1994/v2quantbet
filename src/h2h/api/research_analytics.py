@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from html import escape
 from math import sqrt
-from statistics import mean, median
+from statistics import mean, median, stdev
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
@@ -87,13 +87,16 @@ def _wilson_interval(wins: int, trials: int) -> tuple[float | None, float | None
 
 
 def _sample_band(n: int) -> str:
-    if n < 20:
-        return "SIGNAL_ONLY"
-    if n < 50:
-        return "MONITOR"
+    """Evidence maturity for ROI-led pruning; never an automatic betting decision."""
     if n < 100:
-        return "PROVISIONAL_EVIDENCE"
-    return "STABILITY_REVIEW"
+        return "COLLECT"
+    if n < 250:
+        return "WATCH"
+    if n < 500:
+        return "SOFT_REVIEW"
+    if n < 1000:
+        return "DECISION_GRADE"
+    return "MATURE"
 
 
 def _mean(values: Iterable[float]) -> float | None:
@@ -168,6 +171,37 @@ def cohort_metrics(
         if fixed_stake_minor > 0 and graded_n
         else None
     )
+    per_bet_returns = (
+        [
+            int(row.get("pnl_minor") or 0) / fixed_stake_minor
+            for row in graded
+        ]
+        if fixed_stake_minor > 0
+        else []
+    )
+    if len(per_bet_returns) >= 2:
+        roi_se = stdev(per_bet_returns) / sqrt(len(per_bet_returns))
+        roi_95_low = (mean(per_bet_returns) - 1.959963984540054 * roi_se) * 100
+        roi_95_high = (mean(per_bet_returns) + 1.959963984540054 * roi_se) * 100
+    else:
+        roi_95_low = None
+        roi_95_high = None
+
+    graded_by_time = sorted(
+        graded,
+        key=lambda row: _event_time(row) or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    )
+
+    def trailing_roi(limit: int) -> float | None:
+        if fixed_stake_minor <= 0 or len(graded_by_time) < limit:
+            return None
+        sample = graded_by_time[:limit]
+        return (
+            sum(int(row.get("pnl_minor") or 0) for row in sample)
+            / (fixed_stake_minor * limit)
+            * 100
+        )
 
     clv_values = [
         int(row["clv_ppm"])
@@ -189,6 +223,11 @@ def cohort_metrics(
         "win_rate_wilson_95_high_pct": _pct(win_high),
         "flat_pnl_minor": pnl_minor,
         "roi_pct": _pct(roi),
+        "roi_95_low_pct": roi_95_low,
+        "roi_95_high_pct": roi_95_high,
+        "roi_last_100_pct": trailing_roi(100),
+        "roi_last_250_pct": trailing_roi(250),
+        "roi_last_500_pct": trailing_roi(500),
         "avg_entry_odds": _mean(float(row["odds"]) for row in settled),
         "avg_model_probability_pct": _pct(
             _mean(float(row["model_probability"]) for row in settled)
@@ -304,7 +343,9 @@ def build_research_analytics_snapshot(
         "model_probability_bucket": ("probability_bucket",),
         "market_fair_probability_bucket": ("market_fair_probability_bucket",),
         "ev_bucket": ("ev_bucket",),
+        "edge_bucket": ("edge_bucket",),
         "odds_bucket": ("odds_bucket",),
+        "time_to_kickoff_bucket": ("time_to_kickoff_bucket",),
         "disposition": ("disposition",),
         "bookmaker": ("bookmaker",),
         "league": ("competition_name",),
@@ -330,15 +371,9 @@ def build_research_analytics_snapshot(
             "market_fair_probability_bucket",
         ),
         "market_selection_ev": ("market", "selection", "ev_bucket"),
+        "market_selection_edge": ("market", "selection", "edge_bucket"),
         "market_selection_odds": ("market", "selection", "odds_bucket"),
-        "production_filter_cube": (
-            "market",
-            "selection",
-            "probability_bucket",
-            "market_fair_probability_bucket",
-            "ev_bucket",
-            "odds_bucket",
-        ),
+        "league_market": ("competition_name", "league_id", "market", "selection"),
     }
 
     return {
@@ -354,16 +389,25 @@ def build_research_analytics_snapshot(
                 "voids are reported but excluded from the ROI denominator."
             ),
             "calibration_gap": "Observed win rate minus mean model probability, percentage points.",
-            "clv": "Research close must be a later stored same-series/source pre-kickoff quote.",
+            "clv": (
+                "CLV is retained as a research metric and future validation axis. "
+                "Current provider quote cadence is not used as a pruning gate; "
+                "the plan is to cross-validate with an odds-specialized API."
+            ),
+            "decision_focus": (
+                "ROI is the current north-star metric for the self-sustain phase; "
+                "pruning must also respect sample size, uncertainty and temporal persistence."
+            ),
             "versioning": (
                 "Overall windows may combine versions; use model/policy/decision-contract "
                 "cohorts for regime-specific conclusions. Legacy policy rows are never inferred."
             ),
             "sample_bands": {
-                "SIGNAL_ONLY": "<20 graded",
-                "MONITOR": "20–49 graded",
-                "PROVISIONAL_EVIDENCE": "50–99 graded",
-                "STABILITY_REVIEW": "100+ graded",
+                "COLLECT": "<100 graded",
+                "WATCH": "100–249 graded",
+                "SOFT_REVIEW": "250–499 graded",
+                "DECISION_GRADE": "500–999 graded",
+                "MATURE": "1000+ graded",
             },
         },
         "version_summary": _version_summary(settled),
@@ -417,6 +461,16 @@ def _metric_class(value: Any) -> str:
     return "metric-neutral"
 
 
+def _roi_interval_class(low: Any, high: Any) -> str:
+    if low is None or high is None:
+        return "metric-neutral"
+    if float(low) > 0:
+        return "metric-positive"
+    if float(high) < 0:
+        return "metric-negative"
+    return "metric-neutral"
+
+
 def _bucket_sort_value(value: Any) -> float:
     text = str(value or "").strip().replace("%", "")
     if not text or text == "—":
@@ -452,18 +506,30 @@ def _analytics_sort_value(row: dict[str, Any], key: str) -> Any:
         )
     if key == "sample_band":
         return {
-            "SIGNAL_ONLY": 0,
-            "MONITOR": 1,
-            "PROVISIONAL_EVIDENCE": 2,
-            "STABILITY_REVIEW": 3,
+            "COLLECT": 0,
+            "WATCH": 1,
+            "SOFT_REVIEW": 2,
+            "DECISION_GRADE": 3,
+            "MATURE": 4,
         }.get(str(row.get(key) or ""), -1)
     if key in {
         "probability_bucket",
         "market_fair_probability_bucket",
         "ev_bucket",
+        "edge_bucket",
         "odds_bucket",
     }:
         return _bucket_sort_value(row.get(key))
+    if key == "time_to_kickoff_bucket":
+        return {
+            "after kickoff": -1,
+            "<1h": 0,
+            "1–3h": 1,
+            "3–6h": 3,
+            "6–12h": 6,
+            "12–24h": 12,
+            "24h+": 24,
+        }.get(str(row.get(key) or ""), -2)
     if key in {"league_id", "season"}:
         try:
             return int(row.get(key) or 0)
@@ -548,6 +614,7 @@ def _metrics_table(
     row_link_path: str | None = None,
     row_link_params: dict[str, str] | None = None,
     row_link_fixed: dict[str, str] | None = None,
+    compact_roi: bool = False,
 ) -> str:
     visible_rows = list(rows)
     if active_sort_table == table_id and active_sort_key:
@@ -568,6 +635,36 @@ def _metrics_table(
         )
         for name in dimensions
     )
+    metric_columns = (
+        (
+            ("N", "n"),
+            ("W-L-V", "record"),
+            ("ROI", "roi_pct"),
+            ("ROI 95% low", "roi_95_low_pct"),
+            ("Last 100", "roi_last_100_pct"),
+            ("Last 250", "roi_last_250_pct"),
+            ("Last 500", "roi_last_500_pct"),
+            ("Avg odds", "avg_entry_odds"),
+            ("Avg edge", "avg_edge_pct"),
+            ("Evidence", "sample_band"),
+        )
+        if compact_roi
+        else (
+            ("N", "n"),
+            ("W-L-V", "record"),
+            ("Win%", "win_rate_pct"),
+            ("Exp%", "expected_win_rate_pct"),
+            ("Cal gap", "calibration_gap_pp"),
+            ("ROI", "roi_pct"),
+            ("Avg odds", "avg_entry_odds"),
+            ("Avg edge", "avg_edge_pct"),
+            ("Avg EV", "avg_ev_pct"),
+            ("Avg CLV", "avg_clv_pct"),
+            ("CLV n", "clv_count"),
+            ("+CLV%", "positive_clv_rate_pct"),
+            ("Evidence", "sample_band"),
+        )
+    )
     metric_headers = "".join(
         _sort_header(
             label,
@@ -577,18 +674,7 @@ def _metrics_table(
             active_key=active_sort_key,
             active_dir=active_sort_dir,
         )
-        for label, key in (
-            ("N", "n"),
-            ("W-L-V", "record"),
-            ("Win%", "win_rate_pct"),
-            ("Exp%", "expected_win_rate_pct"),
-            ("Cal gap", "calibration_gap_pp"),
-            ("ROI", "roi_pct"),
-            ("Avg CLV", "avg_clv_pct"),
-            ("Med CLV", "median_clv_pct"),
-            ("+CLV%", "positive_clv_rate_pct"),
-            ("Evidence", "sample_band"),
-        )
+        for label, key in metric_columns
     )
     action_header = "<th class=\"action-col\">Picks</th>" if row_link_path else ""
     body = []
@@ -631,36 +717,68 @@ def _metrics_table(
             if row_href
             else ""
         )
-        body.append(
-            "<tr>"
-            + dims
-            + f"<td>{row['n']}</td>"
-            + f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
-            + f"<td>{_fmt(row['win_rate_pct'], '%')}</td>"
-            + f"<td>{_fmt(row['expected_win_rate_pct'], '%')}</td>"
-            + f'<td class="{_metric_class(row["calibration_gap_pp"])}">'
-            + f"{_fmt(row['calibration_gap_pp'], 'pp', signed=True)}</td>"
-            + f'<td class="metric-strong {_metric_class(row["roi_pct"])}">'
-            + f"{_fmt(row['roi_pct'], '%', signed=True)}</td>"
-            + f'<td class="{_metric_class(row["avg_clv_pct"])}">'
-            + f"{_fmt(row['avg_clv_pct'], '%', signed=True)}</td>"
-            + f'<td class="{_metric_class(row["median_clv_pct"])}">'
-            + f"{_fmt(row['median_clv_pct'], '%', signed=True)}</td>"
-            + f"<td>{_fmt(row['positive_clv_rate_pct'], '%')}</td>"
-            + f"<td>{escape(str(row['sample_band']))}</td>"
-            + action
-            + "</tr>"
-        )
+        evidence = escape(str(row["sample_band"]))
+        evidence_class = evidence.casefold().replace("_", "-")
+        if compact_roi:
+            roi_low = row.get("roi_95_low_pct")
+            roi_high = row.get("roi_95_high_pct")
+            roi_ci = (
+                "—"
+                if roi_low is None or roi_high is None
+                else f"{_fmt(roi_low, '%', signed=True)} → {_fmt(roi_high, '%', signed=True)}"
+            )
+            metric_cells = (
+                f"<td>{row['n']}</td>"
+                f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
+                f'<td class="metric-strong {_metric_class(row["roi_pct"])}">'
+                f"{_fmt(row['roi_pct'], '%', signed=True)}</td>"
+                f'<td class="{_roi_interval_class(roi_low, roi_high)}">{roi_ci}</td>'
+                f'<td class="{_metric_class(row.get("roi_last_100_pct"))}">'
+                f"{_fmt(row.get('roi_last_100_pct'), '%', signed=True)}</td>"
+                f'<td class="{_metric_class(row.get("roi_last_250_pct"))}">'
+                f"{_fmt(row.get('roi_last_250_pct'), '%', signed=True)}</td>"
+                f'<td class="{_metric_class(row.get("roi_last_500_pct"))}">'
+                f"{_fmt(row.get('roi_last_500_pct'), '%', signed=True)}</td>"
+                f"<td>{_fmt(row.get('avg_entry_odds'))}</td>"
+                f'<td class="{_metric_class(row.get("avg_edge_pct"))}">'
+                f"{_fmt(row.get('avg_edge_pct'), '%', signed=True)}</td>"
+                f'<td><span class="evidence evidence-{evidence_class}">{evidence}</span></td>'
+            )
+        else:
+            metric_cells = (
+                f"<td>{row['n']}</td>"
+                f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
+                f"<td>{_fmt(row['win_rate_pct'], '%')}</td>"
+                f"<td>{_fmt(row['expected_win_rate_pct'], '%')}</td>"
+                f'<td class="{_metric_class(row["calibration_gap_pp"])}">'
+                f"{_fmt(row['calibration_gap_pp'], 'pp', signed=True)}</td>"
+                f'<td class="metric-strong {_metric_class(row["roi_pct"])}">'
+                f"{_fmt(row['roi_pct'], '%', signed=True)}</td>"
+                f"<td>{_fmt(row.get('avg_entry_odds'))}</td>"
+                f'<td class="{_metric_class(row.get("avg_edge_pct"))}">'
+                f"{_fmt(row.get('avg_edge_pct'), '%', signed=True)}</td>"
+                f'<td class="{_metric_class(row.get("avg_ev_pct"))}">'
+                f"{_fmt(row.get('avg_ev_pct'), '%', signed=True)}</td>"
+                f'<td class="{_metric_class(row.get("avg_clv_pct"))}">'
+                f"{_fmt(row.get('avg_clv_pct'), '%', signed=True)}</td>"
+                f"<td>{row.get('clv_count', 0)}</td>"
+                f"<td>{_fmt(row.get('positive_clv_rate_pct'), '%')}</td>"
+                f'<td><span class="evidence evidence-{evidence_class}">{evidence}</span></td>'
+            )
+        body.append("<tr>" + dims + metric_cells + action + "</tr>")
     if not body:
         body.append(
-            f'<tr><td colspan="{len(dimensions) + 10 + (1 if row_link_path else 0)}" '
+            f'<tr><td colspan="{len(dimensions) + len(metric_columns) + (1 if row_link_path else 0)}" '
             'class="empty">No settled rows.</td></tr>'
         )
     return (
         f'<section id="table-{escape(table_id, quote=True)}" class="panel">'
-        + "<h3>"
+        + '<div class="panel-title"><h3>'
         + escape(title)
-        + '</h3><div class="scroll"><table><thead><tr>'
+        + '</h3><span class="row-count">'
+        + str(len(visible_rows))
+        + " buckets</span></div>"
+        + '<div class="scroll"><table><thead><tr>'
         + dimension_headers
         + metric_headers
         + action_header
@@ -691,7 +809,7 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         f'<span>model versions={version_summary["model_version_count"]} · '
         f'policy configs={version_summary["policy_config_count"]} · '
         f'unrecorded policy rows={version_summary["unrecorded_policy_n"]}. '
-        'League rows combine retrains; the audit tables preserve version detail.</span></div>'
+        'Decision tables aggregate regimes; Audit preserves version detail.</span></div>'
         if mixed_versions
         else '<div class="version-ok"><b>SINGLE VERSION REGIME</b>'
         '<span>Lifetime cards represent one recorded model/policy regime.</span></div>'
@@ -703,12 +821,12 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         for label, value in (
             ("Settled", str(lifetime["n"])),
             ("W-L-V", f"{lifetime['wins']}-{lifetime['losses']}-{lifetime['voids']}"),
+            ("ROI", _fmt(lifetime["roi_pct"], "%", signed=True)),
             ("Win rate", _fmt(lifetime["win_rate_pct"], "%")),
             ("Expected", _fmt(lifetime["expected_win_rate_pct"], "%")),
             ("Calibration", _fmt(lifetime["calibration_gap_pp"], "pp", signed=True)),
-            ("ROI", _fmt(lifetime["roi_pct"], "%", signed=True)),
-            ("Avg CLV", _fmt(lifetime["avg_clv_pct"], "%", signed=True)),
-            ("+CLV", _fmt(lifetime["positive_clv_rate_pct"], "%")),
+            ("Avg CLV*", _fmt(lifetime["avg_clv_pct"], "%", signed=True)),
+            ("CLV coverage", _fmt(lifetime["clv_coverage_pct"], "%")),
         )
     )
 
@@ -731,6 +849,7 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         },
         row_link_path="/research/analytics/league",
         row_link_params={"league_id": "league_id", "season": "season"},
+        compact_roi=True,
     )
     market_selection = _metrics_table(
         "Market × selection",
@@ -744,19 +863,108 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         row_link_path="/research",
         row_link_params={"market": "market", "selection": "selection"},
         row_link_fixed=history,
+        compact_roi=True,
     )
-    diagnostics = _metrics_table(
-        "Low-scoring diagnostic",
-        snapshot["diagnostics"],
-        ("diagnostic",),
-        table_id="diagnostics",
+    market_selection_odds = _metrics_table(
+        "Market × selection × entry odds",
+        snapshot["cohorts"]["market_selection_odds"],
+        ("market", "selection", "odds_bucket"),
+        table_id="market-odds",
         active_sort_table=active_sort_table,
         active_sort_key=active_sort_key,
         active_sort_dir=active_sort_dir,
-        dimension_labels={"diagnostic": "Diagnostic"},
+        dimension_labels={"market": "Market", "selection": "Pick", "odds_bucket": "Odds"},
         row_link_path="/research",
-        row_link_params={"diagnostic": "diagnostic"},
+        row_link_params={
+            "market": "market",
+            "selection": "selection",
+            "odds_bucket": "odds_bucket",
+        },
         row_link_fixed=history,
+        compact_roi=True,
+    )
+    market_selection_edge = _metrics_table(
+        "Market × selection × edge",
+        snapshot["cohorts"]["market_selection_edge"],
+        ("market", "selection", "edge_bucket"),
+        table_id="market-edge",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
+        dimension_labels={"market": "Market", "selection": "Pick", "edge_bucket": "Edge"},
+        row_link_path="/research",
+        row_link_params={
+            "market": "market",
+            "selection": "selection",
+            "edge_bucket": "edge_bucket",
+        },
+        row_link_fixed=history,
+        compact_roi=True,
+    )
+    league_market = _metrics_table(
+        "League × market × selection",
+        snapshot["cohorts"]["league_market"],
+        ("competition_name", "league_id", "market", "selection"),
+        table_id="league-market",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
+        dimension_labels={
+            "competition_name": "League",
+            "league_id": "League ID",
+            "market": "Market",
+            "selection": "Pick",
+        },
+        row_link_path="/research",
+        row_link_params={
+            "competition_name": "league",
+            "market": "market",
+            "selection": "selection",
+        },
+        row_link_fixed=history,
+        compact_roi=True,
+    )
+    edge = _metrics_table(
+        "Edge buckets",
+        snapshot["cohorts"]["edge_bucket"],
+        ("edge_bucket",),
+        table_id="edge",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
+        dimension_labels={"edge_bucket": "Edge"},
+        row_link_path="/research",
+        row_link_params={"edge_bucket": "edge_bucket"},
+        row_link_fixed=history,
+        compact_roi=True,
+    )
+    odds = _metrics_table(
+        "Entry odds",
+        snapshot["cohorts"]["odds_bucket"],
+        ("odds_bucket",),
+        table_id="odds",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
+        dimension_labels={"odds_bucket": "Odds"},
+        row_link_path="/research",
+        row_link_params={"odds_bucket": "odds_bucket"},
+        row_link_fixed=history,
+        compact_roi=True,
+    )
+    time_to_kickoff = _metrics_table(
+        "Time to kickoff",
+        snapshot["cohorts"]["time_to_kickoff_bucket"],
+        ("time_to_kickoff_bucket",),
+        table_id="ttk",
+        active_sort_table=active_sort_table,
+        active_sort_key=active_sort_key,
+        active_sort_dir=active_sort_dir,
+        dimension_labels={"time_to_kickoff_bucket": "TTK"},
+        row_link_path="/research",
+        row_link_params={"time_to_kickoff_bucket": "ttk_bucket"},
+        row_link_fixed=history,
+        compact_roi=True,
     )
     weekly = _metrics_table(
         "Weekly stability",
@@ -770,6 +978,7 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         row_link_path="/research",
         row_link_params={"week": "week"},
         row_link_fixed=history,
+        compact_roi=True,
     )
 
     model_probability = _metrics_table(
@@ -811,17 +1020,17 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         row_link_params={"ev_bucket": "ev_bucket"},
         row_link_fixed=history,
     )
-    odds = _metrics_table(
-        "Entry odds",
-        snapshot["cohorts"]["odds_bucket"],
-        ("odds_bucket",),
-        table_id="odds",
+    diagnostics = _metrics_table(
+        "Low-scoring diagnostic",
+        snapshot["diagnostics"],
+        ("diagnostic",),
+        table_id="diagnostics",
         active_sort_table=active_sort_table,
         active_sort_key=active_sort_key,
         active_sort_dir=active_sort_dir,
-        dimension_labels={"odds_bucket": "Odds"},
+        dimension_labels={"diagnostic": "Diagnostic"},
         row_link_path="/research",
-        row_link_params={"odds_bucket": "odds_bucket"},
+        row_link_params={"diagnostic": "diagnostic"},
         row_link_fixed=history,
     )
 
@@ -887,116 +1096,100 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         },
         row_link_fixed=history,
     )
-    cube = _metrics_table(
-        "Production filter cube",
-        snapshot["cohorts"]["production_filter_cube"],
-        (
-            "market",
-            "selection",
-            "probability_bucket",
-            "market_fair_probability_bucket",
-            "ev_bucket",
-            "odds_bucket",
-        ),
-        table_id="filter-cube",
-        active_sort_table=active_sort_table,
-        active_sort_key=active_sort_key,
-        active_sort_dir=active_sort_dir,
-        dimension_labels={
-            "market": "Market",
-            "selection": "Pick",
-            "probability_bucket": "Model P",
-            "market_fair_probability_bucket": "Fair P",
-            "ev_bucket": "EV",
-            "odds_bucket": "Odds",
-        },
-        row_link_path="/research",
-        row_link_params={
-            "market": "market",
-            "selection": "selection",
-            "probability_bucket": "p_bucket",
-            "market_fair_probability_bucket": "fair_bucket",
-            "ev_bucket": "ev_bucket",
-            "odds_bucket": "odds_bucket",
-        },
-        row_link_fixed=history,
-    )
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantBet Research Analytics V2</title>
 <style>
-:root{{--bg:#111315;--panel:#181b1f;--panel2:#15181b;--line:#30363d;--text:#eceff1;
---muted:#9299a1;--positive:#79c995;--negative:#e06f78}}
+:root{{--bg:#0f1113;--panel:#171a1e;--panel2:#13161a;--line:#2b3138;--text:#f0f2f4;
+--muted:#8e979f;--positive:#7bc69a;--negative:#e27b82;--accent:#c9a861;--soft:#20252b}}
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:var(--bg);
 color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1920px;margin:auto;padding:24px}}
 header{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}}
-h1{{margin:0;font-size:25px}}h2{{font-size:18px;margin:0}}h3{{font-size:15px;margin:0 0 12px}}
-p,small{{color:var(--muted)}}a{{color:#d8dcdf}}
-.section-nav{{position:sticky;top:0;z-index:20;display:flex;gap:8px;overflow:auto;
-padding:9px 0;background:rgba(17,19,21,.96);border-bottom:1px solid #24292e}}
-.section-nav a{{text-decoration:none;white-space:nowrap;padding:7px 10px;border:1px solid var(--line);
-border-radius:999px;font-size:12px;color:#bfc5ca}}.section-nav a:hover{{color:#fff;border-color:#5b636b}}
-.definition{{margin-top:12px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;
-color:var(--muted);font-size:12px;background:var(--panel2)}}
+h1{{margin:0;font-size:26px;letter-spacing:-.02em}}h2{{font-size:19px;margin:0}}h3{{font-size:15px;margin:0}}
+p,small{{color:var(--muted)}}a{{color:#dce1e5}}
+.section-nav{{position:sticky;top:0;z-index:30;display:flex;gap:8px;overflow:auto;
+padding:10px 0;background:rgba(15,17,19,.96);border-bottom:1px solid #23282d;backdrop-filter:blur(10px)}}
+.section-nav a{{text-decoration:none;white-space:nowrap;padding:7px 11px;border:1px solid var(--line);
+border-radius:999px;font-size:12px;color:#bdc5cb}}.section-nav a:hover{{color:#fff;border-color:#646d75}}
+.focus-note{{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-top:12px;
+padding:12px 14px;border:1px solid #4b4330;border-radius:12px;background:#1f1b14}}
+.focus-note b{{color:#e4c57f;font-size:12px;letter-spacing:.05em}}.focus-note span{{color:var(--muted);font-size:12px}}
+.definition{{margin-top:10px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;
+color:var(--muted);font-size:12px;background:var(--panel2);line-height:1.55}}
 .dimension-link{{text-decoration:none;border-bottom:1px dotted #778089}}
-.dimension-link:hover{{color:#fff;border-bottom-color:#fff}}.row-action{{font-weight:650;
+.dimension-link:hover{{color:#fff;border-bottom-color:#fff}}.row-action{{font-weight:700;
 text-decoration:none;white-space:nowrap}}.cards{{display:grid;
 grid-template-columns:repeat(8,minmax(120px,1fr));gap:9px;margin:14px 0 18px}}
-.card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px}}
-.card{{padding:13px}}.card small{{text-transform:uppercase;font-size:10px;letter-spacing:.08em}}
-.card b{{display:block;font-size:20px;margin-top:7px}}.analytics-group{{scroll-margin-top:58px;
-margin:20px 0 26px}}.group-head{{display:flex;align-items:end;justify-content:space-between;
-gap:12px;padding:0 2px 7px}}.group-head p{{margin:0;font-size:12px}}
-.panel{{padding:14px;margin:10px 0}}.scroll{{overflow:auto;max-height:62vh}}
-table{{width:100%;border-collapse:collapse;font-size:12px}}th,td{{padding:9px 10px;
-border-bottom:1px solid #272c31;white-space:nowrap;text-align:left}}th{{position:sticky;top:0;
-background:#1b1f23;color:#9aa1a8;font-size:10px;text-transform:uppercase;letter-spacing:.05em}}
-.th-wrap{{display:flex;align-items:center;gap:6px}}.sort-tools{{display:inline-flex;gap:2px}}
-.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid #343b42;
-border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
+.card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:14px}}
+.card{{padding:14px;min-height:78px}}.card small{{text-transform:uppercase;font-size:10px;letter-spacing:.09em}}
+.card b{{display:block;font-size:20px;margin-top:7px;letter-spacing:-.02em}}.analytics-group{{scroll-margin-top:62px;
+margin:22px 0 30px}}.group-head{{display:flex;align-items:end;justify-content:space-between;
+gap:12px;padding:0 2px 8px}}.group-head p{{margin:3px 0 0;font-size:12px}}
+.panel{{padding:0;margin:11px 0;overflow:hidden}}.panel-title{{display:flex;justify-content:space-between;
+align-items:center;padding:13px 14px;border-bottom:1px solid #252b31}}.row-count{{font-size:11px;color:var(--muted)}}
+.scroll{{overflow:auto;max-height:66vh}}table{{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}}
+th,td{{padding:9px 10px;border-bottom:1px solid #252a30;white-space:nowrap;text-align:left}}
+th{{position:sticky;top:0;z-index:4;background:#1c2025;color:#9da5ad;font-size:10px;text-transform:uppercase;letter-spacing:.055em}}
+th:first-child,td:first-child{{position:sticky;left:0;z-index:3;background:var(--panel)}}
+th:first-child{{z-index:5;background:#1c2025}}tbody tr:nth-child(even) td{{background:#181c20}}
+tbody tr:nth-child(even) td:first-child{{background:#181c20}}tbody tr:hover td{{background:#20262b}}
+tbody tr:hover td:first-child{{background:#20262b}}.th-wrap{{display:flex;align-items:center;gap:6px}}
+.sort-tools{{display:inline-flex;gap:2px}}.sort-tools a{{display:inline-grid;place-items:center;width:17px;height:17px;
+border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;font-size:10px;line-height:1}}
 .sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
-tbody tr:hover{{background:#1d2226}}.action-col{{text-align:right}}.metric-strong{{font-weight:700}}
-.metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}
-.metric-neutral{{color:inherit}}.empty{{color:var(--muted);text-align:center}}
+.action-col{{text-align:right}}.metric-strong{{font-weight:800;font-size:12.5px}}
+.metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}.metric-neutral{{color:inherit}}
+.empty{{color:var(--muted);text-align:center}}.evidence{{display:inline-flex;padding:3px 7px;border-radius:999px;
+font-size:9px;font-weight:800;letter-spacing:.055em;border:1px solid #3a4148;color:#b5bdc4;background:#20252b}}
+.evidence-decision-grade,.evidence-mature{{border-color:#496b58;color:#9fd0af;background:#17231c}}
+.evidence-soft-review{{border-color:#6e5e3d;color:#d7bd83;background:#241f16}}
 .version-warning,.version-ok{{display:flex;gap:10px;align-items:center;padding:11px 14px;margin:12px 0;
 border-radius:10px;border:1px solid var(--line);font-size:12px}}.version-warning{{background:#2a2117}}
 .version-warning b{{color:#f0b36a}}.version-ok{{background:#17251d}}.version-ok b{{color:#79c995}}
-.version-warning span,.version-ok span{{color:var(--muted)}}@media(max-width:900px){{
-.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}
-.group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}}}
+.version-warning span,.version-ok span{{color:var(--muted)}}.audit-details{{border:1px solid var(--line);
+border-radius:12px;background:var(--panel2);margin:10px 0;padding:0 12px 12px}}
+.audit-details summary{{cursor:pointer;padding:12px 2px;color:#c9d0d5;font-weight:700;font-size:13px}}
+@media(max-width:1100px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}
+@media(max-width:760px){{.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}
+.group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}.focus-note{{display:block}}
+.focus-note span{{display:block;margin-top:5px}}}}
 </style></head><body><main>
 <header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
-<p>Settled performance. Every aggregate row links back to its constituent picks.</p></div>
+<p>ROI-first evidence dashboard. Every aggregate row drills into its constituent picks.</p></div>
 <div><a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
 <nav class="section-nav">
-<a href="#overview">Overview</a><a href="#core">Core performance</a>
-<a href="#calibration">Calibration & price</a><a href="#audit">Audit</a>
+<a href="#overview">Overview</a><a href="#decision">ROI decision lab</a>
+<a href="#calibration">Calibration & CLV</a><a href="#audit">Audit</a>
 </nav>
 <section id="overview" class="analytics-group">
-<div class="definition">Universe: {escape(snapshot['definitions']['universe'])}
+<div class="focus-note"><b>ROI-FIRST SELF-SUSTAIN PHASE</b>
+<span>CLV stays in the model roadmap, but current pruning is driven by ROI + N + uncertainty + persistence.</span></div>
+<div class="definition">Universe: {escape(snapshot['definitions']['universe'])}<br>
 ROI: {escape(snapshot['definitions']['roi'])}<br>
+Decision focus: {escape(snapshot['definitions']['decision_focus'])}<br>
+CLV*: {escape(snapshot['definitions']['clv'])}<br>
 Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 {version_notice}
 <section class="cards">{cards}</section>
 </section>
-<section id="core" class="analytics-group">
-<div class="group-head"><div><h2>Core performance</h2>
-<p>League, market, diagnostic and time stability.</p></div></div>
-{league_seasons}{market_selection}{diagnostics}{weekly}
+<section id="decision" class="analytics-group">
+<div class="group-head"><div><h2>ROI decision lab</h2>
+<p>Low-dimensional buckets first. Rolling 100/250/500 only appears after that bucket has enough graded picks.</p></div></div>
+{market_selection}{market_selection_odds}{market_selection_edge}{edge}{odds}{time_to_kickoff}{league_market}{league_seasons}{weekly}
 </section>
 <section id="calibration" class="analytics-group">
-<div class="group-head"><div><h2>Calibration & price</h2>
-<p>Probability, fair-price, EV and entry-odds cohorts.</p></div></div>
-{model_probability}{fair_probability}{ev}{odds}
+<div class="group-head"><div><h2>Calibration & CLV</h2>
+<p>Model confidence, market price and CLV remain research axes; CLV is not a current pruning gate.</p></div></div>
+{model_probability}{fair_probability}{ev}
 </section>
 <section id="audit" class="analytics-group">
 <div class="group-head"><div><h2>Audit</h2>
-<p>Policy and decision-contract detail. Model versions remain available inside league drilldowns.</p>
-</div></div>
-{policy_configs}{model_policy}{decision_contract}{cube}
+<p>Version provenance and hypothesis diagnostics are preserved without crowding the decision surface.</p></div></div>
+<details class="audit-details"><summary>Research diagnostics</summary>{diagnostics}</details>
+<details class="audit-details"><summary>Version / policy cohorts</summary>{policy_configs}{model_policy}{decision_contract}</details>
 </section>
 </main></body></html>"""
