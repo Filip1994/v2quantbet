@@ -151,6 +151,19 @@ def _ev_bucket(value: Any) -> str:
     return "<7%"
 
 
+def _edge_bucket(value: Any) -> str:
+    edge = _number(value)
+    if edge is None:
+        return "—"
+    pct = edge * 100
+    for low, high in ((0, 5), (5, 10), (10, 15), (15, 20), (20, 30)):
+        if low <= pct < high:
+            return f"{low}–{high}%"
+    if pct >= 30:
+        return "30%+"
+    return "<0%"
+
+
 def _odds_bucket(value: Any) -> str:
     odds = _number(value)
     if odds is None:
@@ -166,6 +179,31 @@ def _odds_bucket(value: Any) -> str:
         if low <= odds <= high:
             return label
     return "other"
+
+
+def _time_to_kickoff_bucket(qualified_at: Any, kickoff_at: Any) -> str:
+    if not isinstance(qualified_at, datetime) or not isinstance(kickoff_at, datetime):
+        return "—"
+
+    def utc(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    hours = (utc(kickoff_at) - utc(qualified_at)).total_seconds() / 3600
+    if hours < 0:
+        return "after kickoff"
+    if hours < 1:
+        return "<1h"
+    if hours < 3:
+        return "1–3h"
+    if hours < 6:
+        return "3–6h"
+    if hours < 12:
+        return "6–12h"
+    if hours < 24:
+        return "12–24h"
+    return "24h+"
 
 
 def counterfactual_outcome(row: dict[str, Any]) -> str:
@@ -380,7 +418,11 @@ class ResearchDashboardService:
             item["market_fair_probability"]
         )
         item["ev_bucket"] = _ev_bucket(item["expected_value"])
+        item["edge_bucket"] = _edge_bucket(item["edge"])
         item["odds_bucket"] = _odds_bucket(item["odds"])
+        item["time_to_kickoff_bucket"] = _time_to_kickoff_bucket(
+            qualified_at, item.get("kickoff_at")
+        )
         return item
 
     def _load_system_health(self) -> tuple[dict[str, str], ...]:
@@ -701,7 +743,9 @@ class ResearchDashboardService:
         p_bucket = params.get("p_bucket", [""])[0].strip()
         fair_bucket = params.get("fair_bucket", [""])[0].strip()
         ev_bucket = params.get("ev_bucket", [""])[0].strip()
+        edge_bucket = params.get("edge_bucket", [""])[0].strip()
         odds_bucket = params.get("odds_bucket", [""])[0].strip()
+        ttk_bucket = params.get("ttk_bucket", [""])[0].strip()
         model_version = params.get("model_version", [""])[0].strip()
         policy_config = params.get("policy_config", [""])[0].strip()
         prediction_method = params.get("prediction_method", [""])[0].strip()
@@ -755,7 +799,11 @@ class ResearchDashboardService:
                 return False
             if ev_bucket and row["ev_bucket"] != ev_bucket:
                 return False
+            if edge_bucket and row["edge_bucket"] != edge_bucket:
+                return False
             if odds_bucket and row["odds_bucket"] != odds_bucket:
+                return False
+            if ttk_bucket and row["time_to_kickoff_bucket"] != ttk_bucket:
                 return False
             if model_version and version_value(
                 row, "model_version_id", "UNRECORDED_MODEL"
@@ -2086,7 +2134,9 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <select name="disposition" aria-label="Route filter"><option value="">All routes</option>{option_list("disposition", ("PLAYED","SKIPPED","BLOCKED_EXPOSURE"))}</select>
 <select name="p_bucket" aria-label="Probability bucket"><option value="">All p buckets</option>{option_list("p_bucket", ("40–45%","45–50%","50–55%","55–60%","60–65%","65–70%","70–75%","75%+"))}</select>
 <select name="ev_bucket" aria-label="EV bucket"><option value="">All EV buckets</option>{option_list("ev_bucket", ("7–10%","10–15%","15–20%","20–30%","30%+"))}</select>
+<select name="edge_bucket" aria-label="Edge bucket"><option value="">All edge buckets</option>{option_list("edge_bucket", ("<0%","0–5%","5–10%","10–15%","15–20%","20–30%","30%+"))}</select>
 <select name="odds_bucket" aria-label="Odds bucket"><option value="">All odds buckets</option>{option_list("odds_bucket", ("1.40–1.60","1.61–1.80","1.81–2.00","2.01–2.50","2.51–3.00","3.01–3.50","other"))}</select>
+<select name="ttk_bucket" aria-label="Time to kickoff bucket"><option value="">All TTK buckets</option>{option_list("ttk_bucket", ("<1h","1–3h","3–6h","6–12h","12–24h","24h+","after kickoff"))}</select>
 <input name="league" placeholder="League" value="{field("league")}">
 <input name="p_min" placeholder="Model p min %" value="{field("p_min")}">
 <input name="p_max" placeholder="Model p max %" value="{field("p_max")}">
