@@ -141,6 +141,11 @@ def _run_active_leader(
             application.opportunity.run_once,
             has_pending_work=lambda: application.opportunity.has_pending,
         ),
+        ScheduledJob(
+            "production_intake",
+            application.settings.opportunity_interval_seconds,
+            application.production_intake.run_once,
+        ),
         ScheduledJob("daily_bulletin", 60.0, bulletin_worker.run_once),
         ScheduledJob(
             "closing_proxy",
