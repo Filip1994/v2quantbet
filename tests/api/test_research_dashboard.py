@@ -86,6 +86,27 @@ class Repository:
         return (signal_row(),)
 
 
+class CountingRepository:
+    def __init__(self):
+        self.calls = 0
+
+    def list_signals(self, *, limit):
+        assert limit == 5000
+        self.calls += 1
+        return (signal_row(),)
+
+
+def test_research_dashboard_reuses_signal_snapshot_within_cache_ttl() -> None:
+    repository = CountingRepository()
+    dashboard = ResearchDashboardService(repository, signal_cache_ttl_seconds=60)
+
+    first = dashboard.signals({})
+    second = dashboard.signals({})
+
+    assert first == second
+    assert repository.calls == 1
+
+
 class DuplicateFixtureRepository:
     def list_signals(self, *, limit):
         assert limit == 5000
