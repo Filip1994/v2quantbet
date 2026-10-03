@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Lock, Thread
+from time import monotonic
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -335,12 +336,24 @@ class ResearchDashboardService:
         strict_quote_age_seconds: int = 300,
         provider_snapshot_max_age_seconds: int = 36_000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        signal_cache_ttl_seconds: int = 0,
+        health_cache_ttl_seconds: int = 0,
     ) -> None:
         self._repository = repository
         self._stake = fixed_stake_minor
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
         self._clock = clock
+        if signal_cache_ttl_seconds < 0 or health_cache_ttl_seconds < 0:
+            raise ValueError("dashboard cache TTLs must be non-negative")
+        self._signal_cache_ttl = signal_cache_ttl_seconds
+        self._health_cache_ttl = health_cache_ttl_seconds
+        self._signal_cache: tuple[dict[str, Any], ...] | None = None
+        self._signal_cache_at = 0.0
+        self._signal_cache_lock = Lock()
+        self._health_cache: tuple[dict[str, str], ...] | None = None
+        self._health_cache_at = 0.0
+        self._health_cache_lock = Lock()
 
     def _derived(self, row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
@@ -370,7 +383,7 @@ class ResearchDashboardService:
         item["odds_bucket"] = _odds_bucket(item["odds"])
         return item
 
-    def _system_health(self) -> tuple[dict[str, str], ...]:
+    def _load_system_health(self) -> tuple[dict[str, str], ...]:
         unavailable = (
             {"label": "Database", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
             {"label": "Engine", "state": "unknown", "summary": "No status", "detail": "Operational status is unavailable."},
@@ -583,6 +596,36 @@ class ResearchDashboardService:
             research,
         )
 
+    def _refresh_health_cache(self) -> None:
+        if not self._health_cache_lock.acquire(blocking=False):
+            return
+        try:
+            self._health_cache = self._load_system_health()
+            self._health_cache_at = monotonic()
+        finally:
+            self._health_cache_lock.release()
+
+    def _system_health(self) -> tuple[dict[str, str], ...]:
+        if self._health_cache_ttl <= 0:
+            return self._load_system_health()
+
+        cached = self._health_cache
+        now = monotonic()
+        if cached is not None and now - self._health_cache_at < self._health_cache_ttl:
+            return cached
+        if cached is not None:
+            if not self._health_cache_lock.locked():
+                Thread(target=self._refresh_health_cache, daemon=True).start()
+            return cached
+
+        with self._health_cache_lock:
+            cached = self._health_cache
+            if cached is None:
+                cached = self._load_system_health()
+                self._health_cache = cached
+                self._health_cache_at = monotonic()
+            return cached
+
     @staticmethod
     def _health_html(items: tuple[dict[str, str], ...]) -> str:
         return "".join(
@@ -596,11 +639,45 @@ class ResearchDashboardService:
             for item in items
         )
 
-    def _all_signal_rows(self) -> tuple[dict[str, Any], ...]:
+    def _load_all_signal_rows(self) -> tuple[dict[str, Any], ...]:
         loader = getattr(self._repository, "list_all_signals", None)
         if callable(loader):
             return tuple(loader())
         return tuple(self._repository.list_signals(limit=5000))
+
+    def _refresh_signal_cache(self) -> None:
+        if not self._signal_cache_lock.acquire(blocking=False):
+            return
+        try:
+            rows = self._load_all_signal_rows()
+        except Exception:
+            return
+        else:
+            self._signal_cache = rows
+            self._signal_cache_at = monotonic()
+        finally:
+            self._signal_cache_lock.release()
+
+    def _all_signal_rows(self) -> tuple[dict[str, Any], ...]:
+        if self._signal_cache_ttl <= 0:
+            return self._load_all_signal_rows()
+
+        cached = self._signal_cache
+        now = monotonic()
+        if cached is not None and now - self._signal_cache_at < self._signal_cache_ttl:
+            return cached
+        if cached is not None:
+            if not self._signal_cache_lock.locked():
+                Thread(target=self._refresh_signal_cache, daemon=True).start()
+            return cached
+
+        with self._signal_cache_lock:
+            cached = self._signal_cache
+            if cached is None:
+                cached = self._load_all_signal_rows()
+                self._signal_cache = cached
+                self._signal_cache_at = monotonic()
+            return cached
 
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
         canonical = tuple(
