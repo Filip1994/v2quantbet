@@ -260,10 +260,21 @@ class QuantLabDashboardService:
         *,
         api_daily_limit: int = 75_000,
         currency: str = "RSD",
-        view_cache_ttl_seconds: int = 0,
+        view_cache_ttl_seconds: int | None = None,
     ) -> None:
         if api_daily_limit <= 0:
             raise ValueError("api_daily_limit must be positive")
+        if view_cache_ttl_seconds is None:
+            raw_cache_ttl = os.getenv(
+                "QUANTBET_QUANTLAB_DASHBOARD_CACHE_TTL_SECONDS",
+                "0",
+            ).strip()
+            try:
+                view_cache_ttl_seconds = int(raw_cache_ttl)
+            except ValueError as exc:
+                raise ValueError(
+                    "QUANTBET_QUANTLAB_DASHBOARD_CACHE_TTL_SECONDS must be an integer"
+                ) from exc
         if view_cache_ttl_seconds < 0:
             raise ValueError("view_cache_ttl_seconds must be non-negative")
         self._repository = repository
