@@ -289,6 +289,56 @@ def test_research_dashboard_maps_match_and_supports_bucket_filters() -> None:
     assert "+10.00%" in html
 
 
+def test_research_history_keeps_same_name_leagues_separate_by_league_id() -> None:
+    class SameNameLeagueRepository:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+
+            wales = signal_row()
+            wales["competition_name"] = "Premier League"
+            wales["country"] = "Wales"
+
+            canada = signal_row()
+            canada["research_signal_id"] = "research-signal-v1:" + "8" * 64
+            canada["evaluation_id"] = "value-evaluation-v1:" + "8" * 64
+            canada["fixture_id"] = "api-football:880"
+            canada["provider_fixture_id"] = "880"
+            canada["league_id"] = 253
+            canada["competition_name"] = "Premier League"
+            canada["country"] = "Canada"
+            canada["home_team"] = "Canada Home"
+            canada["away_team"] = "Canada Away"
+            canada["kickoff_at"] = NOW + timedelta(hours=4)
+
+            return (wales, canada)
+
+    dashboard = ResearchDashboardService(SameNameLeagueRepository())
+
+    filtered = dashboard.signals(
+        {"league": ["Premier League"], "league_id": ["39"]}
+    )
+    assert len(filtered) == 1
+    assert filtered[0]["league_id"] == 39
+    assert filtered[0]["country"] == "Wales"
+
+    snapshot = dashboard.analytics_snapshot()
+    league_rows = snapshot["cohorts"]["league"]
+    assert {(row["competition_name"], row["league_id"]) for row in league_rows} == {
+        ("Premier League", "39"),
+        ("Premier League", "253"),
+    }
+
+    html = dashboard.render_analytics_html()
+    assert (
+        "tab=history&amp;league=Premier+League&amp;league_id=39"
+        "&amp;market=BTTS&amp;selection=YES"
+    ) in html
+    assert (
+        "tab=history&amp;league=Premier+League&amp;league_id=253"
+        "&amp;market=BTTS&amp;selection=YES"
+    ) in html
+
+
 def test_research_dashboard_projects_one_canonical_pick_per_fixture() -> None:
     rows = ResearchDashboardService(DuplicateFixtureRepository()).signals({})
 
