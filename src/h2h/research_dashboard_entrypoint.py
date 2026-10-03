@@ -42,6 +42,12 @@ def main() -> None:
         provider_snapshot_max_age_seconds=_integer(
             "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "36000"
         ),
+        signal_cache_ttl_seconds=_integer(
+            "QUANTBET_RESEARCH_SIGNAL_CACHE_TTL_SECONDS", "60"
+        ),
+        health_cache_ttl_seconds=_integer(
+            "QUANTBET_RESEARCH_HEALTH_CACHE_TTL_SECONDS", "30"
+        ),
     )
     server = ResearchDashboardHTTPService(
         dashboard, host="0.0.0.0", port=_integer("PORT", "8080")
