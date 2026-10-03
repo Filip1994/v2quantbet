@@ -45,10 +45,6 @@ def main() -> None:
         repository,
         api_daily_limit=_positive_integer("QUANTBET_API_DAILY_LIMIT", "75000"),
         currency=os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD",
-        view_cache_ttl_seconds=_positive_integer(
-            "QUANTBET_QUANTLAB_DASHBOARD_CACHE_TTL_SECONDS",
-            "60",
-        ),
     )
     server = QuantLabDashboardHTTPService(
         dashboard,
