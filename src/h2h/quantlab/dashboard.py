@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Lock, Thread
+from time import monotonic
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
@@ -259,12 +260,20 @@ class QuantLabDashboardService:
         *,
         api_daily_limit: int = 75_000,
         currency: str = "RSD",
+        view_cache_ttl_seconds: int = 0,
     ) -> None:
         if api_daily_limit <= 0:
             raise ValueError("api_daily_limit must be positive")
+        if view_cache_ttl_seconds < 0:
+            raise ValueError("view_cache_ttl_seconds must be non-negative")
         self._repository = repository
         self._api_limit = api_daily_limit
         self._currency = currency
+        self._view_cache_ttl = view_cache_ttl_seconds
+        self._view_cache: dict[str, tuple[float, str]] = {}
+        self._view_cache_lock = Lock()
+        self._view_cache_refreshing: set[str] = set()
+        self._view_cache_miss_locks: dict[str, Any] = {}
 
     def _filter_rows(
         self,
@@ -374,13 +383,65 @@ class QuantLabDashboardService:
         contract = self._repository.goal_model_contract(str(row.get("model_version") or ""))
         return render_goal_pick_html(row, contract)
 
-    def render_html(self, raw_query: str = "") -> str:
+    def _render_html_uncached(self, raw_query: str) -> str:
         return render_quantlab_view(
             self._repository,
             raw_query,
             api_daily_limit=self._api_limit,
             currency=self._currency,
         )
+
+    def _refresh_view_cache(self, key: str, raw_query: str) -> None:
+        try:
+            body = self._render_html_uncached(raw_query)
+        except Exception:  # noqa: BLE001 - keep serving the last valid read-only snapshot
+            LOGGER.exception("QuantLab dashboard cache refresh failed query=%s", raw_query)
+        else:
+            with self._view_cache_lock:
+                self._view_cache[key] = (monotonic(), body)
+        finally:
+            with self._view_cache_lock:
+                self._view_cache_refreshing.discard(key)
+
+    def render_html(self, raw_query: str = "") -> str:
+        if self._view_cache_ttl <= 0:
+            return self._render_html_uncached(raw_query)
+
+        key = raw_query
+        now = monotonic()
+        should_refresh = False
+        cached: tuple[float, str] | None
+        with self._view_cache_lock:
+            cached = self._view_cache.get(key)
+            if cached is not None and now - cached[0] < self._view_cache_ttl:
+                return cached[1]
+            if cached is not None:
+                if key not in self._view_cache_refreshing:
+                    self._view_cache_refreshing.add(key)
+                    should_refresh = True
+                stale_body = cached[1]
+            else:
+                stale_body = None
+                miss_lock = self._view_cache_miss_locks.setdefault(key, Lock())
+
+        if stale_body is not None:
+            if should_refresh:
+                Thread(
+                    target=self._refresh_view_cache,
+                    args=(key, raw_query),
+                    daemon=True,
+                ).start()
+            return stale_body
+
+        with miss_lock:
+            with self._view_cache_lock:
+                cached = self._view_cache.get(key)
+                if cached is not None:
+                    return cached[1]
+            body = self._render_html_uncached(raw_query)
+            with self._view_cache_lock:
+                self._view_cache[key] = (monotonic(), body)
+            return body
 
         params = parse_qs(raw_query, keep_blank_values=True)
         lab_key = params.get("lab", ["goal"])[0].strip().casefold()
