@@ -12,7 +12,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Lock, Thread
+from time import monotonic
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -25,7 +26,8 @@ from h2h.api.dashboard_time import (
 from h2h.domain.operator_pick_state import OperatorPickState
 
 
-WORKER_FRESHNESS_SECONDS = 120
+WORKER_FRESHNESS_SECONDS = 600
+DASHBOARD_CACHE_SECONDS = 10
 
 _COUNTRY_FLAG_CODES = {
     "albania": "AL",
@@ -140,7 +142,7 @@ class DashboardService:
         generated_at = datetime.now(UTC)
         policy = _policy(self._application)
         system_performance = self._application.results.performance.summary(
-            policy.bankroll_account_id
+            policy.bankroll_account_id, include_curve=False
         )
         performance = self._application.results.performance.operator_summary(
             policy.bankroll_account_id
@@ -198,19 +200,6 @@ class DashboardService:
 
     def _picks(self) -> list[dict[str, Any]]:
         sql = """
-            WITH latest_fixture AS (
-                SELECT DISTINCT ON (fo.fixture_id)
-                    fo.fixture_id, fo.home_team, fo.away_team, fo.competition_name,
-                    fo.country, fo.kickoff_at, fo.provider_status
-                FROM fixture_observations fo
-                ORDER BY fo.fixture_id, fo.observed_at DESC, fo.fixture_observation_id DESC
-            ), effective_settlement AS (
-                SELECT event.* FROM pick_settlement_events event
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM pick_settlement_events successor
-                    WHERE successor.prior_event_id = event.settlement_event_id
-                )
-            )
             SELECT
                 r.pick_id, r.registered_at, r.fixture_id,
                 latest.home_team, latest.away_team, latest.competition_name, latest.country,
@@ -342,7 +331,14 @@ class DashboardService:
             JOIN quote_snapshots entry ON entry.snapshot_id = r.entry_snapshot_id
             LEFT JOIN final_quote_verifications fq
                 ON fq.verification_id = decision.final_quote_verification_id
-            LEFT JOIN latest_fixture latest ON latest.fixture_id = r.fixture_id
+            LEFT JOIN LATERAL (
+                SELECT fo.home_team, fo.away_team, fo.competition_name,
+                    fo.country, fo.kickoff_at, fo.provider_status
+                FROM fixture_observations fo
+                WHERE fo.fixture_id = r.fixture_id
+                ORDER BY fo.observed_at DESC, fo.fixture_observation_id DESC
+                LIMIT 1
+            ) latest ON TRUE
             LEFT JOIN LATERAL (
                 SELECT q.odd, q.observed_at, q.captured_at
                 FROM quote_snapshots q
@@ -382,7 +378,13 @@ class DashboardService:
                 ON proxy_close.pick_id = r.pick_id
             LEFT JOIN pick_live_close_observations proxy_observation
                 ON proxy_observation.observation_id = proxy_close.observation_id
-            LEFT JOIN effective_settlement settlement ON settlement.pick_id = r.pick_id
+            LEFT JOIN LATERAL (
+                SELECT event.* FROM pick_settlement_events event
+                WHERE event.pick_id = r.pick_id AND NOT EXISTS (
+                    SELECT 1 FROM pick_settlement_events successor
+                    WHERE successor.prior_event_id = event.settlement_event_id
+                )
+            ) settlement ON TRUE
             LEFT JOIN fixture_result_observations settlement_result
                 ON settlement_result.result_observation_id = settlement.result_observation_id
             LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
@@ -1043,6 +1045,9 @@ class DashboardHTTPService:
 
     def __init__(self, dashboard: DashboardService, *, host: str, port: int) -> None:
         self._dashboard = dashboard
+        self._cache_lock = Lock()
+        self._cached_html: str | None = None
+        self._cached_at = 0.0
         service = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1053,7 +1058,9 @@ class DashboardHTTPService:
                 elif path in {"/", "/dashboard"}:
                     if service._authorize(self):
                         try:
-                            service._html(self, 200, dashboard.render_html())
+                            service._html(self, 200, service._render_html())
+                        except (BrokenPipeError, ConnectionResetError):
+                            return
                         except Exception as exc:  # noqa: BLE001 - bounded failure response
                             service._json(self, 503, {"error": type(exc).__name__})
                 else:
@@ -1079,6 +1086,7 @@ class DashboardHTTPService:
                     result = dashboard.set_operator_state(
                         pick_id, values["state"][0], values["request_id"][0]
                     )
+                    service._invalidate_cache()
                 except (KeyError, LookupError, UnicodeDecodeError, ValueError) as exc:
                     service._json(self, 400, {"error": type(exc).__name__})
                     return
@@ -1095,6 +1103,19 @@ class DashboardHTTPService:
 
         self._server = ThreadingHTTPServer((host, port), Handler)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
+
+    def _render_html(self) -> str:
+        with self._cache_lock:
+            now = monotonic()
+            if self._cached_html is None or now - self._cached_at >= DASHBOARD_CACHE_SECONDS:
+                html = self._dashboard.render_html()
+                self._cached_html = html
+                self._cached_at = monotonic()
+            return self._cached_html
+
+    def _invalidate_cache(self) -> None:
+        with self._cache_lock:
+            self._cached_html = None
 
     @staticmethod
     def _json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, Any]) -> None:

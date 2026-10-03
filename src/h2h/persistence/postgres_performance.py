@@ -43,7 +43,9 @@ class PostgreSQLPerformanceRepository:
             "WHERE n.prior_event_id = e.settlement_event_id)) "
         )
 
-    def summary(self, bankroll_account_id: str) -> PerformanceSummary:
+    def summary(
+        self, bankroll_account_id: str, *, include_curve: bool = True
+    ) -> PerformanceSummary:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 self._effective_cte() + "SELECT a.currency, latest.balance_after_minor, "
@@ -75,7 +77,7 @@ class PostgreSQLPerformanceRepository:
             available, exposure = int(row[1]), int(row[2])
             graded = int(row[5])
             roi = None if graded == 0 else Decimal(int(row[3])) / Decimal(graded)
-            curve = self.curve(bankroll_account_id)
+            curve = self.curve(bankroll_account_id) if include_curve else ()
             return PerformanceSummary(
                 bankroll_account_id,
                 row[0],

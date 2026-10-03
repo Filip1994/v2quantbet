@@ -11,6 +11,7 @@ import pytest
 
 from h2h.api.dashboard import DashboardHTTPService, DashboardService
 from h2h import entrypoint
+from h2h.persistence.postgres_runtime import WorkerStatus
 
 
 NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
@@ -487,7 +488,7 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
         ),
         results=SimpleNamespace(
             performance=SimpleNamespace(
-                summary=lambda _account: performance,
+                summary=lambda _account, *, include_curve=True: performance,
                 operator_summary=lambda _account: performance,
             )
         ),
@@ -529,6 +530,29 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     assert data["provider_budget"]["remaining"] == 7485
 
 
+def test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> None:
+    status = WorkerStatus(
+        worker_name="odds",
+        last_started_at=NOW - timedelta(minutes=5),
+        last_success_at=NOW - timedelta(minutes=6),
+        last_failure_at=None,
+        next_due_at=NOW - timedelta(minutes=5),
+        consecutive_failures=0,
+        cycle_count=1,
+        success_count=1,
+        failure_count=0,
+        last_error_class=None,
+        last_error_message=None,
+        instance_id="engine",
+        updated_at=NOW - timedelta(minutes=5),
+    )
+    runtime = SimpleNamespace(readiness_snapshot=lambda: ((status,), {}))
+    dashboard = DashboardService(SimpleNamespace(runtime=runtime))
+
+    assert dashboard._operations(NOW)["stale_workers"] == []
+    assert dashboard._operations(NOW + timedelta(minutes=6))["stale_workers"] == ["odds"]
+
+
 @pytest.fixture
 def dashboard_server(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
@@ -558,6 +582,26 @@ def test_dashboard_http_auth_security_headers_and_no_write_path(dashboard_server
     with pytest.raises(HTTPError) as post_response:
         urlopen(Request(url, method="POST", data=b""))
     assert post_response.value.code == 404
+
+
+def test_dashboard_reuses_short_lived_render_and_invalidates_after_write() -> None:
+    class CountingDashboard(RenderingDashboard):
+        calls = 0
+
+        def render_html(self) -> str:
+            self.calls += 1
+            return str(self.calls)
+
+    dashboard = CountingDashboard(_snapshot([]))
+    service = DashboardHTTPService(dashboard, host="127.0.0.1", port=0)
+    service.start()
+    try:
+        assert service._render_html() == "1"
+        assert service._render_html() == "1"
+        service._invalidate_cache()
+        assert service._render_html() == "2"
+    finally:
+        service.close()
 
 
 def test_operator_write_is_authenticated_even_when_dashboard_is_public(
