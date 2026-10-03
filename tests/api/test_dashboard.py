@@ -584,24 +584,22 @@ def test_dashboard_http_auth_security_headers_and_no_write_path(dashboard_server
     assert post_response.value.code == 404
 
 
-def test_dashboard_reuses_short_lived_render_and_invalidates_after_write() -> None:
-    class CountingDashboard(RenderingDashboard):
+def test_dashboard_reuses_short_lived_data_but_renders_unique_action_ids() -> None:
+    class CountingDashboard(DashboardService):
         calls = 0
 
-        def render_html(self) -> str:
+        def _snapshot_uncached(self) -> dict[str, object]:
             self.calls += 1
-            return str(self.calls)
+            return _snapshot([_pick()])
 
-    dashboard = CountingDashboard(_snapshot([]))
-    service = DashboardHTTPService(dashboard, host="127.0.0.1", port=0)
-    service.start()
-    try:
-        assert service._render_html() == "1"
-        assert service._render_html() == "1"
-        service._invalidate_cache()
-        assert service._render_html() == "2"
-    finally:
-        service.close()
+    dashboard = CountingDashboard(SimpleNamespace())
+    first = dashboard.render_html()
+    second = dashboard.render_html()
+    assert dashboard.calls == 1
+    assert first != second
+    dashboard._invalidate_snapshot()
+    dashboard.render_html()
+    assert dashboard.calls == 2
 
 
 def test_operator_write_is_authenticated_even_when_dashboard_is_public(
@@ -663,11 +661,14 @@ def test_operator_write_response_serializes_timestamp() -> None:
         operator_picks=SimpleNamespace(set_state=set_state),
     )
 
-    result = DashboardService(application).set_operator_state(
+    dashboard = DashboardService(application)
+    dashboard._cached_snapshot = _snapshot([_pick()])
+    result = dashboard.set_operator_state(
         event.pick_id, "SKIPPED", event.request_id
     )
 
     assert result["occurred_at"] == "2026-09-23T12:00:00+00:00"
+    assert dashboard._cached_snapshot is None
     assert calls[0][1]["max_open_exposure_minor"] == 300_000
 
 

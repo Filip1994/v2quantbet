@@ -137,8 +137,24 @@ class DashboardService:
 
     def __init__(self, application: Any) -> None:
         self._application = application
+        self._snapshot_lock = Lock()
+        self._cached_snapshot: dict[str, Any] | None = None
+        self._cached_at = 0.0
 
     def snapshot(self) -> dict[str, Any]:
+        with self._snapshot_lock:
+            now = monotonic()
+            if self._cached_snapshot is None or now - self._cached_at >= DASHBOARD_CACHE_SECONDS:
+                snapshot = self._snapshot_uncached()
+                self._cached_snapshot = snapshot
+                self._cached_at = monotonic()
+            return self._cached_snapshot
+
+    def _invalidate_snapshot(self) -> None:
+        with self._snapshot_lock:
+            self._cached_snapshot = None
+
+    def _snapshot_uncached(self) -> dict[str, Any]:
         generated_at = datetime.now(UTC)
         policy = _policy(self._application)
         system_performance = self._application.results.performance.summary(
@@ -410,6 +426,7 @@ class DashboardService:
             occurred_at=datetime.now(UTC),
             max_open_exposure_minor=policy.max_open_exposure_minor,
         )
+        self._invalidate_snapshot()
         return {
             "event_id": event.event_id,
             "pick_id": event.pick_id,
@@ -1045,9 +1062,6 @@ class DashboardHTTPService:
 
     def __init__(self, dashboard: DashboardService, *, host: str, port: int) -> None:
         self._dashboard = dashboard
-        self._cache_lock = Lock()
-        self._cached_html: str | None = None
-        self._cached_at = 0.0
         service = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1058,7 +1072,7 @@ class DashboardHTTPService:
                 elif path in {"/", "/dashboard"}:
                     if service._authorize(self):
                         try:
-                            service._html(self, 200, service._render_html())
+                            service._html(self, 200, dashboard.render_html())
                         except (BrokenPipeError, ConnectionResetError):
                             return
                         except Exception as exc:  # noqa: BLE001 - bounded failure response
@@ -1086,7 +1100,6 @@ class DashboardHTTPService:
                     result = dashboard.set_operator_state(
                         pick_id, values["state"][0], values["request_id"][0]
                     )
-                    service._invalidate_cache()
                 except (KeyError, LookupError, UnicodeDecodeError, ValueError) as exc:
                     service._json(self, 400, {"error": type(exc).__name__})
                     return
@@ -1103,19 +1116,6 @@ class DashboardHTTPService:
 
         self._server = ThreadingHTTPServer((host, port), Handler)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
-
-    def _render_html(self) -> str:
-        with self._cache_lock:
-            now = monotonic()
-            if self._cached_html is None or now - self._cached_at >= DASHBOARD_CACHE_SECONDS:
-                html = self._dashboard.render_html()
-                self._cached_html = html
-                self._cached_at = monotonic()
-            return self._cached_html
-
-    def _invalidate_cache(self) -> None:
-        with self._cache_lock:
-            self._cached_html = None
 
     @staticmethod
     def _json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, Any]) -> None:
