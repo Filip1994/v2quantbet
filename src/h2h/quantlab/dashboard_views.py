@@ -2519,9 +2519,14 @@ def render_analytics(
     lab_key: str,
     currency: str,
     params: dict[str, list[str]] | None = None,
+    source_rows: tuple[dict[str, Any], ...] | None = None,
 ) -> str:
     lab, title, subtitle = LABS[lab_key]
-    source_rows = _sorted(_analytics_universe_rows(_all_rows(repository, lab)))
+    source_rows = _sorted(
+        _analytics_universe_rows(
+            _all_rows(repository, lab) if source_rows is None else source_rows
+        )
+    )
     legacy_rows: tuple[dict[str, Any], ...] = ()
     if lab == "CARD":
         source_rows, legacy_rows = _partition_card_policy_rows(source_rows)
@@ -3565,6 +3570,7 @@ def render_quantlab_view(
     *,
     api_daily_limit: int,
     currency: str,
+    analytics_rows: tuple[dict[str, Any], ...] | None = None,
 ) -> str:
     params = parse_qs(raw_query, keep_blank_values=True)
     view = params.get("view", ["dashboard"])[0].strip().casefold()
@@ -3583,6 +3589,7 @@ def render_quantlab_view(
             lab_key=lab_key,
             currency=currency,
             params=params,
+            source_rows=analytics_rows,
         )
     return render_dashboard(
         repository,
