@@ -737,6 +737,7 @@ class ResearchDashboardService:
         market = params.get("market", [""])[0].strip().upper()
         selection = params.get("selection", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
+        league_id = params.get("league_id", [""])[0].strip()
         result = params.get("result", [""])[0].strip().upper()
         disposition = params.get("disposition", [""])[0].strip().upper()
         bookmaker = params.get("bookmaker", [""])[0].strip().casefold()
@@ -786,6 +787,8 @@ class ResearchDashboardService:
             if selection and str(row.get("selection") or "").upper() != selection:
                 return False
             if league and league not in (row.get("competition_name") or "").casefold():
+                return False
+            if league_id and str(row.get("league_id") or "") != league_id:
                 return False
             if result and row["outcome"] != result:
                 return False
