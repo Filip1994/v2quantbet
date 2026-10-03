@@ -394,7 +394,7 @@ class QuantLabDashboardService:
     def _refresh_view_cache(self, key: str, raw_query: str) -> None:
         try:
             body = self._render_html_uncached(raw_query)
-        except Exception:  # noqa: BLE001 - keep serving the last valid read-only snapshot
+        except Exception:
             LOGGER.exception("QuantLab dashboard cache refresh failed query=%s", raw_query)
         else:
             with self._view_cache_lock:
