@@ -642,8 +642,15 @@ def test_research_analytics_tables_sort_highest_and_lowest() -> None:
         "sort_table=leagues&sort=roi_pct&dir=asc"
     )
 
-    assert highest.index("Other League") < highest.index("Research League")
-    assert lowest.index("Research League") < lowest.index("Other League")
+    highest_leagues = highest.split('<section id="table-leagues"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    lowest_leagues = lowest.split('<section id="table-leagues"', 1)[1].split(
+        "</section>", 1
+    )[0]
+
+    assert highest_leagues.index("Other League") < highest_leagues.index("Research League")
+    assert lowest_leagues.index("Research League") < lowest_leagues.index("Other League")
     assert "sort_table=leagues&amp;sort=roi_pct&amp;dir=asc" in highest
     assert "sort_table=leagues&amp;sort=roi_pct&amp;dir=desc" in highest
     assert 'title="Lowest first"' in highest
