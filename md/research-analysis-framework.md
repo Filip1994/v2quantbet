@@ -327,12 +327,14 @@ V1 surfaces:
 - `/research/analytics` — human-readable cohort dashboard;
 - `/research/analytics.json` — machine-readable snapshot for later filter research;
 - lifetime, trailing 30-day, trailing 7-day, and ISO-week stability slices;
-- market × selection, model-probability, market-fair-probability, EV, odds, route,
-  bookmaker, league, and freshness cohorts;
-- a full Production-filter evidence cube across market, selection, model probability,
-  market fair probability, EV, and odds;
+- ROI-first decision cohorts for market × selection, entry odds, edge, time-to-kickoff,
+  market × selection × entry odds, market × selection × edge, league × market × selection,
+  league, and temporal stability;
+- calibration/research cohorts for model probability, market-fair probability, EV and CLV;
 - a dedicated low-scoring extreme-value diagnostic for OU 2.5 UNDER / BTTS NO versus
-  the remaining Research universe;
+  the remaining Research universe, kept under Audit rather than on the primary decision surface;
+- no high-dimensional Production-filter cube: it fragmented evidence into mostly
+  non-actionable micro-buckets and is intentionally excluded from the main analytics contract;
 - observed win rate, mean model probability, calibration gap, 95% Wilson interval,
   flat-stake P/L and ROI, average entry odds, average edge/EV, CLV coverage,
   average/median CLV, and positive-CLV rate.
@@ -341,12 +343,20 @@ Market-fair-probability buckets are versioned with V1 as:
 `<25%`, `25–35%`, `35–40%`, `40–45%`, `45–50%`, `50–55%`,
 `55–60%`, `60–65%`, `65–75%`, and `75%+`.
 
-Evidence bands are descriptive only and have no Production authority:
+Evidence bands are descriptive only and have no Production authority. For the ROI-first
+self-sustain phase they are:
 
-- fewer than 20 graded rows: `SIGNAL_ONLY`;
-- 20–49: `MONITOR`;
-- 50–99: `PROVISIONAL_EVIDENCE`;
-- 100+: `STABILITY_REVIEW`.
+- fewer than 100 graded rows: `COLLECT`;
+- 100–249: `WATCH`;
+- 250–499: `SOFT_REVIEW`;
+- 500–999: `DECISION_GRADE`;
+- 1000+: `MATURE`.
+
+CLV remains part of the Research contract and long-term roadmap, but current provider quote
+cadence is not treated as a reliable closing-price feed. It must not independently drive
+KEEP/BAN decisions until QuantBet is crossed with an odds-specialized API and CLV is
+revalidated with denser bookmaker price histories. The current pruning focus is realized ROI
+plus sample size, uncertainty, temporal persistence, and out-of-sample confirmation.
 
 No V1 analytics result can register, skip, block, promote, or otherwise mutate a
 Production pick.
