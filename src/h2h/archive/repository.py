@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,6 +19,8 @@ def _row_dicts(cursor: Any) -> tuple[dict[str, Any], ...]:
 
 
 class ColdArchiveCatalog:
+    _RUN_LOCK_KEYS = (0x51424152, 1)  # QBAR lifecycle, shared across cron containers.
+
     def __init__(
         self,
         database_url: str | None = None,
@@ -35,6 +38,27 @@ class ColdArchiveCatalog:
         import psycopg
 
         return psycopg.connect(self._database_url)
+
+    @contextmanager
+    def exclusive_run(self) -> Iterator[bool]:
+        """Serialize cron runs without holding an open database transaction."""
+        with self.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s, %s)", self._RUN_LOCK_KEYS)
+                acquired = bool(cursor.fetchone()[0])
+            connection.commit()
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT pg_advisory_unlock(%s, %s)", self._RUN_LOCK_KEYS
+                        )
+                        released = bool(cursor.fetchone()[0])
+                    connection.commit()
+                    if not released:
+                        raise RuntimeError("archive lifecycle advisory lock was lost")
 
     def table_sizes(self, *, limit: int = 30) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
@@ -204,6 +228,7 @@ class ColdArchiveCatalog:
         *,
         cutoff: datetime,
         limit: int,
+        after_id: str | None = None,
     ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
@@ -215,13 +240,15 @@ class ColdArchiveCatalog:
                 "m.raw_selection, m.parsed_line, m.odds, m.provider_updated_at, "
                 "m.captured_at, m.lab_owner, m.classifier_version, m.raw_payload "
                 "FROM quantlab_market_observations m "
-                "WHERE m.captured_at < %s AND "
+                "WHERE m.captured_at < %s "
+                + ("AND m.market_observation_id > %s " if after_id is not None else "")
+                + "AND "
                 + predicate
                 # The primary key provides an ordered walk that can stop at LIMIT.
                 # Ordering by captured_at sorts every cold row before the limit,
                 # spilling a multi-million-row sort to disk on the live database.
                 + " ORDER BY m.market_observation_id LIMIT %s",
-                (cutoff, limit),
+                (cutoff, after_id, limit) if after_id is not None else (cutoff, limit),
             )
             return _row_dicts(cursor)
 

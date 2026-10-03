@@ -74,14 +74,17 @@ class ArchiveLifecycleService:
 
     def run(self, *, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.now(UTC)
-        return {
-            "market": self.archive_cold_market_observations(now=current),
-            "settlements": {
-                dataset: self.mirror_settlements(dataset)
-                for dataset in self.SETTLEMENT_DATASETS
-            },
-            "largest_tables": self.catalog.table_sizes(limit=12),
-        }
+        with self.catalog.exclusive_run() as acquired:
+            if not acquired:
+                return {"skipped": True, "reason": "archive lifecycle already running"}
+            return {
+                "market": self.archive_cold_market_observations(now=current),
+                "settlements": {
+                    dataset: self.mirror_settlements(dataset)
+                    for dataset in self.SETTLEMENT_DATASETS
+                },
+                "largest_tables": self.catalog.table_sizes(limit=12),
+            }
 
     def archive_cold_market_observations(self, *, now: datetime) -> dict[str, Any]:
         cutoff = now - timedelta(hours=self.config.market_hot_hours)
@@ -89,11 +92,13 @@ class ArchiveLifecycleService:
         deleted_rows = 0
         compressed_bytes = 0
         batches = 0
+        after_id: str | None = None
 
         for _ in range(self.config.market_max_batches):
             rows = self.catalog.market_archive_candidates(
                 cutoff=cutoff,
                 limit=self.config.market_batch_size,
+                after_id=after_id,
             )
             if not rows:
                 break
@@ -118,6 +123,7 @@ class ArchiveLifecycleService:
             archived_rows += len(rows)
             deleted_rows += deleted
             compressed_bytes += int(archived["compressed_bytes"])
+            after_id = str(rows[-1]["market_observation_id"])
 
             # A newly-created FK reference can legitimately race the archive selection.
             # Such a row stays hot forever as decision evidence; continue with later rows.
