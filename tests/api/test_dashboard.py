@@ -11,6 +11,7 @@ import pytest
 
 from h2h.api.dashboard import DashboardHTTPService, DashboardService
 from h2h import entrypoint
+from h2h.persistence.postgres_runtime import WorkerStatus
 
 
 NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
@@ -487,7 +488,7 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
         ),
         results=SimpleNamespace(
             performance=SimpleNamespace(
-                summary=lambda _account: performance,
+                summary=lambda _account, *, include_curve=True: performance,
                 operator_summary=lambda _account: performance,
             )
         ),
@@ -529,6 +530,29 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     assert data["provider_budget"]["remaining"] == 7485
 
 
+def test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> None:
+    status = WorkerStatus(
+        worker_name="odds",
+        last_started_at=NOW - timedelta(minutes=5),
+        last_success_at=NOW - timedelta(minutes=6),
+        last_failure_at=None,
+        next_due_at=NOW - timedelta(minutes=5),
+        consecutive_failures=0,
+        cycle_count=1,
+        success_count=1,
+        failure_count=0,
+        last_error_class=None,
+        last_error_message=None,
+        instance_id="engine",
+        updated_at=NOW - timedelta(minutes=5),
+    )
+    runtime = SimpleNamespace(readiness_snapshot=lambda: ((status,), {}))
+    dashboard = DashboardService(SimpleNamespace(runtime=runtime))
+
+    assert dashboard._operations(NOW)["stale_workers"] == []
+    assert dashboard._operations(NOW + timedelta(minutes=6))["stale_workers"] == ["odds"]
+
+
 @pytest.fixture
 def dashboard_server(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
@@ -558,6 +582,24 @@ def test_dashboard_http_auth_security_headers_and_no_write_path(dashboard_server
     with pytest.raises(HTTPError) as post_response:
         urlopen(Request(url, method="POST", data=b""))
     assert post_response.value.code == 404
+
+
+def test_dashboard_reuses_short_lived_data_but_renders_unique_action_ids() -> None:
+    class CountingDashboard(DashboardService):
+        calls = 0
+
+        def _snapshot_uncached(self) -> dict[str, object]:
+            self.calls += 1
+            return _snapshot([_pick()])
+
+    dashboard = CountingDashboard(SimpleNamespace())
+    first = dashboard.render_html()
+    second = dashboard.render_html()
+    assert dashboard.calls == 1
+    assert first != second
+    dashboard._invalidate_snapshot()
+    dashboard.render_html()
+    assert dashboard.calls == 2
 
 
 def test_operator_write_is_authenticated_even_when_dashboard_is_public(
@@ -619,11 +661,14 @@ def test_operator_write_response_serializes_timestamp() -> None:
         operator_picks=SimpleNamespace(set_state=set_state),
     )
 
-    result = DashboardService(application).set_operator_state(
+    dashboard = DashboardService(application)
+    dashboard._cached_snapshot = _snapshot([_pick()])
+    result = dashboard.set_operator_state(
         event.pick_id, "SKIPPED", event.request_id
     )
 
     assert result["occurred_at"] == "2026-09-23T12:00:00+00:00"
+    assert dashboard._cached_snapshot is None
     assert calls[0][1]["max_open_exposure_minor"] == 300_000
 
 
