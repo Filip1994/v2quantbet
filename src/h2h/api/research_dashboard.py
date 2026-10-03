@@ -1211,10 +1211,11 @@ class ResearchDashboardService:
                 )
             if sort_key == "sample_band":
                 return {
-                    "SIGNAL_ONLY": 0,
-                    "MONITOR": 1,
-                    "PROVISIONAL_EVIDENCE": 2,
-                    "STABILITY_REVIEW": 3,
+                    "COLLECT": 0,
+                    "WATCH": 1,
+                    "SOFT_REVIEW": 2,
+                    "DECISION_GRADE": 3,
+                    "MATURE": 4,
                 }.get(str(row.get("sample_band") or ""), -1)
             value = row.get(sort_key)
             if isinstance(value, str):
