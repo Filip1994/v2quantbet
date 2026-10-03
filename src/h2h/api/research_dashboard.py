@@ -650,7 +650,7 @@ class ResearchDashboardService:
             return
         try:
             rows = self._load_all_signal_rows()
-        except Exception:
+        except Exception:  # noqa: BLE001 - stale cache remains valid on refresh failure
             return
         else:
             self._signal_cache = rows
