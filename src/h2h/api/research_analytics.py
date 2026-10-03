@@ -640,7 +640,7 @@ def _metrics_table(
             ("N", "n"),
             ("W-L-V", "record"),
             ("ROI", "roi_pct"),
-            ("ROI 95% low", "roi_95_low_pct"),
+            ("ROI Safety Floor", "roi_95_low_pct"),
             ("Last 100", "roi_last_100_pct"),
             ("Last 250", "roi_last_250_pct"),
             ("Last 500", "roi_last_500_pct"),
@@ -719,20 +719,28 @@ def _metrics_table(
         )
         evidence = escape(str(row["sample_band"]))
         evidence_class = evidence.casefold().replace("_", "-")
+        roi_low = row.get("roi_95_low_pct")
+        decision_ready = (
+            compact_roi
+            and int(row.get("graded_n") or 0) >= 500
+            and roi_low is not None
+            and float(roi_low) > 0
+            and row.get("roi_last_100_pct") is not None
+            and float(row["roi_last_100_pct"]) > 0
+            and row.get("roi_last_250_pct") is not None
+            and float(row["roi_last_250_pct"]) > 0
+            and row.get("roi_last_500_pct") is not None
+            and float(row["roi_last_500_pct"]) > 0
+        )
         if compact_roi:
-            roi_low = row.get("roi_95_low_pct")
             roi_high = row.get("roi_95_high_pct")
-            roi_ci = (
-                "—"
-                if roi_low is None or roi_high is None
-                else f"{_fmt(roi_low, '%', signed=True)} → {_fmt(roi_high, '%', signed=True)}"
-            )
             metric_cells = (
                 f"<td>{row['n']}</td>"
                 f"<td>{row['wins']}-{row['losses']}-{row['voids']}</td>"
                 f'<td class="metric-strong {_metric_class(row["roi_pct"])}">'
                 f"{_fmt(row['roi_pct'], '%', signed=True)}</td>"
-                f'<td class="{_roi_interval_class(roi_low, roi_high)}">{roi_ci}</td>'
+                f'<td class="{_roi_interval_class(roi_low, roi_high)}">'
+                f"{_fmt(roi_low, '%', signed=True)}</td>"
                 f'<td class="{_metric_class(row.get("roi_last_100_pct"))}">'
                 f"{_fmt(row.get('roi_last_100_pct'), '%', signed=True)}</td>"
                 f'<td class="{_metric_class(row.get("roi_last_250_pct"))}">'
@@ -765,7 +773,16 @@ def _metrics_table(
                 f"<td>{_fmt(row.get('positive_clv_rate_pct'), '%')}</td>"
                 f'<td><span class="evidence evidence-{evidence_class}">{evidence}</span></td>'
             )
-        body.append("<tr>" + dims + metric_cells + action + "</tr>")
+        row_class = "bucket-qualified" if decision_ready else ""
+        row_title = (
+            ' title="Decision-ready bucket: N ≥ 500, ROI Safety Floor > 0%, '
+            'and Last 100/250/500 ROI all > 0%"'
+            if decision_ready
+            else ""
+        )
+        body.append(
+            f'<tr class="{row_class}"{row_title}>' + dims + metric_cells + action + "</tr>"
+        )
     if not body:
         body.append(
             f'<tr><td colspan="{len(dimensions) + len(metric_columns) + (1 if row_link_path else 0)}" '
@@ -1142,6 +1159,9 @@ border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;fo
 .sort-tools a:hover,.sort-tools a.sort-active{{color:#fff;border-color:#778089;background:#252b30}}
 .action-col{{text-align:right}}.metric-strong{{font-weight:800;font-size:12.5px}}
 .metric-positive{{color:var(--positive)}}.metric-negative{{color:var(--negative)}}.metric-neutral{{color:inherit}}
+tbody tr.bucket-qualified td{{background:#16251c;box-shadow:inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
+tbody tr.bucket-qualified td:first-child{{background:#16251c;box-shadow:inset 3px 0 0 #79c995,inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
+tbody tr.bucket-qualified:hover td,tbody tr.bucket-qualified:hover td:first-child{{background:#1a2d22}}
 .empty{{color:var(--muted);text-align:center}}.evidence{{display:inline-flex;padding:3px 7px;border-radius:999px;
 font-size:9px;font-weight:800;letter-spacing:.055em;border:1px solid #3a4148;color:#b5bdc4;background:#20252b}}
 .evidence-decision-grade,.evidence-mature{{border-color:#496b58;color:#9fd0af;background:#17231c}}
@@ -1203,12 +1223,13 @@ Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 <h2>Legend · how to read Analytics</h2>
 <div class="legend-grid">
 <div class="legend-item"><b>ROI</b>Realized flat-stake return on graded WIN/LOSS picks. Positive is profit; negative is loss.</div>
-<div class="legend-item"><b>ROI 95% low</b>Lower bound of the approximate 95% confidence interval for ROI. If it is above 0%, the observed positive ROI is more statistically convincing; if it is below 0%, the sample still allows a non-profitable true ROI.</div>
+<div class="legend-item"><b>ROI Safety Floor</b>Lower bound of the approximate 95% confidence interval for ROI. If it is above 0%, even the conservative statistical estimate remains profitable.</div>
 <div class="legend-item"><b>Last 100 / 250 / 500</b>ROI from the most recent 100, 250 or 500 graded picks inside that exact bucket. A value appears only after the bucket has at least that many graded picks.</div>
 <div class="legend-item"><b>N / W-L-V</b>Settled sample size and Win-Loss-Void record. Voids are shown but excluded from the ROI denominator.</div>
 <div class="legend-item"><b>Avg odds</b>Average entry odds of the picks in that bucket.</div>
 <div class="legend-item"><b>Avg edge</b>Average model edge recorded at decision time. It is a model signal, not proof of realized profitability.</div>
 <div class="legend-item"><b>Evidence</b>Sample maturity: COLLECT &lt;100, WATCH 100–249, SOFT_REVIEW 250–499, DECISION_GRADE 500–999, MATURE 1000+ graded picks.</div>
+<div class="legend-item"><b>Green bucket</b>A bucket turns green only when N ≥ 500, ROI Safety Floor is above 0%, and Last 100 / 250 / 500 ROI are all positive. Green means decision-ready evidence, not automatic production activation.</div>
 <div class="legend-item"><b>CLV*</b>Retained for research and future odds-API validation. Current CLV is not used as a pruning gate because the present odds feed is not a reliable true-closing feed.</div>
 </div>
 <p class="legend-note">Important: no single column automatically means KEEP or BAN. QuantBet pruning should use ROI together with sample size, uncertainty, recent-window persistence and out-of-sample confirmation.</p>
