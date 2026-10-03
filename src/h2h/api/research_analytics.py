@@ -1152,10 +1152,16 @@ border-radius:10px;border:1px solid var(--line);font-size:12px}}.version-warning
 .version-warning span,.version-ok span{{color:var(--muted)}}.audit-details{{border:1px solid var(--line);
 border-radius:12px;background:var(--panel2);margin:10px 0;padding:0 12px 12px}}
 .audit-details summary{{cursor:pointer;padding:12px 2px;color:#c9d0d5;font-weight:700;font-size:13px}}
+.legend{{margin:34px 0 8px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel2)}}
+.legend h2{{margin:0 0 12px;font-size:16px}}.legend-grid{{display:grid;
+grid-template-columns:repeat(2,minmax(280px,1fr));gap:10px 18px}}.legend-item{{padding:10px 0;
+border-bottom:1px solid #242a30;font-size:12px;line-height:1.55;color:var(--muted)}}
+.legend-item b{{display:block;color:#dce1e5;margin-bottom:2px}}.legend-note{{margin:12px 0 0;
+font-size:11px;color:#7f8992;line-height:1.5}}
 @media(max-width:1100px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}
 @media(max-width:760px){{.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}
 .group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}.focus-note{{display:block}}
-.focus-note span{{display:block;margin-top:5px}}}}
+.focus-note span{{display:block;margin-top:5px}}.legend-grid{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
 <p>ROI-first evidence dashboard. Every aggregate row drills into its constituent picks.</p></div>
@@ -1191,5 +1197,20 @@ Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 <p>Version provenance and hypothesis diagnostics are preserved without crowding the decision surface.</p></div></div>
 <details class="audit-details"><summary>Research diagnostics</summary>{diagnostics}</details>
 <details class="audit-details"><summary>Version / policy cohorts</summary>{policy_configs}{model_policy}{decision_contract}</details>
+</section>
+
+<section id="legend" class="legend">
+<h2>Legend · how to read Analytics</h2>
+<div class="legend-grid">
+<div class="legend-item"><b>ROI</b>Realized flat-stake return on graded WIN/LOSS picks. Positive is profit; negative is loss.</div>
+<div class="legend-item"><b>ROI 95% low</b>Lower bound of the approximate 95% confidence interval for ROI. If it is above 0%, the observed positive ROI is more statistically convincing; if it is below 0%, the sample still allows a non-profitable true ROI.</div>
+<div class="legend-item"><b>Last 100 / 250 / 500</b>ROI from the most recent 100, 250 or 500 graded picks inside that exact bucket. A value appears only after the bucket has at least that many graded picks.</div>
+<div class="legend-item"><b>N / W-L-V</b>Settled sample size and Win-Loss-Void record. Voids are shown but excluded from the ROI denominator.</div>
+<div class="legend-item"><b>Avg odds</b>Average entry odds of the picks in that bucket.</div>
+<div class="legend-item"><b>Avg edge</b>Average model edge recorded at decision time. It is a model signal, not proof of realized profitability.</div>
+<div class="legend-item"><b>Evidence</b>Sample maturity: COLLECT &lt;100, WATCH 100–249, SOFT_REVIEW 250–499, DECISION_GRADE 500–999, MATURE 1000+ graded picks.</div>
+<div class="legend-item"><b>CLV*</b>Retained for research and future odds-API validation. Current CLV is not used as a pruning gate because the present odds feed is not a reliable true-closing feed.</div>
+</div>
+<p class="legend-note">Important: no single column automatically means KEEP or BAN. QuantBet pruning should use ROI together with sample size, uncertainty, recent-window persistence and out-of-sample confirmation.</p>
 </section>
 </main></body></html>"""
