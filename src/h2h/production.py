@@ -28,7 +28,10 @@ from h2h.persistence import (
 )
 from h2h.persistence.postgres_runtime import OpportunityFixture, PostgreSQLRuntimeRepository
 from h2h.persistence.postgres_live_closing_proxy import PostgreSQLLiveClosingProxyRepository
-from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
+from h2h.persistence.postgres_production_funnel import (
+    PostgreSQLProductionFunnelRepository,
+    PostgreSQLProductionFunnelStateRepository,
+)
 from h2h.persistence.postgres_model_coverage import PostgreSQLModelCoverageRepository
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 from h2h.use_cases.api_football_training import _trusted_api_football_historical_results
@@ -44,6 +47,7 @@ from h2h.use_cases.scoped_fixture_discovery import ScopedFixtureDiscovery
 from h2h.workers.opportunity import OpportunityWorker
 from h2h.workers.model_lifecycle import ModelLifecycleWorker
 from h2h.workers.live_closing_proxy import LiveClosingProxyWorker
+from h2h.workers.production_funnel import ProductionFunnelWorker
 
 
 @dataclass
@@ -82,8 +86,10 @@ class ProductionApplication:
     model_lifecycle: ModelLifecycleWorker
     opportunity: OpportunityWorker
     live_closing_proxy: LiveClosingProxyWorker
-    operator_picks: PostgreSQLOperatorPickStateRepository
+    operator_picks: PostgreSQLProductionFunnelStateRepository
     research: PostgreSQLResearchSignalRepository
+    production_funnel: PostgreSQLProductionFunnelRepository
+    production_intake: ProductionFunnelWorker
 
     def close(self) -> None:
         self.prediction.close()
@@ -119,8 +125,17 @@ def build_production_application(
     )
     source = ApiFootballOddsService(client)
     provider_state = ProviderOperationalState()
-    operator_picks = PostgreSQLOperatorPickStateRepository(
+    production_funnel = PostgreSQLProductionFunnelRepository(
         database_url=application_settings.database_url
+    )
+    operator_picks = PostgreSQLProductionFunnelStateRepository(
+        database_url=application_settings.database_url
+    )
+    production_intake = ProductionFunnelWorker(
+        production_funnel,
+        max_open_exposure_minor=application_settings.registration_policy.max_open_exposure_minor,
+        currency=application_settings.registration_policy.currency,
+        fallback_stake_minor=application_settings.registration_policy.fixed_stake_minor,
     )
 
     scoped = ScopedFixtureDiscovery(ApiFootballFixtureDiscovery(client))
@@ -333,4 +348,6 @@ def build_production_application(
         live_closing_proxy,
         operator_picks,
         research,
+        production_funnel,
+        production_intake,
     )
