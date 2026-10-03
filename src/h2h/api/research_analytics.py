@@ -348,7 +348,7 @@ def build_research_analytics_snapshot(
         "time_to_kickoff_bucket": ("time_to_kickoff_bucket",),
         "disposition": ("disposition",),
         "bookmaker": ("bookmaker",),
-        "league": ("competition_name",),
+        "league": ("competition_name", "league_id"),
         "league_season": ("competition_name", "league_id", "season"),
         "freshness": ("freshness",),
         "model_version": ("model_version_id",),
@@ -930,6 +930,7 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         row_link_path="/research",
         row_link_params={
             "competition_name": "league",
+            "league_id": "league_id",
             "market": "market",
             "selection": "selection",
         },
