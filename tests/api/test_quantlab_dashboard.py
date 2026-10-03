@@ -178,6 +178,40 @@ class StubRepository:
         return 42
 
 
+def test_quantlab_dashboard_cache_reuses_rendered_view_within_ttl() -> None:
+    repository = StubRepository()
+    dashboard = QuantLabDashboardService(
+        repository,
+        view_cache_ttl_seconds=60,
+    )
+
+    first = dashboard.render_html("lab=goal")
+    second = dashboard.render_html("lab=goal")
+
+    assert first == second
+    assert repository.labs == ["GOAL_PICKS"]
+
+
+def test_quantlab_repository_dashboard_rows_reuses_complete_first_page() -> None:
+    repository = PostgreSQLQuantLabRepository(connect=lambda: None)
+    calls: list[tuple[int, int]] = []
+
+    def goal_page(
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[dict[str, str], ...]:
+        calls.append((limit, offset))
+        return ({"fixture_id": "1"}, {"fixture_id": "2"})
+
+    repository.list_goal_dashboard_picks = goal_page  # type: ignore[method-assign]
+
+    display, metrics = repository.dashboard_rows("GOAL", batch_size=5000)
+
+    assert display == metrics
+    assert calls == [(5000, 0)]
+
+
 def test_quantlab_dashboard_is_operational_only() -> None:
     repository = StubRepository()
     html = QuantLabDashboardService(repository).render_html("lab=goal")

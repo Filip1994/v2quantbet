@@ -573,8 +573,24 @@ def render_dashboard(
     warning = ""
     legacy_rows: tuple[dict[str, Any], ...] = ()
     legacy_metric_rows: tuple[dict[str, Any], ...] = ()
+
+    dashboard_bundle: (
+        tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]] | None
+    ) = None
+    bundle_loader = getattr(repository, "dashboard_rows", None)
+    if callable(bundle_loader):
+        try:
+            dashboard_bundle = bundle_loader(lab)
+        except Exception:  # noqa: BLE001 - fall back to legacy read path
+            dashboard_bundle = None
+
     try:
-        rows = _sorted(_analytics_universe_rows(_display_rows(repository, lab)))
+        display_source = (
+            dashboard_bundle[0]
+            if dashboard_bundle is not None
+            else _display_rows(repository, lab)
+        )
+        rows = _sorted(_analytics_universe_rows(tuple(display_source)))
         if lab == "CARD":
             rows, legacy_rows = _partition_card_policy_rows(rows)
     except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
@@ -585,7 +601,15 @@ def render_dashboard(
         )
 
     try:
-        if lab == "GOAL":
+        if dashboard_bundle is not None:
+            metric_rows = _sorted(
+                _analytics_universe_rows(tuple(dashboard_bundle[1]))
+            )
+            if lab == "CORNER":
+                metric_rows = _dedupe_corner_settlements(metric_rows)
+            elif lab == "CARD":
+                metric_rows, legacy_metric_rows = _partition_card_policy_rows(metric_rows)
+        elif lab == "GOAL":
             loader = getattr(repository, "list_all_goal_picks", None)
             metric_rows = (
                 _sorted(_analytics_universe_rows(tuple(loader())))

@@ -737,6 +737,112 @@ class PostgreSQLQuantLabRepository:
                     row[key] = json.loads(value)
         return rows
 
+    def list_goal_dashboard_picks(
+        self,
+        *,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read GoalLab dashboard rows without the expensive closing-quote lookup.
+
+        The operational dashboard does not display closing odds or CLV. Those fields are
+        still returned as NULL for row-shape compatibility; full analytics and drilldowns
+        continue to use list_goal_picks/list_all_goal_picks.
+        """
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT p.goal_pick_id, p.fixture_id, p.source_decision_id, "
+                "p.feature_snapshot_id, p.pick_policy_version, "
+                "p.pick_policy_version AS policy_version, p.model_name, p.model_version, "
+                "p.bookmaker_id, p.bookmaker_name, p.provider_bet_id, p.provider_bet_name, "
+                "p.market_key, p.selection, p.line, p.quote_observed_at, p.decision_at, "
+                "p.kickoff_at, p.odds, p.companion_odds, p.market_probability, "
+                "p.model_probability, p.edge, p.expected_value, p.expected_home_goals, "
+                "p.expected_away_goals, p.rho, p.stake_minor, p.qualifying_candidate_count, "
+                "p.selection_rank_payload, fs.feature_payload, "
+                "NULL::NUMERIC AS closing_odds, "
+                "NULL::TIMESTAMPTZ AS closing_observed_at, "
+                "s.outcome, s.pnl_minor, s.settled_at, s.result_classification, "
+                "s.regulation_home_goals, s.regulation_away_goals, s.result_detail, "
+                "COALESCE(qlatest.home_team, platest.home_team) AS home_team, "
+                "COALESCE(qlatest.away_team, platest.away_team) AS away_team, "
+                "COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name, "
+                "COALESCE(qlatest.country, platest.country) AS country, "
+                "COALESCE(qlatest.league_id, platest.league_id) AS league_id, "
+                "COALESCE(qlatest.competition_type, platest.competition_type) AS competition_type "
+                "FROM quantlab_goal_picks p "
+                "JOIN quantlab_goal_feature_snapshots fs "
+                "  ON fs.feature_snapshot_id = p.feature_snapshot_id "
+                "LEFT JOIN quantlab_goal_pick_settlements s ON s.goal_pick_id = p.goal_pick_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, league_id, competition_type "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") qlatest ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT home_team, away_team, competition_name, country, "
+                " (SELECT league_id FROM fixtures f WHERE f.fixture_id = o.fixture_id) AS league_id, "
+                " competition_type FROM fixture_observations o WHERE o.fixture_id = p.fixture_id "
+                " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") platest ON TRUE "
+                "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = _row_dicts(cursor)
+        for row in rows:
+            for key in ("selection_rank_payload", "feature_payload", "result_detail"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    row[key] = json.loads(value)
+        return rows
+
+    def dashboard_rows(
+        self,
+        lab: str,
+        *,
+        batch_size: int = 5000,
+    ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+        """Return display rows and complete KPI history with one first-page query.
+
+        When the first page is shorter than batch_size it is already the complete
+        history, so the dashboard reuses it instead of executing the same heavy query
+        twice. Analytics keeps its existing full-history loaders.
+        """
+        if lab not in {"GOAL", "CORNER", "CARD"}:
+            raise ValueError("unsupported QuantLab lab")
+        if batch_size <= 0 or batch_size > 5000:
+            raise ValueError("batch_size must be between 1 and 5000")
+
+        if lab == "GOAL":
+            first = self.list_goal_dashboard_picks(limit=batch_size, offset=0)
+
+            def page(offset: int) -> tuple[dict[str, Any], ...]:
+                return self.list_goal_dashboard_picks(
+                    limit=batch_size,
+                    offset=offset,
+                )
+        else:
+            first = self.list_bets(lab, limit=batch_size, offset=0)
+
+            def page(offset: int) -> tuple[dict[str, Any], ...]:
+                return self.list_bets(lab, limit=batch_size, offset=offset)
+
+        if len(first) < batch_size:
+            return first, first
+
+        complete = list(first)
+        offset = len(first)
+        while True:
+            batch = page(offset)
+            complete.extend(batch)
+            if len(batch) < batch_size:
+                return first, tuple(complete)
+            offset += len(batch)
+
     def list_all_goal_picks(
         self,
         *,
