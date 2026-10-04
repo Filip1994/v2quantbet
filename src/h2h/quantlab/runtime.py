@@ -1559,8 +1559,7 @@ class QuantLabRuntime:
                 continue
             decisions += int(outcome.decisions_inserted)
             picks += int(outcome.picks_inserted)
-            experiments += int(outcome.experiments_inserted)
-        return decisions, picks, experiments
+        return decisions, picks
 
     def _refresh_goal_pick_results(self, now: datetime) -> int:
         """Refresh post-match result evidence for unsettled GoalLab canonical picks."""
@@ -1810,7 +1809,8 @@ class QuantLabRuntime:
                 continue
             decisions += int(outcome.decisions_inserted)
             picks += int(outcome.picks_inserted)
-        return decisions, picks
+            experiments += int(outcome.experiments_inserted)
+        return decisions, picks, experiments
 
     def _refresh_h2h_pick_results(self, now: datetime) -> int:
         rows = self._repository.h2h_shadow_result_refresh_candidates(now=now, limit=25)
