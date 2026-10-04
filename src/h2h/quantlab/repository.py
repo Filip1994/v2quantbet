@@ -92,6 +92,8 @@ class PostgreSQLQuantLabRepository:
             "quantlab_league_coverage_captures",
             "quantlab_h2h_snapshots",
             "quantlab_h2h_decisions",
+            "quantlab_h2h_experiments",
+            "quantlab_h2h_experiment_settlements",
         )
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -407,6 +409,164 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
             return cursor.rowcount > 0
+
+    def save_h2h_experiment(
+        self,
+        *,
+        experiment_id: str,
+        fixture_id: str,
+        h2h_snapshot_id: str,
+        frozen_at: datetime,
+        experiment_version: str,
+        model_version: str,
+        h2h_sample_size: int,
+        dc_weight: float,
+        h2h_weight: float,
+        relation: str,
+        dc_arm: dict[str, Any],
+        h2h_arm: dict[str, Any],
+        probability_trials: list[dict[str, Any]],
+        evidence_fingerprint: str,
+    ) -> bool:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_h2h_experiments ("
+                "experiment_id, fixture_id, h2h_snapshot_id, frozen_at, experiment_version, "
+                "model_version, h2h_sample_size, dc_weight, h2h_weight, relation, dc_arm, "
+                "h2h_arm, probability_trials, evidence_fingerprint"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, "
+                "%s::jsonb, %s) ON CONFLICT (fixture_id, experiment_version) DO NOTHING",
+                (
+                    experiment_id, fixture_id, h2h_snapshot_id, frozen_at, experiment_version,
+                    model_version, h2h_sample_size, dc_weight, h2h_weight, relation,
+                    _json(dc_arm), _json(h2h_arm), _json(probability_trials), evidence_fingerprint,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def h2h_experiment_result_refresh_candidates(
+        self,
+        *,
+        now: datetime,
+        post_kickoff_delay_seconds: int = 5400,
+        refresh_after_seconds: int = 900,
+        limit: int = 25,
+    ) -> tuple[dict[str, Any], ...]:
+        if post_kickoff_delay_seconds <= 0 or refresh_after_seconds <= 0 or limit <= 0:
+            raise ValueError("refresh settings and limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT e.fixture_id, f.provider_fixture_id, latest.kickoff_at, "
+                "latest.provider_status, latest.captured_at "
+                "FROM quantlab_h2h_experiments e "
+                "JOIN quantlab_fixtures f ON f.fixture_id = e.fixture_id "
+                "LEFT JOIN quantlab_h2h_experiment_settlements s ON s.experiment_id = e.experiment_id "
+                "JOIN LATERAL ("
+                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = e.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE s.experiment_id IS NULL "
+                "AND latest.provider_status NOT IN ('FT','AET','PEN','CANC','ABD','AWD','WO') "
+                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
+                "AND latest.captured_at <= %s - (%s * interval '1 second') "
+                "ORDER BY e.frozen_at ASC LIMIT %s",
+                (now, post_kickoff_delay_seconds, now, refresh_after_seconds, limit),
+            )
+            return _row_dicts(cursor)
+
+    def h2h_experiment_settlement_candidates(
+        self,
+        *,
+        limit: int = 500,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT e.experiment_id, e.fixture_id, e.dc_arm, e.h2h_arm, "
+                "e.probability_trials, latest.provider_status, "
+                "NULLIF(latest.raw_payload #>> '{score,fulltime,home}', '')::INTEGER AS home_goals, "
+                "NULLIF(latest.raw_payload #>> '{score,fulltime,away}', '')::INTEGER AS away_goals "
+                "FROM quantlab_h2h_experiments e "
+                "LEFT JOIN quantlab_h2h_experiment_settlements s ON s.experiment_id = e.experiment_id "
+                "JOIN LATERAL ("
+                " SELECT o.provider_status, o.raw_payload FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = e.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "WHERE s.experiment_id IS NULL "
+                "AND latest.provider_status IN ('FT','AET','PEN','CANC','ABD','AWD','WO') "
+                "ORDER BY e.frozen_at ASC, e.experiment_id ASC LIMIT %s",
+                (limit,),
+            )
+            rows = _row_dicts(cursor)
+        for row in rows:
+            for key in ("dc_arm", "h2h_arm", "probability_trials"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    row[key] = json.loads(value)
+        return rows
+
+    def save_h2h_experiment_settlement(self, item: Any, *, settled_at: datetime) -> bool:
+        settlement_id = _identifier(
+            "quantlab-h2h-experiment-settlement-v1:",
+            {
+                "experiment_id": item.experiment_id,
+                "provider_status": item.provider_status,
+                "home_goals": item.home_goals,
+                "away_goals": item.away_goals,
+            },
+        )
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_h2h_experiment_settlements ("
+                "settlement_id, experiment_id, fixture_id, settled_at, provider_status, "
+                "home_goals, away_goals, dc_outcome, h2h_outcome, dc_pnl_minor, h2h_pnl_minor, "
+                "outcome_regime, dc_brier_mean, h2h_brier_mean, brier_uplift, probability_trials"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT (experiment_id) DO NOTHING",
+                (
+                    settlement_id, item.experiment_id, item.fixture_id, settled_at,
+                    item.provider_status, item.home_goals, item.away_goals, item.dc_outcome,
+                    item.h2h_outcome, item.dc_pnl_minor, item.h2h_pnl_minor,
+                    item.outcome_regime, item.dc_brier_mean, item.h2h_brier_mean,
+                    item.brier_uplift, _json(item.probability_trials),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def list_h2h_experiments(self, *, limit: int = 5000) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT e.experiment_id, e.fixture_id, e.frozen_at, e.experiment_version, "
+                "e.model_version, e.h2h_sample_size, e.dc_weight, e.h2h_weight, e.relation, "
+                "e.dc_arm, e.h2h_arm, e.probability_trials, "
+                "s.settled_at, s.provider_status, s.home_goals, s.away_goals, "
+                "s.dc_outcome, s.h2h_outcome, s.dc_pnl_minor, s.h2h_pnl_minor, "
+                "s.outcome_regime, s.dc_brier_mean, s.h2h_brier_mean, s.brier_uplift, "
+                "s.probability_trials AS scored_probability_trials, "
+                "latest.home_team, latest.away_team, latest.competition_name, latest.country, "
+                "latest.kickoff_at "
+                "FROM quantlab_h2h_experiments e "
+                "LEFT JOIN quantlab_h2h_experiment_settlements s ON s.experiment_id = e.experiment_id "
+                "LEFT JOIN LATERAL ("
+                " SELECT o.home_team, o.away_team, o.competition_name, o.country, o.kickoff_at "
+                " FROM quantlab_fixture_observations o WHERE o.fixture_id = e.fixture_id "
+                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                ") latest ON TRUE "
+                "ORDER BY e.frozen_at DESC, e.experiment_id DESC LIMIT %s",
+                (limit,),
+            )
+            rows = _row_dicts(cursor)
+        for row in rows:
+            for key in ("dc_arm", "h2h_arm", "probability_trials", "scored_probability_trials"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    row[key] = json.loads(value)
+        return rows
 
     def goal_market_pairs(
         self,
