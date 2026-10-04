@@ -11,9 +11,9 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
 from hashlib import sha256
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
 
