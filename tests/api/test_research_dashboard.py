@@ -852,3 +852,16 @@ def test_research_board_history_sorts_highest_and_lowest() -> None:
     assert "sort=pnl&amp;dir=desc" in highest
     assert 'title="Lowest first"' in highest
     assert 'title="Highest first"' in highest
+
+
+def test_selected_production_buckets_are_neon_highlighted_in_research_analytics() -> None:
+    html = ResearchDashboardService(Repository()).render_analytics_html()
+
+    assert 'id="production-intake-buckets"' in html
+    assert 'class="panel production-intake-panel"' in html
+    assert "OU UNDER · edge 10–15%" in html
+    assert "OU UNDER · edge 20–30%" in html
+    assert "BTTS NO · odds 2.01–2.50" in html
+    assert "Low scoring · non-extreme" in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+    assert "#18d7ff" in html
