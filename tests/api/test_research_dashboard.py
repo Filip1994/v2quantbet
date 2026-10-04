@@ -852,3 +852,32 @@ def test_research_board_history_sorts_highest_and_lowest() -> None:
     assert "sort=pnl&amp;dir=desc" in highest
     assert 'title="Lowest first"' in highest
     assert 'title="Highest first"' in highest
+
+
+def test_research_history_supports_exact_production_bucket_filter() -> None:
+    class BucketRepository:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            selected = signal_row()
+            selected["market"] = "OU_25"
+            selected["selection"] = "UNDER"
+            selected["edge"] = 0.12
+            selected["expected_value"] = 0.18
+            selected["odds"] = 1.90
+
+            rejected = signal_row()
+            rejected["research_signal_id"] = "research-signal-v1:" + "9" * 64
+            rejected["evaluation_id"] = "value-evaluation-v1:" + "9" * 64
+            rejected["fixture_id"] = "api-football:999"
+            rejected["provider_fixture_id"] = "999"
+            rejected["market"] = "BTTS"
+            rejected["selection"] = "YES"
+            return (selected, rejected)
+
+    rows = ResearchDashboardService(BucketRepository()).signals(
+        {"production_bucket": ["RESEARCH_OU_UNDER_EDGE_10_15"]}
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["market"] == "OU_25"
+    assert rows[0]["selection"] == "UNDER"
