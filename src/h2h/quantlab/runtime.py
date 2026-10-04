@@ -57,6 +57,10 @@ def _utc_fixture_time(value: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class QuantLabRuntimeSettings:
+    goal_enabled: bool = True
+    corner_enabled: bool = True
+    card_enabled: bool = True
+    h2h_enabled: bool = True
     lookahead_hours: int = 36
     discovery_lookback_days: int = 1
     fixture_limit: int = 1000
@@ -93,6 +97,14 @@ class QuantLabRuntimeSettings:
     league_coverage_refresh_seconds: int = 21600
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("goal_enabled", self.goal_enabled),
+            ("corner_enabled", self.corner_enabled),
+            ("card_enabled", self.card_enabled),
+            ("h2h_enabled", self.h2h_enabled),
+        ):
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be a boolean")
         for name, value in (
             ("lookahead_hours", self.lookahead_hours),
             ("fixture_limit", self.fixture_limit),
@@ -616,7 +628,11 @@ class QuantLabRuntime:
 
     def _backfill_history(self, now: datetime) -> int:
         target = self._settings.history_backfill_per_cycle
-        if target <= 0:
+        if target <= 0 or not (
+            self._settings.goal_enabled
+            or self._settings.corner_enabled
+            or self._settings.card_enabled
+        ):
             return 0
         candidates = self._repository.completed_for_context_backfill(
             before=now,
@@ -645,29 +661,30 @@ class QuantLabRuntime:
                 # Referee/context is useful for CardLab, but historical match statistics
                 # also feed CornerLab and GoalLab DC+. Do not make the stats backfill
                 # depend on referee/context availability.
-                context = self._repository.latest_context_before(
-                    fixture_id, decision_at=now
-                )
-                if context is None:
-                    try:
-                        payload = self._provider.fetch_fixture(provider_fixture_id)
-                        parsed = parse_fixture_context(
-                            payload,
-                            fixture_id=fixture_id,
-                            provider_fixture_id=provider_fixture_id,
-                            captured_at=now,
-                        )
-                        self._repository.save_fixture_context(parsed)
-                    except ApiBudgetExceededError:
-                        raise
-                    except Exception as exc:  # noqa: BLE001
-                        LOGGER.warning(
-                            "QuantLab history context unavailable fixture=%s "
-                            "error_class=%s error=%s",
-                            fixture_id,
-                            type(exc).__name__,
-                            str(exc),
-                        )
+                if self._settings.card_enabled:
+                    context = self._repository.latest_context_before(
+                        fixture_id, decision_at=now
+                    )
+                    if context is None:
+                        try:
+                            payload = self._provider.fetch_fixture(provider_fixture_id)
+                            parsed = parse_fixture_context(
+                                payload,
+                                fixture_id=fixture_id,
+                                provider_fixture_id=provider_fixture_id,
+                                captured_at=now,
+                            )
+                            self._repository.save_fixture_context(parsed)
+                        except ApiBudgetExceededError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001
+                            LOGGER.warning(
+                                "QuantLab history context unavailable fixture=%s "
+                                "error_class=%s error=%s",
+                                fixture_id,
+                                type(exc).__name__,
+                                str(exc),
+                            )
 
                 already_captured = self._repository.statistics_capture_exists(fixture_id)
                 attempted = self._capture_historical_statistics(fixture, now)
@@ -1368,12 +1385,20 @@ class QuantLabRuntime:
         force_card_referees: frozenset[str] = frozenset(),
         force_card_web_leagues: frozenset[str] = frozenset(),
     ) -> tuple[int, int]:
-        goal_queue = self._repository.upcoming_fixtures(
-            start_at=now,
-            end_at=now + timedelta(hours=self._settings.lookahead_hours),
-            limit=self._settings.fixture_limit,
+        goal_market_enabled = self._settings.goal_enabled or self._settings.h2h_enabled
+        context_market_enabled = self._settings.corner_enabled or self._settings.card_enabled
+        if not goal_market_enabled and not context_market_enabled:
+            return 0, 0
+        goal_queue = (
+            self._repository.upcoming_fixtures(
+                start_at=now,
+                end_at=now + timedelta(hours=self._settings.lookahead_hours),
+                limit=self._settings.fixture_limit,
+            )
+            if goal_market_enabled
+            else ()
         )
-        context_queue = self._context_upcoming(now)
+        context_queue = self._context_upcoming(now) if context_market_enabled else ()
         prioritized: dict[str, dict[str, Any]] = {}
         for fixture in (*context_queue, *goal_queue):
             prioritized.setdefault(str(fixture["fixture_id"]), fixture)
@@ -1386,8 +1411,10 @@ class QuantLabRuntime:
             fixture_id = str(fixture.get("fixture_id") or "")
             try:
                 scope = self._scope_kwargs(fixture)
-                goal_allowed = goal_scope(**scope).allowed
-                context_allowed = card_corner_scope(**scope).allowed
+                goal_allowed = goal_market_enabled and goal_scope(**scope).allowed
+                context_allowed = (
+                    context_market_enabled and card_corner_scope(**scope).allowed
+                )
                 if not goal_allowed and not context_allowed:
                     continue
 
@@ -1395,8 +1422,10 @@ class QuantLabRuntime:
                 if provider_fixture_id <= 0:
                     raise ValueError("provider_fixture_id must be positive")
                 allowed_labs = {"GOAL"} if goal_allowed else set()
-                if context_allowed:
-                    allowed_labs.update({"CORNER", "CARD", "GOAL", "UNCLASSIFIED"})
+                if context_allowed and self._settings.corner_enabled:
+                    allowed_labs.add("CORNER")
+                if context_allowed and self._settings.card_enabled:
+                    allowed_labs.add("CARD")
                 if self._repository.market_capture_due(
                     fixture_id,
                     now=now,
@@ -1412,13 +1441,17 @@ class QuantLabRuntime:
 
                 market_labs = self._repository.market_labs_for_fixture(fixture_id)
                 standings = None
-                if goal_allowed and "GOAL" in market_labs:
+                if (
+                    self._settings.goal_enabled
+                    and goal_allowed
+                    and "GOAL" in market_labs
+                ):
                     standings = self._standings(fixture, now)
                     self._capture_goal_injuries(fixture, now)
                     self._capture_goal_lineup(fixture, now)
                     self._capture_goal_coaches(fixture, now)
 
-                if not context_allowed:
+                if not self._settings.card_enabled or not context_allowed:
                     continue
                 if "CARD" not in market_labs:
                     continue
@@ -1914,124 +1947,138 @@ class QuantLabRuntime:
             "card_event_captures": 0,
             "card_settlements": 0,
         }
+        LOGGER.info(
+            "QuantLab lab switches goal=%s corner=%s card=%s h2h=%s",
+            self._settings.goal_enabled,
+            self._settings.corner_enabled,
+            self._settings.card_enabled,
+            self._settings.h2h_enabled,
+        )
 
-        # GoalLab is the current research priority. Fit/evaluate DC+ from already
-        # persisted history and quotes before any provider-backed refresh or backfill.
-        # Fresh collection later in this cycle becomes input to the next evaluation.
-        try:
-            goal_decisions, goal_picks = self._evaluate_goal_picks(now)
-            result["goal_decisions"] = goal_decisions
-            result["goal_picks"] = goal_picks
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+        if self._settings.goal_enabled:
+            try:
+                goal_decisions, goal_picks = self._evaluate_goal_picks(now)
+                result["goal_decisions"] = goal_decisions
+                result["goal_picks"] = goal_picks
+            except Exception:
+                LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
 
-        try:
-            result["goal_result_refreshes"] = self._refresh_goal_pick_results(now)
-            if result["goal_result_refreshes"]:
-                LOGGER.info(
-                    "QuantLab GoalLab post-match result observations refreshed=%d",
-                    result["goal_result_refreshes"],
+            try:
+                result["goal_result_refreshes"] = self._refresh_goal_pick_results(now)
+                if result["goal_result_refreshes"]:
+                    LOGGER.info(
+                        "QuantLab GoalLab post-match result observations refreshed=%d",
+                        result["goal_result_refreshes"],
+                    )
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; GoalLab result refresh skipped"
                 )
-        except ApiBudgetExceededError:
-            LOGGER.warning(
-                "Shared football API daily budget reached; GoalLab result refresh skipped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab post-match result refresh failed")
+            except Exception:
+                LOGGER.exception("QuantLab GoalLab post-match result refresh failed")
 
-        try:
-            result["goal_settlements"] = self._settle_goal_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab GoalLab settlement failed")
-        # Existing CornerLab picks must settle even if collection or GoalLab model work is slow.
-        try:
-            refreshed_results = self._refresh_corner_pick_results(now)
-            if refreshed_results:
-                LOGGER.info(
-                    "QuantLab CornerLab post-match result observations refreshed=%d",
-                    refreshed_results,
+            try:
+                result["goal_settlements"] = self._settle_goal_picks(now)
+            except Exception:
+                LOGGER.exception("QuantLab GoalLab settlement failed")
+
+        if self._settings.corner_enabled:
+            try:
+                refreshed_results = self._refresh_corner_pick_results(now)
+                if refreshed_results:
+                    LOGGER.info(
+                        "QuantLab CornerLab post-match result observations refreshed=%d",
+                        refreshed_results,
+                    )
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; CornerLab result refresh skipped"
                 )
-        except ApiBudgetExceededError:
-            LOGGER.warning(
-                "Shared football API daily budget reached; CornerLab result refresh skipped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab post-match result refresh failed")
+            except Exception:
+                LOGGER.exception("QuantLab CornerLab post-match result refresh failed")
 
-        try:
-            refreshed = self._refresh_corner_pick_statistics(now)
-            if refreshed:
-                LOGGER.info(
-                    "QuantLab CornerLab settlement statistics refreshed=%d",
-                    refreshed,
+            try:
+                refreshed = self._refresh_corner_pick_statistics(now)
+                if refreshed:
+                    LOGGER.info(
+                        "QuantLab CornerLab settlement statistics refreshed=%d",
+                        refreshed,
+                    )
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; CornerLab settlement statistics retry skipped"
                 )
-        except ApiBudgetExceededError:
-            LOGGER.warning(
-                "Shared football API daily budget reached; CornerLab settlement statistics retry skipped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab settlement statistics retry failed")
+            except Exception:
+                LOGGER.exception("QuantLab CornerLab settlement statistics retry failed")
 
-        try:
-            result["corner_settlements"] = self._settle_corner_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab settlement failed")
-
-        try:
-            refreshed_card_results = self._refresh_card_pick_results(now)
-            if refreshed_card_results:
-                LOGGER.info(
-                    "QuantLab CardLab post-match result observations refreshed=%d",
-                    refreshed_card_results,
-                )
-        except ApiBudgetExceededError:
-            LOGGER.warning(
-                "Shared football API daily budget reached; CardLab result refresh skipped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab CardLab post-match result refresh failed")
-
-        try:
-            result["card_event_captures"] = self._capture_card_pick_events(now)
-        except ApiBudgetExceededError:
-            LOGGER.warning(
-                "Shared football API daily budget reached; CardLab event capture skipped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab CardLab event capture failed")
-
-        try:
-            result["card_settlements"] = self._settle_card_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab CardLab settlement failed")
+            try:
+                result["corner_settlements"] = self._settle_corner_picks(now)
+            except Exception:
+                LOGGER.exception("QuantLab CornerLab settlement failed")
 
         refreshed_card_web_leagues: frozenset[str] = frozenset()
-        try:
-            (
-                result["card_referee_web_captures"],
-                result["card_referee_web_profiles"],
-                refreshed_card_web_leagues,
-            ) = self._bootstrap_referee_web(now)
-        except Exception:
-            LOGGER.exception("QuantLab CardLab proactive referee web bootstrap failed")
-
-        collection_budget_exhausted = False
         updated_card_referees: frozenset[str] = frozenset()
-        try:
-            (
-                result["card_referee_scopes_refreshed"],
-                result["card_referee_statistics_backfilled"],
-                updated_card_referees,
-            ) = self._bootstrap_card_referee_history(now)
-        except ApiBudgetExceededError:
-            collection_budget_exhausted = True
-            LOGGER.warning(
-                "Shared football API daily budget reached; CardLab referee bootstrap stopped"
-            )
-        except Exception:
-            LOGGER.exception("QuantLab CardLab referee bootstrap failed")
+        collection_budget_exhausted = False
 
-        if not collection_budget_exhausted:
+        if self._settings.card_enabled:
+            try:
+                refreshed_card_results = self._refresh_card_pick_results(now)
+                if refreshed_card_results:
+                    LOGGER.info(
+                        "QuantLab CardLab post-match result observations refreshed=%d",
+                        refreshed_card_results,
+                    )
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; CardLab result refresh skipped"
+                )
+            except Exception:
+                LOGGER.exception("QuantLab CardLab post-match result refresh failed")
+
+            try:
+                result["card_event_captures"] = self._capture_card_pick_events(now)
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; CardLab event capture skipped"
+                )
+            except Exception:
+                LOGGER.exception("QuantLab CardLab event capture failed")
+
+            try:
+                result["card_settlements"] = self._settle_card_picks(now)
+            except Exception:
+                LOGGER.exception("QuantLab CardLab settlement failed")
+
+            try:
+                (
+                    result["card_referee_web_captures"],
+                    result["card_referee_web_profiles"],
+                    refreshed_card_web_leagues,
+                ) = self._bootstrap_referee_web(now)
+            except Exception:
+                LOGGER.exception("QuantLab CardLab proactive referee web bootstrap failed")
+
+            try:
+                (
+                    result["card_referee_scopes_refreshed"],
+                    result["card_referee_statistics_backfilled"],
+                    updated_card_referees,
+                ) = self._bootstrap_card_referee_history(now)
+            except ApiBudgetExceededError:
+                collection_budget_exhausted = True
+                LOGGER.warning(
+                    "Shared football API daily budget reached; CardLab referee bootstrap stopped"
+                )
+            except Exception:
+                LOGGER.exception("QuantLab CardLab referee bootstrap failed")
+
+        any_lab_enabled = (
+            self._settings.goal_enabled
+            or self._settings.corner_enabled
+            or self._settings.card_enabled
+            or self._settings.h2h_enabled
+        )
+        if any_lab_enabled and not collection_budget_exhausted:
             try:
                 result["fixtures_discovered"] = self._discover_fixtures(now)
                 result["history_backfilled"] = self._backfill_history(now)
@@ -2042,7 +2089,8 @@ class QuantLabRuntime:
                 )
                 result["market_fixtures"] = market_fixtures
                 result["card_snapshots"] = card_snapshots
-                result["h2h_snapshots"] = self._collect_h2h_snapshots(now)
+                if self._settings.h2h_enabled:
+                    result["h2h_snapshots"] = self._collect_h2h_snapshots(now)
             except ApiBudgetExceededError:
                 collection_budget_exhausted = True
                 LOGGER.warning(
@@ -2053,7 +2101,7 @@ class QuantLabRuntime:
                     "QuantLab rejected a feature snapshot because of timestamp leakage"
                 )
 
-        if not collection_budget_exhausted:
+        if self._settings.goal_enabled and not collection_budget_exhausted:
             try:
                 goal_discoveries, goal_stats = self._bootstrap_goal_team_history(now)
                 result["goal_team_history_discovered"] = goal_discoveries
@@ -2069,7 +2117,7 @@ class QuantLabRuntime:
                     "QuantLab rejected a GoalLab feature snapshot because of timestamp leakage"
                 )
 
-        if not collection_budget_exhausted:
+        if self._settings.corner_enabled and not collection_budget_exhausted:
             try:
                 team_discoveries, team_stats = self._bootstrap_corner_team_history(now)
                 result["corner_team_history_discovered"] = team_discoveries
@@ -2084,55 +2132,64 @@ class QuantLabRuntime:
                     "QuantLab rejected a CornerLab feature snapshot because of timestamp leakage"
                 )
 
-        try:
-            h2h_decisions, h2h_picks, h2h_experiments = self._evaluate_h2h_picks(now)
-            result["h2h_decisions"] = h2h_decisions
-            result["h2h_picks"] = h2h_picks
-            result["h2h_experiments"] = h2h_experiments
-        except Exception:
-            LOGGER.exception("QuantLab H2HLab shadow evaluation failed")
+        if self._settings.h2h_enabled:
+            try:
+                h2h_decisions, h2h_picks, h2h_experiments = self._evaluate_h2h_picks(now)
+                result["h2h_decisions"] = h2h_decisions
+                result["h2h_picks"] = h2h_picks
+                result["h2h_experiments"] = h2h_experiments
+            except Exception:
+                LOGGER.exception("QuantLab H2HLab shadow evaluation failed")
 
-        try:
-            result["h2h_result_refreshes"] = self._refresh_h2h_pick_results(now)
-        except ApiBudgetExceededError:
-            LOGGER.warning("Shared football API daily budget reached; H2HLab result refresh skipped")
-        except Exception:
-            LOGGER.exception("QuantLab H2HLab result refresh failed")
+            try:
+                result["h2h_result_refreshes"] = self._refresh_h2h_pick_results(now)
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; H2HLab result refresh skipped"
+                )
+            except Exception:
+                LOGGER.exception("QuantLab H2HLab result refresh failed")
 
-        try:
-            result["h2h_experiment_result_refreshes"] = self._refresh_h2h_experiment_results(now)
-        except ApiBudgetExceededError:
-            LOGGER.warning("Shared football API daily budget reached; H2HLab experiment result refresh skipped")
-        except Exception:
-            LOGGER.exception("QuantLab H2HLab experiment result refresh failed")
+            try:
+                result["h2h_experiment_result_refreshes"] = (
+                    self._refresh_h2h_experiment_results(now)
+                )
+            except ApiBudgetExceededError:
+                LOGGER.warning(
+                    "Shared football API daily budget reached; H2HLab experiment result refresh skipped"
+                )
+            except Exception:
+                LOGGER.exception("QuantLab H2HLab experiment result refresh failed")
 
-        try:
-            result["h2h_settlements"] = self._settle_h2h_picks(now)
-        except Exception:
-            LOGGER.exception("QuantLab H2HLab settlement failed")
+            try:
+                result["h2h_settlements"] = self._settle_h2h_picks(now)
+            except Exception:
+                LOGGER.exception("QuantLab H2HLab settlement failed")
 
-        try:
-            result["h2h_experiment_settlements"] = self._settle_h2h_experiments(now)
-        except Exception:
-            LOGGER.exception("QuantLab H2HLab paired experiment settlement failed")
+            try:
+                result["h2h_experiment_settlements"] = self._settle_h2h_experiments(now)
+            except Exception:
+                LOGGER.exception("QuantLab H2HLab paired experiment settlement failed")
 
-        try:
-            corner_decisions, corner_picks = self._evaluate_context_picks(
-                self._corner_engine, "CORNER", now
-            )
-            result["corner_decisions"] = corner_decisions
-            result["corner_picks"] = corner_picks
-        except Exception:
-            LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
+        if self._settings.corner_enabled:
+            try:
+                corner_decisions, corner_picks = self._evaluate_context_picks(
+                    self._corner_engine, "CORNER", now
+                )
+                result["corner_decisions"] = corner_decisions
+                result["corner_picks"] = corner_picks
+            except Exception:
+                LOGGER.exception("QuantLab CornerLab shadow evaluation failed")
 
-        try:
-            card_decisions, card_picks = self._evaluate_context_picks(
-                self._card_engine, "CARD", now
-            )
-            result["card_decisions"] = card_decisions
-            result["card_picks"] = card_picks
-        except Exception:
-            LOGGER.exception("QuantLab CardLab shadow evaluation failed")
+        if self._settings.card_enabled:
+            try:
+                card_decisions, card_picks = self._evaluate_context_picks(
+                    self._card_engine, "CARD", now
+                )
+                result["card_decisions"] = card_decisions
+                result["card_picks"] = card_picks
+            except Exception:
+                LOGGER.exception("QuantLab CardLab shadow evaluation failed")
 
         LOGGER.info(
             "QuantLab cycle completed fixtures_discovered=%d history_backfilled=%d "
