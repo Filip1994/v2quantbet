@@ -9,7 +9,10 @@ from h2h.api.health import RuntimeHealthState
 from h2h.dashboard_entrypoint import build_dashboard_application
 from h2h.domain.fixture_identity import api_football_fixture_identity
 from h2h.entrypoint import _fixture_identities_from_environment, _run_active_leader
-from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
+from h2h.persistence.postgres_production_funnel import (
+    PostgreSQLProductionFunnelRepository,
+    PostgreSQLProductionFunnelStateRepository,
+)
 from h2h.workers.quote_refresh_schedule import StaleQuoteRetryPolicy
 
 
@@ -24,7 +27,7 @@ def test_manual_fixture_allowlist_resolves_api_football_canonical_identities(
     )
 
 
-def test_standalone_dashboard_composes_operator_state_repository(
+def test_standalone_dashboard_composes_production_funnel_repositories(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/quantbet")
@@ -33,7 +36,10 @@ def test_standalone_dashboard_composes_operator_state_repository(
     application = build_dashboard_application()
 
     assert isinstance(
-        application.operator_picks, PostgreSQLOperatorPickStateRepository
+        application.operator_picks, PostgreSQLProductionFunnelStateRepository
+    )
+    assert isinstance(
+        application.production_funnel, PostgreSQLProductionFunnelRepository
     )
 
 
@@ -87,8 +93,8 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         ),
         registration=SimpleNamespace(
             bootstrap_bankroll=SimpleNamespace(execute=lambda: None),
-            repository=SimpleNamespace(risk_exposure_breakdown=lambda *_args, **_kwargs: {}),
         ),
+        production_funnel=SimpleNamespace(exposure_breakdown=dict),
         monitoring=SimpleNamespace(
             reconcile=SimpleNamespace(execute=lambda: None),
             worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
@@ -103,6 +109,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         ),
         model_lifecycle=SimpleNamespace(run_once=lambda: None, has_pending=False),
         opportunity=SimpleNamespace(run_once=lambda: None, has_pending=False),
+        production_intake=SimpleNamespace(run_once=lambda: None),
         live_closing_proxy=SimpleNamespace(run_once=lambda: None),
     )
     monkeypatch.setattr(

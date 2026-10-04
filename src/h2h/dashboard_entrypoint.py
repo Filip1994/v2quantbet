@@ -11,8 +11,10 @@ from typing import Any
 from h2h.api.dashboard import DashboardHTTPService, DashboardService
 from h2h.logging_config import configure_logging
 from h2h.odds import PostgreSQLApiBudget
-from h2h.persistence import PostgreSQLPerformanceRepository
-from h2h.persistence.operator_pick_state import PostgreSQLOperatorPickStateRepository
+from h2h.persistence.postgres_production_funnel import (
+    PostgreSQLProductionFunnelRepository,
+    PostgreSQLProductionFunnelStateRepository,
+)
 from h2h.persistence.postgres_runtime import PostgreSQLRuntimeRepository
 from h2h.workers.runtime import install_shutdown_handlers
 
@@ -37,9 +39,9 @@ class DashboardApplication:
 
     settings: Any
     runtime: PostgreSQLRuntimeRepository
-    results: Any
     budget: PostgreSQLApiBudget
-    operator_picks: PostgreSQLOperatorPickStateRepository
+    operator_picks: PostgreSQLProductionFunnelStateRepository
+    production_funnel: PostgreSQLProductionFunnelRepository
 
 
 def build_dashboard_application() -> DashboardApplication:
@@ -48,6 +50,7 @@ def build_dashboard_application() -> DashboardApplication:
     initial_minor = _integer("QUANTBET_INITIAL_BANKROLL_MINOR", "3000000")
     fixed_stake_minor = _integer("QUANTBET_FIXED_STAKE_MINOR", "30000")
     max_open_exposure_minor = _integer("QUANTBET_MAX_OPEN_EXPOSURE_MINOR", "300000")
+    currency = os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD"
     daily_limit = _integer("QUANTBET_API_DAILY_LIMIT", "75000")
     reserve = _integer("QUANTBET_API_RESERVE", "0")
     effective_limit = daily_limit - reserve
@@ -60,15 +63,13 @@ def build_dashboard_application() -> DashboardApplication:
         initial_bankroll_minor=initial_minor,
         fixed_stake_minor=fixed_stake_minor,
         max_open_exposure_minor=max_open_exposure_minor,
+        currency=currency,
     )
     return DashboardApplication(
         settings=SimpleNamespace(
             application=SimpleNamespace(registration_policy=policy)
         ),
         runtime=PostgreSQLRuntimeRepository(database_url),
-        results=SimpleNamespace(
-            performance=PostgreSQLPerformanceRepository(database_url)
-        ),
         budget=PostgreSQLApiBudget(
             daily_limit=daily_limit,
             reserve=reserve,
@@ -76,7 +77,12 @@ def build_dashboard_application() -> DashboardApplication:
             operational_reserve=operational_reserve,
             database_url=database_url,
         ),
-        operator_picks=PostgreSQLOperatorPickStateRepository(database_url=database_url),
+        operator_picks=PostgreSQLProductionFunnelStateRepository(
+            database_url=database_url
+        ),
+        production_funnel=PostgreSQLProductionFunnelRepository(
+            database_url=database_url
+        ),
     )
 
 

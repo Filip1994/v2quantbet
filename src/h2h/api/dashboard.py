@@ -157,52 +157,72 @@ class DashboardService:
     def _snapshot_uncached(self) -> dict[str, Any]:
         generated_at = datetime.now(UTC)
         policy = _policy(self._application)
-        system_performance = self._application.results.performance.summary(
-            policy.bankroll_account_id, include_curve=False
-        )
-        performance = self._application.results.performance.operator_summary(
-            policy.bankroll_account_id
-        )
         picks = self._picks()
         operations = self._operations(generated_at)
         usage = self._application.budget.usage_by_category()
         used = sum(usage.values())
-        played = sum(pick.get("operator_state") == "PLAYED" for pick in picks)
+
+        played_rows = [pick for pick in picks if pick.get("operator_state") == "PLAYED"]
+        settled_played = [
+            pick for pick in played_rows if pick.get("settlement_outcome") is not None
+        ]
+        open_played = [
+            pick for pick in played_rows if pick.get("settlement_outcome") is None
+        ]
+        played = len(played_rows)
         skipped = sum(pick.get("operator_state") == "SKIPPED" for pick in picks)
         pending = sum(pick.get("operator_state") == "PENDING" for pick in picks)
+        exposure = self._application.production_funnel.exposure_breakdown()
+        realized_pnl_minor = sum(
+            int(pick.get("realized_pnl_minor") or 0) for pick in settled_played
+        )
+        gross_returns_minor = sum(
+            int(pick.get("gross_return_minor") or 0) for pick in settled_played
+        )
+        open_exposure_minor = int(exposure["open_exposure_minor"])
+        initial_minor = policy.initial_bankroll_minor
+
+        def settled_count(outcome: str) -> int:
+            return sum(
+                str(pick.get("settlement_outcome") or "").upper() == outcome
+                for pick in settled_played
+            )
+
         return {
             "generated_at": generated_at,
             "bankroll": {
-                "initial_minor": performance.initial_bankroll_minor,
-                "available_minor": performance.available_bankroll_minor,
-                "open_exposure_minor": performance.open_exposure_minor,
-                "risk_exposure_minor": performance.open_exposure_minor,
+                "initial_minor": initial_minor,
+                "available_minor": initial_minor + realized_pnl_minor - open_exposure_minor,
+                "open_exposure_minor": open_exposure_minor,
+                "risk_exposure_minor": open_exposure_minor,
                 "max_open_exposure_minor": policy.max_open_exposure_minor,
                 "fixed_stake_minor": policy.fixed_stake_minor,
-                "total_staked_minor": performance.total_staked_minor,
-                "settled_stake_minor": performance.resolved_stake_minor,
-                "gross_returns_minor": performance.gross_returns_minor,
-                "realized_pnl_minor": performance.realized_pnl_minor,
-                "pending_minor": performance.pending_stake_minor,
-                "currency": performance.currency,
+                "total_staked_minor": sum(int(pick["stake_minor"]) for pick in played_rows),
+                "settled_stake_minor": sum(
+                    int(pick["stake_minor"]) for pick in settled_played
+                ),
+                "gross_returns_minor": gross_returns_minor,
+                "realized_pnl_minor": realized_pnl_minor,
+                "pending_minor": sum(int(pick["stake_minor"]) for pick in open_played),
+                "currency": policy.currency,
             },
             "counts": {
                 "all": len(picks),
                 "pending_operator": pending,
                 "played": played,
                 "skipped": skipped,
-                "active": performance.pending_count,
-                "won": performance.win_count,
-                "lost": performance.loss_count,
-                "void": performance.void_count,
+                "active": len(open_played),
+                "won": settled_count("WIN"),
+                "lost": settled_count("LOSS"),
+                "void": settled_count("VOID"),
             },
             "system_performance": {
                 "registered_picks": len(picks),
-                "pending": system_performance.pending_count,
-                "won": system_performance.win_count,
-                "lost": system_performance.loss_count,
-                "void": system_performance.void_count,
-                "realized_pnl_minor": system_performance.realized_pnl_minor,
+                "pending": len(open_played),
+                "won": settled_count("WIN"),
+                "lost": settled_count("LOSS"),
+                "void": settled_count("VOID"),
+                "realized_pnl_minor": realized_pnl_minor,
             },
             "provider_budget": {
                 "used": used,
@@ -216,200 +236,145 @@ class DashboardService:
 
     def _picks(self) -> list[dict[str, Any]]:
         sql = """
-            SELECT
-                r.pick_id, r.registered_at, r.fixture_id,
-                latest.home_team, latest.away_team, latest.competition_name, latest.country,
-                latest.kickoff_at, latest.provider_status,
-                r.market, r.selection, r.stake_minor, r.currency,
-                entry.odd AS pick_odd, entry.observed_at AS pick_observed_at,
-                entry.captured_at AS pick_captured_at,
-                opening.odd AS first_seen_odd,
-                opening.observed_at AS first_seen_observed_at,
-                opening.captured_at AS first_seen_captured_at,
-                CASE
-                    WHEN live_latest.provider_observed_at IS NOT NULL
-                         AND (
-                             current_quote.observed_at IS NULL
-                             OR live_latest.provider_observed_at > current_quote.observed_at
-                         )
-                    THEN live_latest.odd
-                    ELSE current_quote.odd
-                END AS last_observed_odd,
-                CASE
-                    WHEN live_latest.provider_observed_at IS NOT NULL
-                         AND (
-                             current_quote.observed_at IS NULL
-                             OR live_latest.provider_observed_at > current_quote.observed_at
-                         )
-                    THEN live_latest.provider_observed_at
-                    ELSE current_quote.observed_at
-                END AS last_observed_at,
-                monitoring.updated_at AS last_checked_at,
-                CASE
-                    WHEN live_latest.provider_observed_at IS NOT NULL
-                         AND (
-                             current_quote.observed_at IS NULL
-                             OR live_latest.provider_observed_at > current_quote.observed_at
-                         )
-                    THEN 'LIVE_PROXY'
-                    WHEN current_quote.observed_at IS NOT NULL THEN 'SAME_BOOK'
-                    ELSE 'UNAVAILABLE'
-                END AS last_observed_source,
-                CASE
-                    WHEN COALESCE(
-                        live_latest.provider_observed_at,
-                        current_quote.observed_at
-                    ) IS NULL
-                    THEN 'UNAVAILABLE'
-                    WHEN (
-                        CASE
-                            WHEN live_latest.provider_observed_at IS NOT NULL
-                                 AND (
-                                     current_quote.observed_at IS NULL
-                                     OR live_latest.provider_observed_at
-                                        > current_quote.observed_at
-                                 )
-                            THEN live_latest.provider_observed_at
-                            ELSE current_quote.observed_at
+            WITH latest_operator AS (
+                SELECT DISTINCT ON (pick_id) pick_id, state
+                FROM production_funnel_state_events
+                ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC
+            ),
+            source_status AS (
+                SELECT
+                    p.*,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.outcome
+                        WHEN p.source_universe = 'RESEARCH'
+                             AND research_result.result_classification = 'NON_PLAYED_VOIDABLE'
+                        THEN 'VOID'
+                        WHEN p.source_universe = 'RESEARCH'
+                             AND research_result.result_classification = 'PLAYED_SETTLEABLE'
+                        THEN CASE
+                            WHEN p.market_key = 'OU_25' AND p.selection = 'OVER'
+                            THEN CASE WHEN
+                                research_result.regulation_home_goals
+                                + research_result.regulation_away_goals > 2
+                                THEN 'WIN' ELSE 'LOSS' END
+                            WHEN p.market_key = 'OU_25' AND p.selection = 'UNDER'
+                            THEN CASE WHEN
+                                research_result.regulation_home_goals
+                                + research_result.regulation_away_goals < 3
+                                THEN 'WIN' ELSE 'LOSS' END
+                            WHEN p.market_key = 'BTTS' AND p.selection = 'YES'
+                            THEN CASE WHEN
+                                research_result.regulation_home_goals > 0
+                                AND research_result.regulation_away_goals > 0
+                                THEN 'WIN' ELSE 'LOSS' END
+                            WHEN p.market_key = 'BTTS' AND p.selection = 'NO'
+                            THEN CASE WHEN NOT (
+                                research_result.regulation_home_goals > 0
+                                AND research_result.regulation_away_goals > 0
+                            ) THEN 'WIN' ELSE 'LOSS' END
+                            ELSE NULL
                         END
-                    ) >= LEAST(CURRENT_TIMESTAMP, latest.kickoff_at)
-                        - make_interval(secs => COALESCE(
-                            monitoring.current_max_age_seconds,
-                            (config.configuration->>'maximum_quote_age_seconds')::integer
-                        ))
-                    THEN 'FRESH'
-                    ELSE 'STALE'
-                END AS last_observed_freshness,
+                        ELSE NULL
+                    END AS source_outcome,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.settled_at
+                        WHEN p.source_universe = 'RESEARCH'
+                             AND research_result.result_classification IN (
+                                 'PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE'
+                             )
+                        THEN research_result.persisted_at
+                        ELSE NULL
+                    END AS source_settled_at,
+                    research_result.regulation_home_goals AS research_home_goals,
+                    research_result.regulation_away_goals AS research_away_goals
+                FROM production_funnel_picks p
+                LEFT JOIN quantlab_goal_pick_settlements goal_settlement
+                  ON p.source_universe = 'GOALLAB'
+                 AND goal_settlement.goal_pick_id = p.source_pick_id
+                LEFT JOIN fixture_result_acquisition_states research_state
+                  ON p.source_universe = 'RESEARCH'
+                 AND research_state.fixture_id = p.source_fixture_id
+                LEFT JOIN fixture_result_observations research_result
+                  ON research_result.result_observation_id = research_state.current_observation_id
+            )
+            SELECT
+                p.pick_id, p.cloned_at AS registered_at, p.source_fixture_id AS fixture_id,
+                p.home_team, p.away_team, p.competition_name, p.country,
+                p.kickoff_at, p.provider_status,
+                p.market_key AS market, p.selection, p.stake_minor, p.currency,
+                p.odds AS pick_odd, p.source_quote_observed_at AS pick_observed_at,
+                p.cloned_at AS pick_captured_at,
+                p.odds AS first_seen_odd,
+                p.source_quote_observed_at AS first_seen_observed_at,
+                p.cloned_at AS first_seen_captured_at,
+                p.odds AS last_observed_odd,
+                p.source_quote_observed_at AS last_observed_at,
+                p.cloned_at AS last_checked_at,
+                'SOURCE_CLONE'::text AS last_observed_source,
+                'UNAVAILABLE'::text AS last_observed_freshness,
+                NULL::numeric AS display_closing_odd,
+                NULL::timestamptz AS display_closing_observed_at,
+                'UNAVAILABLE'::text AS display_closing_source,
+                NULL::text AS closing_status,
+                NULL::text AS proxy_closing_status,
+                NULL::bigint AS proxy_clv_ppm,
+                NULL::bigint AS manual_clv_ppm,
                 CASE
-                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.odd
-                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.odd
-                    WHEN proxy_close.outcome = 'CAPTURED'
-                    THEN proxy_close.proxy_closing_odd_decimal
-                    ELSE NULL
-                END AS display_closing_odd,
-                CASE
-                    WHEN closing.outcome = 'CAPTURED' THEN closing_quote.observed_at
-                    WHEN manual_close.snapshot_id IS NOT NULL THEN manual_quote.observed_at
-                    WHEN proxy_close.outcome = 'CAPTURED'
-                    THEN proxy_observation.provider_observed_at
-                    ELSE NULL
-                END AS display_closing_observed_at,
-                CASE
-                    WHEN closing.outcome = 'CAPTURED' THEN 'SAME_BOOK'
-                    WHEN manual_close.snapshot_id IS NOT NULL THEN 'MANUAL'
-                    WHEN proxy_close.outcome = 'CAPTURED' THEN 'LIVE_PROXY'
-                    ELSE 'UNAVAILABLE'
-                END AS display_closing_source,
-                closing.outcome AS closing_status,
-                proxy_close.outcome AS proxy_closing_status,
-                proxy_close.proxy_clv_ppm,
-                CASE
-                    WHEN manual_quote.odd IS NULL THEN NULL
-                    ELSE ROUND(
-                        ((entry.odd / manual_quote.odd) - 1) * 1000000
-                    )::bigint
-                END AS manual_clv_ppm,
-                CASE
-                    WHEN settlement.outcome IS NOT NULL THEN 'SETTLED'
-                    WHEN latest.provider_status IN ('FT', 'AET', 'PEN') THEN 'FINISHED'
-                    WHEN latest.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'CLOSED'
-                    WHEN latest.kickoff_at <= CURRENT_TIMESTAMP
-                         OR latest.provider_status IN (
+                    WHEN p.source_outcome IS NOT NULL THEN 'SETTLED'
+                    WHEN p.provider_status IN ('FT', 'AET', 'PEN') THEN 'FINISHED'
+                    WHEN p.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'CLOSED'
+                    WHEN p.kickoff_at <= CURRENT_TIMESTAMP
+                         OR p.provider_status IN (
                              '1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT', 'LIVE'
                          )
                     THEN 'LIVE'
                     ELSE 'PREMATCH'
                 END AS dashboard_phase,
-                e.bookmaker_key, e.source, e.model_probability,
-                e.selected_raw_implied_probability AS implied_probability,
-                e.selected_devig_probability AS devig_probability,
-                e.edge, e.expected_value,
-                prediction.model_version_id, prediction.prediction_method_version,
-                r.config_fingerprint,
-                config.eligibility_policy_version, config.risk_policy_version,
-                config.staking_policy_version,
-                fq.stale_quote, fq.quote_age_seconds, fq.warning_codes,
-                monitoring.state AS monitoring_state,
-                settlement.outcome AS settlement_outcome,
-                settlement.gross_return_minor, settlement.realized_pnl_minor,
-                settlement.occurred_at AS settled_at,
-                settlement_result.regulation_home_goals AS result_home_goals,
-                settlement_result.regulation_away_goals AS result_away_goals,
-                clv.clv_ppm, clv.method_version AS clv_method_version,
-                COALESCE(operator_state.state, 'PENDING') AS operator_state
-            FROM registered_picks r
-            JOIN pick_decisions decision ON decision.decision_id = r.decision_id
-            JOIN value_evaluations e ON e.evaluation_id = r.evaluation_id
-            JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id
-            JOIN pick_policy_configurations config
-                ON config.config_fingerprint = r.config_fingerprint
-            LEFT JOIN pick_monitoring_states monitoring ON monitoring.pick_id = r.pick_id
-            JOIN quote_snapshots entry ON entry.snapshot_id = r.entry_snapshot_id
-            LEFT JOIN final_quote_verifications fq
-                ON fq.verification_id = decision.final_quote_verification_id
-            LEFT JOIN LATERAL (
-                SELECT fo.home_team, fo.away_team, fo.competition_name,
-                    fo.country, fo.kickoff_at, fo.provider_status
-                FROM fixture_observations fo
-                WHERE fo.fixture_id = r.fixture_id
-                ORDER BY fo.observed_at DESC, fo.fixture_observation_id DESC
-                LIMIT 1
-            ) latest ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT q.odd, q.observed_at, q.captured_at
-                FROM quote_snapshots q
-                WHERE q.series_id = e.selected_series_id AND q.source = e.source
-                  AND q.observed_at < latest.kickoff_at
-                  AND q.captured_at < latest.kickoff_at
-                ORDER BY q.captured_at, q.observed_at, q.snapshot_id
-                LIMIT 1
-            ) opening ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT q.odd, q.observed_at, q.captured_at
-                FROM quote_snapshots q
-                WHERE q.series_id = e.selected_series_id AND q.source = e.source
-                  AND q.observed_at < latest.kickoff_at
-                  AND q.captured_at < latest.kickoff_at
-                ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
-                LIMIT 1
-            ) current_quote ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT observation.odd, observation.provider_observed_at, observation.captured_at
-                FROM pick_live_close_observations observation
-                WHERE observation.pick_id = r.pick_id
-                  AND observation.provider_observed_at < latest.kickoff_at
-                  AND observation.captured_at < latest.kickoff_at
-                ORDER BY observation.provider_observed_at DESC,
-                    observation.captured_at DESC, observation.observation_id DESC
-                LIMIT 1
-            ) live_latest ON TRUE
-            LEFT JOIN pick_closing_finalizations closing ON closing.pick_id = r.pick_id
-            LEFT JOIN quote_snapshots closing_quote
-                ON closing_quote.snapshot_id = closing.closing_snapshot_id
-            LEFT JOIN pick_manual_closing_overrides manual_close
-                ON manual_close.pick_id = r.pick_id
-            LEFT JOIN quote_snapshots manual_quote
-                ON manual_quote.snapshot_id = manual_close.snapshot_id
-            LEFT JOIN pick_live_close_finalizations proxy_close
-                ON proxy_close.pick_id = r.pick_id
-            LEFT JOIN pick_live_close_observations proxy_observation
-                ON proxy_observation.observation_id = proxy_close.observation_id
-            LEFT JOIN LATERAL (
-                SELECT event.* FROM pick_settlement_events event
-                WHERE event.pick_id = r.pick_id AND NOT EXISTS (
-                    SELECT 1 FROM pick_settlement_events successor
-                    WHERE successor.prior_event_id = event.settlement_event_id
-                )
-            ) settlement ON TRUE
-            LEFT JOIN fixture_result_observations settlement_result
-                ON settlement_result.result_observation_id = settlement.result_observation_id
-            LEFT JOIN pick_realized_clv clv ON clv.pick_id = r.pick_id
-            LEFT JOIN LATERAL (
-                SELECT state FROM pick_operator_state_events operator_event
-                WHERE operator_event.pick_id = r.pick_id
-                ORDER BY occurred_at DESC, persisted_at DESC, event_id DESC LIMIT 1
-            ) operator_state ON TRUE
-            ORDER BY r.registered_at DESC, r.pick_id DESC
+                p.bookmaker_name AS bookmaker_key,
+                lower(p.source_universe) AS source,
+                p.model_probability,
+                (1 / p.odds)::numeric AS implied_probability,
+                p.market_probability AS devig_probability,
+                p.edge, p.expected_value,
+                p.source_model_version AS model_version_id,
+                p.source_model_name AS prediction_method_version,
+                p.intake_contract_version AS config_fingerprint,
+                p.source_policy_version AS eligibility_policy_version,
+                NULL::text AS risk_policy_version,
+                NULL::text AS staking_policy_version,
+                FALSE AS stale_quote,
+                CASE
+                    WHEN p.source_quote_observed_at IS NULL THEN NULL
+                    ELSE EXTRACT(EPOCH FROM (
+                        p.source_decision_at - p.source_quote_observed_at
+                    ))::bigint
+                END AS quote_age_seconds,
+                ARRAY[]::text[] AS warning_codes,
+                'PENDING'::text AS monitoring_state,
+                p.source_outcome AS settlement_outcome,
+                CASE p.source_outcome
+                    WHEN 'WIN' THEN ROUND(p.stake_minor * p.odds)::bigint
+                    WHEN 'LOSS' THEN 0::bigint
+                    WHEN 'VOID' THEN p.stake_minor
+                    ELSE NULL::bigint
+                END AS gross_return_minor,
+                CASE p.source_outcome
+                    WHEN 'WIN' THEN ROUND(p.stake_minor * (p.odds - 1))::bigint
+                    WHEN 'LOSS' THEN -p.stake_minor
+                    WHEN 'VOID' THEN 0::bigint
+                    ELSE NULL::bigint
+                END AS realized_pnl_minor,
+                p.source_settled_at AS settled_at,
+                p.research_home_goals AS result_home_goals,
+                p.research_away_goals AS result_away_goals,
+                NULL::bigint AS clv_ppm,
+                NULL::text AS clv_method_version,
+                COALESCE(operator_state.state, 'PENDING') AS operator_state,
+                p.source_universe, p.source_pick_id, p.matched_bucket_ids,
+                p.bucket_priority, p.intake_contract_version
+            FROM source_status p
+            LEFT JOIN latest_operator operator_state ON operator_state.pick_id = p.pick_id
+            ORDER BY p.cloned_at DESC, p.pick_id DESC
         """
         with self._application.runtime.connect() as connection, connection.cursor() as cursor:
             cursor.execute(sql)
@@ -526,7 +491,15 @@ class DashboardService:
     ) -> tuple[tuple[str, str, str], tuple[str, ...], str]:
         """Prefer fixture lifecycle after kickoff and quote freshness before kickoff."""
         phase = str(pick.get("dashboard_phase") or "PREMATCH").upper()
-        if phase == "SETTLED":
+        source_universe = str(pick.get("source_universe") or "").upper()
+        if phase == "PREMATCH" and source_universe:
+            bucket_text = ", ".join(str(item) for item in (pick.get("matched_bucket_ids") or ()))
+            primary = (
+                source_universe,
+                "fresh",
+                "Cloned by the Production funnel from: " + (bucket_text or source_universe),
+            )
+        elif phase == "SETTLED":
             primary = ("SETTLED", "fresh", "Result and settlement are durable")
         elif phase == "FINISHED":
             primary = ("FINISHED", "fresh", "Fixture is finished; settlement may still be pending")
@@ -757,6 +730,9 @@ class DashboardService:
             filter(
                 None,
                 [
+                    str(pick.get("source_universe") or ""),
+                    str(pick.get("source_pick_id") or ""),
+                    ", ".join(str(item) for item in (pick.get("matched_bucket_ids") or ())),
                     str(pick.get("model_version_id") or ""),
                     str(pick.get("config_fingerprint") or ""),
                     str(pick.get("prediction_method_version") or ""),
@@ -828,7 +804,9 @@ class DashboardService:
             f'</div></td>'
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick, countdown=str(pick.get('dashboard_phase') or 'PREMATCH').upper() == 'PREMATCH')}"
-            f'<span class="pick-book" title="Registered bookmaker">{registered_bookmaker}</span></td>'
+            f'<small class="quality-history">{escape(str(pick.get("source_universe") or "SOURCE"))} · '
+            f'{escape(" · ".join(str(item).replace("RESEARCH_", "").replace("GOALLAB_", "") for item in (pick.get("matched_bucket_ids") or ())))}</small>'
+            f'<span class="pick-book" title="Source bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
             f'<td>{odds}<small class="timestamps">{escape(checkpoint_times)}</small></td>'
@@ -1043,7 +1021,7 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
 <section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
 <dt>First seen</dt><dd>First stored pre-match price for the registered market and bookmaker series.</dd>
-<dt>Pick odds</dt><dd>Immutable decimal odds registered with the pick.</dd>
+<dt>Pick odds</dt><dd>Immutable decimal odds cloned from the source universe when the intake contract matched.</dd>
 <dt>Last observed</dt><dd>Newest stored pre-kickoff price. In the final live window this may come from the API-Football live-market proxy and is labeled LIVE PROXY.</dd>
 <dt>Closing</dt><dd>True same-book closing when available; otherwise an explicit manual historical override or the live-market proxy, each labeled at the value.</dd>
 <dt>Quality</dt><dd>Before kickoff it shows quote freshness. After kickoff it switches to LIVE, FINISHED, CLOSED or SETTLED so stale pre-match quotes do not masquerade as current match state.</dd>
@@ -1053,7 +1031,7 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 <dt>Edge</dt><dd>Model probability − de-vig bookmaker probability.</dd>
 <dt>EV</dt><dd>(model probability × decimal odds) − 1.</dd>
 <dt>CLV</dt><dd>Closing-line value compares Pick odds only with the closing price at the same registered bookmaker.</dd>
-</dl></section><footer><span>Read-only · no betting, settlement or worker controls</span>
+</dl></section><footer><span>Production funnel · source-cloned picks only</span>
 <span>Times: Europe/Belgrade · Refresh page for current durable state</span></footer></main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 

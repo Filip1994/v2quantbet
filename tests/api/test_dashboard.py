@@ -459,38 +459,26 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
     assert "—" in missing
 
 
-def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
-    performance = SimpleNamespace(
+def test_snapshot_uses_production_funnel_for_financial_summary() -> None:
+    policy = SimpleNamespace(
+        bankroll_account_id="pilot",
         initial_bankroll_minor=3_000_000,
-        available_bankroll_minor=3_095_000,
-        open_exposure_minor=50_000,
-        resolved_stake_minor=100_000,
-        realized_pnl_minor=95_000,
-        pending_stake_minor=50_000,
+        fixed_stake_minor=30_000,
+        max_open_exposure_minor=300_000,
         currency="RSD",
-        pending_count=1,
-        win_count=1,
-        loss_count=0,
-        void_count=0,
-        total_staked_minor=100_000,
-        gross_returns_minor=195_000,
     )
     application = SimpleNamespace(
         settings=SimpleNamespace(
-            application=SimpleNamespace(
-                registration_policy=SimpleNamespace(
-                    bankroll_account_id="pilot",
-                    initial_bankroll_minor=3_000_000,
-                    fixed_stake_minor=30_000,
-                    max_open_exposure_minor=300_000,
-                )
-            )
+            application=SimpleNamespace(registration_policy=policy)
         ),
-        results=SimpleNamespace(
-            performance=SimpleNamespace(
-                summary=lambda _account, *, include_curve=True: performance,
-                operator_summary=lambda _account: performance,
-            )
+        production_funnel=SimpleNamespace(
+            exposure_breakdown=lambda: {
+                "open_exposure_minor": 50_000,
+                "pending_count": 1,
+                "played_open_count": 0,
+                "skipped_count": 1,
+                "settled_count": 1,
+            }
         ),
         budget=SimpleNamespace(
             usage_by_category=lambda: {"discovery": 10, "results_monitoring": 5},
@@ -504,12 +492,21 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
                 {
                     "stake_minor": 100_000,
                     "gross_return_minor": 195_000,
+                    "realized_pnl_minor": 95_000,
                     "settlement_outcome": "WIN",
                     "operator_state": "PLAYED",
                 },
                 {
                     "stake_minor": 50_000,
                     "gross_return_minor": None,
+                    "realized_pnl_minor": None,
+                    "settlement_outcome": None,
+                    "operator_state": "PENDING",
+                },
+                {
+                    "stake_minor": 50_000,
+                    "gross_return_minor": None,
+                    "realized_pnl_minor": None,
                     "settlement_outcome": None,
                     "operator_state": "SKIPPED",
                 },
@@ -520,6 +517,7 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
 
     data = Projection(application).snapshot()
 
+    assert data["bankroll"]["available_minor"] == 3_045_000
     assert data["bankroll"]["total_staked_minor"] == 100_000
     assert data["bankroll"]["settled_stake_minor"] == 100_000
     assert data["bankroll"]["gross_returns_minor"] == 195_000
@@ -527,8 +525,10 @@ def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
     assert data["bankroll"]["risk_exposure_minor"] == 50_000
     assert data["bankroll"]["fixed_stake_minor"] == 30_000
     assert data["bankroll"]["max_open_exposure_minor"] == 300_000
+    assert data["counts"]["pending_operator"] == 1
+    assert data["counts"]["played"] == 1
+    assert data["counts"]["skipped"] == 1
     assert data["provider_budget"]["remaining"] == 7485
-
 
 def test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> None:
     status = WorkerStatus(
