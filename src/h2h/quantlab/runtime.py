@@ -104,7 +104,7 @@ class QuantLabRuntimeSettings:
             ("h2h_enabled", self.h2h_enabled),
         ):
             if not isinstance(value, bool):
-                raise ValueError(f"{name} must be a boolean")
+                raise TypeError(f"{name} must be a boolean")
         for name, value in (
             ("lookahead_hours", self.lookahead_hours),
             ("fixture_limit", self.fixture_limit),
