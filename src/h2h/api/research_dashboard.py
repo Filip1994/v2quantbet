@@ -32,6 +32,10 @@ from h2h.api.research_analytics import (
     render_research_analytics_html,
 )
 from h2h.domain.competition_scope import is_universe_blocked_competition
+from h2h.domain.production_intake_buckets import (
+    BUCKET_SPECS,
+    bucket_matches,
+)
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 
@@ -754,6 +758,11 @@ class ResearchDashboardService:
         freshness = params.get("freshness", [""])[0].strip().upper()
         diagnostic = params.get("diagnostic", [""])[0].strip().upper()
         week = params.get("week", [""])[0].strip().upper()
+        production_bucket = params.get("production_bucket", [""])[0].strip()
+        if production_bucket:
+            spec = BUCKET_SPECS.get(production_bucket)
+            if spec is None or spec.source_universe != "RESEARCH":
+                raise ValueError("invalid Research production bucket")
         p_min = _parse_fraction(params.get("p_min", [""])[0])
         p_max = _parse_fraction(params.get("p_max", [""])[0])
         ev_min = _parse_fraction(params.get("ev_min", [""])[0])
@@ -827,6 +836,8 @@ class ResearchDashboardService:
             if diagnostic and diagnostic_bucket(row) != diagnostic:
                 return False
             if week and row_week(row) != week:
+                return False
+            if production_bucket and not bucket_matches(row, production_bucket):
                 return False
             if p_min is not None and p < p_min:
                 return False
