@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from h2h.domain.production_intake_buckets import n_roi_priority_score
 from h2h.persistence.postgres_production_funnel import (
     DEFAULT_BUCKET_IDS,
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
@@ -44,7 +45,7 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
     subset = intake_contract_version(DEFAULT_BUCKET_IDS[:2])
 
-    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V2:")
+    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V3:")
     assert full != subset
 
 
@@ -144,38 +145,41 @@ def test_goallab_expected_total_bucket_boundaries(
     assert (GOALLAB_OU_OVER_XG_2_5_3_0 in matches) is included
 
 
-def test_candidate_ranking_is_global_not_bucket_priority() -> None:
+def test_n_roi_priority_discounts_small_samples_until_n_100() -> None:
+    assert n_roi_priority_score(graded_n=100, roi_pct=10.0) == pytest.approx(10.0)
+    assert n_roi_priority_score(graded_n=25, roi_pct=32.0) == pytest.approx(8.0)
+    assert n_roi_priority_score(graded_n=250, roi_pct=10.0) == pytest.approx(10.0)
+
+
+def test_candidate_ranking_prefers_stronger_bucket_before_pick_ev() -> None:
     rows = [
         {
             "source_universe": "RESEARCH",
-            "source_pick_id": "research-low-ev",
+            "source_pick_id": "strong-bucket-lower-ev",
             "expected_value": 0.12,
             "edge": 0.18,
             "source_decision_at": 1,
+            "bucket_priority": 1,
         },
         {
             "source_universe": "GOALLAB",
-            "source_pick_id": "goallab-high-ev",
-            "expected_value": 0.31,
-            "edge": 0.16,
-            "source_decision_at": 2,
-        },
-        {
-            "source_universe": "GOALLAB",
-            "source_pick_id": "goallab-same-ev-higher-edge",
+            "source_pick_id": "weaker-bucket-higher-ev",
             "expected_value": 0.31,
             "edge": 0.20,
-            "source_decision_at": 3,
+            "source_decision_at": 2,
+            "bucket_priority": 2,
         },
     ]
 
     ordered = sorted(
         rows,
-        key=PostgreSQLProductionFunnelRepository._candidate_sort_key,
+        key=lambda row: PostgreSQLProductionFunnelRepository._candidate_sort_key(
+            row,
+            bucket_priority=row["bucket_priority"],
+        ),
     )
 
     assert [row["source_pick_id"] for row in ordered] == [
-        "goallab-same-ev-higher-edge",
-        "goallab-high-ev",
-        "research-low-ev",
+        "strong-bucket-lower-ev",
+        "weaker-bucket-higher-ev",
     ]
