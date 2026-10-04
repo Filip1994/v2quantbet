@@ -1111,3 +1111,47 @@ The complete V1 formula, gates, persistence contract and non-goals are frozen in
 ### Production impact
 
 **NONE.** H2HLab remains shadow-only and does not modify GoalLab/DC+, production pick registration, bankroll/staking or active production models.
+
+
+## 2026-10-04 — H2HLab paired DC-only vs DC+H2H experiment
+
+**Owner:** QuantLab / H2HLab
+
+### Research correction
+
+The H2H experiment is now explicitly paired. A high ROI in a CONFIRM bucket is not
+treated as proof that H2H improves Dixon-Coles.
+
+For every H2H-eligible fixture, the system freezes the first execution-valid quote
+snapshot and evaluates two policies on exactly the same evidence:
+
+- `DC_ONLY`: plain Dixon-Coles probability;
+- `DC_H2H`: the existing DC+direct-H2H composite.
+
+Both arms use the same quote pool, odds range, freshness, kickoff window, edge threshold,
+EV threshold and canonical ranking. Each arm independently records a canonical BET or
+NO_BET.
+
+### Primary outcomes
+
+- ROI uplift = ROI(DC+H2H) − ROI(DC-only).
+- Brier uplift = Brier(DC-only) − Brier(DC+H2H).
+
+Positive values favor the H2H-aware model/policy.
+
+CONFIRM, CONFLICT, FLIP, H2H_ONLY, DC_ONLY and settlement rescue/harm regimes are retained
+only as explanatory buckets.
+
+### Persistence and analytics
+
+- Added `060b_quantlab_h2h_paired_experiment.sql`.
+- Added immutable `quantlab_h2h_experiments`.
+- Added immutable `quantlab_h2h_experiment_settlements`.
+- H2HLab Analytics now places the paired experiment above ordinary bucket analytics and
+  shows frozen N, bet counts, both ROIs, ROI uplift, both Brier scores and Brier uplift.
+- Full pre-registered protocol is frozen in `QuantLab/H2HLab/PAIRED_EXPERIMENT.md`.
+
+### Production impact
+
+**NONE on real betting authority.** The paired experiment is shadow analytics only. The
+existing H2HLab composite shadow policy remains unchanged.
