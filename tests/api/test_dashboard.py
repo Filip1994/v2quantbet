@@ -713,3 +713,33 @@ def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
     entrypoint.main()
 
     assert calls == ["dashboard"]
+
+
+def test_production_pick_links_bucket_name_and_exact_path_in_new_tabs() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                    source_universe="GOALLAB",
+                    source_pick_id="quantlab-goal-pick-v1:" + "f" * 64,
+                    matched_bucket_ids=[
+                        "GOALLAB_OU_OVER_XG_2_5_3_0",
+                        "GOALLAB_OU_OVER_ODDS_2_01_2_50",
+                    ],
+                    source_payload={
+                        "production_primary_bucket_id": "GOALLAB_OU_OVER_XG_2_5_3_0",
+                    },
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "OU OVER · xG total 2.5–3.0 ↗" in html
+    assert "QuantLab → GoalLab → Analytics → Production intake buckets" in html
+    assert "PRIMARY" in html
+    assert "production-bucket-goallab-ou-over-xg-2-5-3-0" in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+    assert "bucket_expected_total_goals_bucket=2.5%E2%80%933" in html
