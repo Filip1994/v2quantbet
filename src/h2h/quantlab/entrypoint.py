@@ -415,7 +415,7 @@ def main() -> None:
                     row.get("edge"),
                     row.get("expected_value"),
                 )
-        if inline_goal_validation:
+        if inline_goal_validation:  # noqa: SIM102 - preserves hot-path contract test
             if goal_enabled:
                 try:
                     ensure_latest_goal_model_validation(repository, LOGGER)
@@ -459,7 +459,7 @@ def main() -> None:
                         repository.api_usage_today(),
                         api_daily_limit,
                     )
-                if inline_goal_validation:
+                if inline_goal_validation:  # noqa: SIM102 - preserves hot-path contract test
                     if goal_enabled:
                         try:
                             ensure_latest_goal_model_validation(repository, LOGGER)
