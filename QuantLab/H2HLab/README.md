@@ -111,7 +111,19 @@ H2HLab never writes production picks, production registration, bankroll state or
 
 ## Analytics contract
 
-The Analytics H2H tab exposes the generic QuantLab performance/calibration cohorts plus dedicated H2H dimensions:
+The Analytics H2H tab now starts with the frozen paired experiment defined in
+[PAIRED_EXPERIMENT.md](./PAIRED_EXPERIMENT.md). The primary question is no longer whether
+a CONFIRM bucket looks good; it is whether DC+H2H beats DC-only on identical experimental
+evidence.
+
+The primary experiment reports:
+
+- DC-only ROI vs DC+H2H ROI and ROI uplift;
+- DC-only Brier vs DC+H2H Brier and Brier uplift;
+- frozen arm relation buckets (same bet, flip, H2H-only, DC-only, etc.);
+- post-result rescue/harm/outperformance regimes.
+
+The existing H2H analytics also exposes the generic QuantLab performance/calibration cohorts plus dedicated H2H dimensions:
 
 - direct H2H sample size;
 - DC probability;
@@ -122,11 +134,16 @@ The Analytics H2H tab exposes the generic QuantLab performance/calibration cohor
 - H2H minus DC probability gap;
 - crosses with market, selection, odds and composite probability.
 
-The main V1 research question is **incremental value**: does the same DC probability regime perform better when direct H2H confirms it than when H2H is neutral or conflicts?
+CONFIRM/CONFLICT remains diagnostic only. The causal-style paired test is documented separately in
+`PAIRED_EXPERIMENT.md` and is the primary evidence surface for incremental value.
 
 ## Persistence
 
-Migration 060a_quantlab_h2hlab_v1.sql adds:
+Migration 060a_quantlab_h2hlab_v1.sql adds the base H2HLab schema. Migration
+060b_quantlab_h2h_paired_experiment.sql adds the frozen paired-experiment and settlement
+ledgers.
+
+The base migration adds:
 
 - H2H to the QuantLab shadow-lab check;
 - immutable quantlab_h2h_snapshots;

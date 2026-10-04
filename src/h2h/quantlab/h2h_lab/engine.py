@@ -13,6 +13,13 @@ from h2h.domain.fixture_identity import API_FOOTBALL_PROVIDER
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.quant.dixon_coles import DixonColesFitError
+from h2h.quantlab.h2h_lab.experiment import (
+    EXPERIMENT_VERSION,
+    arm_relation,
+    canonical_arm,
+    probability_trials,
+    should_freeze,
+)
 from h2h.quantlab.scope import goal_scope
 
 POLICY_VERSION = "H2HLAB_DC_H2H_POLICY_V1"
@@ -157,6 +164,7 @@ class H2HDecision:
 class H2HEngineResult:
     decisions_inserted: int = 0
     picks_inserted: int = 0
+    experiments_inserted: int = 0
 
 
 class H2HLabEngine:
@@ -264,18 +272,28 @@ class H2HLabEngine:
                 captured_at = _utc(pair["captured_at"], "captured_at")
                 quote_age = (now - captured_at).total_seconds()
                 seconds_to_kickoff = (kickoff - now).total_seconds()
-                reason = None
+                common_reason = None
                 if seconds_to_kickoff < MIN_SECONDS_TO_KICKOFF:
-                    reason = "KICKOFF_TOO_CLOSE"
+                    common_reason = "KICKOFF_TOO_CLOSE"
                 elif quote_age < 0:
-                    reason = "QUOTE_FROM_FUTURE"
+                    common_reason = "QUOTE_FROM_FUTURE"
                 elif quote_age > MAX_QUOTE_AGE_SECONDS:
-                    reason = "STALE_QUOTE"
+                    common_reason = "STALE_QUOTE"
                 elif not MIN_ODDS <= odds <= MAX_ODDS:
-                    reason = "ODDS_OUTSIDE_RANGE"
-                elif edge < MIN_EDGE:
+                    common_reason = "ODDS_OUTSIDE_RANGE"
+
+                dc_edge = dc_probability - market_probability
+                dc_ev = dc_probability * odds - 1.0
+                dc_reason = common_reason
+                if dc_reason is None and dc_edge < MIN_EDGE:
+                    dc_reason = "EDGE_BELOW_MINIMUM"
+                elif dc_reason is None and dc_ev < MIN_EXPECTED_VALUE:
+                    dc_reason = "EV_BELOW_MINIMUM"
+
+                reason = common_reason
+                if reason is None and edge < MIN_EDGE:
                     reason = "EDGE_BELOW_MINIMUM"
-                elif ev < MIN_EXPECTED_VALUE:
+                elif reason is None and ev < MIN_EXPECTED_VALUE:
                     reason = "EV_BELOW_MINIMUM"
                 agreement = "CONFIRM" if (dc_probability - 0.5) * (h2h_shrunk - 0.5) > 0 else "CONFLICT" if (dc_probability - 0.5) * (h2h_shrunk - 0.5) < 0 else "NEUTRAL"
                 evaluated.append({
@@ -284,9 +302,72 @@ class H2HLabEngine:
                     "market_probability": market_probability, "dc_probability": dc_probability,
                     "h2h_raw_probability": h2h_raw, "h2h_probability": h2h_shrunk,
                     "model_probability": composite, "edge": edge, "expected_value": ev,
+                    "dc_edge": dc_edge, "dc_expected_value": dc_ev,
                     "quote_age_seconds": quote_age, "seconds_to_kickoff": seconds_to_kickoff,
+                    "common_reason": common_reason, "dc_reason": dc_reason,
                     "reason": reason, "agreement": agreement, "meetings": evidence_meetings,
                 })
+
+        experiments_inserted = 0
+        if should_freeze(evaluated):
+            dc_arm = canonical_arm(
+                evaluated,
+                arm="DC_ONLY",
+                reason_key="dc_reason",
+                probability_key="dc_probability",
+                edge_key="dc_edge",
+                ev_key="dc_expected_value",
+            )
+            h2h_arm = canonical_arm(
+                evaluated,
+                arm="DC_H2H",
+                reason_key="reason",
+                probability_key="model_probability",
+                edge_key="edge",
+                ev_key="expected_value",
+            )
+            trials = probability_trials(evaluated)
+            relation = arm_relation(dc_arm, h2h_arm)
+            experiment_evidence = _fingerprint(
+                {
+                    "fixture_id": fixture_id,
+                    "experiment_version": EXPERIMENT_VERSION,
+                    "snapshot": snapshot["h2h_snapshot_id"],
+                    "model_version": model_version,
+                    "frozen_at": now.isoformat(),
+                    "dc_arm": dc_arm,
+                    "h2h_arm": h2h_arm,
+                    "trials": trials,
+                    "dc_weight": dc_weight,
+                    "h2h_weight": h2h_weight,
+                }
+            )
+            experiments_inserted = int(
+                bool(
+                    self._repository.save_h2h_experiment(
+                        experiment_id="quantlab-h2h-experiment-v1:"
+                        + _fingerprint(
+                            {
+                                "fixture_id": fixture_id,
+                                "experiment_version": EXPERIMENT_VERSION,
+                            }
+                        ),
+                        fixture_id=fixture_id,
+                        h2h_snapshot_id=str(snapshot["h2h_snapshot_id"]),
+                        frozen_at=now,
+                        experiment_version=EXPERIMENT_VERSION,
+                        model_version=model_version,
+                        h2h_sample_size=sample_size,
+                        dc_weight=dc_weight,
+                        h2h_weight=h2h_weight,
+                        relation=relation,
+                        dc_arm=dc_arm,
+                        h2h_arm=h2h_arm,
+                        probability_trials=trials,
+                        evidence_fingerprint=experiment_evidence,
+                    )
+                )
+            )
 
         eligible = [item for item in evaluated if item["reason"] is None]
         canonical = max(
@@ -343,4 +424,8 @@ class H2HLabEngine:
             decisions += int(inserted)
             if decision == "PICK" and inserted:
                 picks += int(bool(self._repository.save_context_shadow_bet(row, stake_minor=FLAT_STAKE_MINOR)))
-        return H2HEngineResult(decisions_inserted=decisions, picks_inserted=picks)
+        return H2HEngineResult(
+            decisions_inserted=decisions,
+            picks_inserted=picks,
+            experiments_inserted=experiments_inserted,
+        )

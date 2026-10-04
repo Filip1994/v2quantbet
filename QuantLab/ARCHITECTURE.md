@@ -137,6 +137,8 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_goal_decisions
 - quantlab_h2h_snapshots
 - quantlab_h2h_decisions
+- quantlab_h2h_experiments
+- quantlab_h2h_experiment_settlements
 
 ## Market collector contract
 
