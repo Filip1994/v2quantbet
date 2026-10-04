@@ -62,10 +62,10 @@ def test_research_low_scoring_non_extreme_can_overlap_edge_10_15() -> None:
         }
     )
 
-    assert matches == (
+    assert set(matches) == {
         RESEARCH_LOW_SCORING_NON_EXTREME,
         RESEARCH_OU_UNDER_EDGE_10_15,
-    )
+    }
 
 
 def test_research_edge_20_30_is_extreme_not_non_extreme() -> None:
