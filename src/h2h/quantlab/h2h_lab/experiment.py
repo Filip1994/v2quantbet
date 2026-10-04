@@ -169,6 +169,8 @@ def _settle_arm(arm: dict[str, Any], *, status: str, home: int | None, away: int
 
 
 def _regime(dc_outcome: str, h2h_outcome: str, dc_pnl: int, h2h_pnl: int) -> str:
+    if "VOID" in {dc_outcome, h2h_outcome}:
+        return "VOID"
     if dc_outcome == "NO_BET" and h2h_outcome == "NO_BET":
         return "BOTH_NO_BET"
     if dc_outcome == "NO_BET":
