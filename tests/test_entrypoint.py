@@ -94,7 +94,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         registration=SimpleNamespace(
             bootstrap_bankroll=SimpleNamespace(execute=lambda: None),
         ),
-        production_funnel=SimpleNamespace(exposure_breakdown=lambda: {}),
+        production_funnel=SimpleNamespace(exposure_breakdown=dict),
         monitoring=SimpleNamespace(
             reconcile=SimpleNamespace(execute=lambda: None),
             worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
