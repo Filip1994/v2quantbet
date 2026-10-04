@@ -41,6 +41,7 @@ LABS = {
     "goal": ("GOAL", "GoalLab", "Goals · DC+ and goal-market experiments"),
     "corner": ("CORNER", "CornerLab", "Corners · totals, team totals and handicaps"),
     "card": ("CARD", "CardLab", "Cards · totals, team cards and referee-sensitive models"),
+    "h2h": ("H2H", "H2HLab", "Direct H2H · Dixon-Coles + mutual-match evidence"),
 }
 
 
