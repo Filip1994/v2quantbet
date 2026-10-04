@@ -415,18 +415,19 @@ def main() -> None:
                     row.get("edge"),
                     row.get("expected_value"),
                 )
-        if inline_goal_validation and goal_enabled:
-            try:
-                ensure_latest_goal_model_validation(repository, LOGGER)
-            except Exception as exc:
-                sqlstate = getattr(exc, "sqlstate", None)
-                error_text = str(exc)
-                LOGGER.exception(
-                    "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s error=%s",
-                    type(exc).__name__,
-                    sqlstate,
-                    error_text,
-                )
+        if inline_goal_validation:
+            if goal_enabled:
+                try:
+                    ensure_latest_goal_model_validation(repository, LOGGER)
+                except Exception as exc:
+                    sqlstate = getattr(exc, "sqlstate", None)
+                    error_text = str(exc)
+                    LOGGER.exception(
+                        "GoalLab DC+ startup validation failed error_class=%s sqlstate=%s error=%s",
+                        type(exc).__name__,
+                        sqlstate,
+                        error_text,
+                    )
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
@@ -458,18 +459,19 @@ def main() -> None:
                         repository.api_usage_today(),
                         api_daily_limit,
                     )
-                if inline_goal_validation and goal_enabled:
-                    try:
-                        ensure_latest_goal_model_validation(repository, LOGGER)
-                    except Exception as exc:
-                        sqlstate = getattr(exc, "sqlstate", None)
-                        error_text = str(exc)
-                        LOGGER.exception(
-                            "GoalLab DC+ validation failed error_class=%s sqlstate=%s error=%s",
-                            type(exc).__name__,
-                            sqlstate,
-                            error_text,
-                        )
+                if inline_goal_validation:
+                    if goal_enabled:
+                        try:
+                            ensure_latest_goal_model_validation(repository, LOGGER)
+                        except Exception as exc:
+                            sqlstate = getattr(exc, "sqlstate", None)
+                            error_text = str(exc)
+                            LOGGER.exception(
+                                "GoalLab DC+ validation failed error_class=%s sqlstate=%s error=%s",
+                                type(exc).__name__,
+                                sqlstate,
+                                error_text,
+                            )
                 if inline_research_audits and corner_enabled:
                     readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                     if (
