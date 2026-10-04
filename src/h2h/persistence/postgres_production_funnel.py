@@ -22,13 +22,7 @@ from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateE
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
     DEFAULT_BUCKET_IDS,
-    GOALLAB_OU_OVER_ODDS_2_01_2_50,
-    GOALLAB_OU_OVER_XG_2_5_3_0,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
-    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
-    RESEARCH_LOW_SCORING_NON_EXTREME,
-    RESEARCH_OU_UNDER_EDGE_10_15,
-    RESEARCH_OU_UNDER_EDGE_20_30,
     matching_bucket_ids,
     n_roi_priority_score,
 )
