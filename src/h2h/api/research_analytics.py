@@ -11,6 +11,14 @@ from statistics import mean, median, stdev
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
+from h2h.production_buckets import (
+    PRODUCTION_BUCKET_SPECS,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    RESEARCH_LOW_SCORING_NON_EXTREME,
+    RESEARCH_OU_UNDER_EDGE_10_15,
+    RESEARCH_OU_UNDER_EDGE_20_30,
+)
+
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
 
@@ -800,6 +808,115 @@ def _metrics_table(
     )
 
 
+def _selected_research_production_buckets(
+    snapshot: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Resolve the four selected Research intake buckets to their current analytics rows."""
+    specs = {
+        spec.bucket_id: spec
+        for spec in PRODUCTION_BUCKET_SPECS
+        if spec.source_universe == "RESEARCH"
+    }
+
+    def find(rows: Sequence[dict[str, Any]], **expected: str) -> dict[str, Any] | None:
+        for row in rows:
+            if all(str(row.get(key) or "") == value for key, value in expected.items()):
+                return row
+        return None
+
+    sources = (
+        (
+            RESEARCH_OU_UNDER_EDGE_10_15,
+            find(
+                snapshot["cohorts"]["market_selection_edge"],
+                market="OU_25",
+                selection="UNDER",
+                edge_bucket="10–15%",
+            ),
+        ),
+        (
+            RESEARCH_OU_UNDER_EDGE_20_30,
+            find(
+                snapshot["cohorts"]["market_selection_edge"],
+                market="OU_25",
+                selection="UNDER",
+                edge_bucket="20–30%",
+            ),
+        ),
+        (
+            RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+            find(
+                snapshot["cohorts"]["market_selection_odds"],
+                market="BTTS",
+                selection="NO",
+                odds_bucket="2.01–2.50",
+            ),
+        ),
+        (
+            RESEARCH_LOW_SCORING_NON_EXTREME,
+            find(
+                snapshot["diagnostics"],
+                diagnostic="LOW_SCORING_NON_EXTREME",
+            ),
+        ),
+    )
+
+    output: list[dict[str, Any]] = []
+    for bucket_id, metrics in sources:
+        spec = specs[bucket_id]
+        row = dict(metrics or {})
+        row.update(
+            {
+                "bucket_id": bucket_id,
+                "bucket_label": spec.label,
+                "analytics_path": spec.analytics_path,
+                "reference_roi_pct": spec.reference_roi_pct,
+            }
+        )
+        output.append(row)
+    return output
+
+
+def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
+    rows = _selected_research_production_buckets(snapshot)
+    rendered = []
+    for priority, row in enumerate(rows, 1):
+        href = str(row["analytics_path"])
+        n = int(row.get("n") or 0)
+        wins = int(row.get("wins") or 0)
+        losses = int(row.get("losses") or 0)
+        voids = int(row.get("voids") or 0)
+        evidence = escape(str(row.get("sample_band") or "—"))
+        rendered.append(
+            '<tr class="production-bucket-row">'
+            f'<td><span class="priority-rank">#{priority}</span></td>'
+            f'<td><a class="production-bucket-link" href="{escape(href, quote=True)}" '
+            'target="_blank" rel="noopener noreferrer">'
+            f'{escape(str(row["bucket_label"]))}</a>'
+            f'<small><code>{escape(str(row["bucket_id"]))}</code></small></td>'
+            f'<td>{n}</td><td>{wins}-{losses}-{voids}</td>'
+            f'<td class="metric-strong {_metric_class(row.get("roi_pct"))}">'
+            f'{_fmt(row.get("roi_pct"), "%", signed=True)}</td>'
+            f'<td>{_fmt(row.get("reference_roi_pct"), "%", signed=True)}</td>'
+            f'<td>{_fmt(row.get("avg_entry_odds"))}</td>'
+            f'<td class="{_metric_class(row.get("avg_edge_pct"))}">'
+            f'{_fmt(row.get("avg_edge_pct"), "%", signed=True)}</td>'
+            f'<td><span class="evidence">{evidence}</span></td>'
+            "</tr>"
+        )
+    return (
+        '<section class="panel production-intake-panel" id="production-intake-buckets">'
+        '<div class="panel-title"><h3>Production intake · selected buckets</h3>'
+        '<span class="row-count">neon blue = approved intake · priority follows ROI at selection</span></div>'
+        '<div class="scroll"><table><thead><tr>'
+        '<th>Priority</th><th>Bucket</th><th>N</th><th>W-L-V</th><th>Current ROI</th>'
+        '<th>ROI at selection</th><th>Avg odds</th><th>Avg edge</th><th>Evidence</th>'
+        '</tr></thead><tbody>'
+        + "".join(rendered)
+        + "</tbody></table></div></section>"
+    )
+
+
 def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") -> str:
     params = parse_qs(query, keep_blank_values=True)
     active_sort_table = params.get("sort_table", [""])[0].strip()
@@ -1033,6 +1150,7 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         row_link_params={"ev_bucket": "ev_bucket"},
         row_link_fixed=history,
     )
+    production_intake = _selected_research_bucket_table(snapshot)
     diagnostics = _metrics_table(
         "Low-scoring diagnostic",
         snapshot["diagnostics"],
@@ -1158,6 +1276,14 @@ border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;fo
 tbody tr.bucket-qualified td{{background:#16251c;box-shadow:inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
 tbody tr.bucket-qualified td:first-child{{background:#16251c;box-shadow:inset 3px 0 0 #79c995,inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
 tbody tr.bucket-qualified:hover td,tbody tr.bucket-qualified:hover td:first-child{{background:#1a2d22}}
+.production-intake-panel{{border:2px solid #18d7ff;box-shadow:0 0 18px rgba(24,215,255,.24),inset 0 0 0 1px rgba(24,215,255,.12);background:linear-gradient(180deg,rgba(24,215,255,.055),var(--panel))}}
+.production-intake-panel .panel-title{{border-bottom-color:#168fb0;background:rgba(24,215,255,.045)}}
+.production-intake-panel .panel-title h3{{color:#7eeaff;text-transform:uppercase;letter-spacing:.08em}}
+.production-bucket-row td{{box-shadow:inset 0 1px 0 rgba(24,215,255,.34),inset 0 -1px 0 rgba(24,215,255,.34);background:rgba(10,63,76,.18)}}
+.production-bucket-row td:first-child{{box-shadow:inset 3px 0 0 #18d7ff,inset 0 1px 0 rgba(24,215,255,.34),inset 0 -1px 0 rgba(24,215,255,.34)}}
+.production-bucket-link{{color:#7eeaff;font-weight:900;text-decoration:none;border-bottom:1px solid rgba(126,234,255,.6)}}
+.production-bucket-link:hover{{color:#d7f9ff;border-bottom-color:#d7f9ff}}
+.priority-rank{{display:inline-flex;min-width:26px;justify-content:center;padding:3px 6px;border:1px solid #18d7ff;border-radius:999px;color:#7eeaff;font-weight:900}}
 .empty{{color:var(--muted);text-align:center}}.evidence{{display:inline-flex;padding:3px 7px;border-radius:999px;
 font-size:9px;font-weight:800;letter-spacing:.055em;border:1px solid #3a4148;color:#b5bdc4;background:#20252b}}
 .evidence-decision-grade,.evidence-mature{{border-color:#496b58;color:#9fd0af;background:#17231c}}
@@ -1201,7 +1327,7 @@ Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 <section id="decision" class="analytics-group">
 <div class="group-head"><div><h2>ROI decision lab</h2>
 <p>Low-dimensional buckets first. Rolling 100/250/500 only appears after that bucket has enough graded picks.</p></div></div>
-{market_selection}{market_selection_odds}{market_selection_edge}{edge}{odds}{time_to_kickoff}{league_market}{league_seasons}{weekly}
+{production_intake}{market_selection}{market_selection_odds}{market_selection_edge}{edge}{odds}{time_to_kickoff}{league_market}{league_seasons}{weekly}
 </section>
 <section id="calibration" class="analytics-group">
 <div class="group-head"><div><h2>Calibration & CLV</h2>
