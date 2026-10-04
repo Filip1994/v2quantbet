@@ -147,6 +147,18 @@ def main() -> None:
 
     LOGGER.info("QuantLab migration runner=%s", MIGRATION_RUNNER_VERSION)
 
+    goal_enabled = _boolean("QUANTBET_QUANTLAB_GOAL_ENABLED", "true")
+    corner_enabled = _boolean("QUANTBET_QUANTLAB_CORNER_ENABLED", "true")
+    card_enabled = _boolean("QUANTBET_QUANTLAB_CARD_ENABLED", "true")
+    h2h_enabled = _boolean("QUANTBET_QUANTLAB_H2H_ENABLED", "true")
+    LOGGER.info(
+        "QuantLab lab switches goal=%s corner=%s card=%s h2h=%s",
+        goal_enabled,
+        corner_enabled,
+        card_enabled,
+        h2h_enabled,
+    )
+
     goal_contract = assert_goallab_v1_contract()
     LOGGER.info(
         "GoalLab active lock verified lock=%s model_prefix=%s feature=%s "
@@ -211,19 +223,24 @@ def main() -> None:
         StatBunkerRefereeSource(
             timeout=float(os.getenv("QUANTBET_QUANTLAB_REFEREE_WEB_TIMEOUT_SECONDS", "10"))
         )
-        if _boolean("QUANTBET_QUANTLAB_REFEREE_WEB_ENABLED", "true")
+        if card_enabled
+        and _boolean("QUANTBET_QUANTLAB_REFEREE_WEB_ENABLED", "true")
         else None
     )
     runtime = QuantLabRuntime(
         repository,
         provider,
-        goal_engine=goal_engine,
-        h2h_engine=h2h_engine,
-        corner_engine=corner_engine,
-        card_engine=card_engine,
+        goal_engine=goal_engine if goal_enabled else None,
+        h2h_engine=h2h_engine if h2h_enabled else None,
+        corner_engine=corner_engine if corner_enabled else None,
+        card_engine=card_engine if card_enabled else None,
         market_archive_writer=market_archive_writer,
         referee_web_source=referee_web_source,
         settings=QuantLabRuntimeSettings(
+            goal_enabled=goal_enabled,
+            corner_enabled=corner_enabled,
+            card_enabled=card_enabled,
+            h2h_enabled=h2h_enabled,
             lookahead_hours=_positive_integer("QUANTBET_QUANTLAB_LOOKAHEAD_HOURS", "36"),
             discovery_lookback_days=_integer(
                 "QUANTBET_QUANTLAB_DISCOVERY_LOOKBACK_DAYS", "1"
@@ -351,12 +368,13 @@ def main() -> None:
             LOGGER.info("QuantLab dashboard listening; startup audits continue asynchronously from healthcheck perspective")
         else:
             LOGGER.info("QuantLab collector-only runtime started")
-        if inline_research_audits:
+        if inline_research_audits and card_enabled:
             try:
                 log_cardlab_v5_audit(repository, LOGGER)
             except Exception:
                 LOGGER.exception("QuantLab CardLab V5 startup audit failed")
 
+        if inline_research_audits and corner_enabled:
             try:
                 log_cornerlab_v2_audit(repository, LOGGER)
                 log_cornerlab_v2_readiness(repository, LOGGER)
@@ -366,8 +384,16 @@ def main() -> None:
             else:
                 model_ready_audit_emitted = True
 
-        _log_latest_goal_picks(repository)
-        for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab"), ("H2H", "H2HLab")):
+        if goal_enabled:
+            _log_latest_goal_picks(repository)
+        enabled_pick_logs = (
+            (("CORNER", "CornerLab"),) if corner_enabled else ()
+        ) + (
+            (("CARD", "CardLab"),) if card_enabled else ()
+        ) + (
+            (("H2H", "H2HLab"),) if h2h_enabled else ()
+        )
+        for lab, label in enabled_pick_logs:
             for row in repository.list_bets(lab, limit=20):
                 LOGGER.info(
                     "QuantLab %s shadow pick fixture=%s match=%s vs %s league=%s "
@@ -389,7 +415,7 @@ def main() -> None:
                     row.get("edge"),
                     row.get("expected_value"),
                 )
-        if inline_goal_validation:
+        if inline_goal_validation and goal_enabled:
             try:
                 ensure_latest_goal_model_validation(repository, LOGGER)
             except Exception as exc:
@@ -404,28 +430,35 @@ def main() -> None:
         while not stop.is_set():
             try:
                 cycle_result = runtime.run_once()
-                if inline_research_audits and (
+                if card_enabled and inline_research_audits and (
                     cycle_result.get("card_decisions") or cycle_result.get("card_picks")
                 ):
                     try:
                         log_cardlab_v5_audit(repository, LOGGER)
                     except Exception:
                         LOGGER.exception("QuantLab CardLab V5 cycle audit failed")
-                goal_readiness = goal_structural_engine.readiness()
-                LOGGER.info(
-                    "GoalLab DC+ readiness reason=%s training_sample=%s minimum=%s "
-                    "history_matches=%s active_features=%s model_version=%s "
-                    "api_used_today=%s api_daily_limit=%s",
-                    goal_readiness.get("reason"),
-                    goal_readiness.get("training_sample_size"),
-                    goal_readiness.get("minimum_training_examples", 300),
-                    goal_readiness.get("history_match_count"),
-                    goal_readiness.get("active_feature_count"),
-                    goal_readiness.get("model_version"),
-                    repository.api_usage_today(),
-                    api_daily_limit,
-                )
-                if inline_goal_validation:
+                if goal_enabled:
+                    goal_readiness = goal_structural_engine.readiness()
+                    LOGGER.info(
+                        "GoalLab DC+ readiness reason=%s training_sample=%s minimum=%s "
+                        "history_matches=%s active_features=%s model_version=%s "
+                        "api_used_today=%s api_daily_limit=%s",
+                        goal_readiness.get("reason"),
+                        goal_readiness.get("training_sample_size"),
+                        goal_readiness.get("minimum_training_examples", 300),
+                        goal_readiness.get("history_match_count"),
+                        goal_readiness.get("active_feature_count"),
+                        goal_readiness.get("model_version"),
+                        repository.api_usage_today(),
+                        api_daily_limit,
+                    )
+                else:
+                    LOGGER.info(
+                        "QuantLab API usage api_used_today=%s api_daily_limit=%s",
+                        repository.api_usage_today(),
+                        api_daily_limit,
+                    )
+                if inline_goal_validation and goal_enabled:
                     try:
                         ensure_latest_goal_model_validation(repository, LOGGER)
                     except Exception as exc:
@@ -437,7 +470,7 @@ def main() -> None:
                             sqlstate,
                             error_text,
                         )
-                if inline_research_audits:
+                if inline_research_audits and corner_enabled:
                     readiness = log_cornerlab_v2_training_readiness(repository, LOGGER)
                     if (
                         bool(readiness["model_fit_eligible"])
