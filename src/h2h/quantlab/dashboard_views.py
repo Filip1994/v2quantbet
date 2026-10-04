@@ -18,6 +18,13 @@ from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
 from h2h.domain.competition_scope import is_universe_blocked_competition
+from h2h.domain.production_intake_buckets import (
+    BUCKET_SPECS,
+    GOALLAB_OU_OVER_ODDS_2_01_2_50,
+    GOALLAB_OU_OVER_XG_2_5_3_0,
+    bucket_anchor,
+    bucket_matches,
+)
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
@@ -415,7 +422,7 @@ def _shell(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantLab · {escape(title)} · {escape(view.title())}</title>
 <style>
-:root{{--bg:#0f1215;--panel:#181c20;--panel2:#20252a;--line:#30363c;--text:#edf0f2;--muted:#9099a2;--win:#69c98f;--loss:#e06f78;--warn:#d5aa61}}
+:root{{--bg:#0f1215;--panel:#181c20;--panel2:#20252a;--line:#30363c;--text:#edf0f2;--muted:#9099a2;--win:#69c98f;--loss:#e06f78;--warn:#d5aa61;--neon-blue:#00d9ff}}
 *{{box-sizing:border-box}}
 body{{margin:0;background:linear-gradient(180deg,#171b1f 0,var(--bg) 220px);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
 main{{max-width:1760px;margin:auto;padding:24px}}
@@ -472,6 +479,24 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .watchlist .panel{{border-color:#5b4726;background:#171b1e}}
 .watchlist .panel-title{{background:rgba(169,120,44,.06)}}
 .watchlist .panel-title b{{color:#f0d29a}}
+.production-intake{{margin:8px 0 18px;padding:12px;border:2px solid var(--neon-blue);border-radius:16px;
+background:linear-gradient(180deg,rgba(0,217,255,.13),rgba(0,217,255,.035));
+box-shadow:0 0 0 1px rgba(0,217,255,.16) inset,0 0 24px rgba(0,217,255,.11)}}
+.production-intake-head{{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:2px 2px 11px}}
+.production-intake-head b{{color:#86efff;font-size:13px;letter-spacing:.12em;text-transform:uppercase}}
+.production-intake-head span{{color:#aeb6bd;font-size:11px}}
+.production-bucket-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}
+.production-bucket-selected{{scroll-margin-top:72px;border:1px solid var(--neon-blue);border-radius:12px;padding:13px;
+background:rgba(10,27,32,.78);box-shadow:0 0 18px rgba(0,217,255,.08)}}
+.production-bucket-selected small{{color:#72d9e9;font-size:9px;text-transform:uppercase;letter-spacing:.08em}}
+.production-bucket-selected h3{{margin:4px 0;font-size:14px;color:#f0fdff}}
+.production-bucket-selected code{{display:block;color:#79e7f9;font-size:9px;white-space:normal;overflow-wrap:anywhere}}
+.production-bucket-selected p{{color:#aeb9bf;font-size:11px;line-height:1.45}}
+.production-bucket-metrics{{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}}
+.production-bucket-metrics span{{min-width:74px;padding:7px 9px;border:1px solid rgba(0,217,255,.25);
+border-radius:8px;background:rgba(0,0,0,.16)}}.production-bucket-metrics b{{display:block;margin-top:2px}}
+.production-bucket-link{{display:inline-block;color:#a8f2ff;font-size:11px;font-weight:900}}
+.production-bucket-link:hover{{color:#fff;text-shadow:0 0 10px var(--neon-blue)}}
 .analytics-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}}
 .analytics-grid .panel{{margin:0}}
 .metric-list{{padding:8px 14px 12px}}.metric-line{{display:flex;justify-content:space-between;gap:18px;padding:8px 0;border-bottom:1px solid #262c31}}
@@ -479,7 +504,7 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .audit-pass{{color:var(--win)}}.audit-fail{{color:var(--loss)}}
 footer{{margin-top:14px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1100px){{.cards{{grid-template-columns:repeat(4,1fr)}}.analytics-grid{{grid-template-columns:1fr}}}}
-@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
+@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}.production-bucket-grid{{grid-template-columns:1fr}}}}
 </style>
 </head>
 <body><main>
@@ -2608,6 +2633,68 @@ def render_analytics(
         for label, value in top_cards
     )
 
+    production_intake = ""
+    if lab_key == "goal":
+        selected_bucket_ids = (
+            GOALLAB_OU_OVER_XG_2_5_3_0,
+            GOALLAB_OU_OVER_ODDS_2_01_2_50,
+        )
+        rendered_buckets: list[str] = []
+        for bucket_id in selected_bucket_ids:
+            bucket_rows = tuple(row for row in rows if bucket_matches(row, bucket_id))
+            bucket_metrics = goal_pick_metrics(bucket_rows)
+            if bucket_id == GOALLAB_OU_OVER_XG_2_5_3_0:
+                bucket_query = {
+                    "view": "analytics",
+                    "lab": "goal",
+                    "bucket": "1",
+                    "bucket_market_key": "OU_25",
+                    "bucket_selection": "OVER",
+                    "bucket_expected_total_goals_bucket": "2.5–3",
+                }
+            else:
+                bucket_query = {
+                    "view": "analytics",
+                    "lab": "goal",
+                    "bucket": "1",
+                    "bucket_market_key": "OU_25",
+                    "bucket_selection": "OVER",
+                    "bucket_entry_odds_bucket": "2.01–2.50",
+                }
+            spec = BUCKET_SPECS[bucket_id]
+            roi = bucket_metrics.get("roi_pct")
+            roi_class = (
+                "positive"
+                if roi is not None and float(roi) > 0
+                else "negative"
+                if roi is not None and float(roi) < 0
+                else "neutral"
+            )
+            rendered_buckets.append(
+                f'<article class="production-bucket-selected" id="{escape(bucket_anchor(bucket_id), quote=True)}">'
+                '<small>SELECTED · PRODUCTION INTAKE</small>'
+                f'<h3>{escape(spec.label)}</h3><code>{escape(bucket_id)}</code>'
+                f'<p>{escape(spec.definition)}</p>'
+                '<div class="production-bucket-metrics">'
+                f'<span><small>N</small><b>{int(bucket_metrics.get("graded_n") or 0)}</b></span>'
+                f'<span><small>ROI</small><b class="{roi_class}">'
+                f'{_metric(bucket_metrics.get("roi_pct"), suffix="%", signed=True)}</b></span>'
+                f'<span><small>W-L-V</small><b>{int(bucket_metrics.get("wins") or 0)}-'
+                f'{int(bucket_metrics.get("losses") or 0)}-{int(bucket_metrics.get("voids") or 0)}</b></span>'
+                '</div>'
+                f'<a class="production-bucket-link" target="_blank" rel="noopener noreferrer" '
+                f'href="/quantlab?{escape(urlencode(bucket_query), quote=True)}#bucket-picks">Exact picks ↗</a>'
+                '</article>'
+            )
+        production_intake = (
+            '<section class="production-intake" id="production-intake-buckets">'
+            '<div class="production-intake-head"><b>Production intake buckets</b>'
+            '<span>Selected GoalLab buckets · neon blue · exact N + ROI</span></div>'
+            '<div class="production-bucket-grid">'
+            + "".join(rendered_buckets)
+            + '</div></section>'
+        )
+
     if lab_key == "goal":
         analytics_note = (
             "GoalLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
@@ -3600,6 +3687,7 @@ def render_analytics(
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
         f'<section class="cards">{cards_html}</section>'
+        + production_intake
         + _bucket_pick_table(
             rows,
             params=params,
