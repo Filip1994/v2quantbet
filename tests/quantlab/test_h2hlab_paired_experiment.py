@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from h2h.quantlab.h2h_lab.experiment import (
     arm_relation,
     canonical_arm,
@@ -40,7 +42,7 @@ def _candidate(
             "provider_bet_name": market,
             "market_key": market,
             "line": None if market == "BTTS" else 2.5,
-            "captured_at": __import__("datetime").datetime(2026, 10, 4, tzinfo=__import__("datetime").UTC),
+            "captured_at": datetime(2026, 10, 4, tzinfo=UTC),
         },
         "selection": selection,
         "selected": {"market_observation_id": f"s-{market}-{selection}-{bookmaker}"},
