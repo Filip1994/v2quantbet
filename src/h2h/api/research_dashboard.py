@@ -36,6 +36,17 @@ from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 
 
+# Keep dashboard health topology explicit. Durable worker rows survive deploys, so
+# treating every historical row as a live Engine dependency creates false-red
+# status and duplicates Models/Odds/Results failures into the Engine card.
+_HEALTH_WORKER_GROUPS: dict[str, tuple[str, ...]] = {
+    "Engine": ("discovery", "production_intake", "daily_bulletin"),
+    "Models": ("model_lifecycle",),
+    "Odds": ("opportunity", "monitoring", "closing_proxy"),
+    "Results": ("results",),
+}
+
+
 def _number(value: Any) -> float | None:
     if value is None:
         return None
@@ -568,20 +579,14 @@ class ResearchDashboardService:
                 "detail": "; ".join(details),
             }
 
-        engine_names = tuple(sorted(by_name))
-        engine = worker_component("Engine", engine_names) if engine_names else {
-            "label": "Engine",
-            "state": "bad",
-            "summary": "No heartbeat",
-            "detail": "production_worker_status is empty.",
-        }
-        models = worker_component("Models", ("model_lifecycle",))
+        engine = worker_component("Engine", _HEALTH_WORKER_GROUPS["Engine"])
+        models = worker_component("Models", _HEALTH_WORKER_GROUPS["Models"])
         odds = worker_component(
             "Odds",
-            ("opportunity", "monitoring", "closing_proxy"),
+            _HEALTH_WORKER_GROUPS["Odds"],
             tolerate_partial=True,
         )
-        results = worker_component("Results", ("results",))
+        results = worker_component("Results", _HEALTH_WORKER_GROUPS["Results"])
 
         if int(corrections or 0) > 0 and results["state"] == "ok":
             results = {
@@ -670,16 +675,23 @@ class ResearchDashboardService:
 
     @staticmethod
     def _health_html(items: tuple[dict[str, str], ...]) -> str:
-        return "".join(
-            (
+        rendered: list[str] = []
+        for item in items:
+            detail = ""
+            if item["state"] != "ok":
+                detail = (
+                    '<details class="health-detail"><summary>details</summary><div>'
+                    + escape(item["detail"])
+                    + "</div></details>"
+                )
+            rendered.append(
                 f'<div class="health-item health-{escape(item["state"])}" '
                 f'title="{escape(item["detail"], quote=True)}">'
                 f'<span class="health-lamp" aria-hidden="true"></span>'
                 f'<span><b>{escape(item["label"])}</b>'
-                f'<small>{escape(item["summary"])}</small></span></div>'
+                f'<small>{escape(item["summary"])}</small>{detail}</span></div>'
             )
-            for item in items
-        )
+        return "".join(rendered)
 
     def _load_all_signal_rows(self) -> tuple[dict[str, Any], ...]:
         loader = getattr(self._repository, "list_all_signals", None)
@@ -2071,7 +2083,7 @@ main{{max-width:1920px;margin:auto;padding:24px}}.topbar{{display:flex;align-ite
 .brand{{display:flex;align-items:center;gap:14px}}.sportsbook-logo{{height:46px;min-width:154px;display:flex;align-items:center;padding:0 13px;border-radius:10px;background:linear-gradient(180deg,#25292d,#1a1d20);border:1px solid #3d4349;box-shadow:inset 0 1px rgba(255,255,255,.04),0 10px 28px rgba(0,0,0,.22);font-weight:950;letter-spacing:-.03em}}.logo-q{{display:grid;place-items:center;width:31px;height:31px;margin-right:8px;border:2px solid #d4d8dc;border-radius:50%;color:#f0f2f3;font-size:18px;line-height:1}}.logo-word{{color:#d8dcdf;font-size:15px}}.logo-bet{{margin-left:2px;color:#d3aa5f;font-size:15px}}
 h1{{font-size:24px;line-height:1.1;margin:0}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#aab1b8;font-weight:800;margin-bottom:4px}}
 .subtitle{{margin:0;color:var(--muted);font-size:13px}}.readonly{{border:1px solid var(--line);background:#1a1e22;padding:8px 11px;border-radius:999px;color:#aeb5bc;font-size:12px;white-space:nowrap}}
-.health-strip{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-8px 0 16px;padding:9px 10px;background:#15181b;border:1px solid var(--line);border-radius:12px}}.health-label{{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#737b83;font-weight:900;margin:0 4px}}.health-item{{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #2a3035;border-radius:9px;background:#1a1e22;min-width:112px}}.health-item>span:last-child{{display:block}}.health-item b{{display:block;font-size:11px;line-height:1.05}}.health-item small{{display:block;margin:3px 0 0;font-size:9px;line-height:1;color:#858d94}}.health-lamp{{width:9px;height:9px;border-radius:50%;flex:0 0 9px;background:#677079;box-shadow:0 0 0 3px rgba(103,112,121,.10)}}.health-ok .health-lamp{{background:var(--win);box-shadow:0 0 0 3px rgba(105,201,143,.11),0 0 10px rgba(105,201,143,.28)}}.health-warn .health-lamp{{background:var(--warn);box-shadow:0 0 0 3px rgba(198,163,93,.11),0 0 10px rgba(198,163,93,.24)}}.health-bad .health-lamp{{background:var(--loss);box-shadow:0 0 0 3px rgba(224,111,120,.11),0 0 10px rgba(224,111,120,.26)}}.health-unknown .health-lamp{{background:#677079}}
+.health-strip{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-8px 0 16px;padding:9px 10px;background:#15181b;border:1px solid var(--line);border-radius:12px}}.health-label{{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#737b83;font-weight:900;margin:0 4px}}.health-item{{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #2a3035;border-radius:9px;background:#1a1e22;min-width:112px}}.health-item>span:last-child{{display:block}}.health-item b{{display:block;font-size:11px;line-height:1.05}}.health-item small{{display:block;margin:3px 0 0;font-size:9px;line-height:1;color:#858d94}}.health-detail{{margin-top:4px;font-size:9px}}.health-detail summary{{cursor:pointer;color:#9ba4ac;line-height:1.2}}.health-detail div{{margin-top:4px;max-width:260px;color:#aab2b9;line-height:1.35}}.health-lamp{{width:9px;height:9px;border-radius:50%;flex:0 0 9px;background:#677079;box-shadow:0 0 0 3px rgba(103,112,121,.10)}}.health-ok .health-lamp{{background:var(--win);box-shadow:0 0 0 3px rgba(105,201,143,.11),0 0 10px rgba(105,201,143,.28)}}.health-warn .health-lamp{{background:var(--warn);box-shadow:0 0 0 3px rgba(198,163,93,.11),0 0 10px rgba(198,163,93,.24)}}.health-bad .health-lamp{{background:var(--loss);box-shadow:0 0 0 3px rgba(224,111,120,.11),0 0 10px rgba(224,111,120,.26)}}.health-unknown .health-lamp{{background:#677079}}
 .tabs{{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#171a1d;border:1px solid var(--line);border-radius:12px;width:max-content}}
 .tabs a{{text-decoration:none;color:#9ca3aa;padding:9px 16px;border-radius:8px;font-weight:800;font-size:13px;transition:.15s ease}}
 .tabs a:hover{{color:var(--text);background:#24292e}}.tabs a.active{{background:#d4d8dc;color:#17191b;box-shadow:0 5px 16px rgba(0,0,0,.24)}}

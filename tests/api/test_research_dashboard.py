@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from h2h.api.research_dashboard import (
+    _HEALTH_WORKER_GROUPS,
     ResearchDashboardHTTPService,
     ResearchDashboardService,
     counterfactual_outcome,
@@ -94,6 +95,51 @@ class CountingRepository:
         assert limit == 5000
         self.calls += 1
         return (signal_row(),)
+
+
+def test_research_health_groups_cover_only_current_scheduler_workers() -> None:
+    groups = tuple(_HEALTH_WORKER_GROUPS.values())
+    flattened = [worker for group in groups for worker in group]
+
+    assert _HEALTH_WORKER_GROUPS["Engine"] == (
+        "discovery",
+        "production_intake",
+        "daily_bulletin",
+    )
+    assert set(flattened) == {
+        "discovery",
+        "model_lifecycle",
+        "opportunity",
+        "production_intake",
+        "daily_bulletin",
+        "closing_proxy",
+        "monitoring",
+        "results",
+    }
+    assert len(flattened) == len(set(flattened))
+
+
+def test_research_health_non_ok_details_are_tappable() -> None:
+    html = ResearchDashboardService._health_html(
+        (
+            {
+                "label": "Engine",
+                "state": "bad",
+                "summary": "1 problem",
+                "detail": "stale: retired_worker",
+            },
+            {
+                "label": "Database",
+                "state": "ok",
+                "summary": "Connected",
+                "detail": "PostgreSQL operational facts are readable.",
+            },
+        )
+    )
+
+    assert '<details class="health-detail">' in html
+    assert "stale: retired_worker" in html
+    assert html.count('<details class="health-detail">') == 1
 
 
 def test_research_dashboard_reuses_signal_snapshot_within_cache_ttl() -> None:
