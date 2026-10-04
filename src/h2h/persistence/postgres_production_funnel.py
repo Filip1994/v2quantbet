@@ -17,6 +17,7 @@ from hashlib import sha256
 from collections.abc import Callable
 from typing import Any
 
+from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
@@ -28,6 +29,8 @@ from h2h.production_buckets import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    matching_bucket_ids,
+    n_roi_priority_score,
 )
 
 
@@ -60,7 +63,7 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
     canonical = ",".join(bucket_ids)
-    return "PRODUCTION_FUNNEL_INTAKE_V2:" + sha256(canonical.encode("utf-8")).hexdigest()
+    return "PRODUCTION_FUNNEL_INTAKE_V3:" + sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,45 +111,18 @@ class PostgreSQLProductionFunnelRepository:
 
     @staticmethod
     def _research_matches(row: dict[str, Any]) -> tuple[str, ...]:
-        market = str(row["market_key"])
-        selection = str(row["selection"])
-        odds = float(row["odds"])
-        edge = float(row["edge"])
-        ev = float(row["expected_value"])
-        low_scoring = (market == "OU_25" and selection == "UNDER") or (
-            market == "BTTS" and selection == "NO"
-        )
-        extreme = ev >= 0.30 or edge >= 0.20
-        matches: list[str] = []
-        if low_scoring and not extreme:
-            matches.append(RESEARCH_LOW_SCORING_NON_EXTREME)
-        if market == "OU_25" and selection == "UNDER" and 0.10 <= edge < 0.15:
-            matches.append(RESEARCH_OU_UNDER_EDGE_10_15)
-        if market == "OU_25" and selection == "UNDER" and 0.20 <= edge < 0.30:
-            matches.append(RESEARCH_OU_UNDER_EDGE_20_30)
-        if market == "BTTS" and selection == "NO" and 2.00 < odds <= 2.50:
-            matches.append(RESEARCH_BTTS_NO_ODDS_2_01_2_50)
-        return tuple(matches)
+        return matching_bucket_ids(row, source_universe="RESEARCH")
 
     @staticmethod
     def _goallab_matches(row: dict[str, Any]) -> tuple[str, ...]:
-        market = str(row["market_key"])
-        selection = str(row["selection"])
-        odds = float(row["odds"])
-        total = float(row["expected_home_goals"]) + float(row["expected_away_goals"])
-        matches: list[str] = []
-        if market == "OU_25" and selection == "OVER" and 2.5 <= total < 3.0:
-            matches.append(GOALLAB_OU_OVER_XG_2_5_3_0)
-        if market == "OU_25" and selection == "OVER" and 2.00 < odds <= 2.50:
-            matches.append(GOALLAB_OU_OVER_ODDS_2_01_2_50)
-        return tuple(matches)
+        return matching_bucket_ids(row, source_universe="GOALLAB")
 
     @staticmethod
     def _candidate_sort_key(
         priority: int,
         row: dict[str, Any],
     ) -> tuple[int, float, float, Any, str, str]:
-        """Rank by selected-bucket ROI priority, then by pick strength inside that bucket."""
+        """Rank by current bucket N+ROI strength, then by pick EV and edge."""
         return (
             priority,
             -float(row["expected_value"]),
@@ -154,6 +130,203 @@ class PostgreSQLProductionFunnelRepository:
             row["source_decision_at"],
             str(row["source_universe"]),
             str(row["source_pick_id"]),
+        )
+
+    @staticmethod
+    def _research_outcome(row: dict[str, Any]) -> str:
+        if row.get("production_manual_void"):
+            return "VOID"
+        classification = row.get("result_classification")
+        if classification == "NON_PLAYED_VOIDABLE":
+            return "VOID"
+        if classification != "PLAYED_SETTLEABLE":
+            return "PENDING"
+        home = row.get("regulation_home_goals")
+        away = row.get("regulation_away_goals")
+        if home is None or away is None:
+            return "PENDING"
+        total = int(home) + int(away)
+        market = str(row.get("market_key") or "")
+        selection = str(row.get("selection") or "")
+        if market == "OU_25":
+            won = total > 2 if selection == "OVER" else total <= 2
+        elif market == "BTTS":
+            both = int(home) > 0 and int(away) > 0
+            won = both if selection == "YES" else not both
+        else:
+            return "PENDING"
+        return "WIN" if won else "LOSS"
+
+    @staticmethod
+    def _research_performance_rows(cursor: Any) -> tuple[dict[str, Any], ...]:
+        cursor.execute(
+            """
+            SELECT
+                rs.fixture_id,
+                e.market AS market_key,
+                e.selected_selection AS selection,
+                e.selected_odd AS odds,
+                e.edge,
+                e.expected_value,
+                result.result_classification,
+                result.regulation_home_goals,
+                result.regulation_away_goals,
+                (settlement.event_kind = 'MANUAL_VOID' AND settlement.outcome = 'VOID')
+                    AS production_manual_void,
+                latest.home_team,
+                latest.away_team,
+                latest.competition_name,
+                latest.country,
+                f.league_id
+            FROM research_signals rs
+            JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id
+            JOIN fixtures f ON f.fixture_id = rs.fixture_id
+            JOIN LATERAL (
+                SELECT fo.home_team, fo.away_team, fo.competition_name, fo.country
+                FROM fixture_observations fo
+                WHERE fo.fixture_id = rs.fixture_id
+                ORDER BY fo.observed_at DESC, fo.fixture_observation_id DESC
+                LIMIT 1
+            ) latest ON TRUE
+            LEFT JOIN fixture_result_acquisition_states state
+                ON state.fixture_id = rs.fixture_id
+            LEFT JOIN fixture_result_observations result
+                ON result.result_observation_id = state.current_observation_id
+            LEFT JOIN LATERAL (
+                SELECT pse.event_kind, pse.outcome
+                FROM pick_settlement_events pse
+                WHERE pse.pick_id = rs.production_pick_id
+                ORDER BY pse.occurred_at DESC, pse.settlement_event_id DESC
+                LIMIT 1
+            ) settlement ON TRUE
+            WHERE rs.qualified_at IS NOT NULL
+            """
+        )
+        return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
+
+    @staticmethod
+    def _goallab_performance_rows(cursor: Any) -> tuple[dict[str, Any], ...]:
+        cursor.execute(
+            """
+            SELECT
+                p.fixture_id,
+                p.market_key,
+                p.selection,
+                p.odds,
+                p.edge,
+                p.expected_value,
+                p.expected_home_goals,
+                p.expected_away_goals,
+                p.stake_minor,
+                s.outcome,
+                s.pnl_minor,
+                COALESCE(qlatest.home_team, platest.home_team) AS home_team,
+                COALESCE(qlatest.away_team, platest.away_team) AS away_team,
+                COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name,
+                COALESCE(qlatest.country, platest.country) AS country,
+                f.league_id
+            FROM quantlab_goal_picks p
+            JOIN quantlab_goal_pick_settlements s ON s.goal_pick_id = p.goal_pick_id
+            JOIN fixtures f ON f.fixture_id = p.fixture_id
+            LEFT JOIN LATERAL (
+                SELECT o.home_team, o.away_team, o.competition_name, o.country
+                FROM quantlab_fixture_observations o
+                WHERE o.fixture_id = p.fixture_id
+                ORDER BY o.captured_at DESC, o.fixture_observation_id DESC
+                LIMIT 1
+            ) qlatest ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT o.home_team, o.away_team, o.competition_name, o.country
+                FROM fixture_observations o
+                WHERE o.fixture_id = p.fixture_id
+                ORDER BY o.observed_at DESC, o.fixture_observation_id DESC
+                LIMIT 1
+            ) platest ON TRUE
+            """
+        )
+        return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
+
+    @classmethod
+    def _bucket_performance(
+        cls,
+        cursor: Any,
+        *,
+        bucket_ids: tuple[str, ...],
+    ) -> dict[str, dict[str, Any]]:
+        accumulators = {
+            bucket_id: {"graded_n": 0, "unit_pnl": 0.0}
+            for bucket_id in bucket_ids
+        }
+
+        for row in cls._research_performance_rows(cursor):
+            if is_universe_blocked_competition(
+                country=row.get("country"),
+                competition_name=row.get("competition_name"),
+                league_id=row.get("league_id"),
+                home_team=row.get("home_team"),
+                away_team=row.get("away_team"),
+            ):
+                continue
+            outcome = cls._research_outcome(row)
+            if outcome not in {"WIN", "LOSS"}:
+                continue
+            unit_pnl = float(row["odds"]) - 1.0 if outcome == "WIN" else -1.0
+            for bucket_id in matching_bucket_ids(row, source_universe="RESEARCH"):
+                if bucket_id in accumulators:
+                    accumulators[bucket_id]["graded_n"] += 1
+                    accumulators[bucket_id]["unit_pnl"] += unit_pnl
+
+        for row in cls._goallab_performance_rows(cursor):
+            if is_universe_blocked_competition(
+                country=row.get("country"),
+                competition_name=row.get("competition_name"),
+                league_id=row.get("league_id"),
+                home_team=row.get("home_team"),
+                away_team=row.get("away_team"),
+            ):
+                continue
+            if str(row.get("outcome") or "") not in {"WIN", "LOSS"}:
+                continue
+            stake = int(row.get("stake_minor") or 0)
+            if stake <= 0:
+                continue
+            unit_pnl = int(row.get("pnl_minor") or 0) / stake
+            for bucket_id in matching_bucket_ids(row, source_universe="GOALLAB"):
+                if bucket_id in accumulators:
+                    accumulators[bucket_id]["graded_n"] += 1
+                    accumulators[bucket_id]["unit_pnl"] += unit_pnl
+
+        stats: dict[str, dict[str, Any]] = {}
+        for bucket_id, accumulator in accumulators.items():
+            graded_n = int(accumulator["graded_n"])
+            roi_pct = (
+                None
+                if graded_n == 0
+                else float(accumulator["unit_pnl"]) / graded_n * 100.0
+            )
+            stats[bucket_id] = {
+                "graded_n": graded_n,
+                "roi_pct": roi_pct,
+                "priority_score": n_roi_priority_score(
+                    graded_n=graded_n,
+                    roi_pct=roi_pct,
+                ),
+            }
+        return stats
+
+    @staticmethod
+    def _bucket_strength_key(
+        bucket_id: str,
+        stats: dict[str, dict[str, Any]],
+    ) -> tuple[float, float, int, int, int]:
+        item = stats[bucket_id]
+        roi = item.get("roi_pct")
+        return (
+            float(item["priority_score"]),
+            float("-inf") if roi is None else float(roi),
+            min(int(item["graded_n"]), 100),
+            int(item["graded_n"]),
+            -_BUCKET_PRIORITY[bucket_id],
         )
 
     @staticmethod
@@ -447,7 +620,20 @@ class PostgreSQLProductionFunnelRepository:
             )
             rows.extend(self._goallab_candidates(cursor, now=cloned_at))
 
-            matched: list[tuple[int, dict[str, Any], tuple[str, ...]]] = []
+            bucket_stats = self._bucket_performance(cursor, bucket_ids=selected)
+            bucket_order = tuple(
+                sorted(
+                    selected,
+                    key=lambda bucket_id: self._bucket_strength_key(bucket_id, bucket_stats),
+                    reverse=True,
+                )
+            )
+            dynamic_priority = {
+                bucket_id: index
+                for index, bucket_id in enumerate(bucket_order, 1)
+            }
+
+            matched: list[tuple[int, dict[str, Any], tuple[str, ...], str]] = []
             for row in rows:
                 source = str(row["source_universe"])
                 all_matches = (
@@ -455,17 +641,23 @@ class PostgreSQLProductionFunnelRepository:
                     if source == "RESEARCH"
                     else self._goallab_matches(row)
                 )
-                active_matches = tuple(item for item in all_matches if item in allowed)
+                active_matches = tuple(
+                    sorted(
+                        (item for item in all_matches if item in allowed),
+                        key=dynamic_priority.__getitem__,
+                    )
+                )
                 if not active_matches:
                     continue
-                priority = min(_BUCKET_PRIORITY[item] for item in active_matches)
-                matched.append((priority, row, active_matches))
+                primary_bucket_id = active_matches[0]
+                priority = dynamic_priority[primary_bucket_id]
+                matched.append((priority, row, active_matches, primary_bucket_id))
 
             matched.sort(key=lambda item: self._candidate_sort_key(item[0], item[1]))
             cloned = 0
             duplicates = 0
             blocked = 0
-            for priority, row, matches in matched:
+            for priority, row, matches, primary_bucket_id in matched:
                 stake_minor = fallback_stake_minor
                 if exposure + stake_minor > max_open_exposure_minor:
                     blocked += 1
@@ -477,6 +669,16 @@ class PostgreSQLProductionFunnelRepository:
                 payload = row.get("source_payload")
                 if isinstance(payload, str):
                     payload = json.loads(payload)
+                payload = dict(payload or {})
+                primary_stats = bucket_stats[primary_bucket_id]
+                payload.update(
+                    {
+                        "production_primary_bucket_id": primary_bucket_id,
+                        "production_bucket_graded_n": primary_stats["graded_n"],
+                        "production_bucket_roi_pct": primary_stats["roi_pct"],
+                        "production_bucket_priority_score": primary_stats["priority_score"],
+                    }
+                )
                 cursor.execute(
                     """
                     INSERT INTO production_funnel_picks (
@@ -531,7 +733,7 @@ class PostgreSQLProductionFunnelRepository:
                         cloned_at,
                         stake_minor,
                         currency,
-                        json.dumps(payload or {}, sort_keys=True, default=str),
+                        json.dumps(payload, sort_keys=True, default=str),
                     ),
                 )
                 if cursor.rowcount == 1:
