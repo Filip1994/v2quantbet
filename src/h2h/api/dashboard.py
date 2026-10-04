@@ -24,6 +24,7 @@ from h2h.api.dashboard_time import (
     local_time,
 )
 from h2h.domain.operator_pick_state import OperatorPickState
+from h2h.production_buckets import bucket_spec
 
 
 WORKER_FRESHNESS_SECONDS = 600
@@ -130,6 +131,32 @@ def _policy(application: Any) -> Any:
     if policy is None:
         raise RuntimeError("dashboard requires a registration policy")
     return policy
+
+
+def _production_bucket_links_html(bucket_ids: Any) -> str:
+    research_base = os.environ.get(
+        "QUANTBET_RESEARCH_DASHBOARD_BASE_URL",
+        "https://quantbet-research-production.up.railway.app",
+    ).rstrip("/")
+    quantlab_base = os.environ.get(
+        "QUANTBET_QUANTLAB_DASHBOARD_BASE_URL",
+        "https://quantbet-quantlab-production.up.railway.app",
+    ).rstrip("/")
+    links: list[str] = []
+    for raw in bucket_ids or ():
+        bucket_id = str(raw)
+        spec = bucket_spec(bucket_id)
+        if spec is None:
+            links.append(f'<span class="production-bucket-link unknown">{escape(bucket_id)}</span>')
+            continue
+        base = research_base if spec.source_universe == "RESEARCH" else quantlab_base
+        href = base + spec.analytics_path
+        links.append(
+            f'<a class="production-bucket-link" href="{escape(href, quote=True)}" '
+            'target="_blank" rel="noopener noreferrer" '
+            f'title="{escape(bucket_id, quote=True)}">{escape(spec.label)}</a>'
+        )
+    return '<span class="production-bucket-links">' + " · ".join(links) + "</span>" if links else ""
 
 
 class DashboardService:
@@ -681,7 +708,8 @@ class DashboardService:
             f'<strong>{escape(pick_selection)}</strong></div>'
             f'<small>{escape(self._dt(pick.get("settled_at")))}</small></div></td>'
             f'<td class="history-fixture"><strong>{escape(fixture)}</strong>'
-            f"{self._league_meta(pick)}</td>"
+            f"{self._league_meta(pick)}"
+            f"{_production_bucket_links_html(pick.get('matched_bucket_ids'))}</td>"
             f'<td class="num history-odds"><strong>{self._odd(pick.get("pick_odd"))}'
             f" → {self._odd(pick.get('display_closing_odd'))}</strong>"
             f"<small>Pick → Closing · {escape(close_source)}</small>"
@@ -804,8 +832,8 @@ class DashboardService:
             f'</div></td>'
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick, countdown=str(pick.get('dashboard_phase') or 'PREMATCH').upper() == 'PREMATCH')}"
-            f'<small class="quality-history">{escape(str(pick.get("source_universe") or "SOURCE"))} · '
-            f'{escape(" · ".join(str(item).replace("RESEARCH_", "").replace("GOALLAB_", "") for item in (pick.get("matched_bucket_ids") or ())))}</small>'
+            f'<small class="quality-history">{escape(str(pick.get("source_universe") or "SOURCE"))}</small>'
+            f"{_production_bucket_links_html(pick.get('matched_bucket_ids'))}"
             f'<span class="pick-book" title="Source bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
@@ -972,6 +1000,10 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 .quality-badge.active{{color:#8ab4ff;border-color:#35578c}}
 .quality-badge.unavailable{{color:var(--muted)}}
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
+.production-bucket-links{{display:flex;flex-wrap:wrap;gap:4px 7px;margin-top:5px}}
+.production-bucket-link{{display:inline-flex;align-items:center;width:max-content;padding:2px 5px;border:1px solid #18d7ff;border-radius:999px;color:#7eeaff!important;background:rgba(24,215,255,.07);font-size:8px;font-weight:850;text-decoration:none;box-shadow:0 0 9px rgba(24,215,255,.10)}}
+.production-bucket-link:hover{{color:#e4fbff!important;background:rgba(24,215,255,.16);box-shadow:0 0 12px rgba(24,215,255,.24)}}
+.production-bucket-link.unknown{{border-color:#47556a;color:var(--muted)!important;box-shadow:none}}
 .source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
 .source-label.manual{{color:var(--amber)!important}}
 .operator-pending{{color:#b7c2d3;border-color:#47556a;background:#182130}}.operator-played{{color:#9ef2ce;border-color:#2f8c6c;background:#123629}}.operator-skipped{{color:#ffd989;border-color:#8b6a2f;background:#3a2c12}}
