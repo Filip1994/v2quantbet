@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Callable
+from collections.abc import Callable
 
 from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelRepository,
