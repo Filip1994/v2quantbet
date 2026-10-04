@@ -1343,3 +1343,15 @@ def test_cardlab_analytics_excludes_pre_v7_rows_from_roi_and_buckets() -> None:
     assert '<small>LEGACY excluded</small><b>1</b>' in html
     assert "1 pre-V7 rows are classified LEGACY and excluded from all current CardLab metrics." in html
     assert "CARDLAB_RAW_STATS_POLICY_V6_MARKET80" not in html
+
+
+def test_selected_goallab_production_buckets_are_neon_highlighted() -> None:
+    dashboard = QuantLabDashboardService(StubRepository())
+    html = dashboard.render_html("view=analytics&lab=goal")
+
+    assert 'id="production-intake-buckets"' in html
+    assert 'class="panel production-intake-panel"' in html
+    assert "OU OVER · λ total 2.5–3.0" in html
+    assert "OU OVER · odds 2.01–2.50" in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+    assert "#18d7ff" in html

@@ -26,6 +26,11 @@ from h2h.quantlab.goal_analytics import (
 )
 from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 from h2h.quantlab.note_dialog import NOTE_DIALOG_CSS, NOTE_DIALOG_HTML
+from h2h.production_buckets import (
+    GOALLAB_OU_OVER_ODDS_2_01_2_50,
+    GOALLAB_OU_OVER_XG_2_5_3_0,
+    PRODUCTION_BUCKET_SPECS,
+)
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
 
@@ -465,6 +470,14 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 .analytics-note{{margin:0 0 14px;padding:11px 13px;border-left:3px solid var(--warn);background:#171b1f;color:#aab2b9;font-size:12px}}
 .analytics-section{{margin:22px 2px 10px;padding-top:5px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#c8d0d7}}
 .analytics-section small{{display:inline;margin-left:9px;text-transform:none;letter-spacing:0;font-weight:400}}
+.production-intake-panel{{border:2px solid #18d7ff;box-shadow:0 0 18px rgba(24,215,255,.24),inset 0 0 0 1px rgba(24,215,255,.12);background:linear-gradient(180deg,rgba(24,215,255,.055),var(--panel));margin-bottom:16px}}
+.production-intake-panel .panel-title{{border-bottom-color:#168fb0;background:rgba(24,215,255,.045)}}
+.production-intake-panel .panel-title b{{color:#7eeaff;text-transform:uppercase;letter-spacing:.08em}}
+.production-bucket-row td{{box-shadow:inset 0 1px 0 rgba(24,215,255,.34),inset 0 -1px 0 rgba(24,215,255,.34);background:rgba(10,63,76,.18)}}
+.production-bucket-row td:first-child{{box-shadow:inset 3px 0 0 #18d7ff,inset 0 1px 0 rgba(24,215,255,.34),inset 0 -1px 0 rgba(24,215,255,.34)}}
+.production-bucket-link{{color:#7eeaff;font-weight:900;text-decoration:none;border-bottom:1px solid rgba(126,234,255,.6)}}
+.production-bucket-link:hover{{color:#d7f9ff;border-bottom-color:#d7f9ff}}
+.priority-rank{{display:inline-flex;min-width:26px;justify-content:center;padding:3px 6px;border:1px solid #18d7ff;border-radius:999px;color:#7eeaff;font-weight:900}}
 .watchlist{{margin:8px 0 18px;padding:12px;border:2px solid #a9782c;border-radius:16px;background:linear-gradient(180deg,rgba(169,120,44,.12),rgba(169,120,44,.035));box-shadow:0 0 0 1px rgba(226,178,93,.08) inset}}
 .watchlist-head{{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:2px 2px 11px}}
 .watchlist-head b{{color:#e5b45d;font-size:13px;letter-spacing:.12em;text-transform:uppercase}}
@@ -1097,6 +1110,72 @@ def _corner_calibration_watch_bucket(row: dict[str, Any]) -> str:
     if selection == "OVER" and line is not None and 12.5 <= line <= 13.5:
         return "OVER high-lines 12.5–13.5"
     return "—"
+
+
+def _selected_goal_production_bucket_table(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    currency: str,
+) -> str:
+    specs = {
+        spec.bucket_id: (priority, spec)
+        for priority, spec in enumerate(PRODUCTION_BUCKET_SPECS, 1)
+        if spec.source_universe == "GOALLAB"
+    }
+    cohorts = (
+        (
+            GOALLAB_OU_OVER_XG_2_5_3_0,
+            tuple(
+                row
+                for row in rows
+                if row.get("market_key") == "OU_25"
+                and row.get("selection") == "OVER"
+                and row.get("expected_total_goals_bucket") == "2.5–3"
+            ),
+        ),
+        (
+            GOALLAB_OU_OVER_ODDS_2_01_2_50,
+            tuple(
+                row
+                for row in rows
+                if row.get("market_key") == "OU_25"
+                and row.get("selection") == "OVER"
+                and row.get("entry_odds_bucket") == "2.01–2.50"
+            ),
+        ),
+    )
+    rendered = []
+    for bucket_id, cohort in cohorts:
+        priority, spec = specs[bucket_id]
+        metrics = goal_pick_metrics(cohort)
+        pnl = metrics.get("pnl_minor")
+        rendered.append(
+            '<tr class="production-bucket-row">'
+            f'<td><span class="priority-rank">#{priority}</span></td>'
+            f'<td><a class="production-bucket-link" href="{escape(spec.analytics_path, quote=True)}" '
+            'target="_blank" rel="noopener noreferrer">'
+            f'{escape(spec.label)}</a>'
+            f'<small><code>{escape(spec.bucket_id)}</code></small></td>'
+            f'<td>{metrics["n"]}</td>'
+            f'<td>{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}</td>'
+            f'<td>{_metric(metrics["roi_pct"], suffix="%", signed=True)}</td>'
+            f'<td>{_metric(spec.reference_roi_pct, suffix="%", signed=True)}</td>'
+            f'<td>{_money(None if pnl is None else int(pnl), currency)}</td>'
+            f'<td>{_metric(metrics["avg_odds"], digits=2)}</td>'
+            f'<td>{escape(str(metrics["sample_band"]))}</td>'
+            "</tr>"
+        )
+    return (
+        '<section class="panel production-intake-panel" id="production-intake-buckets">'
+        '<div class="panel-title"><b>Production intake · selected GoalLab buckets</b>'
+        '<span>neon blue = approved intake · priority follows ROI at selection</span></div>'
+        '<div class="table"><table><thead><tr>'
+        '<th>Priority</th><th>Bucket</th><th>N</th><th>W-L-V</th><th>Current ROI</th>'
+        '<th>ROI at selection</th><th>P/L</th><th>Avg odds</th><th>Evidence</th>'
+        '</tr></thead><tbody>'
+        + "".join(rendered)
+        + "</tbody></table></div></section>"
+    )
 
 
 def _watchlist_block(content: str, *, lab_key: str) -> str:
@@ -3597,6 +3676,12 @@ def render_analytics(
             )
         )
 
+    production_intake = (
+        _selected_goal_production_bucket_table(rows, currency=currency)
+        if lab_key == "goal"
+        else ""
+    )
+
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
         f'<section class="cards">{cards_html}</section>'
@@ -3606,6 +3691,7 @@ def render_analytics(
             lab_key=lab_key,
             currency=currency,
         )
+        + production_intake
         + watchlist
         + '<div class="analytics-grid">'
         + _window_card("Last 7 days", last_7, raw_stats=lab_key == "card")
