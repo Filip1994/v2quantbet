@@ -1009,6 +1009,7 @@ class PostgreSQLQuantLabRepository:
         *,
         limit: int = 5000,
         offset: int = 0,
+        goal_pick_id: str | None = None,
     ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
@@ -1063,8 +1064,11 @@ class PostgreSQLQuantLabRepository:
                 " competition_type FROM fixture_observations o WHERE o.fixture_id = p.fixture_id "
                 " ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1"
                 ") platest ON TRUE "
-                "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s OFFSET %s",
-                (limit, offset),
+                + ("WHERE p.goal_pick_id = %s " if goal_pick_id is not None else "")
+                + "ORDER BY p.decision_at DESC, p.goal_pick_id DESC LIMIT %s OFFSET %s",
+                (goal_pick_id, limit, offset)
+                if goal_pick_id is not None
+                else (limit, offset),
             )
             rows = _row_dicts(cursor)
         for row in rows:
@@ -1073,6 +1077,11 @@ class PostgreSQLQuantLabRepository:
                 if isinstance(value, str):
                     row[key] = json.loads(value)
         return rows
+
+    def get_goal_pick(self, goal_pick_id: str) -> dict[str, Any] | None:
+        """Load a single drilldown row using the pick's primary key."""
+        rows = self.list_goal_picks(limit=1, goal_pick_id=goal_pick_id)
+        return rows[0] if rows else None
 
     def list_goal_dashboard_picks(
         self,

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 from h2h.quantlab.dashboard import QuantLabDashboardService
 from h2h.quantlab.dashboard_views import _dedupe_corner_settlements
@@ -176,6 +177,47 @@ class StubRepository:
 
     def api_usage_today(self) -> int:
         return 42
+
+
+def test_goal_pick_drilldown_reads_only_requested_primary_key() -> None:
+    pick = goal_pick()
+    cursor = MagicMock()
+    cursor.__enter__.return_value = cursor
+    cursor.description = [MagicMock(name="goal_pick_id")]
+    cursor.description[0].name = "goal_pick_id"
+    cursor.fetchall.return_value = [(pick["goal_pick_id"],)]
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value = cursor
+    repository = PostgreSQLQuantLabRepository(connect=lambda: connection)
+
+    assert repository.get_goal_pick(pick["goal_pick_id"]) == {
+        "goal_pick_id": pick["goal_pick_id"]
+    }
+    sql, params = cursor.execute.call_args.args
+    assert "WHERE p.goal_pick_id = %s" in sql
+    assert params == (pick["goal_pick_id"], 1, 0)
+
+
+def test_goal_pick_drilldown_avoids_full_history_loader() -> None:
+    pick = goal_pick()
+
+    class PickRepository(StubRepository):
+        def get_goal_pick(self, goal_pick_id: str):
+            assert goal_pick_id == pick["goal_pick_id"]
+            return pick
+
+        def list_all_goal_picks(self):
+            raise AssertionError("drilldown must not scan all goal picks")
+
+        def goal_model_contract(self, _model_version: str):
+            return None
+
+    html = QuantLabDashboardService(PickRepository()).render_goal_pick(
+        "goal_pick_id=" + pick["goal_pick_id"]
+    )
+    assert "GoalLab pick" in html
+    assert "Premier League" in html
 
 
 def test_quantlab_dashboard_cache_reuses_rendered_view_within_ttl() -> None:

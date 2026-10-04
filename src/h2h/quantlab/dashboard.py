@@ -390,14 +390,18 @@ class QuantLabDashboardService:
         goal_pick_id = params.get("goal_pick_id", [""])[0].strip()
         if not goal_pick_id:
             raise ValueError("goal_pick_id is required")
-        row = next(
-            (
-                item
-                for item in self._repository.list_all_goal_picks()
-                if str(item.get("goal_pick_id") or "") == goal_pick_id
-            ),
-            None,
-        )
+        loader = getattr(self._repository, "get_goal_pick", None)
+        if callable(loader):
+            row = loader(goal_pick_id)
+        else:
+            row = next(
+                (
+                    item
+                    for item in self._repository.list_all_goal_picks()
+                    if str(item.get("goal_pick_id") or "") == goal_pick_id
+                ),
+                None,
+            )
         if row is None:
             raise LookupError("goal pick not found")
         contract = self._repository.goal_model_contract(str(row.get("model_version") or ""))
