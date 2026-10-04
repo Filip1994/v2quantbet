@@ -1155,3 +1155,16 @@ only as explanatory buckets.
 
 **NONE on real betting authority.** The paired experiment is shadow analytics only. The
 existing H2HLab composite shadow policy remains unchanged.
+
+## 2026-10-04 — Per-lab operational kill switches
+
+**Owner:** QuantLab operations
+
+- Added independent runtime switches for GoalLab, CornerLab, CardLab and H2HLab.
+- Switches stop new branch-specific collection, evaluation, result refresh and settlement work while preserving persisted history and dashboard reads.
+- Shared upstream collection is dependency-aware: H2HLab may keep GOAL markets alive even when GoalLab is off; CardLab-specific referee/context work stops when CardLab is off.
+- Added the same gates to the offline modeler/audit service for GoalLab, CornerLab and CardLab.
+- Added explicit cycle/modeler logging of the effective switch state.
+- Production operational state requested on 2026-10-04: CardLab disabled; GoalLab, CornerLab and H2HLab enabled.
+- Operational contract is documented in [OPERATIONS.md](./OPERATIONS.md).
+
