@@ -1093,7 +1093,7 @@ a silent model mutation. Historical policy versions remain queryable and reprodu
 
 ### Persistence/runtime
 
-- Added migration 061_quantlab_h2hlab_v1.sql.
+- Added migration 060a_quantlab_h2hlab_v1.sql.
 - Added immutable quantlab_h2h_snapshots and quantlab_h2h_decisions.
 - Added H2H to quantlab_shadow_bets lab ownership.
 - Added API-Football direct H2H collection through fixtures/headtohead, persisted before evaluation and refreshed on a six-hour default cadence.
