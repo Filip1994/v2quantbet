@@ -31,6 +31,7 @@ from h2h.quantlab.coverage import (
     parse_league_coverage_flags,
 )
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
+from h2h.quantlab.h2h_lab.experiment import settle_experiment
 from h2h.quantlab.h2h_lab.history import parse_h2h_response
 from h2h.quantlab.h2h_lab.settlement import settle_h2h_shadow_bet
 from h2h.quantlab.goal_lab.picks import (
@@ -1558,7 +1559,8 @@ class QuantLabRuntime:
                 continue
             decisions += int(outcome.decisions_inserted)
             picks += int(outcome.picks_inserted)
-        return decisions, picks
+            experiments += int(outcome.experiments_inserted)
+        return decisions, picks, experiments
 
     def _refresh_goal_pick_results(self, now: datetime) -> int:
         """Refresh post-match result evidence for unsettled GoalLab canonical picks."""
@@ -1786,15 +1788,15 @@ class QuantLabRuntime:
                 )
         return captured
 
-    def _evaluate_h2h_picks(self, now: datetime) -> tuple[int, int]:
+    def _evaluate_h2h_picks(self, now: datetime) -> tuple[int, int, int]:
         if self._h2h_engine is None:
-            return 0, 0
+            return 0, 0, 0
         fixtures = self._repository.upcoming_fixtures(
             start_at=now,
             end_at=now + timedelta(hours=self._settings.lookahead_hours),
             limit=self._settings.fixture_limit,
         )
-        decisions = picks = 0
+        decisions = picks = experiments = 0
         for fixture in fixtures:
             if not goal_scope(**self._scope_kwargs(fixture)).allowed:
                 continue
@@ -1821,6 +1823,28 @@ class QuantLabRuntime:
             if matching:
                 refreshed += int(self._repository.save_fixture_observations(matching))
         return refreshed
+
+    def _refresh_h2h_experiment_results(self, now: datetime) -> int:
+        rows = self._repository.h2h_experiment_result_refresh_candidates(now=now, limit=25)
+        refreshed = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            payload = self._provider.fetch_fixture(int(fixture["provider_fixture_id"]))
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            matching = tuple(item for item in observations if str(item.fixture.fixture_id) == fixture_id)
+            if matching:
+                refreshed += int(self._repository.save_fixture_observations(matching))
+        return refreshed
+
+    def _settle_h2h_experiments(self, now: datetime) -> int:
+        settled = 0
+        for row in self._repository.h2h_experiment_settlement_candidates(limit=500):
+            item = settle_experiment(row)
+            if item is not None:
+                settled += int(
+                    bool(self._repository.save_h2h_experiment_settlement(item, settled_at=now))
+                )
+        return settled
 
     def _settle_h2h_picks(self, now: datetime) -> int:
         settled = 0
@@ -1877,8 +1901,11 @@ class QuantLabRuntime:
             "h2h_snapshots": 0,
             "h2h_decisions": 0,
             "h2h_picks": 0,
+            "h2h_experiments": 0,
             "h2h_result_refreshes": 0,
+            "h2h_experiment_result_refreshes": 0,
             "h2h_settlements": 0,
+            "h2h_experiment_settlements": 0,
             "corner_decisions": 0,
             "corner_picks": 0,
             "corner_settlements": 0,
@@ -2058,9 +2085,10 @@ class QuantLabRuntime:
                 )
 
         try:
-            h2h_decisions, h2h_picks = self._evaluate_h2h_picks(now)
+            h2h_decisions, h2h_picks, h2h_experiments = self._evaluate_h2h_picks(now)
             result["h2h_decisions"] = h2h_decisions
             result["h2h_picks"] = h2h_picks
+            result["h2h_experiments"] = h2h_experiments
         except Exception:
             LOGGER.exception("QuantLab H2HLab shadow evaluation failed")
 
@@ -2072,9 +2100,21 @@ class QuantLabRuntime:
             LOGGER.exception("QuantLab H2HLab result refresh failed")
 
         try:
+            result["h2h_experiment_result_refreshes"] = self._refresh_h2h_experiment_results(now)
+        except ApiBudgetExceededError:
+            LOGGER.warning("Shared football API daily budget reached; H2HLab experiment result refresh skipped")
+        except Exception:
+            LOGGER.exception("QuantLab H2HLab experiment result refresh failed")
+
+        try:
             result["h2h_settlements"] = self._settle_h2h_picks(now)
         except Exception:
             LOGGER.exception("QuantLab H2HLab settlement failed")
+
+        try:
+            result["h2h_experiment_settlements"] = self._settle_h2h_experiments(now)
+        except Exception:
+            LOGGER.exception("QuantLab H2HLab paired experiment settlement failed")
 
         try:
             corner_decisions, corner_picks = self._evaluate_context_picks(
@@ -2103,7 +2143,8 @@ class QuantLabRuntime:
             "card_referee_web_captures=%d card_referee_web_profiles=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
             "goal_result_refreshes=%d goal_settlements=%d h2h_snapshots=%d "
-            "h2h_decisions=%d h2h_picks=%d h2h_result_refreshes=%d h2h_settlements=%d corner_decisions=%d "
+            "h2h_decisions=%d h2h_picks=%d h2h_experiments=%d h2h_result_refreshes=%d "
+            "h2h_experiment_result_refreshes=%d h2h_settlements=%d h2h_experiment_settlements=%d corner_decisions=%d "
             "corner_picks=%d corner_settlements=%d "
             "card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
@@ -2126,8 +2167,11 @@ class QuantLabRuntime:
             result["h2h_snapshots"],
             result["h2h_decisions"],
             result["h2h_picks"],
+            result["h2h_experiments"],
             result["h2h_result_refreshes"],
+            result["h2h_experiment_result_refreshes"],
             result["h2h_settlements"],
+            result["h2h_experiment_settlements"],
             result["corner_decisions"],
             result["corner_picks"],
             result["corner_settlements"],
