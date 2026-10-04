@@ -30,8 +30,8 @@ def test_intake_contract_can_change_by_environment_without_core_code_change() ->
     }
 
     assert active_bucket_ids(values) == (
-        RESEARCH_LOW_SCORING_NON_EXTREME,
         GOALLAB_OU_OVER_ODDS_2_01_2_50,
+        RESEARCH_LOW_SCORING_NON_EXTREME,
     )
 
 
@@ -144,38 +144,41 @@ def test_goallab_expected_total_bucket_boundaries(
     assert (GOALLAB_OU_OVER_XG_2_5_3_0 in matches) is included
 
 
-def test_candidate_ranking_is_global_not_bucket_priority() -> None:
-    rows = [
-        {
-            "source_universe": "RESEARCH",
-            "source_pick_id": "research-low-ev",
-            "expected_value": 0.12,
-            "edge": 0.18,
-            "source_decision_at": 1,
-        },
-        {
-            "source_universe": "GOALLAB",
-            "source_pick_id": "goallab-high-ev",
-            "expected_value": 0.31,
-            "edge": 0.16,
-            "source_decision_at": 2,
-        },
-        {
-            "source_universe": "GOALLAB",
-            "source_pick_id": "goallab-same-ev-higher-edge",
-            "expected_value": 0.31,
-            "edge": 0.20,
-            "source_decision_at": 3,
-        },
-    ]
-
-    ordered = sorted(
-        rows,
-        key=PostgreSQLProductionFunnelRepository._candidate_sort_key,
+def test_default_bucket_order_is_current_roi_priority() -> None:
+    assert DEFAULT_BUCKET_IDS == (
+        RESEARCH_OU_UNDER_EDGE_10_15,
+        RESEARCH_OU_UNDER_EDGE_20_30,
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+        GOALLAB_OU_OVER_XG_2_5_3_0,
+        GOALLAB_OU_OVER_ODDS_2_01_2_50,
+        RESEARCH_LOW_SCORING_NON_EXTREME,
     )
 
-    assert [row["source_pick_id"] for row in ordered] == [
-        "goallab-same-ev-higher-edge",
-        "goallab-high-ev",
-        "research-low-ev",
+
+def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
+    research = {
+        "source_universe": "RESEARCH",
+        "source_pick_id": "research-top-bucket",
+        "expected_value": 0.12,
+        "edge": 0.11,
+        "source_decision_at": 1,
+    }
+    goallab = {
+        "source_universe": "GOALLAB",
+        "source_pick_id": "goallab-higher-ev",
+        "expected_value": 0.31,
+        "edge": 0.20,
+        "source_decision_at": 2,
+    }
+
+    ordered = sorted(
+        [(1, research), (4, goallab)],
+        key=lambda item: PostgreSQLProductionFunnelRepository._candidate_sort_key(
+            item[0], item[1]
+        ),
+    )
+
+    assert [row["source_pick_id"] for _priority, row in ordered] == [
+        "research-top-bucket",
+        "goallab-higher-ev",
     ]
