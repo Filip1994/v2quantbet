@@ -24,6 +24,7 @@ from h2h.api.dashboard_time import (
     local_time,
 )
 from h2h.domain.operator_pick_state import OperatorPickState
+from h2h.domain.settlement import realized_clv_ppm
 from h2h.production_buckets import bucket_spec
 
 
@@ -321,11 +322,56 @@ class DashboardService:
                         WHEN p.source_universe = 'GOALLAB'
                         THEN goal_settlement.regulation_away_goals
                         ELSE research_result.regulation_away_goals
-                    END AS source_away_goals
+                    END AS source_away_goals,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB' THEN goal_closing.odds
+                        WHEN p.source_universe = 'RESEARCH' THEN research_closing.odd
+                        ELSE NULL
+                    END AS source_closing_odd,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB' THEN goal_closing.captured_at
+                        WHEN p.source_universe = 'RESEARCH' THEN research_closing.observed_at
+                        ELSE NULL
+                    END AS source_closing_observed_at
                 FROM production_funnel_picks p
                 LEFT JOIN quantlab_goal_pick_settlements goal_settlement
                   ON p.source_universe = 'GOALLAB'
                  AND goal_settlement.goal_pick_id = p.source_pick_id
+                LEFT JOIN quantlab_goal_picks goal_pick
+                  ON p.source_universe = 'GOALLAB'
+                 AND goal_pick.goal_pick_id = p.source_pick_id
+                LEFT JOIN quantlab_market_observations goal_entry
+                  ON goal_entry.market_observation_id = goal_pick.selected_observation_id
+                LEFT JOIN LATERAL (
+                    SELECT q.odds, q.captured_at
+                    FROM quantlab_market_observations q
+                    WHERE p.source_universe = 'GOALLAB'
+                      AND q.fixture_id = goal_pick.fixture_id
+                      AND q.bookmaker_id = goal_pick.bookmaker_id
+                      AND q.provider_bet_id = goal_pick.provider_bet_id
+                      AND q.raw_selection = goal_entry.raw_selection
+                      AND q.parsed_line IS NOT DISTINCT FROM goal_entry.parsed_line
+                      AND q.captured_at > goal_pick.quote_observed_at
+                      AND q.captured_at < goal_pick.kickoff_at
+                    ORDER BY q.captured_at DESC, q.market_observation_id DESC
+                    LIMIT 1
+                ) goal_closing ON TRUE
+                LEFT JOIN research_signals research_signal
+                  ON p.source_universe = 'RESEARCH'
+                 AND research_signal.research_signal_id = p.source_pick_id
+                LEFT JOIN value_evaluations research_evaluation
+                  ON research_evaluation.evaluation_id = research_signal.evaluation_id
+                LEFT JOIN LATERAL (
+                    SELECT q.odd, q.observed_at
+                    FROM quote_snapshots q
+                    WHERE p.source_universe = 'RESEARCH'
+                      AND q.series_id = research_evaluation.selected_series_id
+                      AND q.source = research_evaluation.source
+                      AND q.observed_at > p.source_quote_observed_at
+                      AND q.observed_at < p.kickoff_at
+                    ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC
+                    LIMIT 1
+                ) research_closing ON TRUE
                 LEFT JOIN fixture_result_acquisition_states research_state
                   ON p.source_universe = 'RESEARCH'
                  AND research_state.fixture_id = p.source_fixture_id
@@ -347,10 +393,16 @@ class DashboardService:
                 p.cloned_at AS last_checked_at,
                 'SOURCE_CLONE'::text AS last_observed_source,
                 'UNAVAILABLE'::text AS last_observed_freshness,
-                NULL::numeric AS display_closing_odd,
-                NULL::timestamptz AS display_closing_observed_at,
-                'UNAVAILABLE'::text AS display_closing_source,
-                NULL::text AS closing_status,
+                p.source_closing_odd AS display_closing_odd,
+                p.source_closing_observed_at AS display_closing_observed_at,
+                CASE
+                    WHEN p.source_closing_odd IS NOT NULL THEN 'SAME_BOOK'
+                    ELSE 'UNAVAILABLE'
+                END AS display_closing_source,
+                CASE
+                    WHEN p.source_closing_odd IS NOT NULL THEN 'CAPTURED'
+                    ELSE NULL
+                END AS closing_status,
                 NULL::text AS proxy_closing_status,
                 NULL::bigint AS proxy_clv_ppm,
                 NULL::bigint AS manual_clv_ppm,
@@ -415,7 +467,24 @@ class DashboardService:
             cursor.execute(sql)
             columns = [item.name for item in cursor.description]
             rows = cursor.fetchall()
-        return [dict(zip(columns, row, strict=True)) for row in rows]
+        picks = [dict(zip(columns, row, strict=True)) for row in rows]
+        for pick in picks:
+            closing = pick.get("display_closing_odd")
+            closing_at = pick.get("display_closing_observed_at")
+            entry = pick.get("pick_odd")
+            entry_at = pick.get("pick_observed_at")
+            if (
+                closing is not None
+                and entry is not None
+                and isinstance(closing_at, datetime)
+                and isinstance(entry_at, datetime)
+                and closing_at > entry_at
+            ):
+                pick["clv_ppm"] = realized_clv_ppm(
+                    Decimal(str(entry)),
+                    Decimal(str(closing)),
+                )
+        return picks
 
     def set_operator_state(self, pick_id: str, state: str, request_id: str) -> dict[str, Any]:
         policy = _policy(self._application)
