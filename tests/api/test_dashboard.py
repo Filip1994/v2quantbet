@@ -459,78 +459,7 @@ def test_render_empty_and_missing_durable_values_as_explicit_unavailable() -> No
     assert "—" in missing
 
 
-def test_snapshot_uses_performance_facts_for_financial_summary() -> None:
-    performance = SimpleNamespace(
-        initial_bankroll_minor=3_000_000,
-        available_bankroll_minor=3_095_000,
-        open_exposure_minor=50_000,
-        resolved_stake_minor=100_000,
-        realized_pnl_minor=95_000,
-        pending_stake_minor=50_000,
-        currency="RSD",
-        pending_count=1,
-        win_count=1,
-        loss_count=0,
-        void_count=0,
-        total_staked_minor=100_000,
-        gross_returns_minor=195_000,
-    )
-    application = SimpleNamespace(
-        settings=SimpleNamespace(
-            application=SimpleNamespace(
-                registration_policy=SimpleNamespace(
-                    bankroll_account_id="pilot",
-                    initial_bankroll_minor=3_000_000,
-                    fixed_stake_minor=30_000,
-                    max_open_exposure_minor=300_000,
-                )
-            )
-        ),
-        results=SimpleNamespace(
-            performance=SimpleNamespace(
-                summary=lambda _account, *, include_curve=True: performance,
-                operator_summary=lambda _account: performance,
-            )
-        ),
-        budget=SimpleNamespace(
-            usage_by_category=lambda: {"discovery": 10, "results_monitoring": 5},
-            effective_limit=7500,
-        ),
-    )
-
-    class Projection(DashboardService):
-        def _picks(self) -> list[dict[str, object]]:
-            return [
-                {
-                    "stake_minor": 100_000,
-                    "gross_return_minor": 195_000,
-                    "settlement_outcome": "WIN",
-                    "operator_state": "PLAYED",
-                },
-                {
-                    "stake_minor": 50_000,
-                    "gross_return_minor": None,
-                    "settlement_outcome": None,
-                    "operator_state": "SKIPPED",
-                },
-            ]
-
-        def _operations(self, _generated_at: datetime) -> dict[str, object]:
-            return {"database_reachable": True}
-
-    data = Projection(application).snapshot()
-
-    assert data["bankroll"]["total_staked_minor"] == 100_000
-    assert data["bankroll"]["settled_stake_minor"] == 100_000
-    assert data["bankroll"]["gross_returns_minor"] == 195_000
-    assert data["bankroll"]["realized_pnl_minor"] == 95_000
-    assert data["bankroll"]["risk_exposure_minor"] == 50_000
-    assert data["bankroll"]["fixed_stake_minor"] == 30_000
-    assert data["bankroll"]["max_open_exposure_minor"] == 300_000
-    assert data["provider_budget"]["remaining"] == 7485
-
-
-def test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> None:
+def test_snapshot_uses_production_funnel_for_financial_summary() -> None:\n    policy = SimpleNamespace(\n        bankroll_account_id="pilot",\n        initial_bankroll_minor=3_000_000,\n        fixed_stake_minor=30_000,\n        max_open_exposure_minor=300_000,\n        currency="RSD",\n    )\n    application = SimpleNamespace(\n        settings=SimpleNamespace(\n            application=SimpleNamespace(registration_policy=policy)\n        ),\n        production_funnel=SimpleNamespace(\n            exposure_breakdown=lambda: {\n                "open_exposure_minor": 50_000,\n                "pending_count": 1,\n                "played_open_count": 0,\n                "skipped_count": 1,\n                "settled_count": 1,\n            }\n        ),\n        budget=SimpleNamespace(\n            usage_by_category=lambda: {"discovery": 10, "results_monitoring": 5},\n            effective_limit=7500,\n        ),\n    )\n\n    class Projection(DashboardService):\n        def _picks(self) -> list[dict[str, object]]:\n            return [\n                {\n                    "stake_minor": 100_000,\n                    "gross_return_minor": 195_000,\n                    "realized_pnl_minor": 95_000,\n                    "settlement_outcome": "WIN",\n                    "operator_state": "PLAYED",\n                },\n                {\n                    "stake_minor": 50_000,\n                    "gross_return_minor": None,\n                    "realized_pnl_minor": None,\n                    "settlement_outcome": None,\n                    "operator_state": "PENDING",\n                },\n                {\n                    "stake_minor": 50_000,\n                    "gross_return_minor": None,\n                    "realized_pnl_minor": None,\n                    "settlement_outcome": None,\n                    "operator_state": "SKIPPED",\n                },\n            ]\n\n        def _operations(self, _generated_at: datetime) -> dict[str, object]:\n            return {"database_reachable": True}\n\n    data = Projection(application).snapshot()\n\n    assert data["bankroll"]["available_minor"] == 3_045_000\n    assert data["bankroll"]["total_staked_minor"] == 100_000\n    assert data["bankroll"]["settled_stake_minor"] == 100_000\n    assert data["bankroll"]["gross_returns_minor"] == 195_000\n    assert data["bankroll"]["realized_pnl_minor"] == 95_000\n    assert data["bankroll"]["risk_exposure_minor"] == 50_000\n    assert data["bankroll"]["fixed_stake_minor"] == 30_000\n    assert data["bankroll"]["max_open_exposure_minor"] == 300_000\n    assert data["counts"]["pending_operator"] == 1\n    assert data["counts"]["played"] == 1\n    assert data["counts"]["skipped"] == 1\n    assert data["provider_budget"]["remaining"] == 7485\n\ndef test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> None:
     status = WorkerStatus(
         worker_name="odds",
         last_started_at=NOW - timedelta(minutes=5),
