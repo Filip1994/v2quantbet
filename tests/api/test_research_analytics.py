@@ -7,6 +7,7 @@ from h2h.api.research_analytics import (
     cohort_metrics,
     diagnostic_bucket,
     market_fair_probability_bucket,
+    render_research_analytics_html,
 )
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
 
@@ -327,3 +328,35 @@ def test_snapshot_flags_mixed_and_unrecorded_version_regimes() -> None:
     assert snapshot["version_summary"]["mixed_policy_configs"] is True
     assert snapshot["version_summary"]["unrecorded_policy_n"] == 1
     assert len(snapshot["cohorts"]["model_policy"]) == 2
+
+
+def test_selected_production_buckets_are_neon_highlighted_with_exact_links() -> None:
+    selected = (
+        row(
+            fixture="selected",
+            market="OU_25",
+            selection="UNDER",
+            outcome="WIN",
+            model_probability=0.62,
+            market_fair_probability=0.50,
+            odds=1.90,
+            edge=0.12,
+            ev=0.18,
+            pnl_minor=27_000,
+            clv_ppm=None,
+        ),
+    )
+    snapshot = build_research_analytics_snapshot(
+        selected,
+        fixed_stake_minor=30_000,
+        as_of=AS_OF,
+    )
+    html = render_research_analytics_html(snapshot)
+
+    assert "Production intake buckets" in html
+    assert "--neon-blue:#00d9ff" in html
+    assert "production-bucket-selected" in html
+    assert "RESEARCH_LOW_SCORING_NON_EXTREME" in html
+    assert "RESEARCH_OU_UNDER_EDGE_10_15" in html
+    assert "production_bucket=RESEARCH_LOW_SCORING_NON_EXTREME" in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
