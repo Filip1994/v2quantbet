@@ -54,13 +54,13 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
     raw = env.get("QUANTBET_PRODUCTION_INTAKE_BUCKETS", "").strip()
     if not raw:
         return DEFAULT_BUCKET_IDS
-    selected = tuple(dict.fromkeys(item.strip() for item in raw.split(",") if item.strip()))
-    unknown = tuple(item for item in selected if item not in _KNOWN_BUCKET_IDS)
+    requested = tuple(dict.fromkeys(item.strip() for item in raw.split(",") if item.strip()))
+    unknown = tuple(item for item in requested if item not in _KNOWN_BUCKET_IDS)
     if unknown:
         raise ValueError("unknown production intake bucket(s): " + ", ".join(unknown))
-    if not selected:
+    if not requested:
         raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one bucket")
-    return selected
+    return tuple(sorted(requested, key=_BUCKET_PRIORITY.__getitem__))
 
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
@@ -175,7 +175,11 @@ class PostgreSQLProductionFunnelRepository:
                     'research_signal_id', rs.research_signal_id,
                     'evaluation_id', rs.evaluation_id,
                     'block_reason', rs.block_reason,
-                    'stage', rs.stage
+                    'stage', rs.stage,
+                    'source_stake_minor', COALESCE(
+                        NULLIF(config.configuration->>'fixed_stake_minor', '')::bigint,
+                        %s::bigint
+                    )
                 ) AS source_payload
             FROM research_signals rs
             JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id
@@ -215,7 +219,7 @@ class PostgreSQLProductionFunnelRepository:
             ORDER BY rs.qualified_at ASC, rs.research_signal_id ASC
             LIMIT 5000
             """,
-            (fallback_stake_minor, now),
+            (fallback_stake_minor, fallback_stake_minor, now),
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
@@ -239,14 +243,15 @@ class PostgreSQLProductionFunnelRepository:
                 p.pick_policy_version AS source_policy_version,
                 p.quote_observed_at AS source_quote_observed_at,
                 p.decision_at AS source_decision_at,
-                p.kickoff_at, p.stake_minor,
+                p.kickoff_at, p.stake_minor AS source_stake_minor,
                 p.expected_home_goals, p.expected_away_goals,
                 jsonb_build_object(
                     'goal_pick_id', p.goal_pick_id,
                     'source_decision_id', p.source_decision_id,
                     'feature_snapshot_id', p.feature_snapshot_id,
                     'expected_home_goals', p.expected_home_goals,
-                    'expected_away_goals', p.expected_away_goals
+                    'expected_away_goals', p.expected_away_goals,
+                    'source_stake_minor', p.stake_minor
                 ) AS source_payload
             FROM quantlab_goal_picks p
             LEFT JOIN LATERAL (
@@ -409,10 +414,13 @@ class PostgreSQLProductionFunnelRepository:
             raise ValueError("max_open_exposure_minor must be positive")
         if isinstance(fallback_stake_minor, bool) or fallback_stake_minor <= 0:
             raise ValueError("fallback_stake_minor must be positive")
-        selected = active_bucket_ids() if bucket_ids is None else bucket_ids
-        if not selected or any(item not in _KNOWN_BUCKET_IDS for item in selected):
+        requested = active_bucket_ids() if bucket_ids is None else bucket_ids
+        if not requested or any(item not in _KNOWN_BUCKET_IDS for item in requested):
             raise ValueError("bucket_ids must contain known production intake buckets")
-        contract = intake_contract_version(tuple(selected))
+        selected = tuple(
+            sorted(dict.fromkeys(requested), key=_BUCKET_PRIORITY.__getitem__)
+        )
+        contract = intake_contract_version(selected)
         allowed = frozenset(selected)
 
         with self.connect() as connection, connection.cursor() as cursor:
@@ -448,7 +456,7 @@ class PostgreSQLProductionFunnelRepository:
             duplicates = 0
             blocked = 0
             for priority, _decision_at, row, matches in matched:
-                stake_minor = int(row["stake_minor"])
+                stake_minor = fallback_stake_minor
                 if exposure + stake_minor > max_open_exposure_minor:
                     blocked += 1
                     continue
