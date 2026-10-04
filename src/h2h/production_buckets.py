@@ -8,6 +8,7 @@ links always resolve to the cohort that admitted the pick.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlencode
 
 
@@ -99,3 +100,55 @@ BUCKET_BY_ID = {spec.bucket_id: spec for spec in PRODUCTION_BUCKET_SPECS}
 
 def bucket_spec(bucket_id: str) -> ProductionBucketSpec | None:
     return BUCKET_BY_ID.get(bucket_id)
+
+
+
+def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
+    """Exact shared predicate for analytics, historical scoring and live intake."""
+    market = str(row.get("market_key") or row.get("market") or "").upper()
+    selection = str(row.get("selection") or "").upper()
+    odds = float(row.get("odds") or 0)
+    edge = float(row.get("edge") or 0)
+    ev = float(row.get("expected_value") or 0)
+
+    if bucket_id == RESEARCH_LOW_SCORING_NON_EXTREME:
+        low_scoring = (market == "OU_25" and selection == "UNDER") or (
+            market == "BTTS" and selection == "NO"
+        )
+        return low_scoring and ev < 0.30 and edge < 0.20
+    if bucket_id == RESEARCH_OU_UNDER_EDGE_10_15:
+        return market == "OU_25" and selection == "UNDER" and 0.10 <= edge < 0.15
+    if bucket_id == RESEARCH_OU_UNDER_EDGE_20_30:
+        return market == "OU_25" and selection == "UNDER" and 0.20 <= edge < 0.30
+    if bucket_id == RESEARCH_BTTS_NO_ODDS_2_01_2_50:
+        return market == "BTTS" and selection == "NO" and 2.00 < odds <= 2.50
+    if bucket_id == GOALLAB_OU_OVER_XG_2_5_3_0:
+        home = row.get("expected_home_goals")
+        away = row.get("expected_away_goals")
+        if home is None or away is None:
+            return False
+        total = float(home) + float(away)
+        return market == "OU_25" and selection == "OVER" and 2.5 <= total < 3.0
+    if bucket_id == GOALLAB_OU_OVER_ODDS_2_01_2_50:
+        return market == "OU_25" and selection == "OVER" and 2.00 < odds <= 2.50
+    raise ValueError(f"unknown production bucket {bucket_id!r}")
+
+
+def matching_bucket_ids(
+    row: dict[str, Any],
+    *,
+    source_universe: str,
+) -> tuple[str, ...]:
+    source = source_universe.upper()
+    return tuple(
+        spec.bucket_id
+        for spec in PRODUCTION_BUCKET_SPECS
+        if spec.source_universe == source and bucket_matches(row, spec.bucket_id)
+    )
+
+
+def n_roi_priority_score(*, graded_n: int, roi_pct: float | None) -> float:
+    """ROI discounted by evidence depth until N=100; no extra N bonus after N=100."""
+    if graded_n <= 0 or roi_pct is None:
+        return float("-inf")
+    return float(roi_pct) * min(1.0, graded_n / 100.0)
