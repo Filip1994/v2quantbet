@@ -15,7 +15,7 @@ def _candidate(
     selection: str = "YES",
     bookmaker: int = 8,
     odds: float = 2.0,
-    dc_probability: float = 0.54,
+    dc_probability: float = 0.52,
     composite_probability: float = 0.62,
     market_probability: float = 0.50,
     common_reason=None,
