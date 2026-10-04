@@ -28,6 +28,7 @@ from h2h.quantlab.corner_lab.research_audit import log_cornerlab_historical_hold
 from h2h.quantlab.corner_lab.shadow_engine import CornerLabShadowPickEngine
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService, QuantLabDashboardService
 from h2h.quantlab.goal_lab.audit import ensure_latest_goal_model_validation
+from h2h.quantlab.h2h_lab.engine import H2HLabEngine
 from h2h.quantlab.goal_lab.composite_engine import GoalLabCompositeEngine
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.goal_lab.readiness import assert_goallab_v1_contract
@@ -197,6 +198,7 @@ def main() -> None:
         PICK_POLICY_VERSION,
     )
     goal_engine = GoalLabCompositeEngine(goal_control_engine, goal_structural_engine)
+    h2h_engine = H2HLabEngine(repository, model_loader)
     corner_engine = CornerLabShadowPickEngine(repository)
     card_engine = CardLabShadowPickEngine(repository)
 
@@ -216,6 +218,7 @@ def main() -> None:
         repository,
         provider,
         goal_engine=goal_engine,
+        h2h_engine=h2h_engine,
         corner_engine=corner_engine,
         card_engine=card_engine,
         market_archive_writer=market_archive_writer,
@@ -252,6 +255,9 @@ def main() -> None:
             ),
             goal_coach_refresh_seconds=_positive_integer(
                 "QUANTBET_QUANTLAB_GOAL_COACH_REFRESH_SECONDS", "86400"
+            ),
+            h2h_refresh_seconds=_positive_integer(
+                "QUANTBET_QUANTLAB_H2H_REFRESH_SECONDS", "21600"
             ),
             history_backfill_per_cycle=_integer(
                 "QUANTBET_QUANTLAB_HISTORY_BACKFILL_PER_CYCLE", "25"
@@ -361,7 +367,7 @@ def main() -> None:
                 model_ready_audit_emitted = True
 
         _log_latest_goal_picks(repository)
-        for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab")):
+        for lab, label in (("CORNER", "CornerLab"), ("CARD", "CardLab"), ("H2H", "H2HLab")):
             for row in repository.list_bets(lab, limit=20):
                 LOGGER.info(
                     "QuantLab %s shadow pick fixture=%s match=%s vs %s league=%s "

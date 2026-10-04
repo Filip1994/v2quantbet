@@ -1069,3 +1069,45 @@ GoalLab value qualification was simplified:
 
 The model family remains `DC_PLUS_PRO_STRUCTURAL_V3`; this is a policy successor, not
 a silent model mutation. Historical policy versions remain queryable and reproducible.
+
+## 2026-10-04 — H2HLab V1: direct H2H + Dixon-Coles
+
+**Owner:** QuantLab / H2HLab
+
+### Product placement
+
+- Added H2HLab as the fourth program beside GoalLab, CornerLab and CardLab.
+- H2HLab is available in both existing QuantLab surfaces: Dashboard and Analytics.
+- No new top-level QuantLab surface was created.
+
+### Frozen V1 decision policy
+
+- Minimum direct H2H sample: 5 matches; maximum used: 10.
+- Direct H2H evidence is timestamp-safe and restricted to the exact two team IDs.
+- Recency weight is 0.90^index; same-venue orientation weight is 1.00 and reverse venue is 0.75.
+- The weighted H2H hit rate is shrunk with Beta(2,2).
+- Dixon-Coles is capped at 70% of the composite decision: 70/30 at N=5, declining by two percentage points per additional match to 60/40 at N=10+.
+- V1 markets are O/U 2.5 and BTTS, using existing complete QuantLab GOAL market pairs.
+- V1 value gates remain transparent: edge >= 3pp, EV >= 3%, odds 1.40-4.00, quote age <= 13h and >= 15m before kickoff.
+- Maximum one canonical H2HLab shadow exposure per fixture.
+
+### Persistence/runtime
+
+- Added migration 060a_quantlab_h2hlab_v1.sql.
+- Added immutable quantlab_h2h_snapshots and quantlab_h2h_decisions.
+- Added H2H to quantlab_shadow_bets lab ownership.
+- Added API-Football direct H2H collection through fixtures/headtohead, persisted before evaluation and refreshed on a six-hour default cadence.
+- Added H2HLab evaluation, post-match result refresh and O/U2.5/BTTS settlement.
+- H2HLab reads the active plain Dixon-Coles artifact; it does not retrain, activate or mutate production model state.
+
+### Analytics
+
+Dedicated H2HLab analytics exposes direct sample size, DC probability, shrunk H2H probability, DC/H2H weights, CONFIRM/CONFLICT regime, H2H-minus-DC gap and crosses with price/market/selection. The primary research objective is incremental value relative to equivalent DC regimes.
+
+### Documentation
+
+The complete V1 formula, gates, persistence contract and non-goals are frozen in QuantLab/H2HLab/README.md.
+
+### Production impact
+
+**NONE.** H2HLab remains shadow-only and does not modify GoalLab/DC+, production pick registration, bankroll/staking or active production models.

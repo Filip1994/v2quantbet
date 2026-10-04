@@ -255,6 +255,7 @@ def test_quantlab_dashboard_is_operational_only() -> None:
     assert "GoalLab" in html
     assert "CornerLab" in html
     assert "CardLab" in html
+    assert "H2HLab" in html
     assert ">Dashboard<" in html
     assert ">Analytics<" in html
     assert "Active Picks" in html

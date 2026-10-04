@@ -9,6 +9,7 @@ It is **not** the existing Research Board and it has **no authority to place pro
 - [GoalLab](./GoalLab/README.md) — goals, BTTS and DC+ experiments.
 - [CornerLab](./CornerLab/README.md) — corner totals, team corners and corner handicaps.
 - [CardLab](./CardLab/README.md) — cards, fouls, referee and match-context models.
+- [H2HLab](./H2HLab/README.md) — direct mutual-match evidence blended with plain Dixon-Coles, with DC capped at 70%.
 
 ## Runtime
 

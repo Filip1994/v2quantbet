@@ -31,6 +31,8 @@ from h2h.quantlab.coverage import (
     parse_league_coverage_flags,
 )
 from h2h.quantlab.fixture_discovery import parse_fixture_discovery_response
+from h2h.quantlab.h2h_lab.history import parse_h2h_response
+from h2h.quantlab.h2h_lab.settlement import settle_h2h_shadow_bet
 from h2h.quantlab.goal_lab.picks import (
     GOAL_RESULT_FINALITY_DELAY_SECONDS,
     GOAL_RESULT_INITIAL_DELAY_SECONDS,
@@ -44,6 +46,12 @@ from h2h.quantlab.scope import card_corner_scope, goal_scope
 
 
 LOGGER = logging.getLogger("quantbet.quantlab")
+
+
+def _utc_fixture_time(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("fixture kickoff must be timezone-aware")
+    return value.astimezone(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +68,7 @@ class QuantLabRuntimeSettings:
     goal_lineup_refresh_seconds: int = 900
     goal_lineup_window_minutes: int = 120
     goal_coach_refresh_seconds: int = 86400
+    h2h_refresh_seconds: int = 21600
     history_backfill_per_cycle: int = 25
     goal_team_history_last: int = 15
     goal_team_history_teams_per_cycle: int = 120
@@ -95,6 +104,7 @@ class QuantLabRuntimeSettings:
             ("goal_lineup_refresh_seconds", self.goal_lineup_refresh_seconds),
             ("goal_lineup_window_minutes", self.goal_lineup_window_minutes),
             ("goal_coach_refresh_seconds", self.goal_coach_refresh_seconds),
+            ("h2h_refresh_seconds", self.h2h_refresh_seconds),
             ("goal_team_history_last", self.goal_team_history_last),
             ("goal_team_history_teams_per_cycle", self.goal_team_history_teams_per_cycle),
             ("goal_team_statistics_per_cycle", self.goal_team_statistics_per_cycle),
@@ -135,6 +145,7 @@ class QuantLabRuntime:
         settings: QuantLabRuntimeSettings | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         goal_engine: Any | None = None,
+        h2h_engine: Any | None = None,
         corner_engine: Any | None = None,
         card_engine: Any | None = None,
         market_archive_writer: Any | None = None,
@@ -150,6 +161,7 @@ class QuantLabRuntime:
             archive_writer=market_archive_writer,
         )
         self._goal_engine = goal_engine
+        self._h2h_engine = h2h_engine
         self._corner_engine = corner_engine
         self._card_engine = card_engine
         self._referee_web_source = referee_web_source
@@ -1721,6 +1733,103 @@ class QuantLabRuntime:
             settled += int(bool(self._repository.save_card_settlement_event(settlement)))
         return settled
 
+    def _collect_h2h_snapshots(self, now: datetime) -> int:
+        """Collect at most one timestamp-safe direct-H2H snapshot per upcoming fixture."""
+        if self._h2h_engine is None:
+            return 0
+        fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=self._settings.fixture_limit,
+        )
+        captured = 0
+        for fixture in fixtures:
+            if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            fixture_id = str(fixture.get("fixture_id") or "")
+            if "GOAL" not in self._repository.market_labs_for_fixture(fixture_id):
+                continue
+            if not self._repository.h2h_snapshot_due(
+                fixture_id, now=now, refresh_seconds=self._settings.h2h_refresh_seconds
+            ):
+                continue
+            home_team_id = int(fixture.get("home_team_id") or 0)
+            away_team_id = int(fixture.get("away_team_id") or 0)
+            if home_team_id <= 0 or away_team_id <= 0 or home_team_id == away_team_id:
+                continue
+            try:
+                payload = self._provider.fetch_head_to_head(home_team_id, away_team_id, last=10)
+                meetings = parse_h2h_response(
+                    payload,
+                    target_home_team_id=home_team_id,
+                    target_away_team_id=away_team_id,
+                    before=_utc_fixture_time(fixture["kickoff_at"]),
+                    maximum=10,
+                )
+                self._repository.save_h2h_snapshot(
+                    fixture_id=fixture_id,
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    captured_at=now,
+                    meetings=meetings,
+                    raw_payload=dict(payload),
+                )
+                captured += 1
+            except ApiBudgetExceededError:
+                raise
+            except (KeyError, TypeError, ValueError) as exc:
+                LOGGER.warning(
+                    "QuantLab H2HLab snapshot rejected fixture=%s error_class=%s error=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                    str(exc),
+                )
+        return captured
+
+    def _evaluate_h2h_picks(self, now: datetime) -> tuple[int, int]:
+        if self._h2h_engine is None:
+            return 0, 0
+        fixtures = self._repository.upcoming_fixtures(
+            start_at=now,
+            end_at=now + timedelta(hours=self._settings.lookahead_hours),
+            limit=self._settings.fixture_limit,
+        )
+        decisions = picks = 0
+        for fixture in fixtures:
+            if not goal_scope(**self._scope_kwargs(fixture)).allowed:
+                continue
+            try:
+                outcome = self._h2h_engine.run_fixture(fixture, decision_at=now)
+            except Exception as exc:
+                LOGGER.exception(
+                    "H2HLab fixture evaluation failed fixture=%s error_class=%s",
+                    fixture.get("fixture_id"), type(exc).__name__,
+                )
+                continue
+            decisions += int(outcome.decisions_inserted)
+            picks += int(outcome.picks_inserted)
+        return decisions, picks
+
+    def _refresh_h2h_pick_results(self, now: datetime) -> int:
+        rows = self._repository.h2h_shadow_result_refresh_candidates(now=now, limit=25)
+        refreshed = 0
+        for fixture in rows:
+            fixture_id = str(fixture["fixture_id"])
+            payload = self._provider.fetch_fixture(int(fixture["provider_fixture_id"]))
+            observations = parse_fixture_discovery_response(payload, captured_at=now)
+            matching = tuple(item for item in observations if str(item.fixture.fixture_id) == fixture_id)
+            if matching:
+                refreshed += int(self._repository.save_fixture_observations(matching))
+        return refreshed
+
+    def _settle_h2h_picks(self, now: datetime) -> int:
+        settled = 0
+        for row in self._repository.h2h_shadow_settlement_candidates(limit=500):
+            settlement = settle_h2h_shadow_bet(row, settled_at=now)
+            if settlement is not None:
+                settled += int(bool(self._repository.save_h2h_settlement(settlement)))
+        return settled
+
     def _evaluate_context_picks(
         self,
         engine: Any | None,
@@ -1765,6 +1874,11 @@ class QuantLabRuntime:
             "goal_picks": 0,
             "goal_result_refreshes": 0,
             "goal_settlements": 0,
+            "h2h_snapshots": 0,
+            "h2h_decisions": 0,
+            "h2h_picks": 0,
+            "h2h_result_refreshes": 0,
+            "h2h_settlements": 0,
             "corner_decisions": 0,
             "corner_picks": 0,
             "corner_settlements": 0,
@@ -1901,6 +2015,7 @@ class QuantLabRuntime:
                 )
                 result["market_fixtures"] = market_fixtures
                 result["card_snapshots"] = card_snapshots
+                result["h2h_snapshots"] = self._collect_h2h_snapshots(now)
             except ApiBudgetExceededError:
                 collection_budget_exhausted = True
                 LOGGER.warning(
@@ -1943,6 +2058,25 @@ class QuantLabRuntime:
                 )
 
         try:
+            h2h_decisions, h2h_picks = self._evaluate_h2h_picks(now)
+            result["h2h_decisions"] = h2h_decisions
+            result["h2h_picks"] = h2h_picks
+        except Exception:
+            LOGGER.exception("QuantLab H2HLab shadow evaluation failed")
+
+        try:
+            result["h2h_result_refreshes"] = self._refresh_h2h_pick_results(now)
+        except ApiBudgetExceededError:
+            LOGGER.warning("Shared football API daily budget reached; H2HLab result refresh skipped")
+        except Exception:
+            LOGGER.exception("QuantLab H2HLab result refresh failed")
+
+        try:
+            result["h2h_settlements"] = self._settle_h2h_picks(now)
+        except Exception:
+            LOGGER.exception("QuantLab H2HLab settlement failed")
+
+        try:
             corner_decisions, corner_picks = self._evaluate_context_picks(
                 self._corner_engine, "CORNER", now
             )
@@ -1968,7 +2102,8 @@ class QuantLabRuntime:
             "card_referee_scopes_refreshed=%d card_referee_statistics_backfilled=%d "
             "card_referee_web_captures=%d card_referee_web_profiles=%d "
             "market_fixtures=%d card_snapshots=%d goal_decisions=%d goal_picks=%d "
-            "goal_result_refreshes=%d goal_settlements=%d corner_decisions=%d "
+            "goal_result_refreshes=%d goal_settlements=%d h2h_snapshots=%d "
+            "h2h_decisions=%d h2h_picks=%d h2h_result_refreshes=%d h2h_settlements=%d corner_decisions=%d "
             "corner_picks=%d corner_settlements=%d "
             "card_decisions=%d card_picks=%d",
             result["fixtures_discovered"],
@@ -1988,6 +2123,11 @@ class QuantLabRuntime:
             result["goal_picks"],
             result["goal_result_refreshes"],
             result["goal_settlements"],
+            result["h2h_snapshots"],
+            result["h2h_decisions"],
+            result["h2h_picks"],
+            result["h2h_result_refreshes"],
+            result["h2h_settlements"],
             result["corner_decisions"],
             result["corner_picks"],
             result["corner_settlements"],

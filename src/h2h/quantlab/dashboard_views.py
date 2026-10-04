@@ -33,8 +33,9 @@ LABS = {
     "goal": ("GOAL", "GoalLab", "Goals · DC+ and goal-market experiments"),
     "corner": ("CORNER", "CornerLab", "Corners · totals, team totals and handicaps"),
     "card": ("CARD", "CardLab", "Cards · totals, team cards and referee-sensitive models"),
+    "h2h": ("H2H", "H2HLab", "Direct H2H · Dixon-Coles + mutual-match evidence"),
 }
-ANALYTICS_LABS = {"goal", "corner", "card"}
+ANALYTICS_LABS = {"goal", "corner", "card", "h2h"}
 
 
 def _number(value: Any) -> float | None:
@@ -1146,6 +1147,8 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
         else "corner_feature_payload"
         if lab_key == "corner"
         else "card_feature_payload"
+        if lab_key == "card"
+        else "decision_details"
     )
     raw_for_reliability = _raw_features(item, payload_key)
     item.update(
@@ -1285,6 +1288,35 @@ def _analytics_row(row: dict[str, Any], *, lab_key: str) -> dict[str, Any]:
                 ),
                 "feature_away_l5_sot_for_bucket": _feature_bucket(
                     raw.get("away_l5_sot_for"), "sot"
+                ),
+            }
+        )
+    elif lab_key == "h2h":
+        details = item.get("decision_details")
+        details = details if isinstance(details, dict) else {}
+        dc_probability = _first_number(item.get("dc_probability"), details.get("dc_probability"))
+        h2h_probability_value = _first_number(item.get("h2h_probability"), details.get("h2h_probability"))
+        dc_weight = _first_number(item.get("dc_weight"), details.get("dc_weight"))
+        h2h_weight = _first_number(item.get("h2h_weight"), details.get("h2h_weight"))
+        sample_size = _first_number(item.get("h2h_sample_size"), details.get("h2h_sample_size"))
+        item.update(
+            {
+                "h2h_sample_bucket": _scalar_bucket(sample_size, breaks=(5, 6, 7, 8, 9, 10), digits=0),
+                "h2h_dc_probability_bucket": _probability_bucket(dc_probability),
+                "h2h_probability_bucket": _probability_bucket(h2h_probability_value),
+                "h2h_dc_weight_bucket": _scalar_bucket(
+                    None if dc_weight is None else dc_weight * 100,
+                    breaks=(60, 62, 64, 66, 68, 70), suffix="%", digits=0,
+                ),
+                "h2h_weight_bucket": _scalar_bucket(
+                    None if h2h_weight is None else h2h_weight * 100,
+                    breaks=(30, 32, 34, 36, 38, 40), suffix="%", digits=0,
+                ),
+                "h2h_agreement_bucket": str(details.get("agreement") or "—"),
+                "h2h_vs_dc_gap_bucket": _signed_gap_bucket(
+                    None
+                    if dc_probability is None or h2h_probability_value is None
+                    else h2h_probability_value - dc_probability
                 ),
             }
         )
@@ -2576,19 +2608,29 @@ def render_analytics(
         for label, value in top_cards
     )
 
-    analytics_note = (
-        "GoalLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
-        "version regimes, calibration and exact constituent-pick drilldowns."
-        if lab_key == "goal"
-        else "CornerLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
-        "version regimes, calibration and exact constituent-pick drilldowns. Historical multi-pick fixtures "
-        "are normalized to one settled pick with entry odds closest to 2.00; raw settlement evidence remains immutable."
-        if lab_key == "corner"
-        else "CardLab is raw-statistics first: PICK decisions do not require EV, edge or an odds band. "
-        "Analytics exposes referee, team discipline, foul, matchup, league, H2H, importance, game-state, "
-        "trend and reliability buckets with exact constituent-pick drilldowns. "
-        f"{len(legacy_rows)} pre-V7 rows are classified LEGACY and excluded from all current CardLab metrics."
-    )
+    if lab_key == "goal":
+        analytics_note = (
+            "GoalLab analytics now uses Research-style stable buckets, cross-sections, timing cohorts, "
+            "version regimes, calibration and exact constituent-pick drilldowns."
+        )
+    elif lab_key == "corner":
+        analytics_note = (
+            "CornerLab analytics uses Research-style stable buckets and exact constituent-pick drilldowns. "
+            "Historical multi-pick fixtures are normalized to one settled pick with entry odds closest to 2.00."
+        )
+    elif lab_key == "h2h":
+        analytics_note = (
+            "H2HLab V1 measures the incremental value of direct mutual-match evidence on top of plain Dixon-Coles. "
+            "Minimum direct H2H sample is 5; DC is capped at 70% and falls to 60% by N=10. "
+            "H2H rates use recency/venue weighting and Beta(2,2) shrinkage."
+        )
+    else:
+        analytics_note = (
+            "CardLab is raw-statistics first: PICK decisions do not require EV, edge or an odds band. "
+            "Analytics exposes referee, team discipline, foul, matchup, league, H2H, importance, game-state, "
+            "trend and reliability buckets with exact constituent-pick drilldowns. "
+            f"{len(legacy_rows)} pre-V7 rows are classified LEGACY and excluded from all current CardLab metrics."
+        )
 
     def table(
         title_text: str,
@@ -2814,6 +2856,39 @@ def render_analytics(
             )
         )
 
+    elif lab_key == "h2h":
+        watchlist_content = (
+            table(
+                "DC × H2H confirmation",
+                ("market_key", "selection", "h2h_agreement_bucket", "h2h_dc_probability_bucket", "h2h_probability_bucket"),
+                "watch_h2h_confirmation",
+                labels={
+                    "market_key": "Market", "selection": "Pick", "h2h_agreement_bucket": "Agreement",
+                    "h2h_dc_probability_bucket": "DC P", "h2h_probability_bucket": "H2H P",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "Sample × H2H weight × price",
+                ("h2h_sample_bucket", "h2h_weight_bucket", "entry_odds_bucket", "market_key", "selection"),
+                "watch_h2h_sample_weight",
+                labels={
+                    "h2h_sample_bucket": "H2H N", "h2h_weight_bucket": "H2H weight",
+                    "entry_odds_bucket": "Odds", "market_key": "Market", "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+            + table(
+                "H2H − DC gap × composite",
+                ("h2h_vs_dc_gap_bucket", "model_probability_bucket", "market_probability_bucket", "market_key", "selection"),
+                "watch_h2h_gap",
+                labels={
+                    "h2h_vs_dc_gap_bucket": "H2H−DC", "model_probability_bucket": "Composite P",
+                    "market_probability_bucket": "Market P", "market_key": "Market", "selection": "Pick",
+                },
+                drop_missing=True,
+            )
+        )
     else:
         watchlist_content = (
             table(
@@ -3150,6 +3225,19 @@ def render_analytics(
                 labels={"expected_total_corners_bucket": "Expected corners"},
                 drop_missing=True,
             )
+        )
+    elif lab_key == "h2h":
+        domain = (
+            _analytics_section(
+                "H2HLab structure",
+                "direct H2H sample, DC/H2H allocation and confirmation/conflict regimes",
+            )
+            + table("Direct H2H sample", ("h2h_sample_bucket",), "h2h_sample", labels={"h2h_sample_bucket": "H2H N"}, drop_missing=True)
+            + table("DC probability", ("h2h_dc_probability_bucket",), "h2h_dc_probability", labels={"h2h_dc_probability_bucket": "DC P"}, drop_missing=True)
+            + table("Shrunk H2H probability", ("h2h_probability_bucket",), "h2h_probability", labels={"h2h_probability_bucket": "H2H P"}, drop_missing=True)
+            + table("DC decision weight", ("h2h_dc_weight_bucket",), "h2h_dc_weight", labels={"h2h_dc_weight_bucket": "DC weight"}, drop_missing=True)
+            + table("H2H decision weight", ("h2h_weight_bucket",), "h2h_weight", labels={"h2h_weight_bucket": "H2H weight"}, drop_missing=True)
+            + table("DC/H2H agreement", ("h2h_agreement_bucket", "market_key", "selection"), "h2h_agreement", labels={"h2h_agreement_bucket": "Regime", "market_key": "Market", "selection": "Pick"}, drop_missing=True)
         )
     else:
         card_dimensions = (

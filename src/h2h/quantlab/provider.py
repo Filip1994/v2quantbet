@@ -137,6 +137,29 @@ class QuantLabApiFootballClient:
             cache_ttl_seconds=21600.0,
         )
 
+    def fetch_head_to_head(
+        self,
+        home_team_id: int,
+        away_team_id: int,
+        *,
+        last: int = 10,
+    ) -> Mapping[str, Any]:
+        """Fetch direct meetings for H2HLab; the runtime persists a timestamp-safe snapshot."""
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in (home_team_id, away_team_id)
+        ):
+            raise ValueError("home_team_id and away_team_id must be positive integers")
+        if home_team_id == away_team_id:
+            raise ValueError("home_team_id and away_team_id must differ")
+        if isinstance(last, bool) or not isinstance(last, int) or not 5 <= last <= 10:
+            raise ValueError("last must be an integer between 5 and 10")
+        return self._get(
+            "fixtures/headtohead",
+            {"h2h": f"{home_team_id}-{away_team_id}", "last": last, "timezone": "UTC"},
+            cache_ttl_seconds=21600.0,
+        )
+
     def fetch_league_coverage(self, league_id: int, season: int) -> Mapping[str, Any]:
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value <= 0
