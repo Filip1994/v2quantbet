@@ -1,4 +1,4 @@
-"""Single-process production composition for the Phase I football universe.\n\nProduction registrations are research-only by default here: successful registrations are\nautomatically routed to operator state SKIPPED so they do not consume effective exposure.\n"""
+"""Compose source-universe plumbing plus the source-agnostic Production funnel.\n\nThe legacy registration path remains auto-SKIPPED only because it still feeds the Research\nuniverse. Production authority lives in production_funnel_picks: approved source picks\nare cloned from the active intake buckets and enter the operator queue as PENDING.\n"""
 
 from __future__ import annotations
 
