@@ -312,8 +312,16 @@ class DashboardService:
                         THEN research_result.persisted_at
                         ELSE NULL
                     END AS source_settled_at,
-                    research_result.regulation_home_goals AS research_home_goals,
-                    research_result.regulation_away_goals AS research_away_goals
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB'
+                        THEN goal_settlement.regulation_home_goals
+                        ELSE research_result.regulation_home_goals
+                    END AS source_home_goals,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB'
+                        THEN goal_settlement.regulation_away_goals
+                        ELSE research_result.regulation_away_goals
+                    END AS source_away_goals
                 FROM production_funnel_picks p
                 LEFT JOIN quantlab_goal_pick_settlements goal_settlement
                   ON p.source_universe = 'GOALLAB'
@@ -392,8 +400,8 @@ class DashboardService:
                     ELSE NULL::bigint
                 END AS realized_pnl_minor,
                 p.source_settled_at AS settled_at,
-                p.research_home_goals AS result_home_goals,
-                p.research_away_goals AS result_away_goals,
+                p.source_home_goals AS result_home_goals,
+                p.source_away_goals AS result_away_goals,
                 NULL::bigint AS clv_ppm,
                 NULL::text AS clv_method_version,
                 COALESCE(operator_state.state, 'PENDING') AS operator_state,
