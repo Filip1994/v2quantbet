@@ -2,9 +2,9 @@
 
 Production does not decide which bets are good. It clones already-formed picks from
 research universes when they match the active intake contract, then owns only operational
-state (PENDING/PLAYED/SKIPPED) and the shared exposure cap. Intake buckets are eligibility
-labels, not a queue: when capacity is constrained, eligible picks are ranked globally by
-source-comparable expected value, then edge.
+state (PENDING/PLAYED/SKIPPED) and the shared exposure cap. When capacity is constrained,
+approved buckets are consumed in the current ROI-priority order; EV and edge only break
+ties inside the same ROI-ranked bucket.
 """
 
 from __future__ import annotations
@@ -18,27 +18,20 @@ from collections.abc import Callable
 from typing import Any
 
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
-
-
-ConnectionFactory = Callable[[], Any]
-
-RESEARCH_LOW_SCORING_NON_EXTREME = "RESEARCH_LOW_SCORING_NON_EXTREME"
-RESEARCH_OU_UNDER_EDGE_10_15 = "RESEARCH_OU_UNDER_EDGE_10_15"
-RESEARCH_OU_UNDER_EDGE_20_30 = "RESEARCH_OU_UNDER_EDGE_20_30"
-RESEARCH_BTTS_NO_ODDS_2_01_2_50 = "RESEARCH_BTTS_NO_ODDS_2_01_2_50"
-GOALLAB_OU_OVER_XG_2_5_3_0 = "GOALLAB_OU_OVER_XG_2_5_3_0"
-GOALLAB_OU_OVER_ODDS_2_01_2_50 = "GOALLAB_OU_OVER_ODDS_2_01_2_50"
-
-DEFAULT_BUCKET_IDS = (
+from h2h.production_buckets import (
+    BUCKET_PRIORITY as _BUCKET_PRIORITY,
+    DEFAULT_BUCKET_IDS,
+    GOALLAB_OU_OVER_ODDS_2_01_2_50,
+    GOALLAB_OU_OVER_XG_2_5_3_0,
+    KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
-    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
-    GOALLAB_OU_OVER_XG_2_5_3_0,
-    GOALLAB_OU_OVER_ODDS_2_01_2_50,
 )
-_BUCKET_PRIORITY = {bucket_id: index for index, bucket_id in enumerate(DEFAULT_BUCKET_IDS, 1)}
-_KNOWN_BUCKET_IDS = frozenset(DEFAULT_BUCKET_IDS)
+
+
+ConnectionFactory = Callable[[], Any]
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -149,9 +142,13 @@ class PostgreSQLProductionFunnelRepository:
         return tuple(matches)
 
     @staticmethod
-    def _candidate_sort_key(row: dict[str, Any]) -> tuple[float, float, Any, str, str]:
-        """Rank eligible picks globally; bucket order must never starve a source universe."""
+    def _candidate_sort_key(
+        priority: int,
+        row: dict[str, Any],
+    ) -> tuple[int, float, float, Any, str, str]:
+        """Rank by selected-bucket ROI priority, then by pick strength inside that bucket."""
         return (
+            priority,
             -float(row["expected_value"]),
             -float(row["edge"]),
             row["source_decision_at"],
@@ -464,7 +461,7 @@ class PostgreSQLProductionFunnelRepository:
                 priority = min(_BUCKET_PRIORITY[item] for item in active_matches)
                 matched.append((priority, row, active_matches))
 
-            matched.sort(key=lambda item: self._candidate_sort_key(item[1]))
+            matched.sort(key=lambda item: self._candidate_sort_key(item[0], item[1]))
             cloned = 0
             duplicates = 0
             blocked = 0
