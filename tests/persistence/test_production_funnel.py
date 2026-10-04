@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from h2h.production_buckets import n_roi_priority_score
-from h2h.persistence.postgres_production_funnel import (
+from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
     GOALLAB_OU_OVER_XG_2_5_3_0,
@@ -11,6 +10,9 @@ from h2h.persistence.postgres_production_funnel import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    n_roi_priority_score,
+)
+from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelRepository,
     active_bucket_ids,
     intake_contract_version,
