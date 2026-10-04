@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
 from time import monotonic
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 from h2h.api.dashboard_time import (
     COUNTDOWN_SCRIPT,
@@ -24,6 +24,12 @@ from h2h.api.dashboard_time import (
     local_time,
 )
 from h2h.domain.operator_pick_state import OperatorPickState
+from h2h.domain.production_intake_buckets import (
+    BUCKET_SPECS,
+    GOALLAB_OU_OVER_ODDS_2_01_2_50,
+    GOALLAB_OU_OVER_XG_2_5_3_0,
+    bucket_anchor,
+)
 
 
 WORKER_FRESHNESS_SECONDS = 600
@@ -371,7 +377,7 @@ class DashboardService:
                 NULL::text AS clv_method_version,
                 COALESCE(operator_state.state, 'PENDING') AS operator_state,
                 p.source_universe, p.source_pick_id, p.matched_bucket_ids,
-                p.bucket_priority, p.intake_contract_version
+                p.bucket_priority, p.intake_contract_version, p.source_payload
             FROM source_status p
             LEFT JOIN latest_operator operator_state ON operator_state.pick_id = p.pick_id
             ORDER BY p.cloned_at DESC, p.pick_id DESC
@@ -476,6 +482,85 @@ class DashboardService:
     def _short_id(value: Any) -> str:
         text = str(value or "")
         return text[-10:] if len(text) > 10 else text or "—"
+
+    @staticmethod
+    def _bucket_urls(bucket_id: str) -> tuple[str, str]:
+        spec = BUCKET_SPECS[bucket_id]
+        research_base = os.environ.get(
+            "QUANTBET_RESEARCH_DASHBOARD_URL",
+            "https://quantbet-research-production.up.railway.app",
+        ).rstrip("/")
+        quantlab_base = os.environ.get(
+            "QUANTBET_QUANTLAB_DASHBOARD_URL",
+            "https://quantbet-quantlab-production.up.railway.app",
+        ).rstrip("/")
+        anchor = bucket_anchor(bucket_id)
+        if spec.source_universe == "RESEARCH":
+            analytics = f"{research_base}/research/analytics#{anchor}"
+            exact = research_base + "/research?" + urlencode(
+                {"tab": "history", "production_bucket": bucket_id}
+            )
+            return analytics, exact
+        analytics = f"{quantlab_base}/quantlab?view=analytics&lab=goal#{anchor}"
+        if bucket_id == GOALLAB_OU_OVER_XG_2_5_3_0:
+            query = {
+                "view": "analytics",
+                "lab": "goal",
+                "bucket": "1",
+                "bucket_market_key": "OU_25",
+                "bucket_selection": "OVER",
+                "bucket_expected_total_goals_bucket": "2.5–3",
+            }
+        elif bucket_id == GOALLAB_OU_OVER_ODDS_2_01_2_50:
+            query = {
+                "view": "analytics",
+                "lab": "goal",
+                "bucket": "1",
+                "bucket_market_key": "OU_25",
+                "bucket_selection": "OVER",
+                "bucket_entry_odds_bucket": "2.01–2.50",
+            }
+        else:
+            query = {"view": "analytics", "lab": "goal"}
+        exact = quantlab_base + "/quantlab?" + urlencode(query) + "#bucket-picks"
+        return analytics, exact
+
+    @classmethod
+    def _bucket_links_html(cls, pick: dict[str, Any]) -> str:
+        payload = pick.get("source_payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        primary = str(payload.get("production_primary_bucket_id") or "")
+        matched = [str(item) for item in (pick.get("matched_bucket_ids") or ())]
+        ordered = ([primary] if primary and primary in matched else []) + [
+            item for item in matched if item != primary
+        ]
+        links: list[str] = []
+        for index, bucket_id in enumerate(ordered):
+            spec = BUCKET_SPECS.get(bucket_id)
+            if spec is None:
+                continue
+            analytics_url, exact_url = cls._bucket_urls(bucket_id)
+            primary_class = " primary" if index == 0 else ""
+            links.append(
+                f'<div class="bucket-link-row{primary_class}">'
+                f'<a class="bucket-chip" href="{escape(analytics_url, quote=True)}" '
+                'target="_blank" rel="noopener noreferrer">'
+                f'{escape(spec.label)} ↗</a>'
+                + ('<span class="bucket-primary">PRIMARY</span>' if index == 0 else '')
+                + f'<a class="bucket-path" href="{escape(exact_url, quote=True)}" '
+                'target="_blank" rel="noopener noreferrer">'
+                f'{escape(spec.quick_path)} · exact picks ↗</a>'
+                '</div>'
+            )
+        if not links:
+            return ""
+        return '<div class="bucket-links">' + "".join(links) + '</div>'
 
     @staticmethod
     def _status(pick: dict[str, Any]) -> tuple[str, str]:
@@ -792,6 +877,7 @@ class DashboardService:
                 f"X {self._checkpoint_time(pick.get('display_closing_observed_at'))}",
             ]
         )
+        bucket_links = self._bucket_links_html(pick)
         return (
             f'<tr data-provenance="{escape(provenance)}">'
             f'<td><code title="{escape(str(pick.get("pick_id") or ""))}">'
@@ -804,8 +890,8 @@ class DashboardService:
             f'</div></td>'
             f'<td class="fixture"><strong>{escape(fixture)}</strong>'
             f"{self._league_meta(pick, countdown=str(pick.get('dashboard_phase') or 'PREMATCH').upper() == 'PREMATCH')}"
-            f'<small class="quality-history">{escape(str(pick.get("source_universe") or "SOURCE"))} · '
-            f'{escape(" · ".join(str(item).replace("RESEARCH_", "").replace("GOALLAB_", "") for item in (pick.get("matched_bucket_ids") or ())))}</small>'
+            f'<small class="quality-history">{escape(str(pick.get("source_universe") or "SOURCE"))}</small>'
+            f"{bucket_links}"
             f'<span class="pick-book" title="Source bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
             f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
@@ -972,6 +1058,13 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 .quality-badge.active{{color:#8ab4ff;border-color:#35578c}}
 .quality-badge.unavailable{{color:var(--muted)}}
 .quality-history{{margin:0!important;color:var(--muted)!important;font-size:8px!important;line-height:1.3}}
+.bucket-links{{display:flex;flex-direction:column;gap:5px;margin:7px 0 5px;max-width:360px}}
+.bucket-link-row{{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 6px;border-left:2px solid #315d7a;background:rgba(24,55,77,.35)}}
+.bucket-link-row.primary{{border-left-color:#00d9ff;background:rgba(0,217,255,.09);box-shadow:inset 0 0 12px rgba(0,217,255,.04)}}
+.bucket-chip{{color:#a9eefe;font-size:9px;font-weight:900;text-decoration:none}}
+.bucket-chip:hover{{color:#fff;text-shadow:0 0 9px #00d9ff}}
+.bucket-path{{color:#7f9eb3;font-size:7.5px;text-decoration:none;white-space:normal}}
+.bucket-path:hover{{color:#bed7e8}}.bucket-primary{{color:#00d9ff;border:1px solid rgba(0,217,255,.45);padding:1px 4px;font-size:6px;font-weight:950;letter-spacing:.08em}}
 .source-label{{margin-top:auto!important;padding-top:4px;font-size:7px!important;letter-spacing:.05em;color:#a9c5ff!important}}
 .source-label.manual{{color:var(--amber)!important}}
 .operator-pending{{color:#b7c2d3;border-color:#47556a;background:#182130}}.operator-played{{color:#9ef2ce;border-color:#2f8c6c;background:#123629}}.operator-skipped{{color:#ffd989;border-color:#8b6a2f;background:#3a2c12}}
