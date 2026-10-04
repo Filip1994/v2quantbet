@@ -44,7 +44,7 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
     subset = intake_contract_version(DEFAULT_BUCKET_IDS[:2])
 
-    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V1:")
+    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V2:")
     assert full != subset
 
 
@@ -142,3 +142,40 @@ def test_goallab_expected_total_bucket_boundaries(
     )
 
     assert (GOALLAB_OU_OVER_XG_2_5_3_0 in matches) is included
+
+
+def test_candidate_ranking_is_global_not_bucket_priority() -> None:
+    rows = [
+        {
+            "source_universe": "RESEARCH",
+            "source_pick_id": "research-low-ev",
+            "expected_value": 0.12,
+            "edge": 0.18,
+            "source_decision_at": 1,
+        },
+        {
+            "source_universe": "GOALLAB",
+            "source_pick_id": "goallab-high-ev",
+            "expected_value": 0.31,
+            "edge": 0.16,
+            "source_decision_at": 2,
+        },
+        {
+            "source_universe": "GOALLAB",
+            "source_pick_id": "goallab-same-ev-higher-edge",
+            "expected_value": 0.31,
+            "edge": 0.20,
+            "source_decision_at": 3,
+        },
+    ]
+
+    ordered = sorted(
+        rows,
+        key=PostgreSQLProductionFunnelRepository._candidate_sort_key,
+    )
+
+    assert [row["source_pick_id"] for row in ordered] == [
+        "goallab-same-ev-higher-edge",
+        "goallab-high-ev",
+        "research-low-ev",
+    ]

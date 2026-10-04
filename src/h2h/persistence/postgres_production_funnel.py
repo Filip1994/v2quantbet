@@ -2,7 +2,9 @@
 
 Production does not decide which bets are good. It clones already-formed picks from
 research universes when they match the active intake contract, then owns only operational
-state (PENDING/PLAYED/SKIPPED) and the shared exposure cap.
+state (PENDING/PLAYED/SKIPPED) and the shared exposure cap. Intake buckets are eligibility
+labels, not a queue: when capacity is constrained, eligible picks are ranked globally by
+source-comparable expected value, then edge.
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
     canonical = ",".join(bucket_ids)
-    return "PRODUCTION_FUNNEL_INTAKE_V1:" + sha256(canonical.encode("utf-8")).hexdigest()
+    return "PRODUCTION_FUNNEL_INTAKE_V2:" + sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +147,17 @@ class PostgreSQLProductionFunnelRepository:
         if market == "OU_25" and selection == "OVER" and 2.00 < odds <= 2.50:
             matches.append(GOALLAB_OU_OVER_ODDS_2_01_2_50)
         return tuple(matches)
+
+    @staticmethod
+    def _candidate_sort_key(row: dict[str, Any]) -> tuple[float, float, Any, str, str]:
+        """Rank eligible picks globally; bucket order must never starve a source universe."""
+        return (
+            -float(row["expected_value"]),
+            -float(row["edge"]),
+            row["source_decision_at"],
+            str(row["source_universe"]),
+            str(row["source_pick_id"]),
+        )
 
     @staticmethod
     def _research_candidates(cursor: Any, *, now: datetime, fallback_stake_minor: int) -> tuple[dict[str, Any], ...]:
@@ -437,7 +450,7 @@ class PostgreSQLProductionFunnelRepository:
             )
             rows.extend(self._goallab_candidates(cursor, now=cloned_at))
 
-            matched: list[tuple[int, datetime, dict[str, Any], tuple[str, ...]]] = []
+            matched: list[tuple[int, dict[str, Any], tuple[str, ...]]] = []
             for row in rows:
                 source = str(row["source_universe"])
                 all_matches = (
@@ -449,13 +462,13 @@ class PostgreSQLProductionFunnelRepository:
                 if not active_matches:
                     continue
                 priority = min(_BUCKET_PRIORITY[item] for item in active_matches)
-                matched.append((priority, row["source_decision_at"], row, active_matches))
+                matched.append((priority, row, active_matches))
 
-            matched.sort(key=lambda item: (item[0], item[1], str(item[2]["source_pick_id"])))
+            matched.sort(key=lambda item: self._candidate_sort_key(item[1]))
             cloned = 0
             duplicates = 0
             blocked = 0
-            for priority, _decision_at, row, matches in matched:
+            for priority, row, matches in matched:
                 stake_minor = fallback_stake_minor
                 if exposure + stake_minor > max_open_exposure_minor:
                     blocked += 1
