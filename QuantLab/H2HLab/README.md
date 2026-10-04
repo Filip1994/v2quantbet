@@ -126,7 +126,7 @@ The main V1 research question is **incremental value**: does the same DC probabi
 
 ## Persistence
 
-Migration 061_quantlab_h2hlab_v1.sql adds:
+Migration 060a_quantlab_h2hlab_v1.sql adds:
 
 - H2H to the QuantLab shadow-lab check;
 - immutable quantlab_h2h_snapshots;
