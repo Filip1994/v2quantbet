@@ -12,9 +12,11 @@
     │   └── README.md
     ├── CornerLab/
     │   └── README.md
-    └── CardLab/
-        ├── README.md
-        └── FEATURES_V1.md
+    ├── CardLab/
+    │   ├── README.md
+    │   └── FEATURES_V1.md
+    └── H2HLab/
+        └── README.md
 
     src/h2h/quantlab/
     ├── entrypoint.py
@@ -29,7 +31,8 @@
     ├── market_classifier.py
     ├── goal_lab/
     ├── corner_lab/
-    └── card_lab/
+    ├── card_lab/
+    └── h2h_lab/
 
 ## Services
 
@@ -81,6 +84,14 @@ variables belong here unless a later experiment explicitly demonstrates a justif
 cross-lab use. CardLab uses the same market-driven universe and requests referee/context
 only after a CARD market has actually been observed for the fixture.
 
+### H2HLab
+
+Owns direct mutual-match experiments. V1 reads the active plain Dixon-Coles artifact
+read-only, requires at least five direct H2H meetings, applies recency/venue weighting and
+Beta shrinkage, and blends H2H with DC while enforcing a database/runtime cap of 70% on
+the DC decision weight. H2HLab reuses existing QuantLab GOAL quotes for O/U 2.5 and BTTS
+and has no GoalLab/DC+ or production write authority.
+
 ## Data contract
 
 Every feature snapshot carries or can be audited back to:
@@ -124,6 +135,8 @@ QuantLab-owned Task 001 observation/snapshot tables are append-only:
 - quantlab_corner_model_versions
 - quantlab_corner_feature_snapshots
 - quantlab_goal_decisions
+- quantlab_h2h_snapshots
+- quantlab_h2h_decisions
 
 ## Market collector contract
 
