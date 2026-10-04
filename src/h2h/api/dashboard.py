@@ -350,7 +350,7 @@ class DashboardService:
                     ))::bigint
                 END AS quote_age_seconds,
                 ARRAY[]::text[] AS warning_codes,
-                'CLONED'::text AS monitoring_state,
+                'PENDING'::text AS monitoring_state,
                 p.source_outcome AS settlement_outcome,
                 CASE p.source_outcome
                     WHEN 'WIN' THEN ROUND(p.stake_minor * p.odds)::bigint
