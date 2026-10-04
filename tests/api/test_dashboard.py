@@ -713,3 +713,29 @@ def test_root_entrypoint_dispatches_dashboard_without_composing_worker(
     entrypoint.main()
 
     assert calls == ["dashboard"]
+
+
+def test_production_pick_bucket_names_link_to_exact_analytics_in_new_tab() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [
+                _pick(
+                    dashboard_phase="PREMATCH",
+                    settlement_outcome=None,
+                    settled_at=None,
+                    source_universe="GOALLAB",
+                    matched_bucket_ids=[
+                        "GOALLAB_OU_OVER_XG_2_5_3_0",
+                        "GOALLAB_OU_OVER_ODDS_2_01_2_50",
+                    ],
+                )
+            ]
+        )
+    ).render_html()
+
+    assert "OU OVER · λ total 2.5–3.0" in html
+    assert "OU OVER · odds 2.01–2.50" in html
+    assert "https://quantbet-quantlab-production.up.railway.app/quantlab?" in html
+    assert "bucket_expected_total_goals_bucket=2.5%E2%80%933" in html
+    assert "bucket_entry_odds_bucket=2.01%E2%80%932.50" in html
+    assert html.count('target="_blank" rel="noopener noreferrer"') >= 2
