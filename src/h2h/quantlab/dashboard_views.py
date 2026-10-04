@@ -2624,6 +2624,142 @@ def _goal_audit(
         + f'</tr></thead><tbody>{funnel}</tbody></table></div></section>'
     )
 
+def _h2h_arm_text(arm: dict[str, Any]) -> str:
+    if arm.get("decision") != "BET":
+        return "NO BET"
+    return (
+        f"{arm.get('market_key') or '—'} {arm.get('selection') or '—'} "
+        f"@ {_odd(arm.get('odds'))}"
+    )
+
+
+def _h2h_paired_experiment_section(repository: Any, *, currency: str) -> str:
+    loader = getattr(repository, "list_h2h_experiments", None)
+    if not callable(loader):
+        return ""
+    experiments = tuple(loader())
+    if not experiments:
+        return (
+            _analytics_section(
+                "Paired experiment · DC-only vs DC+H2H",
+                "same fixtures, same frozen quotes, same gates; only the model probability differs",
+            )
+            + '<section class="panel"><p class="analytics-note">No frozen paired experiments yet.</p></section>'
+        )
+
+    settled = tuple(row for row in experiments if row.get("settled_at") is not None)
+    dc_bets = tuple(row for row in settled if (row.get("dc_arm") or {}).get("decision") == "BET")
+    h2h_bets = tuple(row for row in settled if (row.get("h2h_arm") or {}).get("decision") == "BET")
+    dc_pnl = sum(int(row.get("dc_pnl_minor") or 0) for row in dc_bets)
+    h2h_pnl = sum(int(row.get("h2h_pnl_minor") or 0) for row in h2h_bets)
+    dc_roi = None if not dc_bets else dc_pnl / (len(dc_bets) * 10_000) * 100.0
+    h2h_roi = None if not h2h_bets else h2h_pnl / (len(h2h_bets) * 10_000) * 100.0
+    roi_uplift = None if dc_roi is None or h2h_roi is None else h2h_roi - dc_roi
+
+    dc_scores: list[float] = []
+    h2h_scores: list[float] = []
+    for row in settled:
+        for trial in row.get("scored_probability_trials") or ():
+            if trial.get("dc_brier") is not None and trial.get("h2h_brier") is not None:
+                dc_scores.append(float(trial["dc_brier"]))
+                h2h_scores.append(float(trial["h2h_brier"]))
+    dc_brier = None if not dc_scores else sum(dc_scores) / len(dc_scores)
+    h2h_brier = None if not h2h_scores else sum(h2h_scores) / len(h2h_scores)
+    brier_uplift = None if dc_brier is None or h2h_brier is None else dc_brier - h2h_brier
+
+    cards = (
+        ("Frozen fixtures", str(len(experiments))),
+        ("Settled fixtures", str(len(settled))),
+        ("DC-only bets", str(len(dc_bets))),
+        ("DC+H2H bets", str(len(h2h_bets))),
+        ("DC-only ROI", _metric(dc_roi, suffix="%", signed=True)),
+        ("DC+H2H ROI", _metric(h2h_roi, suffix="%", signed=True)),
+        ("ROI uplift", _metric(roi_uplift, suffix="pp", signed=True)),
+        ("DC Brier", _metric(dc_brier, digits=4)),
+        ("DC+H2H Brier", _metric(h2h_brier, digits=4)),
+        ("Brier uplift", _metric(brier_uplift, signed=True, digits=4)),
+    )
+    cards_html = "".join(
+        f'<div class="card"><small>{escape(label)}</small><b>{escape(value)}</b></div>'
+        for label, value in cards
+    )
+
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in settled:
+        grouped[str(row.get("relation") or "—")].append(row)
+    relation_rows = []
+    for relation, cohort in sorted(grouped.items()):
+        dc_cohort = [row for row in cohort if (row.get("dc_arm") or {}).get("decision") == "BET"]
+        h2h_cohort = [row for row in cohort if (row.get("h2h_arm") or {}).get("decision") == "BET"]
+        dp = sum(int(row.get("dc_pnl_minor") or 0) for row in dc_cohort)
+        hp = sum(int(row.get("h2h_pnl_minor") or 0) for row in h2h_cohort)
+        dr = None if not dc_cohort else dp / (len(dc_cohort) * 10_000) * 100.0
+        hr = None if not h2h_cohort else hp / (len(h2h_cohort) * 10_000) * 100.0
+        bu = [float(row["brier_uplift"]) for row in cohort if row.get("brier_uplift") is not None]
+        relation_rows.append(
+            "<tr>"
+            f"<td>{escape(relation)}</td><td>{len(cohort)}</td>"
+            f"<td>{len(dc_cohort)}</td><td>{_metric(dr, suffix='%', signed=True)}</td>"
+            f"<td>{len(h2h_cohort)}</td><td>{_metric(hr, suffix='%', signed=True)}</td>"
+            f"<td>{_metric(None if dr is None or hr is None else hr - dr, suffix='pp', signed=True)}</td>"
+            f"<td>{_metric(None if not bu else sum(bu) / len(bu), signed=True, digits=4)}</td>"
+            "</tr>"
+        )
+    relation_table = (
+        '<section class="panel"><div class="panel-title"><b>Policy relation buckets</b>'
+        '<span>explanatory only; uplift is the experiment target</span></div>'
+        '<div class="table"><table><thead><tr><th>Relation</th><th>N</th>'
+        '<th>DC bets</th><th>DC ROI</th><th>H2H bets</th><th>H2H ROI</th>'
+        '<th>ROI uplift</th><th>Brier uplift</th></tr></thead><tbody>'
+        + "".join(relation_rows)
+        + "</tbody></table></div></section>"
+    )
+
+    recent_rows = []
+    for row in experiments[:40]:
+        dc_arm = dict(row.get("dc_arm") or {})
+        h2h_arm = dict(row.get("h2h_arm") or {})
+        match = f"{row.get('home_team') or '?'} – {row.get('away_team') or '?'}"
+        pnl_delta = (
+            None
+            if row.get("settled_at") is None
+            else int(row.get("h2h_pnl_minor") or 0) - int(row.get("dc_pnl_minor") or 0)
+        )
+        recent_rows.append(
+            "<tr>"
+            f"<td><b>{escape(match)}</b><small>{escape(str(row.get('competition_name') or '—'))}</small></td>"
+            f"<td>{escape(str(row.get('relation') or '—'))}</td>"
+            f"<td>{escape(_h2h_arm_text(dc_arm))}</td>"
+            f"<td>{escape(_h2h_arm_text(h2h_arm))}</td>"
+            f"<td>{escape(str(row.get('dc_outcome') or 'PENDING'))}</td>"
+            f"<td>{escape(str(row.get('h2h_outcome') or 'PENDING'))}</td>"
+            f"<td>{_money(pnl_delta, currency)}</td>"
+            f"<td>{_metric(row.get('brier_uplift'), signed=True, digits=4)}</td>"
+            "</tr>"
+        )
+    recent_table = (
+        '<section class="panel"><div class="panel-title"><b>Frozen paired trials</b>'
+        '<span>one experiment per fixture; first execution-valid quote snapshot</span></div>'
+        '<div class="table"><table><thead><tr><th>Match</th><th>Relation</th>'
+        '<th>DC-only</th><th>DC+H2H</th><th>DC result</th><th>H2H result</th>'
+        '<th>P/L delta</th><th>Brier uplift</th></tr></thead><tbody>'
+        + "".join(recent_rows)
+        + "</tbody></table></div></section>"
+    )
+
+    return (
+        _analytics_section(
+            "Paired experiment · DC-only vs DC+H2H",
+            "same fixture universe, same frozen quote snapshot, same execution/edge/EV gates; only probability model differs",
+        )
+        + '<section class="cards">'
+        + cards_html
+        + "</section>"
+        + relation_table
+        + recent_table
+    )
+
+
 def render_analytics(
     repository: Any,
     *,
@@ -2647,6 +2783,11 @@ def render_analytics(
     )
     params = params or {}
     metrics = goal_pick_metrics(rows)
+    paired_experiment = (
+        _h2h_paired_experiment_section(repository, currency=currency)
+        if lab_key == "h2h"
+        else ""
+    )
     now = datetime.now(UTC)
     last_7 = goal_pick_metrics(_window_rows(rows, days=7, now=now))
     last_30 = goal_pick_metrics(_window_rows(rows, days=30, now=now))
@@ -2699,9 +2840,9 @@ def render_analytics(
         )
     elif lab_key == "h2h":
         analytics_note = (
-            "H2HLab V1 measures the incremental value of direct mutual-match evidence on top of plain Dixon-Coles. "
-            "Minimum direct H2H sample is 5; DC is capped at 70% and falls to 60% by N=10. "
-            "H2H rates use recency/venue weighting and Beta(2,2) shrinkage."
+            "H2HLab runs a frozen paired experiment: DC-only versus DC+H2H on the same fixtures, "
+            "quotes and gates. ROI uplift and Brier uplift are the primary outcomes; CONFIRM/CONFLICT "
+            "remain explanatory buckets. Minimum direct H2H sample is 5 and DC is capped at 70%."
         )
     else:
         analytics_note = (
@@ -3685,6 +3826,7 @@ def render_analytics(
     body = (
         f'<p class="analytics-note">{escape(analytics_note)}</p>'
         f'<section class="cards">{cards_html}</section>'
+        + paired_experiment
         + _bucket_pick_table(
             rows,
             params=params,
