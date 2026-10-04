@@ -11,6 +11,16 @@ from statistics import mean, median, stdev
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
+from h2h.domain.production_intake_buckets import (
+    BUCKET_SPECS,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    RESEARCH_LOW_SCORING_NON_EXTREME,
+    RESEARCH_OU_UNDER_EDGE_10_15,
+    RESEARCH_OU_UNDER_EDGE_20_30,
+    bucket_anchor,
+    bucket_matches,
+)
+
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
 
@@ -308,6 +318,33 @@ def _diagnostic_rows(
     return output
 
 
+RESEARCH_PRODUCTION_BUCKET_IDS = (
+    RESEARCH_LOW_SCORING_NON_EXTREME,
+    RESEARCH_OU_UNDER_EDGE_10_15,
+    RESEARCH_OU_UNDER_EDGE_20_30,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+)
+
+
+def _production_intake_rows(
+    rows: Sequence[dict[str, Any]],
+    *,
+    fixed_stake_minor: int,
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for bucket_id in RESEARCH_PRODUCTION_BUCKET_IDS:
+        cohort = tuple(row for row in rows if bucket_matches(row, bucket_id))
+        item = {
+            "bucket_id": bucket_id,
+            "label": BUCKET_SPECS[bucket_id].label,
+            "definition": BUCKET_SPECS[bucket_id].definition,
+            "anchor": bucket_anchor(bucket_id),
+        }
+        item.update(cohort_metrics(cohort, fixed_stake_minor=fixed_stake_minor))
+        output.append(item)
+    return output
+
+
 def build_research_analytics_snapshot(
     rows: Sequence[dict[str, Any]],
     *,
@@ -427,6 +464,10 @@ def build_research_analytics_snapshot(
             for week in sorted(weekly, reverse=True)
         ],
         "diagnostics": _diagnostic_rows(
+            settled,
+            fixed_stake_minor=fixed_stake_minor,
+        ),
+        "production_intake_buckets": _production_intake_rows(
             settled,
             fixed_stake_minor=fixed_stake_minor,
         ),
@@ -842,6 +883,35 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
         )
     )
 
+    production_bucket_rows = "".join(
+        (
+            f'<article class="production-bucket-selected" id="{escape(str(row["anchor"]), quote=True)}">'
+            f'<div class="production-bucket-head"><div><small>SELECTED · PRODUCTION INTAKE</small>'
+            f'<h3>{escape(str(row["label"]))}</h3>'
+            f'<code>{escape(str(row["bucket_id"]))}</code></div>'
+            f'<a class="production-bucket-link" target="_blank" rel="noopener noreferrer" '
+            f'href="{escape("/research?" + urlencode({"tab": "history", "production_bucket": row["bucket_id"]}), quote=True)}">'
+            'Exact picks ↗</a></div>'
+            f'<p>{escape(str(row["definition"]))}</p>'
+            f'<div class="production-bucket-metrics">'
+            f'<span><small>N</small><b>{int(row.get("graded_n") or 0)}</b></span>'
+            f'<span><small>ROI</small><b class="{_metric_class(row.get("roi_pct"))}">'
+            f'{escape(_fmt(row.get("roi_pct"), "%", signed=True))}</b></span>'
+            f'<span><small>W-L-V</small><b>{int(row.get("wins") or 0)}-'
+            f'{int(row.get("losses") or 0)}-{int(row.get("voids") or 0)}</b></span>'
+            '</div></article>'
+        )
+        for row in snapshot["production_intake_buckets"]
+    )
+    production_buckets = (
+        '<section id="production-intake-buckets" class="analytics-group production-intake-group">'
+        '<div class="group-head"><div><h2>Production intake buckets</h2>'
+        '<p>Selected Research buckets · neon blue = active intake contract · exact N + ROI.</p>'
+        '</div></div><div class="production-bucket-grid">'
+        + production_bucket_rows
+        + '</div></section>'
+    )
+
     history = {"tab": "history"}
 
     league_seasons = _metrics_table(
@@ -1116,7 +1186,8 @@ def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") ->
 <title>QuantBet Research Analytics V2</title>
 <style>
 :root{{--bg:#0f1113;--panel:#171a1e;--panel2:#13161a;--line:#2b3138;--text:#f0f2f4;
---muted:#8e979f;--positive:#7bc69a;--negative:#e27b82;--accent:#c9a861;--soft:#20252b}}
+--muted:#8e979f;--positive:#7bc69a;--negative:#e27b82;--accent:#c9a861;--soft:#20252b;
+--neon-blue:#00d9ff;--neon-blue-soft:rgba(0,217,255,.13)}}
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:var(--bg);
 color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1920px;margin:auto;padding:24px}}
@@ -1143,6 +1214,22 @@ margin:22px 0 30px}}.group-head{{display:flex;align-items:end;justify-content:sp
 gap:12px;padding:0 2px 8px}}.group-head p{{margin:3px 0 0;font-size:12px}}
 .panel{{padding:0;margin:11px 0;overflow:hidden}}.panel-title{{display:flex;justify-content:space-between;
 align-items:center;padding:13px 14px;border-bottom:1px solid #252b31}}.row-count{{font-size:11px;color:var(--muted)}}
+.production-bucket-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
+.production-bucket-selected{{scroll-margin-top:72px;border:1px solid var(--neon-blue);border-radius:14px;
+padding:15px;background:linear-gradient(180deg,var(--neon-blue-soft),rgba(0,217,255,.035));
+box-shadow:0 0 0 1px rgba(0,217,255,.18),0 0 24px rgba(0,217,255,.12)}}
+.production-bucket-head{{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}}
+.production-bucket-head small{{color:var(--neon-blue);font-size:9px;font-weight:900;letter-spacing:.09em}}
+.production-bucket-head h3{{margin:4px 0 5px;font-size:15px;color:#eefcff}}
+.production-bucket-head code{{font-size:10px;color:#83eaff;white-space:normal;overflow-wrap:anywhere}}
+.production-bucket-selected p{{margin:11px 0;color:#aebcc3;font-size:12px}}
+.production-bucket-link{{color:#a8f2ff;text-decoration:none;font-weight:800;font-size:11px;white-space:nowrap}}
+.production-bucket-link:hover{{color:#fff;text-shadow:0 0 10px var(--neon-blue)}}
+.production-bucket-metrics{{display:flex;gap:10px;flex-wrap:wrap}}
+.production-bucket-metrics span{{min-width:86px;padding:8px 10px;border:1px solid rgba(0,217,255,.28);
+border-radius:9px;background:rgba(6,18,23,.62)}}.production-bucket-metrics small{{display:block;color:#78cddb;
+font-size:9px;text-transform:uppercase;letter-spacing:.08em}}.production-bucket-metrics b{{display:block;margin-top:3px}}
+
 .scroll{{overflow:auto;max-height:66vh}}table{{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}}
 th,td{{padding:9px 10px;border-bottom:1px solid #252a30;white-space:nowrap;text-align:left}}
 th{{position:sticky;top:0;z-index:4;background:#1c2025;color:#9da5ad;font-size:10px;text-transform:uppercase;letter-spacing:.055em}}
@@ -1184,8 +1271,8 @@ font-size:11px;color:#7f8992;line-height:1.5}}
 <div><a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
 <nav class="section-nav">
-<a href="#overview">Overview</a><a href="#decision">ROI decision lab</a>
-<a href="#calibration">Calibration & CLV</a><a href="#audit">Audit</a>
+<a href="#overview">Overview</a><a href="#production-intake-buckets">Production intake</a>
+<a href="#decision">ROI decision lab</a><a href="#calibration">Calibration & CLV</a><a href="#audit">Audit</a>
 </nav>
 <section id="overview" class="analytics-group">
 <div class="focus-note"><b>ROI-FIRST SELF-SUSTAIN PHASE</b>
@@ -1198,6 +1285,7 @@ Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 {version_notice}
 <section class="cards">{cards}</section>
 </section>
+{production_buckets}
 <section id="decision" class="analytics-group">
 <div class="group-head"><div><h2>ROI decision lab</h2>
 <p>Low-dimensional buckets first. Rolling 100/250/500 only appears after that bucket has enough graded picks.</p></div></div>
