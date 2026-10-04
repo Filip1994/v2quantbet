@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from h2h.persistence.postgres_production_funnel import (
+from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
     GOALLAB_OU_OVER_XG_2_5_3_0,
@@ -10,6 +10,9 @@ from h2h.persistence.postgres_production_funnel import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    n_roi_priority_score,
+)
+from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelRepository,
     active_bucket_ids,
     intake_contract_version,
@@ -44,7 +47,7 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
     subset = intake_contract_version(DEFAULT_BUCKET_IDS[:2])
 
-    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V2:")
+    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V3:")
     assert full != subset
 
 
@@ -59,10 +62,10 @@ def test_research_low_scoring_non_extreme_can_overlap_edge_10_15() -> None:
         }
     )
 
-    assert matches == (
+    assert set(matches) == {
         RESEARCH_LOW_SCORING_NON_EXTREME,
         RESEARCH_OU_UNDER_EDGE_10_15,
-    )
+    }
 
 
 def test_research_edge_20_30_is_extreme_not_non_extreme() -> None:
@@ -144,7 +147,7 @@ def test_goallab_expected_total_bucket_boundaries(
     assert (GOALLAB_OU_OVER_XG_2_5_3_0 in matches) is included
 
 
-def test_default_bucket_order_is_current_roi_priority() -> None:
+def test_default_bucket_order_is_stable_contract_order() -> None:
     assert DEFAULT_BUCKET_IDS == (
         RESEARCH_OU_UNDER_EDGE_10_15,
         RESEARCH_OU_UNDER_EDGE_20_30,
@@ -182,3 +185,34 @@ def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
         "research-top-bucket",
         "goallab-higher-ev",
     ]
+
+
+def test_n_roi_priority_score_discounts_small_samples_until_n_100() -> None:
+    assert n_roi_priority_score(graded_n=100, roi_pct=10.0) == pytest.approx(10.0)
+    assert n_roi_priority_score(graded_n=25, roi_pct=32.0) == pytest.approx(8.0)
+    assert n_roi_priority_score(graded_n=250, roi_pct=10.0) == pytest.approx(10.0)
+
+
+def test_bucket_strength_prefers_better_n_roi_combination() -> None:
+    stats = {
+        RESEARCH_LOW_SCORING_NON_EXTREME: {
+            "graded_n": 100,
+            "roi_pct": 10.0,
+            "priority_score": 10.0,
+        },
+        RESEARCH_OU_UNDER_EDGE_10_15: {
+            "graded_n": 25,
+            "roi_pct": 32.0,
+            "priority_score": 8.0,
+        },
+    }
+
+    strongest = max(
+        stats,
+        key=lambda bucket_id: PostgreSQLProductionFunnelRepository._bucket_strength_key(
+            bucket_id,
+            stats,
+        ),
+    )
+
+    assert strongest == RESEARCH_LOW_SCORING_NON_EXTREME

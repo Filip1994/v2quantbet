@@ -30,6 +30,7 @@ from h2h.production_buckets import (
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
     GOALLAB_OU_OVER_XG_2_5_3_0,
     PRODUCTION_BUCKET_SPECS,
+    n_roi_priority_score,
 )
 
 BELGRADE = ZoneInfo("Europe/Belgrade")
@@ -1118,8 +1119,8 @@ def _selected_goal_production_bucket_table(
     currency: str,
 ) -> str:
     specs = {
-        spec.bucket_id: (priority, spec)
-        for priority, spec in enumerate(PRODUCTION_BUCKET_SPECS, 1)
+        spec.bucket_id: spec
+        for spec in PRODUCTION_BUCKET_SPECS
         if spec.source_universe == "GOALLAB"
     }
     cohorts = (
@@ -1144,10 +1145,29 @@ def _selected_goal_production_bucket_table(
             ),
         ),
     )
-    rendered = []
+    ranked: list[tuple[float, float, int, str, dict[str, Any]]] = []
     for bucket_id, cohort in cohorts:
-        priority, spec = specs[bucket_id]
         metrics = goal_pick_metrics(cohort)
+        graded_n = int(metrics.get("wins") or 0) + int(metrics.get("losses") or 0)
+        roi = metrics.get("roi_pct")
+        score = n_roi_priority_score(
+            graded_n=graded_n,
+            roi_pct=None if roi is None else float(roi),
+        )
+        ranked.append(
+            (
+                score,
+                float("-inf") if roi is None else float(roi),
+                graded_n,
+                bucket_id,
+                metrics,
+            )
+        )
+    ranked.sort(reverse=True)
+
+    rendered = []
+    for priority, (score, _roi, graded_n, bucket_id, metrics) in enumerate(ranked, 1):
+        spec = specs[bucket_id]
         pnl = metrics.get("pnl_minor")
         rendered.append(
             '<tr class="production-bucket-row">'
@@ -1156,10 +1176,10 @@ def _selected_goal_production_bucket_table(
             'target="_blank" rel="noopener noreferrer">'
             f'{escape(spec.label)}</a>'
             f'<small><code>{escape(spec.bucket_id)}</code></small></td>'
-            f'<td>{metrics["n"]}</td>'
+            f'<td>{graded_n}</td>'
             f'<td>{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}</td>'
             f'<td>{_metric(metrics["roi_pct"], suffix="%", signed=True)}</td>'
-            f'<td>{_metric(spec.reference_roi_pct, suffix="%", signed=True)}</td>'
+            f'<td>{_metric(score, digits=2)}</td>'
             f'<td>{_money(None if pnl is None else int(pnl), currency)}</td>'
             f'<td>{_metric(metrics["avg_odds"], digits=2)}</td>'
             f'<td>{escape(str(metrics["sample_band"]))}</td>'
@@ -1168,15 +1188,14 @@ def _selected_goal_production_bucket_table(
     return (
         '<section class="panel production-intake-panel" id="production-intake-buckets">'
         '<div class="panel-title"><b>Production intake · selected GoalLab buckets</b>'
-        '<span>neon blue = approved intake · priority follows ROI at selection</span></div>'
+        '<span>neon blue = approved intake · priority = ROI × min(graded N / 100, 1)</span></div>'
         '<div class="table"><table><thead><tr>'
-        '<th>Priority</th><th>Bucket</th><th>N</th><th>W-L-V</th><th>Current ROI</th>'
-        '<th>ROI at selection</th><th>P/L</th><th>Avg odds</th><th>Evidence</th>'
+        '<th>Priority</th><th>Bucket</th><th>Graded N</th><th>W-L-V</th><th>Current ROI</th>'
+        '<th>N+ROI score</th><th>P/L</th><th>Avg odds</th><th>Evidence</th>'
         '</tr></thead><tbody>'
         + "".join(rendered)
         + "</tbody></table></div></section>"
     )
-
 
 def _watchlist_block(content: str, *, lab_key: str) -> str:
     if not content:

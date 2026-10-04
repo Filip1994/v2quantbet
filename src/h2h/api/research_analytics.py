@@ -17,6 +17,7 @@ from h2h.production_buckets import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    n_roi_priority_score,
 )
 
 
@@ -865,16 +866,29 @@ def _selected_research_production_buckets(
     for bucket_id, metrics in sources:
         spec = specs[bucket_id]
         row = dict(metrics or {})
+        graded_n = int(row.get("graded_n") or 0)
+        roi_pct = row.get("roi_pct")
         row.update(
             {
                 "bucket_id": bucket_id,
                 "bucket_label": spec.label,
                 "analytics_path": spec.analytics_path,
-                "reference_roi_pct": spec.reference_roi_pct,
+                "priority_score": n_roi_priority_score(
+                    graded_n=graded_n,
+                    roi_pct=None if roi_pct is None else float(roi_pct),
+                ),
             }
         )
         output.append(row)
-    return output
+    return sorted(
+        output,
+        key=lambda item: (
+            float(item["priority_score"]),
+            float(item.get("roi_pct") or float("-inf")),
+            int(item.get("graded_n") or 0),
+        ),
+        reverse=True,
+    )
 
 
 def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
@@ -882,7 +896,7 @@ def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
     rendered = []
     for priority, row in enumerate(rows, 1):
         href = str(row["analytics_path"])
-        n = int(row.get("n") or 0)
+        n = int(row.get("graded_n") or 0)
         wins = int(row.get("wins") or 0)
         losses = int(row.get("losses") or 0)
         voids = int(row.get("voids") or 0)
@@ -897,7 +911,7 @@ def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
             f'<td>{n}</td><td>{wins}-{losses}-{voids}</td>'
             f'<td class="metric-strong {_metric_class(row.get("roi_pct"))}">'
             f'{_fmt(row.get("roi_pct"), "%", signed=True)}</td>'
-            f'<td>{_fmt(row.get("reference_roi_pct"), "%", signed=True)}</td>'
+            f'<td>{_fmt(row.get("priority_score"))}</td>'
             f'<td>{_fmt(row.get("avg_entry_odds"))}</td>'
             f'<td class="{_metric_class(row.get("avg_edge_pct"))}">'
             f'{_fmt(row.get("avg_edge_pct"), "%", signed=True)}</td>'
@@ -907,10 +921,10 @@ def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
     return (
         '<section class="panel production-intake-panel" id="production-intake-buckets">'
         '<div class="panel-title"><h3>Production intake · selected buckets</h3>'
-        '<span class="row-count">neon blue = approved intake · priority follows ROI at selection</span></div>'
+        '<span class="row-count">neon blue = approved intake · priority = ROI × min(graded N / 100, 1)</span></div>'
         '<div class="scroll"><table><thead><tr>'
-        '<th>Priority</th><th>Bucket</th><th>N</th><th>W-L-V</th><th>Current ROI</th>'
-        '<th>ROI at selection</th><th>Avg odds</th><th>Avg edge</th><th>Evidence</th>'
+        '<th>Priority</th><th>Bucket</th><th>Graded N</th><th>W-L-V</th><th>Current ROI</th>'
+        '<th>N+ROI score</th><th>Avg odds</th><th>Avg edge</th><th>Evidence</th>'
         '</tr></thead><tbody>'
         + "".join(rendered)
         + "</tbody></table></div></section>"
