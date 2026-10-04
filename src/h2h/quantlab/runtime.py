@@ -1775,10 +1775,12 @@ class QuantLabRuntime:
                 captured += 1
             except ApiBudgetExceededError:
                 raise
-            except Exception as exc:
+            except (KeyError, TypeError, ValueError) as exc:
                 LOGGER.warning(
-                    "QuantLab H2HLab snapshot failed fixture=%s error_class=%s error=%s",
-                    fixture_id, type(exc).__name__, str(exc),
+                    "QuantLab H2HLab snapshot rejected fixture=%s error_class=%s error=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                    str(exc),
                 )
         return captured
 
