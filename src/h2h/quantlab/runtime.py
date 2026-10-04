@@ -1735,6 +1735,8 @@ class QuantLabRuntime:
 
     def _collect_h2h_snapshots(self, now: datetime) -> int:
         """Collect at most one timestamp-safe direct-H2H snapshot per upcoming fixture."""
+        if self._h2h_engine is None:
+            return 0
         fixtures = self._repository.upcoming_fixtures(
             start_at=now,
             end_at=now + timedelta(hours=self._settings.lookahead_hours),
