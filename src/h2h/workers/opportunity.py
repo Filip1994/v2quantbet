@@ -25,7 +25,6 @@ from h2h.persistence.postgres_runtime import (
     PostgreSQLRuntimeRepository,
 )
 from h2h.quant import DixonColesFitError
-from h2h.production_buckets import is_retired_research_segment
 from h2h.use_cases.production_prediction import ProduceFixturePrediction
 from h2h.use_cases.quote_history import QuoteHistoryIngestionService
 from h2h.use_cases.register_pick import RegisterEligiblePick
@@ -675,18 +674,7 @@ class OpportunityWorker:
                             exposure_only = preliminary_rejections == (
                                 "MAX_OPEN_EXPOSURE_EXCEEDED",
                             )
-                            retired_research = is_retired_research_segment(
-                                {
-                                    "market": preliminary.market.value,
-                                    "selection": preliminary.selected_selection.value,
-                                    "odds": preliminary.selected_odd,
-                                }
-                            )
-                            if (
-                                exposure_only
-                                and not retired_research
-                                and self._record_research_signal is not None
-                            ):
+                            if exposure_only and self._record_research_signal is not None:
                                 try:
                                     self._record_research_signal(
                                         preliminary.evaluation_id, self._now()
@@ -747,17 +735,7 @@ class OpportunityWorker:
                                 bookmaker_wins[preliminary.bookmaker_id] = (
                                     bookmaker_wins.get(preliminary.bookmaker_id, 0) + 1
                                 )
-                                retired_research = is_retired_research_segment(
-                                    {
-                                        "market": preliminary.market.value,
-                                        "selection": preliminary.selected_selection.value,
-                                        "odds": preliminary.selected_odd,
-                                    }
-                                )
-                                if (
-                                    not retired_research
-                                    and self._record_research_production is not None
-                                ):
+                                if self._record_research_production is not None:
                                     try:
                                         self._record_research_production(
                                             preliminary.evaluation_id,
