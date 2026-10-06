@@ -34,7 +34,6 @@ from h2h.api.research_analytics import (
 from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
-from h2h.production_buckets import is_retired_research_segment
 
 
 # Keep dashboard health topology explicit. Durable worker rows survive deploys, so
@@ -735,14 +734,9 @@ class ResearchDashboardService:
             return cached
 
     def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
-        eligible_rows = tuple(
-            row
-            for row in self._all_signal_rows()
-            if not is_retired_research_segment(row)
-        )
         canonical = tuple(
             row
-            for row in _one_signal_per_fixture(eligible_rows)
+            for row in _one_signal_per_fixture(self._all_signal_rows())
             if not is_universe_blocked_competition(
                 country=row.get("country"),
                 competition_name=row.get("competition_name"),
