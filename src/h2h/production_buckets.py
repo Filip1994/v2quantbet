@@ -102,6 +102,13 @@ def bucket_spec(bucket_id: str) -> ProductionBucketSpec | None:
     return BUCKET_BY_ID.get(bucket_id)
 
 
+def is_retired_research_segment(row: dict[str, Any]) -> bool:
+    """Return whether a Research candidate is intentionally excluded from the universe."""
+    market = str(row.get("market_key") or row.get("market") or "").upper()
+    selection = str(row.get("selection") or row.get("selected_selection") or "").upper()
+    odds = float(row.get("odds") or row.get("selected_odd") or 0)
+    return market == "OU_25" and selection == "UNDER" and 1.40 <= odds <= 1.80
+
 
 def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
     """Exact shared predicate for analytics, historical scoring and live intake."""
@@ -140,6 +147,8 @@ def matching_bucket_ids(
     source_universe: str,
 ) -> tuple[str, ...]:
     source = source_universe.upper()
+    if source == "RESEARCH" and is_retired_research_segment(row):
+        return ()
     return tuple(
         spec.bucket_id
         for spec in PRODUCTION_BUCKET_SPECS
