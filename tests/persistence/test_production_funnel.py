@@ -10,6 +10,7 @@ from h2h.production_buckets import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    is_retired_research_segment,
     n_roi_priority_score,
 )
 from h2h.persistence.postgres_production_funnel import (
@@ -49,6 +50,33 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
 
     assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V3:")
     assert full != subset
+
+
+
+
+@pytest.mark.parametrize(
+    ("odds", "retired"),
+    [
+        (1.39, False),
+        (1.40, True),
+        (1.60, True),
+        (1.61, True),
+        (1.80, True),
+        (1.81, False),
+    ],
+)
+def test_low_price_under_research_segments_are_retired(odds: float, retired: bool) -> None:
+    row = {
+        "market_key": "OU_25",
+        "selection": "UNDER",
+        "odds": odds,
+        "edge": 0.12,
+        "expected_value": 0.18,
+    }
+
+    assert is_retired_research_segment(row) is retired
+    if retired:
+        assert PostgreSQLProductionFunnelRepository._research_matches(row) == ()
 
 
 def test_research_low_scoring_non_extreme_can_overlap_edge_10_15() -> None:
