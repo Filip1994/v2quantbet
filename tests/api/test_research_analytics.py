@@ -327,3 +327,68 @@ def test_snapshot_flags_mixed_and_unrecorded_version_regimes() -> None:
     assert snapshot["version_summary"]["mixed_policy_configs"] is True
     assert snapshot["version_summary"]["unrecorded_policy_n"] == 1
     assert len(snapshot["cohorts"]["model_policy"]) == 2
+
+
+def test_retired_low_price_under_stays_visible_but_is_excluded_from_active_aggregates() -> None:
+    active = row(
+        fixture="active",
+        market="BTTS",
+        selection="YES",
+        outcome="WIN",
+        model_probability=0.55,
+        market_fair_probability=0.50,
+        odds=2.0,
+        edge=0.05,
+        ev=0.10,
+        pnl_minor=30_000,
+        clv_ppm=0,
+    )
+    retired = {
+        **row(
+            fixture="retired",
+            market="OU_25",
+            selection="UNDER",
+            outcome="LOSS",
+            model_probability=0.70,
+            market_fair_probability=0.65,
+            odds=1.70,
+            edge=0.05,
+            ev=0.10,
+            pnl_minor=-30_000,
+            clv_ppm=0,
+        ),
+        "odds_bucket": "1.61–1.80",
+    }
+
+    snapshot = build_research_analytics_snapshot(
+        (active, retired),
+        fixed_stake_minor=30_000,
+        as_of=AS_OF,
+    )
+
+    lifetime = snapshot["windows"]["lifetime"]
+    assert lifetime["graded_n"] == 1
+    assert lifetime["wins"] == 1
+    assert lifetime["losses"] == 0
+    assert lifetime["flat_pnl_minor"] == 30_000
+    assert lifetime["roi_pct"] == pytest.approx(100.0)
+
+    market_rows = snapshot["cohorts"]["market_selection"]
+    assert all(
+        not (
+            item["market"] == "OU_25"
+            and item["selection"] == "UNDER"
+        )
+        for item in market_rows
+    )
+
+    odds_rows = snapshot["cohorts"]["market_selection_odds"]
+    retired_row = next(
+        item
+        for item in odds_rows
+        if item["market"] == "OU_25"
+        and item["selection"] == "UNDER"
+        and item["odds_bucket"] == "1.61–1.80"
+    )
+    assert retired_row["graded_n"] == 1
+    assert retired_row["roi_pct"] == pytest.approx(-100.0)
