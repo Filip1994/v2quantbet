@@ -777,13 +777,29 @@ def _metrics_table(
                 f"<td>{_fmt(row.get('positive_clv_rate_pct'), '%')}</td>"
                 f'<td><span class="evidence evidence-{evidence_class}">{evidence}</span></td>'
             )
-        row_class = "bucket-qualified" if decision_ready else ""
-        row_title = (
-            ' title="Decision-ready bucket: N ≥ 500, lifetime ROI > 0%, '
-            'and Last 100/250/500 ROI all > 0%"'
-            if decision_ready
-            else ""
+        retired_under_bucket = (
+            str(row.get("market") or "").upper() == "OU_25"
+            and str(row.get("selection") or "").upper() == "UNDER"
+            and str(row.get("odds_bucket") or "") in {"1.40–1.60", "1.61–1.80"}
         )
+        row_classes = []
+        if decision_ready:
+            row_classes.append("bucket-qualified")
+        if retired_under_bucket:
+            row_classes.append("bucket-retired")
+        row_class = " ".join(row_classes)
+        if retired_under_bucket:
+            row_title = (
+                ' title="Retired from Production intake: OU_25 UNDER odds 1.40–1.80. '
+                'Kept in Research for visibility and historical tracking."'
+            )
+        elif decision_ready:
+            row_title = (
+                ' title="Decision-ready bucket: N ≥ 500, lifetime ROI > 0%, '
+                'and Last 100/250/500 ROI all > 0%"'
+            )
+        else:
+            row_title = ""
         body.append(
             f'<tr class="{row_class}"{row_title}>' + dims + metric_cells + action + "</tr>"
         )
@@ -1290,6 +1306,10 @@ border:1px solid #343b42;border-radius:4px;text-decoration:none;color:#737b83;fo
 tbody tr.bucket-qualified td{{background:#16251c;box-shadow:inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
 tbody tr.bucket-qualified td:first-child{{background:#16251c;box-shadow:inset 3px 0 0 #79c995,inset 0 1px 0 #315b3f,inset 0 -1px 0 #315b3f}}
 tbody tr.bucket-qualified:hover td,tbody tr.bucket-qualified:hover td:first-child{{background:#1a2d22}}
+tbody tr.bucket-retired td{{box-shadow:inset 0 1px 0 #8b2d2d,inset 0 -1px 0 #8b2d2d}}
+tbody tr.bucket-retired td:first-child{{box-shadow:inset 3px 0 0 #d05a5a,inset 0 1px 0 #8b2d2d,inset 0 -1px 0 #8b2d2d}}
+tbody tr.bucket-retired td:last-child{{box-shadow:inset -1px 0 0 #8b2d2d,inset 0 1px 0 #8b2d2d,inset 0 -1px 0 #8b2d2d}}
+tbody tr.bucket-retired:hover td{{background:#2a1818}}
 .production-intake-panel{{border:2px solid #18d7ff;box-shadow:0 0 18px rgba(24,215,255,.24),inset 0 0 0 1px rgba(24,215,255,.12);background:linear-gradient(180deg,rgba(24,215,255,.055),var(--panel))}}
 .production-intake-panel .panel-title{{border-bottom-color:#168fb0;background:rgba(24,215,255,.045)}}
 .production-intake-panel .panel-title h3{{color:#7eeaff;text-transform:uppercase;letter-spacing:.08em}}
@@ -1365,6 +1385,7 @@ Versioning: {escape(snapshot['definitions']['versioning'])}</div>
 <div class="legend-item"><b>Avg edge</b>Average model edge recorded at decision time. It is a model signal, not proof of realized profitability.</div>
 <div class="legend-item"><b>Evidence</b>Sample maturity: COLLECT &lt;100, WATCH 100–249, SOFT_REVIEW 250–499, DECISION_GRADE 500–999, MATURE 1000+ graded picks.</div>
 <div class="legend-item"><b>Green bucket</b>A bucket turns green only when N ≥ 500, lifetime ROI is positive, and Last 100 / 250 / 500 ROI are all positive. Green means persistent positive performance across the full sample and recent windows, not automatic production activation.</div>
+<div class="legend-item"><b>Red outline</b>OU_25 UNDER odds 1.40–1.60 and 1.61–1.80 are retired from Production intake. They remain in-place in Research for visibility and historical tracking.</div>
 <div class="legend-item"><b>CLV*</b>Retained for research and future odds-API validation. Current CLV is not used as a pruning gate because the present odds feed is not a reliable true-closing feed.</div>
 </div>
 <p class="legend-note">Important: no single column automatically means KEEP or BAN. QuantBet pruning should use ROI together with sample size, uncertainty, recent-window persistence and out-of-sample confirmation.</p>
