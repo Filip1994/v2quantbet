@@ -117,40 +117,6 @@ def _sorted(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     )
 
 
-def _dedupe_corner_settlements(
-    rows: tuple[dict[str, Any], ...],
-) -> tuple[dict[str, Any], ...]:
-    """Hide legacy multi-pick CornerLab settlement noise without mutating evidence.
-
-    Pending rows are preserved. For each fixture with terminal settlement rows, exactly
-    one row is retained: the pick whose entry odds are closest to 2.00. Equal-distance
-    ties are resolved deterministically by pick id.
-    """
-    chosen: dict[str, tuple[tuple[float, str], int]] = {}
-    terminal = {"WIN", "LOSS", "VOID"}
-    for index, row in enumerate(rows):
-        if _result(row) not in terminal:
-            continue
-        fixture_id = str(row.get("fixture_id") or "")
-        if not fixture_id:
-            continue
-        odds = _number(row.get("odds"))
-        distance = abs(odds - 2.0) if odds is not None else float("inf")
-        key = (distance, _pick_id(row))
-        current = chosen.get(fixture_id)
-        if current is None or key < current[0]:
-            chosen[fixture_id] = (key, index)
-
-    chosen_indexes = {item[1] for item in chosen.values()}
-    return tuple(
-        row
-        for index, row in enumerate(rows)
-        if _result(row) not in terminal
-        or not str(row.get("fixture_id") or "")
-        or index in chosen_indexes
-    )
-
-
 def _bookmaker(name: Any) -> str:
     raw = str(name or "—")
     key = "".join(char for char in raw.casefold() if char.isalnum())
@@ -199,8 +165,7 @@ def _match_html(row: dict[str, Any], *, lab_key: str) -> str:
 def _display_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
     if lab == "GOAL":
         return tuple(repository.list_goal_picks())
-    rows = tuple(repository.list_bets(lab))
-    return _dedupe_corner_settlements(rows) if lab == "CORNER" else rows
+    return tuple(repository.list_bets(lab))
 
 
 def _all_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
@@ -210,8 +175,7 @@ def _all_rows(repository: Any, lab: str) -> tuple[dict[str, Any], ...]:
             return tuple(loader())
         return tuple(repository.list_goal_picks())
     loader = getattr(repository, "list_all_bets", None)
-    rows = tuple(loader(lab)) if callable(loader) else tuple(repository.list_bets(lab))
-    return _dedupe_corner_settlements(rows) if lab == "CORNER" else rows
+    return tuple(loader(lab)) if callable(loader) else tuple(repository.list_bets(lab))
 
 
 def _analytics_universe_rows(
@@ -620,9 +584,7 @@ def render_dashboard(
             metric_rows = _sorted(
                 _analytics_universe_rows(tuple(dashboard_bundle[1]))
             )
-            if lab == "CORNER":
-                metric_rows = _dedupe_corner_settlements(metric_rows)
-            elif lab == "CARD":
+            if lab == "CARD":
                 metric_rows, legacy_metric_rows = _partition_card_policy_rows(metric_rows)
         elif lab == "GOAL":
             loader = getattr(repository, "list_all_goal_picks", None)
@@ -638,9 +600,7 @@ def render_dashboard(
                 if callable(loader)
                 else rows
             )
-            if lab == "CORNER":
-                metric_rows = _dedupe_corner_settlements(metric_rows)
-            elif lab == "CARD":
+            if lab == "CARD":
                 metric_rows, legacy_metric_rows = _partition_card_policy_rows(metric_rows)
     except Exception:  # noqa: BLE001 - dashboard must degrade on repository read failures
         metric_rows = rows
