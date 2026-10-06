@@ -17,6 +17,7 @@ from h2h.production_buckets import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    is_retired_research_segment,
     n_roi_priority_score,
 )
 
@@ -329,8 +330,11 @@ def build_research_analytics_snapshot(
     else:
         now = now.astimezone(UTC)
 
-    settled = tuple(row for row in rows if row.get("outcome") != "PENDING")
-    dated = tuple((row, _event_time(row)) for row in settled)
+    settled_all = tuple(row for row in rows if row.get("outcome") != "PENDING")
+    settled_active = tuple(
+        row for row in settled_all if not is_retired_research_segment(row)
+    )
+    dated = tuple((row, _event_time(row)) for row in settled_active)
 
     def since(days: int) -> tuple[dict[str, Any], ...]:
         cutoff = now - timedelta(days=days)
@@ -390,8 +394,9 @@ def build_research_analytics_snapshot(
         "generated_at": now.isoformat(),
         "definitions": {
             "universe": (
-                "Canonical Research final-gate candidates, one candidate per fixture; "
-                "analytics use settled rows only."
+                "Canonical Research final-gate candidates, one candidate per fixture. "
+                "Retired OU_25 UNDER odds 1.40–1.80 remain visible in the entry-odds table "
+                "but are excluded from active aggregate P/L, ROI, win rate and N."
             ),
             "roi": (
                 "Flat P/L divided by fixed stake times graded WIN/LOSS count; "
@@ -419,9 +424,9 @@ def build_research_analytics_snapshot(
                 "MATURE": "1000+ graded",
             },
         },
-        "version_summary": _version_summary(settled),
+        "version_summary": _version_summary(settled_active),
         "windows": {
-            "lifetime": cohort_metrics(settled, fixed_stake_minor=fixed_stake_minor),
+            "lifetime": cohort_metrics(settled_active, fixed_stake_minor=fixed_stake_minor),
             "last_30d": cohort_metrics(since(30), fixed_stake_minor=fixed_stake_minor),
             "last_7d": cohort_metrics(since(7), fixed_stake_minor=fixed_stake_minor),
         },
@@ -436,12 +441,12 @@ def build_research_analytics_snapshot(
             for week in sorted(weekly, reverse=True)
         ],
         "diagnostics": _diagnostic_rows(
-            settled,
+            settled_active,
             fixed_stake_minor=fixed_stake_minor,
         ),
         "cohorts": {
             name: _cohort_rows(
-                settled,
+                settled_all if name == "market_selection_odds" else settled_active,
                 dimensions,
                 fixed_stake_minor=fixed_stake_minor,
             )
