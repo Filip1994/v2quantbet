@@ -576,6 +576,78 @@ def test_exposure_shadow_stops_after_strongest_candidate_for_fixture() -> None:
     assert recorded == [("evaluation-strong", NOW)]
 
 
+
+
+def test_retired_low_price_under_is_not_recorded_as_research_shadow() -> None:
+    observed_at = NOW - timedelta(seconds=10)
+
+    class UnderRepository(Repository):
+        def latest_complete_market_states(self, *_args):
+            return (
+                SimpleNamespace(
+                    market="OU_25",
+                    observed_at=observed_at,
+                    captured_at=NOW - timedelta(minutes=1),
+                    source="api-football",
+                ),
+            )
+
+    class UnderEvaluator(Evaluator):
+        def execute(self, _prediction_id, _snapshot_id):
+            return SimpleNamespace(
+                evaluation_id="evaluation-under",
+                fixture_id="api-football:1",
+                bookmaker_id=8,
+                bookmaker_key="Bet365",
+                market=Market.OU_25,
+                selected_selection=Selection.UNDER,
+                selected_odd=1.70,
+                edge=0.12,
+                expected_value=0.15,
+                model_probability=0.70,
+                source="api-football",
+            )
+
+    under_market = (
+        CanonicalQuote(
+            "api-football:1",
+            8,
+            "Bet365",
+            Market.OU_25,
+            Selection.OVER,
+            2.25,
+            observed_at,
+            "api-football",
+        ),
+        CanonicalQuote(
+            "api-football:1",
+            8,
+            "Bet365",
+            Market.OU_25,
+            Selection.UNDER,
+            1.70,
+            observed_at,
+            "api-football",
+        ),
+    )
+    recorded = []
+    cycle, source, registration, _ = run(
+        under_market,
+        preliminary=under_market,
+        repository=UnderRepository(),
+        evaluator=UnderEvaluator(),
+        registration=ExposureOnlyRegistration(),
+        record_research_signal=lambda evaluation_id, blocked_at: recorded.append(
+            (evaluation_id, blocked_at)
+        ),
+    )
+
+    assert source.calls == 1
+    assert cycle.registered_pick_ids == ()
+    assert registration.executed == []
+    assert recorded == []
+
+
 def test_multi_reason_rejection_is_not_recorded_as_exposure_only() -> None:
     recorded = []
     cycle, source, registration, _ = run(
