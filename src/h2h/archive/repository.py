@@ -220,7 +220,10 @@ class ColdArchiveCatalog:
             f"OR d.reference_companion_observation_id = {alias}.market_observation_id) "
             f"AND NOT EXISTS (SELECT 1 FROM quantlab_goal_picks p "
             f"WHERE p.selected_observation_id = {alias}.market_observation_id "
-            f"OR p.companion_observation_id = {alias}.market_observation_id)"
+            f"OR p.companion_observation_id = {alias}.market_observation_id) "
+            f"AND NOT EXISTS (SELECT 1 FROM quantlab_h2h_decisions d "
+            f"WHERE d.selected_observation_id = {alias}.market_observation_id "
+            f"OR d.companion_observation_id = {alias}.market_observation_id)"
         )
 
     def market_archive_candidates(
