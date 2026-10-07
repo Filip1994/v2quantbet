@@ -337,7 +337,7 @@ class PostgreSQLKellyLabRepository:
                     max_bet_fraction=Decimal(max_bet_fraction),
                 )
                 kelly_pick_id = "kellylab-pick-v1:" + sha256(
-                    f"{PORTFOLIO_ID}|{row['research_signal_id']}".encode("utf-8")
+                    f"{PORTFOLIO_ID}|{row['research_signal_id']}".encode()
                 ).hexdigest()
                 source_payload = {
                     "evaluation_id": row["evaluation_id"],
