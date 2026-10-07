@@ -838,7 +838,10 @@ def _scalar_bucket(
         return "—"
 
     def fmt(item: float) -> str:
-        return f"{item:.{digits}f}".rstrip("0").rstrip(".") + suffix
+        text = f"{item:.{digits}f}"
+        if digits > 0:
+            text = text.rstrip("0").rstrip(".")
+        return text + suffix
 
     if number < breaks[0]:
         return f"<{fmt(breaks[0])}"
