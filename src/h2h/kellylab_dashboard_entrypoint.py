@@ -41,7 +41,7 @@ def _sync_loop(
             result = repository.sync_new_picks()
             if result["inserted"]:
                 LOGGER.info("KellyLab cloned %s Research pick(s)", result["inserted"])
-        except Exception:  # noqa: BLE001 - worker must survive transient DB/read failures
+        except Exception:
             LOGGER.exception("KellyLab sync failed")
         stop.wait(interval_seconds)
 
