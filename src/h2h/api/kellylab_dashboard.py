@@ -10,7 +10,7 @@ from threading import Thread
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from h2h.api.dashboard_time import local_iso, local_time
+from h2h.api.dashboard_time import local_time
 
 
 def _money(minor: Any) -> str:
@@ -174,7 +174,7 @@ class KellyLabDashboardService:
         if not body:
             body = '<tr><td class="empty" colspan="15">No KellyLab rows in this view.</td></tr>'
 
-        started = escape(local_iso(portfolio["started_at"]))
+        started = escape(local_time(portfolio["started_at"], "%Y-%m-%d %H:%M"))
         fraction = _fraction(portfolio["kelly_fraction"])
         cap = _fraction(portfolio["max_bet_fraction"])
         flat = _money(portfolio["flat_stake_minor"])
