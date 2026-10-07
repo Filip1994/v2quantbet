@@ -239,3 +239,14 @@ def test_database_run_lock_commits_before_work_and_releases_after_failure():
 
     assert connection.events[2][0].startswith("SELECT pg_advisory_unlock")
     assert connection.events[3:] == ["commit", "close"]
+
+
+def test_market_archive_predicate_protects_h2h_decision_evidence():
+    predicate = ColdArchiveCatalog._market_unreferenced_sql("m")
+
+    assert (
+        "AND NOT EXISTS (SELECT 1 FROM quantlab_h2h_decisions d "
+        "WHERE d.selected_observation_id = m.market_observation_id "
+        "OR d.companion_observation_id = m.market_observation_id)"
+        in predicate
+    )
