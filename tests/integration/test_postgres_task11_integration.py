@@ -68,7 +68,7 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
             # Production funnel intake is intentionally the current schema tip.
-            assert applied[-1] == "064_manual_settle_oct_4_5_missing_results.sql"
+            assert applied[-1] == "065_kellylab_shadow_portfolio.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
