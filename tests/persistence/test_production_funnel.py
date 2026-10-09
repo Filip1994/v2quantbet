@@ -79,6 +79,27 @@ def test_low_price_under_research_segments_are_retired(odds: float, retired: boo
         assert PostgreSQLProductionFunnelRepository._research_matches(row) == ()
 
 
+@pytest.mark.parametrize(
+    ("odds", "retired"),
+    [
+        (1.60, False),
+        (1.61, True),
+        (1.80, True),
+        (1.81, False),
+    ],
+)
+def test_low_price_over_research_segment_is_retired(odds: float, retired: bool) -> None:
+    row = {
+        "market_key": "OU_25",
+        "selection": "OVER",
+        "odds": odds,
+        "edge": 0.12,
+        "expected_value": 0.18,
+    }
+
+    assert is_retired_research_segment(row) is retired
+
+
 def test_research_low_scoring_non_extreme_can_overlap_edge_10_15() -> None:
     matches = PostgreSQLProductionFunnelRepository._research_matches(
         {
