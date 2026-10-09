@@ -34,6 +34,7 @@ from h2h.api.research_analytics import (
 from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
+from h2h.production_buckets import is_retired_research_segment
 
 
 # Keep dashboard health topology explicit. Durable worker rows survive deploys, so
@@ -1719,8 +1720,11 @@ main{{padding:14px}}header{{display:block}}}}
                 (
                     row
                     for row in pending_rows
-                    if not isinstance(row.get("kickoff_at"), datetime)
-                    or row["kickoff_at"].astimezone(UTC) > now
+                    if not is_retired_research_segment(row)
+                    and (
+                        not isinstance(row.get("kickoff_at"), datetime)
+                        or row["kickoff_at"].astimezone(UTC) > now
+                    )
                 ),
                 key=kickoff_timestamp,
             )
@@ -1820,7 +1824,8 @@ main{{padding:14px}}header{{display:block}}}}
         }
         sort_base_params["tab"] = tab
 
-        settled = history_rows
+        # Preserve retired rows in History while excluding them from headline performance.
+        settled = tuple(row for row in history_rows if not is_retired_research_segment(row))
         wins = sum(row["outcome"] == "WIN" for row in settled)
         clvs = [row["clv_ppm"] for row in settled if row["clv_ppm"] is not None]
         pnl = sum(row["pnl_minor"] or 0 for row in settled)
@@ -1853,6 +1858,15 @@ main{{padding:14px}}header{{display:block}}}}
         def market_label(row: dict[str, Any]) -> str:
             market = "O/U 2.5" if row["market"] == "OU_25" else row["market"]
             return f'{market} {row["selection"]}'
+
+        def retired_badge(row: dict[str, Any]) -> str:
+            if not is_retired_research_segment(row):
+                return ""
+            return (
+                '<span class="mini-badge status-retired" '
+                'title="Retired: excluded from active picks, Production and Kelly; '
+                'retained for historical tracking">RETIRED</span>'
+            )
 
         def result_badge(outcome: str) -> str:
             css = {
@@ -1914,7 +1928,7 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td><b>{_time(row["kickoff_at"])}</b>'
                     f'{kickoff_countdown(row["kickoff_at"]) if tab == "active" else ""}</td>'
-                    f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}</td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])}</small></td>'
@@ -1993,7 +2007,7 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<td class="match"><b>{match}</b>'
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td class="result-cell">{result_panel}</td>'
-                    f'<td><span class="pick-pill">{escape(market_label(row))}</span></td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}</td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
                     f'<td><b>{_odd(row["closing_odds"])}</b><small>{_time(row["closing_observed_at"])}</small></td>'
@@ -2114,7 +2128,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 .route-played{{background:rgba(134,166,194,.12);border:1px solid rgba(134,166,194,.32);color:#a9c3d9}}.route-skipped{{background:rgba(154,161,168,.10);border:1px solid rgba(154,161,168,.25);color:#aab1b8}}.route-blocked{{background:rgba(198,163,93,.11);border:1px solid rgba(198,163,93,.30);color:var(--warn)}}
 .result-win{{background:rgba(105,201,143,.15);border:1px solid rgba(105,201,143,.42);color:#82dda6}}.result-loss{{background:rgba(224,111,120,.15);border:1px solid rgba(224,111,120,.42);color:#f08790}}.result-void{{background:rgba(154,169,161,.12);border:1px solid rgba(154,169,161,.28);color:#b4c1ba}}.result-pending{{background:rgba(242,189,88,.12);border:1px solid rgba(242,189,88,.32);color:var(--warn)}}
 .result-cell{{min-width:154px;padding-top:7px!important;padding-bottom:7px!important}}.result-panel{{min-width:132px;padding:8px 10px;border-radius:10px;border:1px solid #3a4046;background:#202428;box-shadow:inset 0 1px rgba(255,255,255,.03)}}.result-panel .score{{font-size:23px;line-height:1;font-weight:950;letter-spacing:.04em;color:#f4f6f7;margin-bottom:7px}}.result-meta{{display:flex;align-items:center;gap:7px}}.result-meta .badge{{min-width:57px;padding:4px 7px;font-size:9px}}.result-meta>span:last-child{{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#9199a0;font-weight:800}}.result-panel-win{{background:linear-gradient(135deg,rgba(105,201,143,.14),#202428 62%);border-color:rgba(105,201,143,.34)}}.result-panel-loss{{background:linear-gradient(135deg,rgba(224,111,120,.15),#202428 62%);border-color:rgba(224,111,120,.36)}}.result-panel-void{{background:linear-gradient(135deg,rgba(154,161,168,.10),#202428 62%)}}
-.mini-badge{{display:inline-flex;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:850;vertical-align:1px}}.freshness-fresh{{background:rgba(105,201,143,.10);color:var(--win)}}.freshness-stale{{background:rgba(198,163,93,.11);color:var(--warn)}}.freshness-hard-stale{{background:rgba(224,111,120,.10);color:var(--loss)}}
+.mini-badge{{display:inline-flex;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:850;vertical-align:1px}}.freshness-fresh{{background:rgba(105,201,143,.10);color:var(--win)}}.freshness-stale{{background:rgba(198,163,93,.11);color:var(--warn)}}.freshness-hard-stale{{background:rgba(224,111,120,.10);color:var(--loss)}}.status-retired{{margin-left:6px;background:rgba(224,111,120,.15);border:1px solid rgba(224,111,120,.45);color:#f08790}}
 .positive{{color:var(--win)}}.negative{{color:var(--loss)}}.neutral{{color:var(--text)}}.row-win{{box-shadow:inset 4px 0 var(--win);background:linear-gradient(90deg,rgba(105,201,143,.045),transparent 25%)}}.row-loss{{box-shadow:inset 4px 0 var(--loss);background:linear-gradient(90deg,rgba(224,111,120,.05),transparent 25%)}}.row-void{{box-shadow:inset 4px 0 var(--void);background:linear-gradient(90deg,rgba(154,161,168,.035),transparent 25%)}}.row-pending{{box-shadow:inset 3px 0 var(--warn)}}
 .empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#7f878e;margin-top:12px;font-size:11px}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
@@ -2138,9 +2152,9 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="card"><small>Played</small><b>{played_count}</b></div>
 <div class="card"><small>Skipped</small><b>{skipped_count}</b></div>
 <div class="card"><small>Exposure blocked</small><b>{blocked_count}</b></div>
-<div class="card"><small>Win rate</small><b>{win_rate_text}</b></div>
-<div class="card"><small>Flat P/L</small><b class="{pnl_class}">{pnl_text}</b></div>
-<div class="card"><small>Avg CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
+<div class="card"><small>Non-retired win rate</small><b>{win_rate_text}</b></div>
+<div class="card"><small>Non-retired flat P/L</small><b class="{pnl_class}">{pnl_text}</b></div>
+<div class="card"><small>Non-retired Avg CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
 </section>
 <div class="toolbar">
 <form method="get">
