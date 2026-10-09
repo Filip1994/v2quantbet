@@ -73,7 +73,6 @@ class PostgreSQLModelCoverageRepository:
         """Discover required scopes from fixtures, independent of fixture failures."""
         current = _utc(now)
         with self.connect() as connection, connection.cursor() as cursor:
-            cursor.execute("UPDATE model_coverage_scopes SET eligible = FALSE")
             cursor.execute(
                 "SELECT DISTINCT ON (f.league_id, f.season) f.league_id, f.season, "
                 "latest.country, latest.competition_name, latest.competition_type "
@@ -100,6 +99,19 @@ class PostgreSQLModelCoverageRepository:
                     )
                 ).eligible
             ]
+            # The former blanket reset rewrote every scope, including rows that
+            # were already ineligible and rows immediately re-enabled below.
+            # Keep the committed eligibility and timestamp values identical while
+            # updating only scopes that actually left the current universe.
+            cursor.execute(
+                "UPDATE model_coverage_scopes c SET eligible = FALSE "
+                "WHERE c.eligible AND NOT EXISTS ("
+                "SELECT 1 FROM unnest(%s::bigint[], %s::integer[]) "
+                "AS scope(league_id, season) "
+                "WHERE scope.league_id = c.league_id AND scope.season = c.season)",
+                ([league_id for league_id, _ in eligible],
+                 [season for _, season in eligible]),
+            )
             if eligible:
                 cursor.execute(
                     "INSERT INTO model_coverage_scopes (provider, team_id_namespace, "
