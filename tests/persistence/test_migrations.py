@@ -421,3 +421,23 @@ def test_cardlab_referee_web_migration_adds_append_only_profiles_and_v4() -> Non
     assert "quantlab_referee_web_profiles_immutable" in migration
     assert "quantlab_reject_mutation()" in migration
     assert "CARDLAB_FEATURES_V4" in migration
+
+
+def test_manual_settlement_066_is_not_executed_by_schema_migrations() -> None:
+    root = Path(__file__).parents[2]
+    migration = (
+        root / "migrations" / "066_manual_settle_94e1448785.sql"
+    ).read_text(encoding="utf-8")
+    statements = "\n".join(
+        line for line in migration.splitlines() if not line.lstrip().startswith("--")
+    ).strip()
+    assert statements == "SELECT 1;"
+
+    # Preserve the original operator-only SQL and its evidence guard separately.
+    archived = (
+        root / "ops" / "manual_settlements" / "066_manual_settle_94e1448785.sql"
+    ).read_text(encoding="utf-8")
+    assert "OPERATOR-ONLY ARCHIVE" in archived
+    assert "RAISE EXCEPTION" in archived
+    assert "provider_status IN ('FT', 'AET', 'PEN')" in archived
+    assert "INSERT INTO quantlab_goal_pick_settlements" in archived
