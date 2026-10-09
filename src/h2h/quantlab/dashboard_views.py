@@ -401,7 +401,10 @@ def _nav(view: str, lab_key: str) -> tuple[str, str]:
         f'href="/quantlab?{urlencode({"view": view, "lab": key})}">{escape(LABS[key][1])}</a>'
         for key in LABS
         if key in allowed
-    ) + "</nav>"
+    )
+    if lab_key == "card":
+        secondary += '<a href="/quantlab/card/referees">Referee Database ↗</a>'
+    secondary += "</nav>"
     return primary, secondary
 
 
