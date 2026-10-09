@@ -395,6 +395,8 @@ def build_research_analytics_snapshot(
         "definitions": {
             "universe": (
                 "Canonical Research final-gate candidates, one candidate per fixture. "
+                "Shared universe hard blocks, including blocked clubs, are excluded from "
+                "active Research views and decisions. "
                 "Retired OU_25 UNDER odds 1.40–1.80 and OU_25 OVER odds 1.61–1.80 "
                 "remain visible in the entry-odds table but are excluded from active "
                 "aggregate P/L, ROI, win rate and N."
