@@ -164,3 +164,28 @@ def test_queries_deduplicate_immutable_captures_and_are_read_only() -> None:
     assert all(query.lstrip().startswith("SELECT DISTINCT ON") for query in connection.cursor_instance.queries)
     assert "league_key, season, referee_key" in connection.cursor_instance.queries[0]
     assert "decision_at DESC" in connection.cursor_instance.queries[1]
+
+
+def test_season_filter_changes_weighted_web_average(monkeypatch) -> None:
+    monkeypatch.setattr(
+        directory,
+        "load_referee_directory_data",
+        lambda repo: (
+            (_web(season=2026, matches=10, yellow=40, second=1, red=2),
+             _web(season=2025, matches=8, yellow=30, second=0, red=1)),
+            (),
+        ),
+    )
+    html = directory.render_referee_directory(object(), "season=2026")
+    assert "4.30" in html
+    assert "4.11" not in html
+    assert "2025/26" in html  # Other season remains available as a filter.
+
+
+def test_cardlab_nav_contains_referee_directory() -> None:
+    from h2h.quantlab.dashboard_views import _nav
+
+    _primary, secondary = _nav("analytics", "card")
+    assert 'href="/quantlab/card/referees"' in secondary
+    _primary, other_lab = _nav("analytics", "corner")
+    assert "/quantlab/card/referees" not in other_lab
