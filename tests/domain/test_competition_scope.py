@@ -106,6 +106,16 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
             RejectionReason.EXPLICIT_COMPETITION,
         ),
         (
+            CompetitionMetadata(
+                country="Wales",
+                name="FAW Championship",
+                type="league",
+                level=2,
+                league_id=111,
+            ),
+            RejectionReason.EXPLICIT_COMPETITION,
+        ),
+        (
             CompetitionMetadata("Sweden", "Ettan Norra", "league", 3),
             RejectionReason.SWEDEN_TIER,
         ),
