@@ -273,7 +273,13 @@ def filter_sort_directory(
 
 def render_referee_directory(repository: Any, raw_query: str = "") -> str:
     params = parse_qs(raw_query, keep_blank_values=True)
-    data = build_referee_directory(*load_referee_directory_data(repository))
+    web_rows, feature_rows = load_referee_directory_data(repository)
+    universe = build_referee_directory(web_rows, feature_rows)
+    selected_season = params.get("season", [""])[0]
+    if selected_season:
+        # A season filter must also change the web-rate denominator and numerator.
+        web_rows = tuple(row for row in web_rows if str(row["season"]) == selected_season)
+    data = build_referee_directory(web_rows, feature_rows)
     selected, sort, direction = filter_sort_directory(data, params)
     try:
         page = max(1, min(10000, int(params.get("page", ["1"])[0])))
@@ -290,7 +296,7 @@ def render_referee_directory(repository: Any, raw_query: str = "") -> str:
         return BASE_PATH + "?" + urlencode(merged)
 
     options = ['<option value="">All leagues</option>']
-    present = {row["league_key"] for row in data}
+    present = {row["league_key"] for row in universe}
     for key in sorted(present, key=_league_label):
         selected_attr = ' selected' if params.get("league", [""])[0] == key else ""
         options.append(
@@ -298,7 +304,7 @@ def render_referee_directory(repository: Any, raw_query: str = "") -> str:
             f'{escape(_league_label(key))}</option>'
         )
     season_options = ['<option value="">All seasons</option>']
-    seasons = sorted({s for row in data for s in row["seasons"]}, reverse=True)
+    seasons = sorted({s for row in universe for s in row["seasons"]}, reverse=True)
     for season in seasons:
         selected_attr = ' selected' if params.get("season", [""])[0] == str(season) else ""
         season_options.append(
@@ -386,7 +392,7 @@ tr:hover td{{background:#1c2635}}td small{{display:block;color:var(--muted);font
 <h1>Referee Database</h1>
 <p>Distinct referees by league. Latest StatBunker capture per season; independent API-Football L5/L10 snapshots.</p>
 <div class="stats">
-<div class="stat"><b>{len(data)}</b><small>Referee / league records</small></div>
+<div class="stat"><b>{len(universe)}</b><small>Referee / league records, all seasons</small></div>
 <div class="stat"><b>{sum(1 for x in data if x["web_matches"] >= 10)}</b><small>With 10+ web matches</small></div>
 <div class="stat"><b>{sum(1 for x in data if x["api_sample"] >= 5)}</b><small>With 5+ API card samples</small></div>
 <div class="stat"><b>{sum(1 for x in data if x["web_matches"] > 0)}</b><small>With StatBunker evidence</small></div>
