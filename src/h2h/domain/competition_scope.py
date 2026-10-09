@@ -436,7 +436,7 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     explicitly_excluded_competitions = {
         ("czech republic", "3 liga msfl"),
         ("czechia", "3 liga msfl"),
-        ("wales", "faw championship"),
+        ("wales", "faw championship"),  # retired from Phase I intake
     }
     if (country, name) in explicitly_excluded_competitions:
         return ScopeDecision(False, RejectionReason.EXPLICIT_COMPETITION)
