@@ -140,6 +140,7 @@ class ScopeDecision:
 
 _UNIVERSE_REASON_LABELS = {
     RejectionReason.BLOCKED_COUNTRY: "blocked_country",
+    RejectionReason.BLOCKED_TEAM: "blocked_team",
     RejectionReason.BLACKLISTED_LEAGUE: "blacklisted_league",
     RejectionReason.FRIENDLY: "friendly_football",
     RejectionReason.NATIONAL_TEAM: "national_team_football",
