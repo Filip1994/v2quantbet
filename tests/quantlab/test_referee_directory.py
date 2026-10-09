@@ -122,7 +122,7 @@ def test_page_escapes_user_data_and_filters(monkeypatch) -> None:
 
 def test_queries_deduplicate_immutable_captures_and_are_read_only() -> None:
     class Cursor:
-        description = [SimpleNamespace(name="referee_name")]
+        description = (SimpleNamespace(name="referee_name"),)
 
         def __init__(self) -> None:
             self.queries = []
