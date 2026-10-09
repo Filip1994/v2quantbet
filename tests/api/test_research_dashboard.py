@@ -458,6 +458,76 @@ def test_research_dashboard_separates_active_and_history_tabs() -> None:
     assert 'class="bookmaker-mark bookmaker-bet365"' in history_html
 
 
+def test_retired_ou_odds_stay_out_of_active_but_remain_auditable() -> None:
+    def example(code, name, market, selection, odds, kickoff, *, pending=True):
+        row = signal_row()
+        row["research_signal_id"] = "research-signal-v1:" + code * 64
+        row["evaluation_id"] = "value-evaluation-v1:" + code * 64
+        row["fixture_id"] = f"api-football:{code}"
+        row["provider_fixture_id"] = code
+        row["home_team"] = name
+        row["away_team"] = "Visitor"
+        row["market"] = market
+        row["selection"] = selection
+        row["odds"] = odds
+        row["kickoff_at"] = kickoff
+        if pending:
+            row.update(
+                result_phase="WAITING",
+                result_classification=None,
+                result_provider_status="NS",
+                regulation_home_goals=None,
+                regulation_away_goals=None,
+                closing_odds=None,
+                closing_observed_at=None,
+                closing_captured_at=None,
+            )
+        return row
+
+    rows = (
+        example("1", "Retired Under", "OU_25", "UNDER", 1.50, NOW + timedelta(hours=2)),
+        example("2", "Retired Over", "OU_25", "OVER", 1.70, NOW + timedelta(hours=2)),
+        example("3", "Allowed Under", "OU_25", "UNDER", 1.81, NOW + timedelta(hours=2)),
+        example("4", "Allowed Over", "OU_25", "OVER", 1.60, NOW + timedelta(hours=2)),
+        example("5", "Allowed BTTS", "BTTS", "YES", 1.50, NOW + timedelta(hours=2)),
+        example("6", "Awaiting Retired", "OU_25", "UNDER", 1.55, NOW - timedelta(hours=2)),
+        example("7", "Historical Retired", "OU_25", "UNDER", 1.50, NOW - timedelta(hours=4), pending=False),
+        example("8", "Historical Eligible", "BTTS", "YES", 2.20, NOW - timedelta(hours=4), pending=False),
+    )
+    # Under 2.5 loses 2-1; this loss must not affect the non-retired headline P/L.
+    rows[6]["regulation_home_goals"] = 2
+    rows[6]["regulation_away_goals"] = 1
+
+    class RetiredOddsRepository:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            return rows
+
+    dashboard = ResearchDashboardService(RetiredOddsRepository(), clock=lambda: NOW)
+
+    active = dashboard.render_html("tab=active")
+    assert "Retired Under – Visitor" not in active
+    assert "Retired Over – Visitor" not in active
+    assert "Awaiting Retired – Visitor" not in active
+    assert "Allowed Under – Visitor" in active
+    assert "Allowed Over – Visitor" in active
+    assert "Allowed BTTS – Visitor" in active
+    assert "Active <span>(3)</span>" in active
+
+    awaiting = dashboard.render_html("tab=awaiting")
+    assert "Awaiting Retired – Visitor" in awaiting
+    assert 'class="mini-badge status-retired"' in awaiting
+    assert "Retired Under – Visitor" not in awaiting
+
+    history = dashboard.render_html("tab=history")
+    assert "Historical Retired – Visitor" in history
+    assert "Historical Eligible – Visitor" in history
+    assert 'class="mini-badge status-retired"' in history
+    assert "Non-retired win rate</small><b>100.0%" in history
+    assert "Non-retired flat P/L</small><b class=\"positive\">+360 RSD" in history
+    assert "Settled</small><b>2</b>" in history
+
+
 def test_research_history_result_filter_and_sportsbook_palette() -> None:
     dashboard = ResearchDashboardService(SegmentedRepository(), clock=lambda: NOW)
 
