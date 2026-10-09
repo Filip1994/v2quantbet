@@ -259,22 +259,15 @@ def filter_sort_directory(
         and (not league or row["league_key"] == league)
         and (not season or season in {str(value) for value in row["seasons"]})
     ]
-    # Missing metrics always last. Tie-break by referee + league for stable pages.
-    selected.sort(key=lambda r: (r["name"].casefold(), r["league_key"]))
-    selected.sort(
-        key=lambda r: _sort_value(r, sort),
-        reverse=direction == "desc",
-    ) if all(_sort_value(r, sort) is not None for r in selected) else selected.sort(
-        key=lambda r: (
-            _sort_value(r, sort) is None,
-            -(float(_sort_value(r, sort)) or 0) if direction == "desc" else (float(_sort_value(r, sort)) or 0),
-        ) if sort not in {"name", "league"} else (
-            _sort_value(r, sort) is None,
-            _sort_value(r, sort) or "",
-        ),
-    )
-    if sort in {"name", "league"} and direction == "desc":
-        selected.reverse()
+    # Missing metrics always last, including on descending sort.
+    selected.sort(key=lambda row: (row["name"].casefold(), row["league_key"]))
+    if sort in {"name", "league"}:
+        selected.sort(key=lambda row: _sort_value(row, sort), reverse=direction == "desc")
+    else:
+        present = [row for row in selected if _sort_value(row, sort) is not None]
+        missing = [row for row in selected if _sort_value(row, sort) is None]
+        present.sort(key=lambda row: _sort_value(row, sort), reverse=direction == "desc")
+        selected = present + missing
     return selected, sort, direction
 
 
