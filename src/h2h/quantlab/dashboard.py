@@ -1,7 +1,8 @@
-from h2h.quantlab.card_lab.referee_directory import render_referee_directory
 """Read-only dashboard for QuantLab multi-market experiments."""
 
 from __future__ import annotations
+
+from h2h.quantlab.card_lab.referee_directory import render_referee_directory
 
 import base64
 import hmac
@@ -1337,6 +1338,8 @@ class QuantLabDashboardService:
             for message in dashboard_warnings
         )
 
+        card_directory_tab = '<a href="/quantlab/card/referees">Referee Database ↗</a>' if lab_key == "card" else ""
+
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuantLab · {escape(title)}</title>
@@ -1376,7 +1379,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
-<nav class="tabs">{tabs}{"<a href=\"/quantlab/card/referees\">Referee Database ↗</a>" if lab_key == "card" else ""}</nav>
+<nav class="tabs">{tabs}{card_directory_tab}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
 {warning_html}
 {version_notice_html}
