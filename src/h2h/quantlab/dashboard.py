@@ -1,3 +1,4 @@
+from h2h.quantlab.card_lab.referee_directory import render_referee_directory
 """Read-only dashboard for QuantLab multi-market experiments."""
 
 from __future__ import annotations
@@ -358,6 +359,9 @@ class QuantLabDashboardService:
                 return fallback_rows
             rows = loader(lab)
         return self._filter_rows(tuple(rows), params)
+
+    def render_referee_directory(self, raw_query: str = "") -> str:
+        return render_referee_directory(self._repository, raw_query)
 
     def render_goal_analytics(self) -> str:
         picks = _analytics_universe_rows(tuple(self._repository.list_all_goal_picks()))
@@ -1372,7 +1376,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(4,1fr)}}}}@media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 </style></head><body><main>
 <header class="topbar"><div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div><div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div></header>
-<nav class="tabs">{tabs}</nav>
+<nav class="tabs">{tabs}{"<a href=\"/quantlab/card/referees\">Referee Database ↗</a>" if lab_key == "card" else ""}</nav>
 <p class="lab-note">{escape(lab_note)}</p>
 {warning_html}
 {version_notice_html}
@@ -1415,6 +1419,7 @@ class QuantLabDashboardHTTPService:
                     "/quantlab/goal/analytics",
                     "/quantlab/goal/model",
                     "/quantlab/goal/pick",
+                    "/quantlab/card/referees",
                 }
                 if parsed.path not in allowed_paths:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
@@ -1422,7 +1427,9 @@ class QuantLabDashboardHTTPService:
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/quantlab/goal/analytics":
+                    if parsed.path == "/quantlab/card/referees":
+                        body = dashboard.render_referee_directory(parsed.query)
+                    elif parsed.path == "/quantlab/goal/analytics":
                         body = dashboard.render_goal_analytics()
                     elif parsed.path == "/quantlab/goal/model":
                         body = dashboard.render_goal_model(parsed.query)
