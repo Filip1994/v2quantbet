@@ -251,3 +251,31 @@ def test_rejects_blocked_country_across_entire_universe(
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.BLOCKED_COUNTRY
 
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        CompetitionMetadata(
+            country="Finland",
+            name="Ykkösliiga",
+            type="league",
+            level=2,
+            home_team="Klubi-04",
+            away_team="EIF",
+        ),
+        CompetitionMetadata(
+            country="Finland",
+            name="Ykkösliiga",
+            type="league",
+            level=2,
+            home_team="JäPS",
+            away_team="KLUBI04",
+        ),
+    ],
+)
+def test_rejects_klubi_04_across_entire_universe(metadata: CompetitionMetadata) -> None:
+    decision = classify_phase_i(metadata)
+
+    assert decision.eligible is False
+    assert decision.rejection_reason == RejectionReason.BLOCKED_TEAM

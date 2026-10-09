@@ -19,6 +19,7 @@ class RejectionReason:
     EXPLICIT_COMPETITION = "EXCLUDED_EXPLICIT_COMPETITION"
     BLACKLISTED_LEAGUE = "EXCLUDED_BLACKLISTED_LEAGUE"
     BLOCKED_COUNTRY = "EXCLUDED_BLOCKED_COUNTRY"
+    BLOCKED_TEAM = "EXCLUDED_BLOCKED_TEAM"
     FRIENDLY = "EXCLUDED_FRIENDLY_COMPETITION"
     NATIONAL_TEAM = "EXCLUDED_NATIONAL_TEAM_COMPETITION"
     AMBIGUOUS = "AMBIGUOUS_COMPETITION_METADATA"
@@ -57,6 +58,7 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
 BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
+BLOCKED_TEAMS = frozenset({"klubi 04", "klubi04"})
 FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})
 NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS = frozenset({1, 4, 5, 6, 7, 8, 9})
 
@@ -64,6 +66,11 @@ NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS = frozenset({1, 4, 5, 6, 7, 8, 9})
 def is_blacklisted_country(country: object) -> bool:
     """Return True for countries disabled across the entire football universe."""
     return _normalise(str(country or "")) in BLOCKED_COUNTRIES
+
+
+def is_blacklisted_team(team: object) -> bool:
+    """Return True for clubs disabled across the entire football universe."""
+    return _normalise(str(team or "")) in BLOCKED_TEAMS
 
 
 def is_blacklisted_league_id(league_id: object) -> bool:
@@ -352,6 +359,8 @@ def universe_block_reason(
     """Return the shared hard-block reason used across the football universe."""
     if is_blacklisted_country(country):
         return RejectionReason.BLOCKED_COUNTRY
+    if is_blacklisted_team(home_team) or is_blacklisted_team(away_team):
+        return RejectionReason.BLOCKED_TEAM
     if is_blacklisted_league_id(league_id):
         return RejectionReason.BLACKLISTED_LEAGUE
     if is_friendly_football(
