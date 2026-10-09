@@ -107,7 +107,13 @@ def is_retired_research_segment(row: dict[str, Any]) -> bool:
     market = str(row.get("market_key") or row.get("market") or "").upper()
     selection = str(row.get("selection") or row.get("selected_selection") or "").upper()
     odds = float(row.get("odds") or row.get("selected_odd") or 0)
-    return market == "OU_25" and selection == "UNDER" and 1.40 <= odds <= 1.80
+    if market != "OU_25":
+        return False
+    if selection == "UNDER":
+        return 1.40 <= odds <= 1.80
+    if selection == "OVER":
+        return 1.61 <= odds <= 1.80
+    return False
 
 
 def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
