@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -175,6 +177,169 @@ def test_inventory_refresh_avoids_rewriting_unchanged_eligibility(isolated_datab
         assert connection.execute(
             "SELECT count(*) FROM inventory_updates WHERE league_id = 40"
         ).fetchone()[0] == 0
+
+
+def test_inventory_baseline_candidate_transition_replay(isolated_database, tmp_path) -> None:
+    """Replay the old blanket reset and new selective reset on paired schemas."""
+    assert DATABASE_URL is not None
+    candidate_connect = isolated_database
+    baseline_schema = f"coverage_baseline_{uuid4().hex}"
+    with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+        connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(baseline_schema)))
+
+    migration_subset = tmp_path / "baseline_migrations"
+    migration_subset.mkdir()
+    for migration in sorted(MIGRATION_DIR.glob("*.sql")):
+        if migration.name[:3].isdigit() and int(migration.name[:3]) <= 10:
+            shutil.copyfile(migration, migration_subset / migration.name)
+
+    def raw_baseline_connect():
+        return psycopg.connect(DATABASE_URL, options=f"-c search_path={baseline_schema}")
+
+    class BaselineCursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            self.cursor.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.cursor.__exit__(*args)
+
+        def execute(self, query, params=None):
+            if isinstance(query, str) and query.startswith(
+                "UPDATE model_coverage_scopes c SET eligible = FALSE"
+            ):
+                # Exact SQL replaced by this PR. All other production code runs
+                # unchanged in both replay branches.
+                return self.cursor.execute("UPDATE model_coverage_scopes SET eligible = FALSE")
+            return self.cursor.execute(query, params)
+
+        def __getattr__(self, name):
+            return getattr(self.cursor, name)
+
+    class BaselineConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __enter__(self):
+            self.connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.connection.__exit__(*args)
+
+        def cursor(self):
+            return BaselineCursor(self.connection.cursor())
+
+    def baseline_connect():
+        return BaselineConnection(raw_baseline_connect())
+
+    def snapshot(connect):
+        with connect() as connection:
+            return connection.execute(
+                "SELECT * "
+                "FROM model_coverage_scopes ORDER BY league_id,season"
+            ).fetchall()
+
+    now = datetime(2026, 9, 23, 12, tzinfo=UTC)
+    policy = ProductionTrainingPolicy()
+    changed_policy = ProductionTrainingPolicy(min_matches=100)
+    try:
+        with raw_baseline_connect() as connection:
+            apply_migrations(connection, migration_subset)
+        candidate = PostgreSQLModelCoverageRepository(connect=candidate_connect)
+        baseline = PostgreSQLModelCoverageRepository(connect=baseline_connect)
+
+        def refresh(at, current_policy):
+            assert baseline.refresh_inventory(current_policy, now=at) == candidate.refresh_inventory(
+                current_policy, now=at
+            )
+            assert snapshot(raw_baseline_connect) == snapshot(candidate_connect)
+
+        refresh(now, policy)  # empty universe
+        for connect in (raw_baseline_connect, candidate_connect):
+            insert_fixture(connect, fixture_id=100, league_id=39, season=2026, now=now)
+            insert_fixture(connect, fixture_id=200, league_id=40, season=2026, now=now)
+        refresh(now, policy)
+        refresh(now + timedelta(minutes=1), policy)  # unchanged universe
+
+        for connect in (raw_baseline_connect, candidate_connect):
+            with connect() as connection:
+                connection.execute(
+                    "UPDATE fixture_observations SET kickoff_at=%s WHERE fixture_id=%s",
+                    (now - timedelta(hours=1), "api-football:200"),
+                )
+        refresh(now + timedelta(minutes=2), policy)  # removed league
+
+        for connect in (raw_baseline_connect, candidate_connect):
+            with connect() as connection:
+                connection.execute(
+                    "UPDATE fixture_observations SET kickoff_at=%s WHERE fixture_id=%s",
+                    (now + timedelta(days=2), "api-football:200"),
+                )
+        refresh(now + timedelta(minutes=3), policy)  # returned league
+        refresh(now + timedelta(minutes=4), changed_policy)  # policy change
+
+        baseline_claims = baseline.claim_training_scopes(now=now + timedelta(minutes=5), limit=1)
+        candidate_claims = candidate.claim_training_scopes(now=now + timedelta(minutes=5), limit=1)
+        assert baseline_claims == candidate_claims
+        assert snapshot(raw_baseline_connect) == snapshot(candidate_connect)
+
+        # Concurrent cron invocations with the same clock/policy must settle
+        # to the same durable rows as the baseline.
+        def concurrent_refresh(repository):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                return sorted(pool.map(
+                    lambda _: repository.refresh_inventory(
+                        changed_policy, now=now + timedelta(minutes=6)
+                    ), range(2)
+                ))
+
+        assert concurrent_refresh(baseline) == concurrent_refresh(candidate)
+        assert snapshot(raw_baseline_connect) == snapshot(candidate_connect)
+
+        # Synthetic active pointer: the inventory refresh must promote the
+        # same scope to ACTIVE and later STALE on both SQL paths.
+        artifact = b"synthetic-model-coverage-replay"
+        digest = sha256(artifact).hexdigest()
+        model_id = f"dcm-json-v1:{digest}"
+        for connect in (raw_baseline_connect, candidate_connect):
+            with connect() as connection:
+                connection.execute(
+                    "UPDATE fixture_observations SET kickoff_at=%s",
+                    (now + timedelta(days=30),),
+                )
+                connection.execute("""
+                    INSERT INTO dixon_coles_model_versions (
+                      model_version_id,provider,team_id_namespace,league_id,season,
+                      training_start_at,training_end_at,reference_time,xi,ridge,
+                      min_matches,accepted_match_count,fitted_match_count,
+                      earliest_match_at,latest_match_at,dataset_sha256,
+                      training_input_fingerprint,trained_at,artifact_schema_version,
+                      training_dataset_schema_version,model_implementation_version,
+                      trainer_code_version,python_version,numpy_version,scipy_version,
+                      artifact_sha256,artifact_bytes)
+                    VALUES (%s,'api-football','api-football',39,2026,
+                      %s,%s,%s,0.0018,0.01,80,80,80,%s,%s,%s,%s,%s,
+                      1,1,'synthetic','synthetic','3.11','2.3','1.17',%s,%s)
+                """, (model_id, now - timedelta(days=100), now - timedelta(days=1),
+                      now, now - timedelta(days=90), now - timedelta(days=2),
+                      "a" * 64, "b" * 64, now, digest, artifact))
+                connection.execute("""
+                    INSERT INTO dixon_coles_active_models (
+                      provider,team_id_namespace,league_id,season,
+                      model_version_id,activated_at,generation)
+                    VALUES ('api-football','api-football',39,2026,%s,%s,1)
+                """, (model_id, now + timedelta(minutes=6)))
+        refresh(now + timedelta(minutes=7), changed_policy)
+        refresh(now + timedelta(days=15), changed_policy)  # stale clock boundary
+    finally:
+        with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+            connection.execute(
+                sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(baseline_schema))
+            )
 
 
 def test_persistent_training_budget_reserves_live_capacity(isolated_database) -> None:

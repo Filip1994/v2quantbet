@@ -53,26 +53,44 @@ On a local PostgreSQL replay with two current scopes, the second inventory
 cycle performed four row updates instead of the previous six: two redundant
 `TRUE -> FALSE` writes were removed. When one scope left the universe, it was
 set to false exactly once. Repeated cycles did not rewrite an already false
-scope. This measures row updates in the isolated replay, not WAL bytes or
-production savings. A monthly dollar estimate for this code change is not
-defensible without production call counts and billed resource deltas.
+scope. A paired baseline/candidate replay now compares every coverage scope
+column, including timestamps, status, retry state and active model pointers,
+after an empty universe, unchanged cycle, removal, return, policy change,
+training claim, concurrent same-policy refreshes, activation and staleness.
+The baseline substitutes only the former blanket-reset SQL; all other
+repository code is shared. This establishes the tested database transitions,
+not end-to-end pick or dashboard equivalence.
+
+In a separate synthetic PostgreSQL 17 query microbenchmark with 1,000 already
+current scopes and 12 alternating paired runs, the blanket reset's median
+execution time was 3.897 ms and generated 218,492 WAL bytes (3,016 records).
+The selective reset's median was 1.466 ms and generated zero WAL bytes for
+that query. Each measured query ran inside a rolled-back savepoint. This
+isolates the changed SQL only; the surrounding inventory still performs other
+updates. The configured default lifecycle interval is 60 seconds, but the
+deployed interval and actual call count have not been verified. No monthly
+dollar estimate is defensible without production-equivalent call counts and
+billed resource deltas.
 
 ## Validation
 
-* `uv run --extra dev python -m pytest -q`: 1,299 passed, 62 skipped.
+* `uv run --extra dev python -m pytest -q`: 1,299 passed, 63 skipped.
 * Local PostgreSQL 17 integration:
   `QUANTBET_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/postgres`
   with `uv run --extra dev python -m pytest
   tests/integration/test_postgres_model_coverage_integration.py -q`:
-  3 passed.
+  4 passed.
 * The integration fixture now applies schema migrations 001-010 only. Later
   operator settlement migrations require real production evidence and cannot
   run in an empty temporary database. No production migrations were changed.
 
-This branch does not yet prove whole-system replay equivalence for picks,
-settlement, ROI, Kelly allocations, archive payloads and every dashboard. It
-must remain draft. The rollback for the proposed code change is to revert its
-commit before any approved deployment; there is no migration or data rewrite.
+The production schema has no trigger or notification on
+`model_coverage_scopes`. The replay has not exercised concurrent policy
+changes or training retries/failures. It does not prove whole-system replay
+equivalence for picks, settlement, ROI, Kelly allocations, archive payloads
+and every dashboard. It must remain draft. The rollback for the proposed code
+change is to revert its commit before any approved deployment; there is no
+migration or data rewrite.
 
 ## Deferred candidates
 
