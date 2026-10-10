@@ -1,0 +1,51 @@
+{
+  "added": [
+    "railway:project-example:environment-example:new-example"
+  ],
+  "after_observed_at": "2026-10-02T00:00:00Z",
+  "before_observed_at": "2026-10-01T00:00:00Z",
+  "changes": [
+    {
+      "component_id": "railway:project-example:environment-example:engine-example",
+      "documented_reason": "reason unknown",
+      "fields": {
+        "last_changed_at": {
+          "after": "2026-10-01T23:00:00Z",
+          "before": "2026-09-30T23:00:00Z"
+        },
+        "last_successful_deployment_at": {
+          "after": null,
+          "before": "2026-09-30T23:00:00Z"
+        },
+        "latest_deployment_status": {
+          "after": "FAILED",
+          "before": "SUCCESS"
+        },
+        "operational_state": {
+          "after": "failed_or_crashed_latest_deployment",
+          "before": "running_instance"
+        },
+        "running_instances": {
+          "after": 0,
+          "before": 1
+        },
+        "source_commit": {
+          "after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "name": "quantbet-engine"
+    }
+  ],
+  "ci_failure_counts": {
+    "after": 0,
+    "before": 0
+  },
+  "failure_counts": {
+    "after": 1,
+    "before": 0
+  },
+  "note": "Retired from registry means absent in the later snapshot, not confirmed deleted. Missing CI/freshness/permission evidence is unknown.",
+  "retired_from_registry": [],
+  "schema_version": 1
+}
