@@ -1153,16 +1153,13 @@ def _selected_goal_production_bucket_table(
             ),
         ),
     )
-    active_cohorts = [(bucket_id, cohort) for bucket_id, cohort in cohorts if bucket_id in approved_ids]
+    active_cohorts = [
+        (bucket_id, cohort) for bucket_id, cohort in cohorts if bucket_id in approved_ids
+    ]
+    # With no GoalLab intake selected, omit the special Production highlight panel.
+    # Normal GoalLab analytics, buckets, picks and watchlist remain unchanged.
     if not active_cohorts:
-        return (
-            '<section class="panel" id="production-intake-buckets">'
-            '<div class="panel-title"><b>GoalLab · Production intake suspended</b>'
-            '<span>No GoalLab buckets currently approved</span></div>'
-            '<p>Both former OVER 2.5 buckets are retired from Production intake. '
-            'Historical picks, settlements and ROI remain available in GoalLab Analytics '
-            'and Watchlist.</p></section>'
-        )
+        return ""
 
     ranked: list[tuple[float, float, int, str, dict[str, Any]]] = []
     for bucket_id, cohort in active_cohorts:
