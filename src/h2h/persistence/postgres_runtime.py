@@ -369,6 +369,13 @@ class PostgreSQLRuntimeRepository:
                 scheduling_anchor is None or refresh_last_attempt_at > scheduling_anchor
             ):
                 scheduling_anchor = refresh_last_attempt_at
+            # An explicit NO_USABLE_QUOTE retry deadline is authoritative once due.
+            # Keep all other fresh/usable-stale refresh cadences unchanged.
+            no_usable_quote_retry_due = bool(
+                freshness_state == "NO_USABLE_QUOTE"
+                and next_retry_at is not None
+                and next_retry_at <= current
+            )
             stale_retry = False
             if derived_stale or persisted_stale:
                 if kickoff_at - current <= timedelta(seconds=minimum_time_to_kickoff_seconds):
@@ -393,7 +400,11 @@ class PostgreSQLRuntimeRepository:
                     # (for example immediately after migration). Do not let its recent
                     # transport capture suppress the first stale-aware pull.
                     stale_retry = True
-            elif scheduling_anchor is not None and scheduling_anchor + decision.interval > current:
+            elif (
+                not no_usable_quote_retry_due
+                and scheduling_anchor is not None
+                and scheduling_anchor + decision.interval > current
+            ):
                 waiting_for_refresh += 1
                 continue
             due.append(
