@@ -66,7 +66,7 @@
       "name": "Runtime cost and API budgets",
       "score": 5,
       "confidence": "medium",
-      "evidence": "Infrastructure period spent $32.993, estimated $33.505, hard cap $40; Agent cap is separate and currently $0"
+      "evidence": "Infrastructure period spent $33.22, estimated $33.49 at 19:37 UTC, hard cap $40; Agent cap is separate"
     },
     {
       "name": "Deploy complexity",
@@ -129,7 +129,7 @@
       "title": "Collector fails after GoalLab history load and core captures are stale",
       "severity": 3,
       "likelihood": 3,
-      "evidence": "08:01 UTC run completed at 09:49; 11-16 UTC runs lack cycle completion; last core fixture/market capture 08:01 at 16:53; 0.750 GB RAM limit nearly reached in 12-hour metrics",
+      "evidence": "08:01 UTC run completed at 09:49; 11-17 UTC runs lack cycle completion; last core fixture/market capture 08:01 at 16:53; 0.750 GB RAM limit nearly reached in earlier 12-hour metrics",
       "action": "Review diagnostic PR #248, then after separately approved merge/deploy obtain exit/OOM reason and verify two full cycles plus DB freshness before choosing mitigation"
     },
     {

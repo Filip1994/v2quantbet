@@ -23,7 +23,7 @@ V1 je **samo za čitanje**, isključivo za `sincere-balance`. Svaki korak ispod 
 
 ## Aktivni collector incident, read-only presek oko 16:53 UTC
 
-- Poslednji potvrđeni puni ciklus završio je u 09:49:40 UTC, nakon početka u 08:01. Ciklusi 11–16 UTC nisu prijavili `cycle completed`; poslednji deployment `924be963-a368-48df-91b0-41331632f053` je `CRASHED` u 16:06:53 UTC. Poslednji log je GoalLab `history_loaded rows=30000`, bez Python traceback-a. OOM je hipoteza, ne potvrđen exit reason: limit 0,750 GB, maksimum 12-časovne serije 0,748 GB.
+- Poslednji potvrđeni puni ciklus završio je u 09:49:40 UTC, nakon početka u 08:01. Ciklusi 11–17 UTC nisu prijavili `cycle completed`; poslednji deployment `0d06f8e2-9315-48ad-8ebf-31b055f87ce4` je `CRASHED` u 17:04:20 UTC. Poslednji log je GoalLab `history_loaded rows=30000`, bez Python traceback-a. OOM je hipoteza, ne potvrđen exit reason: limit 0,750 GB, maksimum ranije 12-časovne serije 0,748 GB.
 - Poslednji `quantlab_market_captures` i fixture/discovery capture u bazi je 08:01:22 UTC. Svežina se proverava vremenom reda, ne samo statusom deploymenta. Goal/Corner/Card/H2H su radili u prethodnom punom ciklusu; redovan rad posle njega nije potvrđen. Delimične Goal decisions iz kasnijih pokušaja nisu dokaz punog ciklusa.
 - Bez odobrenja **ne** menjati collector RAM, cron, varijable, modele, podatke ili replay. Za incident zabeležiti poslednji kompletan ciklus, ID neuspelog deploymenta, post-history log, peak RAM/limit, DB watermarks i eventualni kernel exit reason. [Puni nalaz](STABILIZATION_REVIEW_2026-10-10.md) i [draft dijagnostika #248](https://github.com/Filip1994/v2quantbet/pull/248).
 
@@ -31,7 +31,7 @@ V1 je **samo za čitanje**, isključivo za `sincere-balance`. Svaki korak ispod 
 
 Football PostgreSQL ima jednu login rolu `postgres` sa superuser pravima; 16/17 ne-DB servisa deli njene kredencijale. PITR/HA su isključeni; read-only Railway volume backup **i schedule liste su prazne**. Eventualni eksterni dump ostaje nepoznat. Dok ne postoji checksum plus izolovan restore dokaz, ne tvrditi da je recovery moguć. Nema rutinskog SQL write-a, `pg_dump`-a, grant/role promene ili restore-a u ovom vodiču. [Matrica prava #250](https://github.com/Filip1994/v2quantbet/pull/250) i [backup/restore plan #249](https://github.com/Filip1994/v2quantbet/pull/249) traže posebno operativno odobrenje.
 
-**Troškovni gate:** Railway infrastructure hard limit je $40, trenutni period oko $32,99 i procena oko $33,51 do kraja perioda (presek 10. oktobra). Agent budget je druga kvota. Pre aktivacije backup-a/PITR-a ili izolovanog restore-a ponovo proveriti trošak i ostaviti najmanje $2 rezerve u infrastructure limitu; bez automatskog povećanja cap-a.
+**Troškovni gate:** Railway infrastructure hard limit je $40, trenutni period oko $33,22 i procena oko $33,49 do kraja perioda (read-only presek 19:37 UTC, 10. oktobar). Agent budget je druga kvota. Pre aktivacije backup-a/PITR-a ili izolovanog restore-a ponovo proveriti trošak i ostaviti najmanje $2 rezerve u infrastructure limitu; bez automatskog povećanja cap-a. [Backup predlog #249](https://github.com/Filip1994/v2quantbet/pull/249) sada sadrži i intervalni WAL uzorak, ali kompresovani PITR trošak ostaje nepoznat.
 
 ## Bezbedne read-only komande
 
