@@ -12,11 +12,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 from h2h.production_buckets import (
+    DEFAULT_BUCKET_IDS,
     PRODUCTION_BUCKET_SPECS,
-    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
-    RESEARCH_LOW_SCORING_NON_EXTREME,
-    RESEARCH_OU_UNDER_EDGE_10_15,
-    RESEARCH_OU_UNDER_EDGE_20_30,
+    RESEARCH_OU_UNDER_ODDS_1_81_2_00,
+    RESEARCH_OU_OVER_ODDS_1_81_2_00,
     is_retired_research_segment,
     n_roi_priority_score,
 )
@@ -844,11 +843,11 @@ def _metrics_table(
 def _selected_research_production_buckets(
     snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Resolve the four selected Research intake buckets to their current analytics rows."""
+    """Resolve the active Research intake buckets to their current analytics rows."""
     specs = {
         spec.bucket_id: spec
         for spec in PRODUCTION_BUCKET_SPECS
-        if spec.source_universe == "RESEARCH"
+        if spec.bucket_id in DEFAULT_BUCKET_IDS
     }
 
     def find(rows: Sequence[dict[str, Any]], **expected: str) -> dict[str, Any] | None:
@@ -859,37 +858,21 @@ def _selected_research_production_buckets(
 
     sources = (
         (
-            RESEARCH_OU_UNDER_EDGE_10_15,
-            find(
-                snapshot["cohorts"]["market_selection_edge"],
-                market="OU_25",
-                selection="UNDER",
-                edge_bucket="10–15%",
-            ),
-        ),
-        (
-            RESEARCH_OU_UNDER_EDGE_20_30,
-            find(
-                snapshot["cohorts"]["market_selection_edge"],
-                market="OU_25",
-                selection="UNDER",
-                edge_bucket="20–30%",
-            ),
-        ),
-        (
-            RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+            RESEARCH_OU_UNDER_ODDS_1_81_2_00,
             find(
                 snapshot["cohorts"]["market_selection_odds"],
-                market="BTTS",
-                selection="NO",
-                odds_bucket="2.01–2.50",
+                market="OU_25",
+                selection="UNDER",
+                odds_bucket="1.81–2.00",
             ),
         ),
         (
-            RESEARCH_LOW_SCORING_NON_EXTREME,
+            RESEARCH_OU_OVER_ODDS_1_81_2_00,
             find(
-                snapshot["diagnostics"],
-                diagnostic="LOW_SCORING_NON_EXTREME",
+                snapshot["cohorts"]["market_selection_odds"],
+                market="OU_25",
+                selection="OVER",
+                odds_bucket="1.81–2.00",
             ),
         ),
     )
