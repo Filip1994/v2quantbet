@@ -1387,7 +1387,11 @@ def test_cardlab_analytics_excludes_pre_v7_rows_from_roi_and_buckets() -> None:
     assert "CARDLAB_RAW_STATS_POLICY_V6_MARKET80" not in html
 
 
-def test_selected_goallab_production_buckets_are_neon_highlighted() -> None:
+def test_selected_goallab_production_buckets_are_neon_highlighted(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "QUANTBET_PRODUCTION_INTAKE_BUCKETS",
+        "GOALLAB_OU_OVER_XG_2_5_3_0,GOALLAB_OU_OVER_ODDS_2_01_2_50",
+    )
     dashboard = QuantLabDashboardService(StubRepository())
     html = dashboard.render_html("view=analytics&lab=goal")
 
@@ -1399,7 +1403,7 @@ def test_selected_goallab_production_buckets_are_neon_highlighted() -> None:
     assert "#18d7ff" in html
 
 
-def test_retired_goallab_production_buckets_are_not_approved(monkeypatch) -> None:
+def test_unselected_goallab_buckets_have_no_production_highlight(monkeypatch) -> None:
     monkeypatch.setenv(
         "QUANTBET_PRODUCTION_INTAKE_BUCKETS",
         "RESEARCH_OU_UNDER_EDGE_10_15,RESEARCH_OU_UNDER_EDGE_20_30,"
@@ -1407,8 +1411,8 @@ def test_retired_goallab_production_buckets_are_not_approved(monkeypatch) -> Non
     )
     html = QuantLabDashboardService(StubRepository()).render_html("view=analytics&lab=goal")
 
-    assert 'id="production-intake-buckets"' in html
+    assert 'id="production-intake-buckets"' not in html
     assert 'class="panel production-intake-panel"' not in html
-    assert "GoalLab · Production intake suspended" in html
-    assert "Both former OVER 2.5 buckets are retired" in html
-    assert "Historical picks, settlements and ROI remain available" in html
+    assert "Production intake suspended" not in html
+    assert "retired from Production intake" not in html
+    assert 'id="analytics-watchlist"' in html
