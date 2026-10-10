@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -3806,6 +3807,103 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
+
+    @contextmanager
+    def stream_goal_scoring_history(
+        self, *, before: datetime, limit: int = 30_000, batch_size: int = 128
+    ) -> Iterator[Iterator[dict[str, Any]]]:
+        """Stream precisely the same most recent fixtures in chronological order.
+
+        A named server-side PostgreSQL cursor bounds raw payloads held in Python.
+        The caller must process the iterator before this context manager exits.
+        """
+        if limit <= 0 or batch_size <= 0:
+            raise ValueError("limit and batch_size must be positive")
+        sql = (
+                "WITH fixture_candidates AS ("
+                " SELECT DISTINCT ON (o.fixture_id) "
+                " o.fixture_id, o.fixture_observation_id, o.league_id, o.season, "
+                " o.home_team_id, o.away_team_id, o.kickoff_at, o.captured_at, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'home')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'home')::INTEGER"
+                " ) AS home_goals, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'away')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'away')::INTEGER"
+                " ) AS away_goals "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.captured_at <= %s AND o.kickoff_at < %s "
+                " AND o.league_id IS NOT NULL AND o.home_team_id IS NOT NULL "
+                " AND o.away_team_id IS NOT NULL "
+                " AND (o.raw_payload->'fixture'->'status'->>'short') IN ('FT', 'AET', 'PEN') "
+                " AND ("
+                "  (jsonb_typeof(o.raw_payload->'score'->'fulltime'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'score'->'fulltime'->'away') = 'number') "
+                "  OR (jsonb_typeof(o.raw_payload->'goals'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'goals'->'away') = 'number')"
+                " ) "
+                " ORDER BY o.fixture_id, o.captured_at DESC, o.fixture_observation_id DESC"
+                "), fixture_rows AS ("
+                " SELECT * FROM fixture_candidates "
+                " ORDER BY kickoff_at DESC, fixture_id DESC LIMIT %s"
+                ") "
+                "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
+                "f.home_team_id, f.away_team_id, f.kickoff_at, "
+                "f.captured_at AS fixture_available_at, f.home_goals, f.away_goals, "
+                "s.statistics_observation_id, s.available_at AS statistics_available_at, "
+                "pc.player_capture_id, pc.available_at AS player_available_at, "
+                "pc.status AS player_status, pc.reason AS player_reason, "
+                "pc.source AS player_source, pc.raw_payload AS player_payload, "
+                "s.home_fouls, s.away_fouls, "
+                "s.home_yellow_cards, s.away_yellow_cards, "
+                "s.home_red_cards, s.away_red_cards, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_shots_off_goal, s.away_shots_off_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_shots_outsidebox, s.away_shots_outsidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_goalkeeper_saves, s.away_goalkeeper_saves, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM fixture_rows f "
+                "LEFT JOIN LATERAL ("
+                " SELECT s.* FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = f.fixture_id AND s.available_at <= %s "
+                " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
+                ") s ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT p.player_capture_id, p.available_at, p.status, p.reason, "
+                "        p.source, p.raw_payload "
+                " FROM quantlab_goal_player_captures p "
+                " WHERE p.fixture_id = f.fixture_id AND p.available_at <= %s "
+                " ORDER BY p.available_at DESC, p.player_capture_id DESC LIMIT 1"
+                ") pc ON TRUE "
+                "ORDER BY f.kickoff_at DESC, f.fixture_id DESC"
+        )
+        desc = "ORDER BY f.kickoff_at DESC, f.fixture_id DESC"
+        if sql.count(desc) != 1:
+            raise RuntimeError("GoalLab scoring query ordering contract changed")
+        sql = sql.replace(desc, "ORDER BY f.kickoff_at ASC, f.fixture_id ASC")
+        with self.connect() as connection:
+            with connection.cursor(name="quantlab_goal_scoring_history") as cursor:
+                cursor.execute(sql, (before, before, limit, before, before))
+                columns = tuple(item.name for item in cursor.description)
+
+                def rows() -> Iterator[dict[str, Any]]:
+                    while True:
+                        batch = cursor.fetchmany(batch_size)
+                        if not batch:
+                            return
+                        for row in batch:
+                            yield dict(zip(columns, row, strict=True))
+
+                yield rows()
 
     def goal_model_by_training_fingerprint(
         self,
