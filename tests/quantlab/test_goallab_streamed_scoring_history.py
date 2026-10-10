@@ -43,7 +43,7 @@ def test_stream_retrieves_recent_limit_in_bounded_batches() -> None:
     ]
 
     class Cursor:
-        description = [SimpleNamespace(name=key) for key in columns]
+        description = tuple(SimpleNamespace(name=key) for key in columns)
 
         def __init__(self):
             self.query = ""
@@ -97,8 +97,7 @@ def test_stream_retrieves_recent_limit_in_bounded_batches() -> None:
 @pytest.mark.parametrize("limit,batch_size", [(0, 128), (128, 0), (-1, 128)])
 def test_stream_rejects_invalid_limits(limit: int, batch_size: int) -> None:
     repo = PostgreSQLQuantLabRepository(connect=lambda: None)
-    with pytest.raises(ValueError, match="positive"):
-        with repo.stream_goal_scoring_history(
-            before=NOW, limit=limit, batch_size=batch_size
-        ):
-            pass
+    with pytest.raises(ValueError, match="positive"), repo.stream_goal_scoring_history(
+        before=NOW, limit=limit, batch_size=batch_size
+    ):
+        pass
