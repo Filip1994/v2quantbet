@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -1205,6 +1206,8 @@ def _history_coach_capture(
 
 def _build_scoring_context(
     rows: tuple[dict[str, Any], ...],
+    *,
+    diagnostics: bool = False,
 ) -> tuple[
     dict[int, list[TeamMatchSample]],
     dict[int, list[PlayerMatchSample]],
@@ -1223,7 +1226,17 @@ def _build_scoring_context(
             str(row.get("fixture_id") or ""),
         ),
     )
-    for row in ordered:
+    context_started_at = perf_counter()
+    for index, row in enumerate(ordered, start=1):
+        if diagnostics and index % 2_000 == 0:
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=scoring_context_progress "
+                "processed=%d total=%d elapsed_seconds=%.3f peak_rss_bytes=%s",
+                index,
+                len(ordered),
+                perf_counter() - context_started_at,
+                _peak_rss_bytes(),
+            )
         home_id = _safe_id(row.get("home_team_id"))
         away_id = _safe_id(row.get("away_team_id"))
         league_id = _safe_id(row.get("league_id"))
@@ -1260,6 +1273,16 @@ def _build_scoring_context(
             ):
                 player_histories.setdefault(player_sample.team_id, []).append(player_sample)
     return histories, player_histories, pairs, usable_matches
+
+
+def _peak_rss_bytes() -> int | None:
+    """Return process high-water RSS where the OS exposes it."""
+    try:
+        import resource
+    except ImportError:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(peak if sys.platform == "darwin" else peak * 1024)
 
 
 def _build_training(
@@ -1970,8 +1993,20 @@ class GoalStructuralModelService:
             history_loaded_at - started_at,
         )
         if self._artifact_model_version is not None:
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=approved_artifact_query_started "
+                "peak_rss_bytes=%s",
+                _peak_rss_bytes(),
+            )
             persisted = self._repository.goal_model_contract(
                 self._artifact_model_version
+            )
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=approved_artifact_query_completed "
+                "found=%s elapsed_seconds=%.3f peak_rss_bytes=%s",
+                persisted is not None,
+                perf_counter() - history_loaded_at,
+                _peak_rss_bytes(),
             )
             if persisted is None:
                 self._cache_at = now
@@ -1982,9 +2017,25 @@ class GoalStructuralModelService:
                 }
                 return
             context_started_at = perf_counter()
-            histories, player_histories, pairs, _context_history_match_count = (
-                _build_scoring_context(rows)
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=scoring_context_started rows=%d "
+                "peak_rss_bytes=%s",
+                len(rows),
+                _peak_rss_bytes(),
             )
+            try:
+                histories, player_histories, pairs, _context_history_match_count = (
+                    _build_scoring_context(rows, diagnostics=True)
+                )
+            except Exception as exc:
+                LOGGER.error(
+                    "GoalLab DC+ prepare stage=scoring_context_failed "
+                    "error_class=%s elapsed_seconds=%.3f peak_rss_bytes=%s",
+                    type(exc).__name__,
+                    perf_counter() - context_started_at,
+                    _peak_rss_bytes(),
+                )
+                raise
             artifact = _artifact_from_row(persisted)
             self._cache_at = now
             self._histories = histories
