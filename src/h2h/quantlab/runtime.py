@@ -1172,10 +1172,15 @@ class QuantLabRuntime:
                     )
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
-                event_candidates = self._repository.referee_card_event_backfill_candidates(
-                    referee,
-                    decision_at=now,
-                    limit=max(12, self._settings.card_referee_history_target * 2),
+                # Avoid costly candidate SQL once this cycle's API-attempt cap is spent.
+                event_candidates = (
+                    self._repository.referee_card_event_backfill_candidates(
+                        referee,
+                        decision_at=now,
+                        limit=max(12, self._settings.card_referee_history_target * 2),
+                    )
+                    if event_attempts < self._settings.card_referee_statistics_per_cycle
+                    else ()
                 )
                 for fixture in event_candidates:
                     if current_sample >= self._settings.card_referee_history_target:
@@ -1205,11 +1210,15 @@ class QuantLabRuntime:
                             baseline_samples[referee_key_value] = current_sample
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
-                candidates = self._repository.referee_statistics_backfill_candidates(
-                    referee,
-                    decision_at=now,
-                    retry_after_seconds=self._settings.card_referee_statistics_retry_seconds,
-                    limit=max(12, self._settings.card_referee_history_target * 2),
+                candidates = (
+                    self._repository.referee_statistics_backfill_candidates(
+                        referee,
+                        decision_at=now,
+                        retry_after_seconds=self._settings.card_referee_statistics_retry_seconds,
+                        limit=max(12, self._settings.card_referee_history_target * 2),
+                    )
+                    if statistics_attempts < self._settings.card_referee_statistics_per_cycle
+                    else ()
                 )
                 for fixture in candidates:
                     if current_sample >= self._settings.card_referee_history_target:
