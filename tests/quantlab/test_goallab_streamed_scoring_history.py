@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -92,6 +93,52 @@ def test_stream_retrieves_recent_limit_in_bounded_batches() -> None:
     assert "ORDER BY kickoff_at DESC, fixture_id DESC LIMIT %s" in conn.cursor_obj.query
     assert "ORDER BY f.kickoff_at ASC, f.fixture_id ASC" in conn.cursor_obj.query
     assert "pc.raw_payload AS player_payload" in conn.cursor_obj.query
+
+
+def test_pinned_authority_uses_stream_and_never_materializes_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from h2h.quantlab.goal_lab import model
+
+    seen = []
+
+    class Repo:
+        def goal_scoring_history(self, **_kwargs):
+            raise AssertionError("streaming path must not load the full history")
+
+        def goal_model_history(self, **_kwargs):
+            raise AssertionError("pinned authority must not load training history")
+
+        def goal_model_contract(self, model_version):
+            assert model_version == "approved-model"
+            return {"model_version": model_version}
+
+        @contextmanager
+        def stream_goal_scoring_history(self, *, before, limit):
+            assert before == NOW
+            assert limit == model.HISTORY_LIMIT
+            seen.append("stream_opened")
+            yield iter((_fixture("early", NOW - timedelta(days=2)),))
+            seen.append("stream_closed")
+
+    monkeypatch.setattr(
+        model,
+        "_artifact_from_row",
+        lambda row: SimpleNamespace(
+            model_version=row["model_version"],
+            training_payload={},
+            training_sample_size=300,
+            history_match_count=1,
+            parameters={"model_feature_names": ()},
+        ),
+    )
+    service = model.GoalStructuralModelService(
+        Repo(), artifact_model_version="approved-model"
+    )
+    result = service.readiness(decision_at=NOW)
+    assert result["reason"] == "MODEL_READY"
+    assert result["artifact_pinned"] is True
+    assert seen == ["stream_opened", "stream_closed"]
 
 
 @pytest.mark.parametrize("limit,batch_size", [(0, 128), (128, 0), (-1, 128)])
