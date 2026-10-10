@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -1204,7 +1205,9 @@ def _history_coach_capture(
 
 
 def _build_scoring_context(
-    rows: tuple[dict[str, Any], ...],
+    rows: Iterable[dict[str, Any]],
+    *,
+    already_sorted: bool = False,
 ) -> tuple[
     dict[int, list[TeamMatchSample]],
     dict[int, list[PlayerMatchSample]],
@@ -1216,7 +1219,9 @@ def _build_scoring_context(
     player_histories: dict[int, list[PlayerMatchSample]] = {}
     pairs: list[PairMatchSample] = []
     usable_matches = 0
-    ordered = sorted(
+    # The stream arrives chronologically ordered from PostgreSQL; do not
+    # re-materialize its large JSON rows into a second in-memory list.
+    ordered = rows if already_sorted else sorted(
         rows,
         key=lambda row: (
             row.get("kickoff_at") or datetime.min.replace(tzinfo=UTC),
@@ -1958,17 +1963,28 @@ class GoalStructuralModelService:
         if self._cache_at == now:
             return
         started_at = perf_counter()
-        scoring_history = getattr(self._repository, "goal_scoring_history", None)
-        if self._artifact_model_version is not None and callable(scoring_history):
-            rows = scoring_history(before=now, limit=HISTORY_LIMIT)
-        else:
-            rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
-        history_loaded_at = perf_counter()
-        LOGGER.info(
-            "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
-            len(rows),
-            history_loaded_at - started_at,
+        streaming_history = (
+            self._artifact_model_version is not None
+            and callable(getattr(self._repository, "stream_goal_scoring_history", None))
         )
+        if streaming_history:
+            rows: tuple[dict[str, Any], ...] = ()
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=history_stream_selected limit=%d",
+                HISTORY_LIMIT,
+            )
+        else:
+            scoring_history = getattr(self._repository, "goal_scoring_history", None)
+            if self._artifact_model_version is not None and callable(scoring_history):
+                rows = scoring_history(before=now, limit=HISTORY_LIMIT)
+            else:
+                rows = self._repository.goal_model_history(before=now, limit=HISTORY_LIMIT)
+            LOGGER.info(
+                "GoalLab DC+ prepare stage=history_loaded rows=%d elapsed_seconds=%.3f",
+                len(rows),
+                perf_counter() - started_at,
+            )
+        history_loaded_at = perf_counter()
         if self._artifact_model_version is not None:
             persisted = self._repository.goal_model_contract(
                 self._artifact_model_version
@@ -1982,9 +1998,22 @@ class GoalStructuralModelService:
                 }
                 return
             context_started_at = perf_counter()
-            histories, player_histories, pairs, _context_history_match_count = (
-                _build_scoring_context(rows)
-            )
+            if streaming_history:
+                LOGGER.info(
+                    "GoalLab DC+ prepare stage=streaming_scoring_context_started "
+                    "limit=%d",
+                    HISTORY_LIMIT,
+                )
+                with self._repository.stream_goal_scoring_history(
+                    before=now, limit=HISTORY_LIMIT
+                ) as scoring_rows:
+                    histories, player_histories, pairs, _context_history_match_count = (
+                        _build_scoring_context(scoring_rows, already_sorted=True)
+                    )
+            else:
+                histories, player_histories, pairs, _context_history_match_count = (
+                    _build_scoring_context(rows)
+                )
             artifact = _artifact_from_row(persisted)
             self._cache_at = now
             self._histories = histories
