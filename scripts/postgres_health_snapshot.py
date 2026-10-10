@@ -42,6 +42,13 @@ SQL: dict[str, str] = {
         GROUP BY state, wait_event_type
         ORDER BY connections DESC, state, wait_type
     """,
+    "lock_counts": """
+        SELECT locktype, mode, granted, COUNT(*) AS lock_count
+        FROM pg_locks
+        GROUP BY locktype, mode, granted
+        ORDER BY lock_count DESC, locktype, mode
+        LIMIT 20
+    """,
     "database_statistics": """
         SELECT numbackends, xact_commit, xact_rollback,
                blks_read, blks_hit, temp_files, temp_bytes, deadlocks,
@@ -79,6 +86,7 @@ ROW_LIMITS = {
     "server": 1,
     "memory_settings": 12,
     "connection_states": 30,
+    "lock_counts": 20,
     "database_statistics": 1,
     "wal_statistics": 1,
     "checkpoint_statistics": 1,
