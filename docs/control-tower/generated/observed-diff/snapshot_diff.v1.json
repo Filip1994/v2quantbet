@@ -7,10 +7,6 @@
       "component_id": "railway:089895e8-c4b7-4f3b-9fb9-ca9be11544f4:32ceeb6e-a8a8-4f98-b757-58d63417e496:a4a98e6d-1e57-45f9-8e32-bafd8bfcf81c",
       "documented_reason": "reason unknown",
       "fields": {
-        "last_successful_deployment_at": {
-          "after": null,
-          "before": "2026-09-29T07:29:06Z"
-        },
         "latest_deployment_status": {
           "after": "CRASHED",
           "before": "SUCCESS"

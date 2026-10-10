@@ -8,14 +8,14 @@ Iz korena `v2quantbet` repozitorijuma:
 
 ```sh
 python scripts/control_tower.py build \
-  --fixture docs/control-tower/fixtures/railway-2026-10-10-0950.json \
-  --github-fixture docs/control-tower/fixtures/github-2026-10-10.json \
-  --out docs/control-tower/generated/2026-10-10
-
-python scripts/control_tower.py build \
   --fixture docs/control-tower/fixtures/railway-2026-10-10.json \
   --github-fixture docs/control-tower/fixtures/github-2026-10-10.json \
   --out <local-before-directory>
+python scripts/control_tower.py build \
+  --fixture docs/control-tower/fixtures/railway-2026-10-10-0950.json \
+  --github-fixture docs/control-tower/fixtures/github-2026-10-10.json \
+  --previous <local-before-directory>/inventory.v1.json \
+  --out docs/control-tower/generated/2026-10-10
 python scripts/control_tower.py diff \
   --before <local-before-directory>/inventory.v1.json \
   --after docs/control-tower/generated/2026-10-10/inventory.v1.json \
@@ -26,6 +26,7 @@ python scripts/control_tower.py build \
   --out docs/control-tower/generated/synthetic-before
 python scripts/control_tower.py build \
   --fixture docs/control-tower/fixtures/synthetic-after.json \
+  --previous docs/control-tower/generated/synthetic-before/inventory.v1.json \
   --out docs/control-tower/generated/synthetic-after
 python scripts/control_tower.py diff \
   --before docs/control-tower/generated/synthetic-before/inventory.v1.json \
@@ -60,13 +61,16 @@ python scripts/control_tower.py capture-github \
 
 ## Kako se čita registar
 
-- `first_seen_at` je vreme prvog dostupnog snapshot-a, **nije** stvarni datum kreiranja. `created_at=null` znači nepoznato.
+- `first_seen_at` je vreme prvog dostupnog snapshot-a za stabilni Railway ID. Prosledi prethodni registar kroz `--previous` pri svakom osvežavanju; tada se najranije opažanje zadržava. Bez prethodnog registra istorija nije poznata. Ovo **nije** stvarni datum kreiranja; `created_at=null` znači nepoznato.
 - `last_changed_at` je vreme poslednjeg Railway deploymenta; promena konfiguracije bez deploymenta nije obuhvaćena.
-- `last_successful_deployment_at` je poznat samo ako je poslednji deployment `SUCCESS`. Raniji uspeh iza kasnijeg `FAILED` zahteva dodatnu istoriju.
-- `running_instance`, `scheduled_cron_current_run_unknown`, `sleeping_deployment` i `stopped_or_completed` su odvojena stanja. Nula trenutno aktivnih cron instanci ne dokazuje kvar.
+- `last_successful_deployment_at` zadržava deployment koji je u nekom snapshot-u imao status `SUCCESS`; `last_successful_deployment_observed_at` beleži kada je taj status viđen. Isti deployment može kasnije preći u `CRASHED`, kao kod cold storage servisa, pa ovo nije dokaz novog, zasebnog uspešnog deploy-a ni uspešno završenog cron posla. Ako prethodni registar nije sačuvan, stariji uspeh ostaje nepoznat.
+- `cron_scheduled`, `cron_running_now`, `cron_last_successful_completion_at` i `data_freshness_at` su odvojena polja. Poslednja dva ostaju `null` bez direktnog dokaza o završenom poslu odnosno proverene svežine podataka. Opcioni `--operations-fixture` prima takve proverene vremenske oznake i izvore. Nula trenutno aktivnih cron instanci ne dokazuje kvar.
+- Scorecard se **ne računa automatski**. Ocene su ručno unete u `assessment.json` prema rubrici, dokazima i nivou pouzdanosti; generator ih samo prikazuje. Budući razlog konkretne promene treba vezati za PR obrazloženje ili odluku, ne za commit naslov.
 - `verification=inferred` znači da kod/dokument opisuju namenu, ali nema potvrde stvarnog izvršavanja i DB privilegija. `unknown` se ne pretvara u negativnu ocenu.
 - `documented_reason` u registru objašnjava postojeći dizajn samo kada postoji dokument. Snapshot diff za konkretnu promenu uvek kaže `reason unknown` dok ne postoji dokaz koji direktno vezuje tu promenu za PR/odluku.
 - `ci_status` se vezuje za isti commit SHA kada je dostupan GitHub fixture. To nije dokaz da je deployment prošao kontrolu.
 - `datastores_read/write` su kodno/dokumentaciona mapa. Stvarni PostgreSQL grantovi nisu provereni.
 
 Za operativnu trijažu koristi [runbook](RUNBOOK.md). Za ocene i slepe tačke vidi [audit](ARCHITECTURE_AUDIT_2026-10.md). Pri svakoj budućoj promeni registra pregledati diff, zahtevati direktan dokaz za razlog promene i držati generisani snapshot uz datum i izvorni SHA.
+
+[Ciljane read-only provere](FOLLOWUP_2026-10-10.md) sadrže proveru DB kredencijala, PITR/HA, dijagnostičkih definicija i cron logova. Njihovi nalazi su zaseban, kasniji presek od generisanog registra.

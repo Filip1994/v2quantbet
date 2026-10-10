@@ -20,7 +20,6 @@ Retired from registry means absent in the later snapshot, not confirmed deleted.
 
 - `source_commit`: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` → `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`
 - `last_changed_at`: `2026-09-30T23:00:00Z` → `2026-10-01T23:00:00Z`
-- `last_successful_deployment_at`: `2026-09-30T23:00:00Z` → `None`
 - `latest_deployment_status`: `SUCCESS` → `FAILED`
 - `operational_state`: `running_instance` → `failed_or_crashed_latest_deployment`
 - `running_instances`: `1` → `0`

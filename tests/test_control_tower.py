@@ -10,6 +10,7 @@ from scripts.control_tower import (
     build_registry,
     diff_registries,
     render_graph,
+    render_inventory,
     sanitize_railway_status,
 )
 
@@ -121,16 +122,80 @@ def test_snapshot_diff_reports_observation_separately_from_reason():
     changed["latest_deployment_status"] = "FAILED"
     changed["source_commit"] = "b" * 40
     changed["latest_deployment_at"] = "2026-10-11T00:00:00Z"
-    after = build_registry(later, annotations)
+    after = build_registry(later, annotations, previous=before)
     diff = diff_registries(before, after)
     engine = next(row for row in diff["changes"] if row["name"] == "quantbet-engine")
+    later_engine = next(row for row in after["services"] if row["display_name"] == "quantbet-engine")
+    prior_engine = next(row for row in before["services"] if row["display_name"] == "quantbet-engine")
+    assert later_engine["last_successful_deployment_at"] == prior_engine["last_successful_deployment_at"]
     assert "source_commit" in engine["fields"]
     assert "last_changed_at" in engine["fields"]
     assert engine["documented_reason"] == "reason unknown"
     assert diff["failure_counts"] == {"before": 2, "after": 3}
 
 
+def test_history_survives_new_snapshot_and_failed_deployment():
+    annotations = _load(ANNOTATIONS)
+    before = build_registry(_load(EARLIER), annotations)
+    after = build_registry(_load(FIXTURE), annotations, previous=before)
+    old = {row["component_id"]: row for row in before["services"]}
+    assert all(
+        row["first_seen_at"] == old[row["component_id"]]["first_seen_at"]
+        for row in after["services"]
+    )
+    cold = next(
+        row for row in after["services"] if row["display_name"] == "quantbet-baseball-cold-storage"
+    )
+    assert cold["latest_deployment_status"] == "CRASHED"
+    assert cold["last_successful_deployment_at"] == "2026-09-29T07:29:06Z"
+    assert cold["last_successful_deployment_observed_at"] == "2026-10-10T01:47:58Z"
+    assert (
+        "last observed SUCCESS deploy=2026-09-29T07:29:06Z (seen 2026-10-10T01:47:58Z)"
+        in render_inventory(after, _load(ASSESSMENT))
+    )
+
+
+def test_cron_dimensions_are_separate_from_deployment_and_data_freshness():
+    registry = build_registry(_load(FIXTURE), _load(ANNOTATIONS))
+    cron = next(
+        row for row in registry["services"] if row["display_name"] == "quantbet-quantlab-collector"
+    )
+    assert cron["cron_scheduled"] is True
+    assert cron["cron_running_now"] is False
+    assert cron["cron_last_successful_completion_at"] is None
+    assert cron["data_freshness_at"] is None
+    report = render_inventory(registry, _load(ASSESSMENT))
+    assert "last successful completion=unknown" in report
+    assert "data freshness=unknown" in report
+    assert "generator does **not** calculate" in report
+
+
+def test_verified_job_evidence_populates_completion_without_changing_deployment_status():
+    base = build_registry(_load(FIXTURE), _load(ANNOTATIONS))
+    cron = next(
+        row for row in base["services"] if row["display_name"] == "quantbet-quantlab-collector"
+    )
+    evidence = {
+        "services": {
+            cron["component_id"]: {
+                "last_successful_completion_at": "2026-10-10T08:02:00Z",
+                "completion_evidence": "read-only job log review",
+                "data_freshness_at": "2026-10-10T07:55:00Z",
+                "data_freshness_evidence": "read-only watermark query",
+            }
+        }
+    }
+    result = build_registry(_load(FIXTURE), _load(ANNOTATIONS), operations=evidence)
+    row = next(item for item in result["services"] if item["component_id"] == cron["component_id"])
+    assert row["cron_last_successful_completion_at"] == "2026-10-10T08:02:00Z"
+    assert row["data_freshness_at"] == "2026-10-10T07:55:00Z"
+    assert row["latest_deployment_status"] == cron["latest_deployment_status"]
+
+
 def test_offline_cli_regeneration_is_byte_for_byte_deterministic(tmp_path):
+    earlier_registry = build_registry(_load(EARLIER), _load(ANNOTATIONS), _load(GITHUB))
+    previous = tmp_path / "previous.json"
+    previous.write_text(json.dumps(earlier_registry), encoding="utf-8")
     outputs = []
     for index in range(2):
         folder = tmp_path / str(index)
@@ -147,6 +212,8 @@ def test_offline_cli_regeneration_is_byte_for_byte_deterministic(tmp_path):
                 str(ASSESSMENT),
                 "--github-fixture",
                 str(GITHUB),
+                "--previous",
+                str(previous),
                 "--out",
                 str(folder),
             ],

@@ -18,7 +18,6 @@ Retired from registry means absent in the later snapshot, not confirmed deleted.
 
 ### quantbet-baseball-cold-storage
 
-- `last_successful_deployment_at`: `2026-09-29T07:29:06Z` → `None`
 - `latest_deployment_status`: `SUCCESS` → `CRASHED`
 - `operational_state`: `scheduled_cron_current_run_unknown` → `failed_or_crashed_latest_deployment`
 - Documented reason: reason unknown

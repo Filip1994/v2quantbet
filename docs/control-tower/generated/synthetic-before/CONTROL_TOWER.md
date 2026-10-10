@@ -8,30 +8,30 @@ Runtime metadata at that instant: **2** services with a `RUNNING` instance, **0*
 
 ## Service registry
 
-| Service / project | Purpose / owner | Code | State / cron / last deploy | Reads → writes | CI at commit | Risk | Evidence |
+| Service / project | Purpose / owner | Code | Deployment / cron / data | Reads → writes | CI at commit | Risk | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Postgres`<br>`example-football` / `database-example` | Durable data store for services in its Railway project / Railway project | unknown; `unknown` | running_instance; 2026-09-30T22:00:00Z | unknown → unknown | unknown | high_shared_state | unknown; inferred |
-| `quantbet-engine`<br>`example-football` / `engine-example` | Discover fixtures, evaluate pre-match opportunities, register and settle paper picks / Football Production | Filip1994/v2quantbet @ aaaaaaaa; `src/h2h/entrypoint.py` | running_instance; 2026-09-30T23:00:00Z | football PostgreSQL: fixtures, quotes, model state → football PostgreSQL: production decisions, picks, settlement | unknown | high_production_path | [source](https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/README.md); inferred |
+| `Postgres`<br>`example-football` / `database-example` | Durable data store for services in its Railway project / Railway project | unknown; `unknown` | running_instance; deploy 2026-09-30T22:00:00Z; last observed SUCCESS deploy=2026-09-30T22:00:00Z (seen 2026-10-01T00:00:00Z); data freshness=unknown | unknown → unknown | unknown | high_shared_state | unknown; inferred |
+| `quantbet-engine`<br>`example-football` / `engine-example` | Discover fixtures, evaluate pre-match opportunities, register and settle paper picks / Football Production | Filip1994/v2quantbet @ aaaaaaaa; `src/h2h/entrypoint.py` | running_instance; deploy 2026-09-30T23:00:00Z; last observed SUCCESS deploy=2026-09-30T23:00:00Z (seen 2026-10-01T00:00:00Z); data freshness=unknown | football PostgreSQL: fixtures, quotes, model state → football PostgreSQL: production decisions, picks, settlement | unknown | high_production_path | [source](https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/README.md); inferred |
 
-## Architecture scorecard
+## Manually curated architecture scorecard
 
-The [audit rubric](../ARCHITECTURE_AUDIT_2026-10.md#ocena-arhitektonskih-oblasti) defines 1–10 bands. Missing runtime evidence remains `not assessed`.
+Scores are human assessments stored in `assessment.json`; the generator does **not** calculate or refresh them from live telemetry. The [audit rubric](../ARCHITECTURE_AUDIT_2026-10.md#ocena-arhitektonskih-oblasti) defines 1–10 bands. Missing runtime evidence remains `not assessed`.
 
 | Dimension | Score / 10 | Confidence | Evidence |
 | --- | ---: | --- | --- |
 | Cohesion and modularity | 6 | medium | Separate production, research and QuantLab modules; shared repository |
-| Coupling and shared state | 4 | medium | QuantLab contract shares football PostgreSQL; DB grants unknown |
+| Coupling and shared state | 4 | high | Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown |
 | Data lineage and temporal leakage | 6 | medium | available_at and append-only migrations 025–026; runtime samples unknown |
 | Test coverage and reliability | 6 | medium | 151 test files and PR CI; coverage and flaky trend unknown |
 | CI and release hygiene | 5 | medium | PR CI and predeploy migrations; branch rules unknown |
 | Rollback and recoverability | not assessed | low | No restore exercise, RPO or RTO evidence |
 | Observability and alerting | 5 | medium | Health/readiness and worker dashboard; alert delivery unknown |
 | Incident handling | 4 | medium | Diagnostics exist; central owner/lifecycle record absent |
-| Security and least privilege | not assessed | low | Railway variable names and DB grants not inspected |
-| DB migrations, backup and retention | not assessed | low | 75 migration files and archive code; backup/restore unknown |
+| Security and least privilege | not assessed | medium | Production and QuantLab share DB credentials; effective grants and other access boundaries not inspected |
+| DB migrations, backup and retention | not assessed | medium | 75 migration files; PITR disabled on both Railway PostgreSQL services; other backups and restore unverified |
 | Runtime cost and API budgets | 5 | medium | Shared football envelope documented; measured usage and bill unknown |
 | Deploy complexity | 4 | high | 48 Railway definitions, 14 cron, 17 without Git source ref |
-| Single points of failure | 4 | medium | One PostgreSQL definition per project; HA/restore unknown |
+| Single points of failure | 4 | high | One PostgreSQL definition per project; Railway HA status isCluster=false for both; restore unverified |
 | Scalability | not assessed | low | No load, queue-lag or saturation measurements |
 | Maintainability | 5 | medium | Change protocol and tests; Baseball documentation drift |
 | Operational cognitive load | 3 | high | 48 definitions across two projects, including one-shot and cron |
@@ -40,9 +40,9 @@ The [audit rubric](../ARCHITECTURE_AUDIT_2026-10.md#ocena-arhitektonskih-oblasti
 
 | ID | Risk | Severity × likelihood | Evidence | Action |
 | --- | --- | ---: | --- | --- |
-| R1 | Football Production and QuantLab share PostgreSQL; effective grants unknown | 3 × 2 | QuantLab/ARCHITECTURE.md | Read-only DB role/grant review |
+| R1 | Football Production and QuantLab use the same DB credentials; effective grants unknown | 3 × 2 | Read-only Railway variable comparison 2026-10-10; values redacted | Read-only DB role/grant review, then propose separate credentials |
 | R2 | Many long-lived diagnostic definitions lack source ownership | 2 × 3 | 48-service Railway fixture; 17 missing source refs | Assign lifecycle/owner before any retirement proposal |
-| R3 | Backup restore is not demonstrated | 3 × 1 | No restore artifact in reviewed scope | Confirm backup and restore exercise |
+| R3 | Backup restore is not demonstrated | 3 × 1 | Railway PITR disabled on both DBs; other backup and restore evidence absent | Confirm backup inventory, retention and isolated restore exercise |
 | R4 | Deployment status may be mistaken for job or data health; Baseball cold storage later shows CRASHED | 2 × 3 | Two observed Railway fixtures show SUCCESS to CRASHED and cron instance drift | Review last job log/freshness; track process, job and data separately |
 | R5 | Baseball README and PostgreSQL runtime contract diverge | 2 × 2 | quantbet-baseball README.md and src/quantbot/baseball/db.py | Update documentation in separate review |
 | R6 | Older Basketball service points at a module absent from its source ref; v1/v2 coexistence lacks retirement evidence | 2 × 2 | Railway quantbet-basketball source/start module versus quantbet-baseball tree at ed2e1c4 | Confirm last successful run and consumers before proposing simplification |

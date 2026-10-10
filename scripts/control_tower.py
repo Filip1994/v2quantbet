@@ -33,6 +33,7 @@ DIFF_FIELDS = (
     "code_path",
     "entrypoint_module",
     "cron_schedule",
+    "cron_last_successful_completion_at",
     "latest_deployment_status",
     "operational_state",
     "running_instances",
@@ -173,7 +174,11 @@ def _service_id(service: dict[str, Any]) -> str:
 
 
 def build_registry(
-    fixture: dict[str, Any], annotations: dict[str, Any], github: dict[str, Any] | None = None
+    fixture: dict[str, Any],
+    annotations: dict[str, Any],
+    github: dict[str, Any] | None = None,
+    previous: dict[str, Any] | None = None,
+    operations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if fixture.get("schema_version") != SCHEMA_VERSION or not _iso(fixture.get("observed_at")):
         raise ValueError("Expected a v1 fixture with a UTC observed_at timestamp")
@@ -182,6 +187,8 @@ def build_registry(
         raise TypeError("Fixture services must be a list")
     records = []
     seen = set()
+    prior = {row["component_id"]: row for row in (previous or {}).get("services", [])}
+    operational = (operations or {}).get("services", {})
     by_name = annotations.get("services", {})
     github_by_repo = {row.get("full_name"): row for row in (github or {}).get("repos", [])}
     for raw in services:
@@ -202,6 +209,18 @@ def build_registry(
         repo = _allow(raw.get("source_repo"), SAFE_REPO)
         commit = _allow(raw.get("source_commit"), SAFE_COMMIT)
         deployment_at = _iso(raw.get("latest_deployment_at"))
+        old = prior.get(key, {})
+        old_first_seen = _iso(old.get("first_seen_at"))
+        first_seen = min(filter(None, (old_first_seen, _iso(fixture["observed_at"]))))
+        successful = deployment_at if raw.get("latest_deployment_status") == "SUCCESS" else None
+        last_successful = max(
+            filter(None, (successful, _iso(old.get("last_successful_deployment_at")))),
+            default=None,
+        )
+        job = operational.get(key, {})
+        if not isinstance(job, dict):
+            raise TypeError(f"Invalid operational evidence: {key}")
+        cron = raw.get("cron_schedule") if isinstance(raw.get("cron_schedule"), str) else None
         category = note.get("category") or _category(name)
         repo_snapshot = github_by_repo.get(repo, {})
         matching_run = next(
@@ -229,25 +248,31 @@ def build_registry(
                 "environment": _allow(raw.get("environment"), SAFE_NAME) or "unknown",
                 "environment_id": environment_id,
                 "service_id": service_id,
-                "first_seen_at": fixture["observed_at"],
+                "first_seen_at": first_seen,
                 "created_at": None,
                 "last_changed_at": deployment_at,
-                "last_successful_deployment_at": deployment_at
-                if raw.get("latest_deployment_status") == "SUCCESS"
-                else None,
+                "last_successful_deployment_at": last_successful,
+                "last_successful_deployment_observed_at": fixture["observed_at"]
+                if successful
+                else old.get("last_successful_deployment_observed_at"),
                 "latest_deployment_status": _allow(raw.get("latest_deployment_status"), SAFE_NAME),
                 "operational_state": _state(raw),
                 "running_instances": max(0, int(raw.get("running_instances") or 0)),
-                "cron_schedule": raw.get("cron_schedule")
-                if isinstance(raw.get("cron_schedule"), str)
+                "cron_schedule": cron,
+                "cron_scheduled": bool(cron),
+                "cron_running_now": bool(cron and int(raw.get("running_instances") or 0) > 0),
+                "cron_last_successful_completion_at": _iso(job.get("last_successful_completion_at"))
+                if cron
                 else None,
+                "cron_completion_evidence": job.get("completion_evidence") if cron else None,
                 "dependencies": sorted(set(note.get("dependencies", []))),
                 "datastores_read": sorted(set(note.get("datastores_read", []))),
                 "datastores_write": sorted(set(note.get("datastores_write", []))),
                 "provider_categories": sorted(set(note.get("provider_categories", []))),
                 "consumers": sorted(set(note.get("consumers", []))),
                 "permission_scope": note.get("permission_scope") or "unknown",
-                "data_freshness_at": None,
+                "data_freshness_at": _iso(job.get("data_freshness_at")),
+                "data_freshness_evidence": job.get("data_freshness_evidence"),
                 "observability": note.get("observability") or "unknown",
                 "ci_status": (matching_run.get("conclusion") or matching_run.get("status"))
                 if matching_run
@@ -336,7 +361,7 @@ def render_inventory(registry: dict[str, Any], assessment: dict[str, Any]) -> st
         "",
         "## Service registry",
         "",
-        "| Service / project | Purpose / owner | Code | State / cron / last deploy | Reads → writes | CI at commit | Risk | Evidence |",
+        "| Service / project | Purpose / owner | Code | Deployment / cron / data | Reads → writes | CI at commit | Risk | Evidence |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in registry["services"]:
@@ -349,18 +374,27 @@ def render_inventory(registry: dict[str, Any], assessment: dict[str, Any]) -> st
             writes = "none documented; DB grants unknown"
         stores += " → " + (writes or "unknown")
         evidence = f"[source]({row['evidence_url']})" if row["evidence_url"] else "unknown"
-        state = row["operational_state"] + (
-            f"; `{row['cron_schedule']}`" if row["cron_schedule"] else ""
+        state = row["operational_state"] + "; deploy " + (row["last_changed_at"] or "time unknown")
+        state += "; last observed SUCCESS deploy=" + (
+            row["last_successful_deployment_at"] or "unknown"
         )
-        state += "; " + (row["last_changed_at"] or "deploy time unknown")
+        if row["last_successful_deployment_observed_at"]:
+            state += f" (seen {row['last_successful_deployment_observed_at']})"
+        if row["cron_scheduled"]:
+            state += (
+                f"; cron `{row['cron_schedule']}` scheduled=yes"
+                f", running now={'yes' if row['cron_running_now'] else 'no'}"
+                f", last successful completion={row['cron_last_successful_completion_at'] or 'unknown'}"
+            )
+        state += f"; data freshness={row['data_freshness_at'] or 'unknown'}"
         lines.append(
             f"| `{row['display_name']}`<br>`{row['project']}` / `{row['service_id']}` | {row['purpose']} / {row['owner']} | {code}; `{row['code_path']}` | {state} | {stores} | {row['ci_status'] or 'unknown'} | {row['risk_classification']} | {evidence}; {row['verification']} |"
         )
     lines += [
         "",
-        "## Architecture scorecard",
+        "## Manually curated architecture scorecard",
         "",
-        "The [audit rubric](../ARCHITECTURE_AUDIT_2026-10.md#ocena-arhitektonskih-oblasti) defines 1–10 bands. Missing runtime evidence remains `not assessed`.",
+        "Scores are human assessments stored in `assessment.json`; the generator does **not** calculate or refresh them from live telemetry. The [audit rubric](../ARCHITECTURE_AUDIT_2026-10.md#ocena-arhitektonskih-oblasti) defines 1–10 bands. Missing runtime evidence remains `not assessed`.",
         "",
         "| Dimension | Score / 10 | Confidence | Evidence |",
         "| --- | ---: | --- | --- |",
@@ -682,6 +716,16 @@ def main() -> None:
     build.add_argument(
         "--github-fixture", type=Path, help="Optional sanitized commit, PR and CI snapshot"
     )
+    build.add_argument(
+        "--previous",
+        type=Path,
+        help="Prior generated registry for first-seen and deployment history",
+    )
+    build.add_argument(
+        "--operations-fixture",
+        type=Path,
+        help="Optional verified job completion and data freshness evidence",
+    )
     build.add_argument("--out", type=Path, required=True)
     diff = command.add_parser("diff", help="Compare two generated registry JSON snapshots")
     diff.add_argument("--before", type=Path, required=True)
@@ -724,6 +768,8 @@ def main() -> None:
             _load(args.fixture),
             _load(args.annotations),
             _load(args.github_fixture) if args.github_fixture else None,
+            _load(args.previous) if args.previous else None,
+            _load(args.operations_fixture) if args.operations_fixture else None,
         )
         assessment = _load(args.assessment)
         args.out.mkdir(parents=True, exist_ok=True)
