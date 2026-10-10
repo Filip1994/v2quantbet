@@ -20,9 +20,11 @@ from h2h.persistence.postgres_production_funnel import (
 )
 
 
-def test_default_intake_contract_is_the_current_first_six_buckets() -> None:
+def test_default_intake_contract_excludes_retired_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 6
+    assert len(DEFAULT_BUCKET_IDS) == 4
+    assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
+    assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
 
 
 def test_intake_contract_can_change_by_environment_without_core_code_change() -> None:
@@ -201,8 +203,6 @@ def test_default_bucket_order_is_stable_contract_order() -> None:
         RESEARCH_OU_UNDER_EDGE_10_15,
         RESEARCH_OU_UNDER_EDGE_20_30,
         RESEARCH_BTTS_NO_ODDS_2_01_2_50,
-        GOALLAB_OU_OVER_XG_2_5_3_0,
-        GOALLAB_OU_OVER_ODDS_2_01_2_50,
         RESEARCH_LOW_SCORING_NON_EXTREME,
     )
 
