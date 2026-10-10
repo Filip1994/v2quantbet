@@ -27,8 +27,8 @@ Draft [#248](https://github.com/Filip1994/v2quantbet/pull/248) je pripremna impl
 ## Odluke, redom
 
 1. Pregledati draftove [#248](https://github.com/Filip1994/v2quantbet/pull/248), [#249](https://github.com/Filip1994/v2quantbet/pull/249), [#250](https://github.com/Filip1994/v2quantbet/pull/250) i #244; dokumentacija i testovi sami ne menjaju produkciju. Za merge svakog je potrebno posebno odobrenje jer GitHub → Railway zaštita još nije aktivna.
-2. Posebno odobriti Railway watch patterns po [planu](DEPLOYMENT_GUARD_PROPOSAL.md), sa staged diff-om, proverom config source-a, docs-only i runtime scenarijima i rollbackom. Ne primenjivati bez odobrenja.
-3. Zbog odsustva potvrđenog backupa, proceniti prostor u $40 limitu i odobriti postojeći Railway volume backup schedule; proveriti prvi snapshot. PITR i izolovani restore su odvojeni koraci koji mogu redeploy-ovati bazu i koštati više.
+2. Pre produkcionih config/deploy izmena proceniti prostor u $40 limitu i posebno odobriti postojeći Railway `DAILY` volume backup schedule; proveriti prvi završen snapshot. Ako trenutni cap ne može da ga primi, izričito zabeležiti taj blokator i ne pretpostavljati da postoji recovery tačka. PITR i izolovani restore su odvojeni koraci koji mogu redeploy-ovati bazu i koštati više.
+3. Zatim posebno odobriti Railway watch patterns po [planu](DEPLOYMENT_GUARD_PROPOSAL.md), sa staged diff-om, proverom config source-a, docs-only i runtime scenarijima i rollbackom. Ne primenjivati bez odobrenja.
 4. Posle dokazanog restore-a testirati grant matricu u izolaciji, ukloniti runtime DDL zavisnost kroz kontrolisani migration korak, pa pojedinačno rotirati Production i QuantLab naloge sa povratnim planom.
 5. Tek uz potvrđen exit reason odlučiti o collector RAM ili kodnom fix-u. Ne menjati betting logiku, modele ili istraživačke parametre.
 
