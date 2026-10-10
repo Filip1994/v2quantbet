@@ -975,9 +975,8 @@ def test_selected_production_buckets_are_neon_highlighted_in_research_analytics(
 
     assert 'id="production-intake-buckets"' in html
     assert 'class="panel production-intake-panel"' in html
-    assert "OU UNDER · edge 10–15%" in html
-    assert "OU UNDER · edge 20–30%" in html
-    assert "BTTS NO · odds 2.01–2.50" in html
-    assert "Low scoring · non-extreme" in html
+    assert "OU UNDER 2.5 · odds 1.81–2.00" in html
+    assert "OU OVER 2.5 · odds 1.81–2.00" in html
+    assert html.count('class="production-bucket-row"') == 2
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "#18d7ff" in html
