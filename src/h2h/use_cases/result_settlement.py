@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +14,8 @@ from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
 from h2h.persistence.result_settlement import ResultPersistenceConflictError
+
+LOGGER = logging.getLogger("quantbet.results")
 
 
 def _now(clock: Callable[[], datetime]) -> datetime:
@@ -147,6 +150,10 @@ class ReconcileFixtureResults:
                 # The repository transaction rolls back the disputed observation.
                 # Keep the fixture visible as a failure and let unrelated fixtures run.
                 self._on_item_failure(fixture_id, exc, now)
+                LOGGER.error(
+                    "result fixture quarantined",
+                    extra={"fixture_id": fixture_id, "error_class": type(exc).__name__},
+                )
                 continue
             persisted_count += 1
             self._on_item_success(fixture_id)
