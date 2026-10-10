@@ -145,19 +145,18 @@ def read_snapshot(database_url: str) -> dict[str, Any]:
         row_factory=dict_row,
         autocommit=True,
         options="-c default_transaction_read_only=on -c statement_timeout=10000",
-    ) as connection:
-        with connection.transaction():
-            connection.execute(
-                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
-            )
-            readings: dict[str, list[dict[str, Any]]] = {}
-            with connection.cursor() as cursor:
-                for group, query in SQL.items():
-                    cursor.execute(query)
-                    readings[group] = [
-                        dict(row) for row in cursor.fetchmany(ROW_LIMITS[group] + 1)
-                    ]
-            return build_snapshot(readings, captured_at=datetime.now(UTC))
+    ) as connection, connection.transaction():
+        connection.execute(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+        )
+        readings: dict[str, list[dict[str, Any]]] = {}
+        with connection.cursor() as cursor:
+            for group, query in SQL.items():
+                cursor.execute(query)
+                readings[group] = [
+                    dict(row) for row in cursor.fetchmany(ROW_LIMITS[group] + 1)
+                ]
+        return build_snapshot(readings, captured_at=datetime.now(UTC))
 
 
 def main() -> None:
