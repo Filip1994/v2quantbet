@@ -10,6 +10,8 @@ from h2h.production_buckets import (
     RESEARCH_LOW_SCORING_NON_EXTREME,
     RESEARCH_OU_UNDER_EDGE_10_15,
     RESEARCH_OU_UNDER_EDGE_20_30,
+    RESEARCH_OU_UNDER_ODDS_1_81_2_00,
+    RESEARCH_OU_OVER_ODDS_1_81_2_00,
     is_retired_research_segment,
     n_roi_priority_score,
 )
@@ -22,7 +24,7 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_excludes_retired_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 4
+    assert len(DEFAULT_BUCKET_IDS) == 2
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
 
@@ -48,7 +50,7 @@ def test_intake_contract_rejects_unknown_bucket() -> None:
 
 def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
-    subset = intake_contract_version(DEFAULT_BUCKET_IDS[:2])
+    subset = intake_contract_version(DEFAULT_BUCKET_IDS[:1])
 
     assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V3:")
     assert full != subset
@@ -116,6 +118,7 @@ def test_research_low_scoring_non_extreme_can_overlap_edge_10_15() -> None:
     assert set(matches) == {
         RESEARCH_LOW_SCORING_NON_EXTREME,
         RESEARCH_OU_UNDER_EDGE_10_15,
+        RESEARCH_OU_UNDER_ODDS_1_81_2_00,
     }
 
 
@@ -154,6 +157,40 @@ def test_research_btts_no_price_bucket_boundaries(odds: float, included: bool) -
     )
 
     assert (RESEARCH_BTTS_NO_ODDS_2_01_2_50 in matches) is included
+
+
+@pytest.mark.parametrize(
+    ("direction", "odds", "included"),
+    [
+        ("UNDER", 1.80, False),
+        ("UNDER", 1.81, True),
+        ("UNDER", 1.95, True),
+        ("UNDER", 2.00, True),
+        ("UNDER", 2.01, False),
+        ("OVER", 1.80, False),
+        ("OVER", 1.81, True),
+        ("OVER", 1.95, True),
+        ("OVER", 2.00, True),
+        ("OVER", 2.01, False),
+    ],
+)
+def test_research_price_pilot_buckets_boundary(
+    direction: str, odds: float, included: bool
+) -> None:
+    matches = PostgreSQLProductionFunnelRepository._research_matches(
+        {
+            "market_key": "OU_25",
+            "selection": direction,
+            "odds": odds,
+            "edge": 0.12,
+            "expected_value": 0.10,
+        }
+    )
+    bucket_id = (
+        RESEARCH_OU_UNDER_ODDS_1_81_2_00
+        if direction == "UNDER" else RESEARCH_OU_OVER_ODDS_1_81_2_00
+    )
+    assert (bucket_id in matches) is included
 
 
 def test_goallab_over_can_match_shape_and_price_buckets_together() -> None:
@@ -200,10 +237,8 @@ def test_goallab_expected_total_bucket_boundaries(
 
 def test_default_bucket_order_is_stable_contract_order() -> None:
     assert DEFAULT_BUCKET_IDS == (
-        RESEARCH_OU_UNDER_EDGE_10_15,
-        RESEARCH_OU_UNDER_EDGE_20_30,
-        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
-        RESEARCH_LOW_SCORING_NON_EXTREME,
+        RESEARCH_OU_UNDER_ODDS_1_81_2_00,
+        RESEARCH_OU_OVER_ODDS_1_81_2_00,
     )
 
 
