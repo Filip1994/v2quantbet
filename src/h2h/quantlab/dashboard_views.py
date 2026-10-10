@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.settlement import realized_clv_ppm
+from h2h.persistence.postgres_production_funnel import active_bucket_ids
 from h2h.quantlab.goal_analytics import (
     build_goal_analytics_snapshot,
     calibration_bins,
@@ -1124,6 +1125,7 @@ def _selected_goal_production_bucket_table(
     *,
     currency: str,
 ) -> str:
+    approved_ids = set(active_bucket_ids())
     specs = {
         spec.bucket_id: spec
         for spec in PRODUCTION_BUCKET_SPECS
@@ -1151,8 +1153,19 @@ def _selected_goal_production_bucket_table(
             ),
         ),
     )
+    active_cohorts = [(bucket_id, cohort) for bucket_id, cohort in cohorts if bucket_id in approved_ids]
+    if not active_cohorts:
+        return (
+            '<section class="panel" id="production-intake-buckets">'
+            '<div class="panel-title"><b>GoalLab · Production intake suspended</b>'
+            '<span>No GoalLab buckets currently approved</span></div>'
+            '<p>Both former OVER 2.5 buckets are retired from Production intake. '
+            'Historical picks, settlements and ROI remain available in GoalLab Analytics '
+            'and Watchlist.</p></section>'
+        )
+
     ranked: list[tuple[float, float, int, str, dict[str, Any]]] = []
-    for bucket_id, cohort in cohorts:
+    for bucket_id, cohort in active_cohorts:
         metrics = goal_pick_metrics(cohort)
         graded_n = int(metrics.get("wins") or 0) + int(metrics.get("losses") or 0)
         roi = metrics.get("roi_pct")
