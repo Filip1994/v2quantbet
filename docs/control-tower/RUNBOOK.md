@@ -19,7 +19,17 @@ V1 je **samo za čitanje**, isključivo za `sincere-balance`. Svaki korak ispod 
 4. Pre bilo kakve intervencije proveri koje druge komponente koriste isti PostgreSQL, API budget ili izlaz. Production i shadow laboratorije nisu ista P&L knjiga.
 5. Napravi incident belešku sa hipotezom i dokazima. Za restart/redeploy/rollback, promenu quota ili DB mutaciju traži odobrenje i zaseban reviewable plan.
 
-**Merge gate:** i dokumentacioni merge u `main` može pokrenuti Railway auto-deploy. PR #243 je u 11:58 UTC pokrenuo `quantbet-kellylab`, uključujući predeploy sa `applied 0 migration(s)` ([dokaz i predlog](DEPLOYMENT_GUARD_PROPOSAL.md)). PR #244 ostaje draft dok vlasnik zasebno ne odobri zaštitu Railway okidača i merge. Sam prolaz CI nije dovoljan.
+**Merge gate:** i dokumentacioni merge u `main` može pokrenuti Railway auto-deploy. PR #243 je u 11:58 UTC pokrenuo `quantbet-kellylab`, uključujući predeploy sa `applied 0 migration(s)`. Railway pregled je potvrdio `build.watchPatterns` na 14/15 GitHub servisa; KellyLab je jedini bez filtera, a neki postojeći filteri propuštaju deljene runtime zavisnosti. [Predlog po servisu](DEPLOYMENT_GUARD_PROPOSAL.md) je samo plan. PR #244 ostaje draft do zasebnog odobrenja zaštite i merge-a. Sam prolaz CI nije dovoljan.
+
+## Aktivni collector incident, read-only presek 14:30 UTC
+
+- Poslednji potvrđeni puni ciklus završio je u 09:49:40 UTC, nakon početka u 08:01. Ciklusi 10–14 UTC pokrenuti su, ali nisu prijavili `cycle completed`; poslednji je `cronFailed`/`CRASHED` u 14:07:58 UTC. Svaki staje posle GoalLab `history_loaded rows=30000` bez Python traceback-a. OOM je snažna hipoteza, ne potvrđen exit reason: limit 750 MB, peak uspešnog ciklusa ~743 MB.
+- Poslednji `quantlab_market_captures` i fixture/discovery capture u bazi je 08:01:22 UTC. Svežina se proverava vremenom reda, ne samo statusom deploymenta. Goal/Corner/Card/H2H su radili u prethodnom punom ciklusu; redovan rad posle njega nije potvrđen.
+- Bez odobrenja **ne** menjati collector RAM, cron, varijable, modele, podatke ili replay. Za incident zabeležiti poslednji kompletan ciklus, id neuspelog deploymenta, post-history log, peak RAM/limit, DB watermarks i eventualni kernel exit reason. [Puni nalaz i predložena mitigacija](STABILIZATION_REVIEW_2026-10-10.md).
+
+## Backup i privilegije
+
+Football PostgreSQL ima jednu login rolu `postgres` sa superuser pravima; 16/17 ne-DB servisa deli njene kredencijale. PITR/HA su isključeni, on-demand backup lista i raspored su prazni; volume/UI ili eksterni dump ostaju neprovereni. Dok ne postoji checksum plus izolovan restore dokaz, ne tvrditi da je recovery moguć. Nema rutinskog SQL write-a, `pg_dump`-a, grant/role promene ili restore-a u ovom vodiču. [Matrica prava, backup plan i okvir troška](STABILIZATION_REVIEW_2026-10-10.md).
 
 ## Bezbedne read-only komande
 

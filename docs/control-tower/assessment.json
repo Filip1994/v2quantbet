@@ -12,7 +12,7 @@
       "name": "Coupling and shared state",
       "score": 4,
       "confidence": "high",
-      "evidence": "Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown"
+      "evidence": "16 of 17 non-DB services share the Postgres superuser credential; 79 public tables are owned by postgres"
     },
     {
       "name": "Data lineage and temporal leakage",
@@ -30,13 +30,13 @@
       "name": "CI and release hygiene",
       "score": 5,
       "confidence": "high",
-      "evidence": "PR CI exists; docs-only #243 merge triggered KellyLab production deployment; Railway checkSuites=false and no watchPaths observed on linked football services"
+      "evidence": "PR CI exists; docs-only #243 merge triggered KellyLab production deployment; 14 of 15 linked services have build.watchPatterns, KellyLab has none; checkSuites=false"
     },
     {
       "name": "Rollback and recoverability",
       "score": null,
       "confidence": "low",
-      "evidence": "No restore exercise, RPO or RTO evidence"
+      "evidence": "PITR and HA disabled; on-demand backup and schedule lists empty; volume/offsite backup and restore exercise unverified"
     },
     {
       "name": "Observability and alerting",
@@ -53,14 +53,14 @@
     {
       "name": "Security and least privilege",
       "score": null,
-      "confidence": "medium",
-      "evidence": "Production and QuantLab share DB credentials; effective grants and other access boundaries not inspected"
+      "confidence": "high",
+      "evidence": "Only login role postgres is SUPERUSER/BYPASSRLS, owns all 79 public tables, and is shared by 16 of 17 non-DB services"
     },
     {
       "name": "DB migrations, backup and retention",
       "score": null,
       "confidence": "medium",
-      "evidence": "Football PostgreSQL PITR disabled in read-only 2026-10-10 check; other backups and restore unverified"
+      "evidence": "Football PostgreSQL is 18 GB; PITR disabled, on-demand backup and schedule lists empty; volume/offsite backups and restore unverified"
     },
     {
       "name": "Runtime cost and API budgets",
@@ -102,11 +102,11 @@
   "risks": [
     {
       "id": "R1",
-      "title": "Football Production and QuantLab use the same DB credentials; effective grants unknown",
+      "title": "Football services share a PostgreSQL superuser credential",
       "severity": 3,
       "likelihood": 2,
-      "evidence": "Read-only Railway variable comparison 2026-10-10; values redacted",
-      "action": "Read-only DB role/grant review, then propose separate credentials"
+      "evidence": "Read-only comparison found 16/17 non-DB services share postgres; pg_roles confirms SUPERUSER and ownership of all 79 public tables",
+      "action": "After verified backup/restore, test non-superuser Production, QuantLab and migration roles in isolation, then plan staged credential rotation"
     },
     {
       "id": "R2",
@@ -120,25 +120,25 @@
       "id": "R3",
       "title": "Backup restore is not demonstrated",
       "severity": 3,
-      "likelihood": 1,
-      "evidence": "Football PostgreSQL PITR disabled; other backup and restore evidence absent",
-      "action": "Confirm backup inventory, retention and isolated restore exercise"
+      "likelihood": 2,
+      "evidence": "Football PostgreSQL PITR/HA disabled; on-demand backup/schedule lists empty; no verified volume/offsite backup or restore",
+      "action": "Confirm volume/offsite inventory, then approve scheduled backups, PITR and isolated restore drill"
     },
     {
       "id": "R4",
-      "title": "Deployment status and zero running cron instances can be mistaken for job or data health",
-      "severity": 2,
+      "title": "Collector fails after GoalLab history load and core captures are stale",
+      "severity": 3,
       "likelihood": 3,
-      "evidence": "Football collector has scheduled cron and zero running instance in 09:50 UTC fixture; last successful completion and freshness unknown",
-      "action": "Review last job log/freshness; track process, job and data separately"
+      "evidence": "08:01 UTC run completed at 09:49; 10-14 UTC runs lack cycle completion; last core fixture/market capture 08:01 at 14:30; 750 MB RAM limit nearly reached",
+      "action": "Obtain exit/OOM reason; propose approved collector-only memory mitigation and verify two full cycles plus DB freshness"
     },
     {
       "id": "R8",
       "title": "Main merge triggers production deployment even for documentation-only changes",
       "severity": 2,
       "likelihood": 3,
-      "evidence": "PR #243 merge SHA 4842946 matched KellyLab deployment; log recorded applied 0 migration(s)",
-      "action": "Review and approve per-service Railway watch paths before merging #244; keep branch and rollback plan explicit"
+      "evidence": "PR #243 merge SHA 4842946 matched KellyLab deployment with no build.watchPatterns; log recorded applied 0 migration(s)",
+      "action": "Review and approve per-service build.watchPatterns, dependency matrix and rollback before merging #244"
     }
   ],
   "project_id": "c0aa8208-dd61-48c4-a1d8-488802e84f36",

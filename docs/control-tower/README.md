@@ -2,6 +2,8 @@
 
 Aktivni opseg je isključivo Railway projekat `sincere-balance` (`c0aa8208-dd61-48c4-a1d8-488802e84f36`) i repozitorijum `Filip1994/v2quantbet`. CLI radi offline iz sanitizovanih ulaza, samo čita metapodatke i ne pokreće servis. Pogrešan ili nedostajući identitet projekta zaustavlja `capture-railway`, `build` i `diff`. GitHub capture prihvata samo `v2quantbet`.
 
+Novi read-only nalazi za collector, DB grantove i backup su u [stabilizacionom pregledu](STABILIZATION_REVIEW_2026-10-10.md). Generisani registar ispod je stariji, sanitizovani presek od 09:50 UTC i ne predstavlja live stanje u 14:30 UTC.
+
 [Aktivni fudbalski izveštaj](FOOTBALL_REPORT_2026-10-10.md), [generisani registar](generated/football-2026-10-10/CONTROL_TOWER.md), [graf](generated/football-2026-10-10/architecture.mmd), [diff](generated/football-observed-diff/SNAPSHOT_DIFF.md), [runbook](RUNBOOK.md) i [predlog zaštite deploymenta](DEPLOYMENT_GUARD_PROPOSAL.md) čine aktuelni pogled. [Phase A audit](ARCHITECTURE_AUDIT_2026-10.md), [prvobitni servisni inventar](SERVICE_INVENTORY.md), [ranije follow-up beleške](FOLLOWUP_2026-10-10.md), stari višesportski fixture fajlovi i stari `generated/2026-10-10`, `generated/observed-diff` i `generated/synthetic-*` izlazi su **istorijski, zamenjeni i van trenutnog opsega**. Čuvaju se samo radi sledljivosti; ne predstavljaju današnje fudbalske brojeve.
 
 ## Determinističko obnavljanje bez tokena
