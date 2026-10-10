@@ -23,8 +23,8 @@ V1 je **samo za čitanje**, isključivo za `sincere-balance`. Svaki korak ispod 
 
 ## Aktivni collector incident, read-only presek oko 16:53 UTC
 
-- Poslednji potvrđeni puni ciklus završio je u 09:49:40 UTC, nakon početka u 08:01. Ciklusi 11–17 UTC nisu prijavili `cycle completed`; poslednji deployment `0d06f8e2-9315-48ad-8ebf-31b055f87ce4` je `CRASHED` u 17:04:20 UTC. Poslednji log je GoalLab `history_loaded rows=30000`, bez Python traceback-a. OOM je hipoteza, ne potvrđen exit reason: limit 0,750 GB, maksimum ranije 12-časovne serije 0,748 GB.
-- Poslednji `quantlab_market_captures` i fixture/discovery capture u bazi je 08:01:22 UTC. Svežina se proverava vremenom reda, ne samo statusom deploymenta. Goal/Corner/Card/H2H su radili u prethodnom punom ciklusu; redovan rad posle njega nije potvrđen. Delimične Goal decisions iz kasnijih pokušaja nisu dokaz punog ciklusa.
+- Poslednji potvrđeni puni ciklus završio je u 09:49:40 UTC, nakon početka u 08:01. Ciklusi 11–19 UTC nisu prijavili `cycle completed`; poslednji pregledani deployment `a26ce3e3-5829-4ea0-9884-a2d7e45a6d88` je `CRASHED` u 19:04:30 UTC. Poslednji log je GoalLab `history_loaded rows=30000`, bez Python traceback-a. OOM je hipoteza, ne potvrđen exit reason: limit 0,750 GB, maksimum ranije 12-časovne serije 0,748 GB.
+- Poslednji SQL-potvrđen `quantlab_market_captures` i fixture/discovery capture u preseku 16:53 UTC je 08:01:22 UTC. Kasniji tro-tabelarni upit je istekao posle 4 s, pa svežina nakon tog preseka nije potvrđena. Goal/Corner/Card/H2H su radili u prethodnom punom ciklusu; redovan rad posle njega nije potvrđen. Delimične Goal decisions iz kasnijih pokušaja nisu dokaz punog ciklusa.
 - Bez odobrenja **ne** menjati collector RAM, cron, varijable, modele, podatke ili replay. Za incident zabeležiti poslednji kompletan ciklus, ID neuspelog deploymenta, post-history log, peak RAM/limit, DB watermarks i eventualni kernel exit reason. [Puni nalaz](STABILIZATION_REVIEW_2026-10-10.md) i [draft dijagnostika #248](https://github.com/Filip1994/v2quantbet/pull/248).
 
 ## Backup i privilegije
