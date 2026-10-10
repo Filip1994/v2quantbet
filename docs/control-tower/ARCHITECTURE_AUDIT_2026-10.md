@@ -1,5 +1,7 @@
 # QuantBet Control Tower — arhitektonski audit, 10. oktobar 2026.
 
+> **Istorijski Phase A zapis, zamenjen za aktivni opseg Issue #245.** Sadašnji Control Tower prati samo `sincere-balance`; za važeće fudbalske brojeve i rizike koristi [football report](FOOTBALL_REPORT_2026-10-10.md). Ovaj dokument se čuva radi sledljivosti ranijih zaključaka.
+
 Status: **read-only discovery / Phase A**. Presek Railway metapodataka: `2026-10-10T01:47:58Z`. Kod: `v2quantbet` [`8352f01`](https://github.com/Filip1994/v2quantbet/commit/8352f01a9d00ecfcd6a58e95537660a59fa6df55), `h2h` [`b64fd50`](https://github.com/Filip1994/h2h/commit/b64fd507590a6d95ac0d3e56fd906f757fc79f5c), `quantbet-baseball` [`ed2e1c4`](https://github.com/Filip1994/quantbet-baseball/commit/ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7), `quantbet-basketball` [`4987bbc`](https://github.com/Filip1994/quantbet-basketball/commit/4987bbc23a40457aa4deef5c1b0761a3c5dcd394). [Issue #242](https://github.com/Filip1994/v2quantbet/issues/242) je opseg i kriterijum prihvatanja.
 
 ## Sažetak za vlasnika
@@ -9,6 +11,10 @@ QuantBet ima jasne granice u kodu između Football Production, Research i QuantL
 Najveći provereni rizici su zajednički PostgreSQL unutar svakog Railway projekta, veliki broj trajno registrovanih jednokratnih definicija, nejasan status više cron servisa između pokretanja i nedovoljno dokazano odvajanje privilegija na nivou baze. Railway metapodaci potvrđuju deployment i instancu, ali **ne potvrđuju** ispravnost pickova, svežinu redova, stvarnu uspešnost cron ciklusa, backup restore, trošak, profitabilnost ili least-privilege. Te stavke su označene kao neproverene.
 
 **Preporuka:** zadržati postojeće dve Railway celine i tri osnovna repozitorijuma; dodati samo offline registar, snapshot diff i operativni vodič. Nema osnova za novi stalni servis. Kandidati za pojednostavljenje se prvo proveravaju kroz vlasništvo, istoriju izvršavanja, zavisnosti i rollback; ova revizija ne predlaže automatsko gašenje.
+
+### Read-only dopuna, 2026-10-10T09:50:02Z
+
+Drugi sanitizovani Railway presek ponovo vraća 48 definicija, ali **12** servisa sa `RUNNING` instancom. [Stvarni snapshot diff](generated/observed-diff/SNAPSHOT_DIFF.md) pokazuje dve promene: `quantbet-baseball-cold-storage` je prešao sa `SUCCESS` na `CRASHED` bez promene deployment vremena, a `quantbet-quantlab-collector` više nema trenutno `RUNNING` instancu. Collector je cron (`0 * * * *`), pa nula instanci između ciklusa nije dokaz kvara. Cold-storage cron ima `CRASHED` status poslednjeg deploymenta i zahteva pregled poslednjeg job loga/freshness; uticaj na podatke **nije potvrđen**. Ova dopuna ne menja betting tok ni infrastrukturu.
 
 ## Metod i granice dokaza
 
@@ -115,9 +121,9 @@ Skala: ozbiljnost `1–3` (lokalna, više modula, produkcijski tok), verovatnoć
 | R1 | Shared football PostgreSQL povezuje Production i QuantLab; [ugovor](https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/ARCHITECTURE.md). Neznan DB grant znači da izolacija može zavisiti od koda. | 3×2=6 | srednja | Read-only mapirati role/grant, zatim predložiti najmanje privilegije u zasebnom PR-u. |
 | R2 | 48 registrovanih servisa, 17 bez Git source ref; sanitizovan [snapshot](fixtures/railway-2026-10-10.json). Neproverene definicije povećavaju šansu pogrešne operacije. | 2×3=6 | visoka | Registar sa ownerom, klasom i dokazom; ništa ne brisati automatski. |
 | R3 | Nema dokaza o restore testu za oba PostgreSQL servisa. Gubitak DB bi imao širok blast radius. | 3×1=3 | niska | Zatražiti dokaz backup/restore procesa; bez produkcionog write testa u ovom zadatku. |
-| R4 | Poslednji football deployment ima jedan `FAILED` stari one-shot; status nije dokaz korisničkog uticaja. Istovremeno postoje `CREATED` cron instance. | 2×2=4 | srednja | Diff snapshotova + poslednji uspešan cron run i korisnički signal. |
+| R4 | Jedan stari football one-shot ostaje `FAILED`; u kasnijem preseku Baseball cold storage cron je `CRASHED`. Status nije dokaz korisničkog uticaja niti gubitka podataka. | 2×2=4 | visoka za status, niska za uticaj | Pregled poslednjeg uspešnog cron ciklusa, loga i data freshness bez restarta. |
 | R5 | Baseball README opisuje JSONL kao canonical evidence, a kod zahteva `DATABASE_URL`; [README](https://github.com/Filip1994/quantbet-baseball/blob/ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7/README.md), [DB](https://github.com/Filip1994/quantbet-baseball/blob/ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7/src/quantbot/baseball/db.py). | 2×2=4 | srednja | Dokumentovati aktuelni data contract i zadržati istorijsku napomenu. |
-| R6 | Basketball v1 servis iz Baseball repo i v2 iz Basketball repo koegzistiraju; migration/ownership granica nije potvrđena. | 2×2=4 | srednja | Uporediti tabele, consumer-e i poslednje korišćenje; tek potom retirement plan. |
+| R6 | Basketball v1 servis iz Baseball repo i v2 iz Basketball repo koegzistiraju; v1 start modul `quantbot.basketball.worker` nije pronađen u izvornom `ed2e1c4` stablu. Poslednji uspešan stvarni run i potrošači nisu potvrđeni. | 2×2=4 | srednja | Uporediti tabele, consumer-e i poslednje korišćenje; tek potom retirement plan. |
 | R7 | Railway `SUCCESS` za završeni one-shot može izgledati kao aktivna zaštita. | 2×3=6 | visoka | Prikazati deployment, instance, cron i fresh data odvojeno. |
 | R8 | Nije potvrđeno da `h2h` README navedeni GitHub Actions tok postoji na pregledanom HEAD-u. | 1×2=2 | srednja | Proveriti workflow lokaciju/branch i aktivni scheduler pre uvrštavanja u operativnu sliku. |
 

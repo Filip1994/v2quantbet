@@ -1,0 +1,162 @@
+flowchart LR
+  %% Solid arrows read or consume; dotted arrows document application writes.
+  AF[API-Football]
+  AB[API-Sports Baseball]
+  AK[API-Sports Basketball]
+  subgraph P0["Railway believable-contentment / production environment"]
+    S0["db-read-only-audit"]
+    S1["query-production-db"]
+    S2["quantbet-basketball-ops"]
+    S3["quantbet-basketball"]
+    S4["quantbet-basketball-research"]
+    S5["basketball-v2-worker"]
+    S6["quantbet-baseball-dashboard"]
+    S7["basketball-v2-dashboard"]
+    S8["quantbet-basketball-cold-storage"]
+    S9["Postgres"]
+    S10["basketball-capability-audit"]
+    S11["api-sports-baseball-query-oneshot"]
+    S12["quantbet-basketball-main"]
+    S13["basketball-v2-cold-storage"]
+    S14["postgres-audit-runner"]
+    S15["quantbet-postgres-audit"]
+    S16["api-baseball-league-tester"]
+    S17["db-audit-sync"]
+    S18["inspect-accepted-picks-v2"]
+    S19["quantbet-basketball-backfill"]
+    S20["quantbet-baseball-cold-storage"]
+    S21["basketball-full-scope-test"]
+    S22["api-sports-game-history-inspection"]
+    S23["fixture-diagnostics"]
+    S24["mlb-fixture-diagnostic-query"]
+    S25["quantbet-baseball"]
+    S26["quantbet-baseball-cold-archive"]
+    S27["quantbet-basketball-dashboard"]
+    S28["basketball-db-audit"]
+    S29["inspect-picks-query"]
+  end
+  subgraph P1["Railway sincere-balance / production environment"]
+    S30["goallab-void-26a813a9b6"]
+    S31["quantbet-kellylab"]
+    S32["quantbet-kelly-tournament"]
+    S33["quantbet-research"]
+    S34["quantbet-engine"]
+    S35["quantbet-quantlab"]
+    S36["quantbet-quantlab-collector"]
+    S37["quantbet-dashboard"]
+    S38["quantbet-void-1636701"]
+    S39["quantbet-quantlab-modeler"]
+    S40["Postgres"]
+    S41["south-america-performance-query"]
+    S42["quantbet-void-1636701-ops"]
+    S43["quantbet-find-26a813a9b6"]
+    S44["quantbet-find2-26a813a9b6"]
+    S45["quantbet-quantlab-collector-ACut"]
+    S46["south-america-performance-query-v2"]
+    S47["quantbet-archive-lifecycle"]
+  end
+  subgraph M["Code modules / independent repository; runtime status separate"]
+    M0["GoalLab"]
+    M1["CornerLab"]
+    M2["CardLab"]
+    M3["H2HLab"]
+    M4["h2h GitHub Actions paper-trading"]
+  end
+  classDef production fill:#ffd8c2,stroke:#a34b00
+  classDef research fill:#dcecff,stroke:#2e63a0
+  classDef datastore fill:#e3d8ff,stroke:#6545a0
+  class S0 research
+  class S1 research
+  class S2 research
+  class S3 research
+  class S4 research
+  class S5 production
+  class S6 research
+  class S7 research
+  class S8 research
+  class S9 datastore
+  class S10 research
+  class S11 research
+  class S12 research
+  class S13 research
+  class S14 research
+  class S15 research
+  class S16 research
+  class S17 research
+  class S18 research
+  class S19 research
+  class S20 research
+  class S21 research
+  class S22 research
+  class S23 research
+  class S24 research
+  class S25 production
+  class S26 research
+  class S27 research
+  class S28 research
+  class S29 research
+  class S30 research
+  class S31 research
+  class S32 research
+  class S33 research
+  class S34 production
+  class S35 research
+  class S36 research
+  class S37 research
+  class S38 research
+  class S39 research
+  class S40 datastore
+  class S41 research
+  class S42 research
+  class S43 research
+  class S44 research
+  class S45 research
+  class S46 research
+  class S47 research
+  AB --> S25
+  AF --> S34
+  AF --> S36
+  AF --> S45
+  AK --> S12
+  AK --> S19
+  AK --> S3
+  AK --> S4
+  AK --> S5
+  S12 -.->|write documented, DB grants unknown| S9
+  S13 -.->|write documented, DB grants unknown| S9
+  S19 -.->|write documented, DB grants unknown| S9
+  S20 -.->|write documented, DB grants unknown| S9
+  S25 -.->|write documented, DB grants unknown| S9
+  S31 --> S32
+  S34 -.->|write documented, DB grants unknown| S40
+  S36 --> S39
+  S36 -.->|documented shared module| M0
+  S36 -.->|documented shared module| M1
+  S36 -.->|documented shared module| M2
+  S36 -.->|documented shared module| M3
+  S36 -.->|write documented, DB grants unknown| S40
+  S39 -.->|write documented, DB grants unknown| S40
+  S4 -.->|write documented, DB grants unknown| S9
+  S40 -->|read documented| S31
+  S40 -->|read documented| S33
+  S40 -->|read documented| S34
+  S40 -->|read documented| S35
+  S40 -->|read documented| S36
+  S40 -->|read documented| S37
+  S40 -->|read documented| S39
+  S40 -->|read documented| S47
+  S47 -.->|write documented, DB grants unknown| S40
+  S5 -.->|write documented, DB grants unknown| S9
+  S8 -.->|write documented, DB grants unknown| S9
+  S9 -->|read documented| S12
+  S9 -->|read documented| S13
+  S9 -->|read documented| S19
+  S9 -->|read documented| S2
+  S9 -->|read documented| S20
+  S9 -->|read documented| S25
+  S9 -->|read documented| S27
+  S9 -->|read documented| S4
+  S9 -->|read documented| S5
+  S9 -->|read documented| S6
+  S9 -->|read documented| S7
+  S9 -->|read documented| S8
