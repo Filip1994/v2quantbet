@@ -1,5 +1,7 @@
 # Football PostgreSQL recovery — approval-ready proposal
 
+> **2026-10-11 status update:** The empty backup and schedule inventories below describe the **historical 2026-10-10 17:02 UTC** observation. Since then a DAILY schedule with six-day retention has been activated by the operator, but the connected Railway tools do **not** yet expose a successful snapshot ID, completion timestamp or isolated restore evidence. Do not interpret the earlier “zero schedules” snapshot as current, or treat the new schedule as tested recovery. New Railway 24h metrics: PostgreSQL RSS about 0.9958 GB / 1.000 GB cap (average 0.9583 GB), disk about 21.57 GB used / 102.4 GB provisioned; PostgreSQL remains ONLINE. No OOM has been demonstrated. Checkpoint log write phases frequently span tens to hundreds of seconds, while fsync phases are short; this does **not** by itself demonstrate an I/O stall, because PostgreSQL spreads checkpoint writes across the interval. Objective memory, WAL, checkpoint and connection evidence requires the bounded, read-only audit below.
+
 **Issue:** [#247](https://github.com/Filip1994/v2quantbet/issues/247). **Scope:** `sincere-balance` production Postgres only. This document records read-only findings and future operator steps. No backup, bucket, PITR, restore, database write or Railway configuration change was performed.
 
 ## What is verified today
@@ -42,3 +44,21 @@ Target objects, to be rechecked immediately before execution: project `c0aa8208-
 4. Owner approves or rejects cutover. If approved, update only the reviewed connection targets in a release window; check engine, collector, dashboards, modeler and KellyLab health, then monitor the next cron cycles. Keep the original source intact until reconciliation and rollback window end.
 
 **Responsibility:** operator records evidence and exact restore target; repository reviewer checks schema/data reconciliation; owner separately approves paid activation, restore, cutover and disposal. No step in this document grants that approval.
+
+## Read-only PostgreSQL 18 memory / WAL investigation
+
+The repository includes `scripts/postgres_health_snapshot.py` and offline safety tests in `tests/test_postgres_health_snapshot.py`. They run only `SELECT` statements inside a PostgreSQL `REPEATABLE READ, READ ONLY` transaction with a 10-second statement timeout and return aggregate diagnostics, never raw SQL texts, client IPs, credentials, fixture or pick IDs.
+
+In a **trusted existing** shell with network access and an approved *read-only* database credential, run:
+
+```sh
+DATABASE_URL="$READ_ONLY_DATABASE_URL" python scripts/postgres_health_snapshot.py > pg-health-sample-1.json
+# Repeat later, without restarting Postgres or resetting stats:
+DATABASE_URL="$READ_ONLY_DATABASE_URL" python scripts/postgres_health_snapshot.py > pg-health-sample-2.json
+```
+
+Do **not** paste the connection URL into GitHub, shell history, comments or chat. Limit distribution of reports to operators. Compare samples only if each counter's `stats_reset` matches between them. Check `shared_buffers`, `work_mem`, `max_connections`, aggregated `pg_stat_activity` states and waits, `pg_stat_database` temporary disk writes/deadlocks, `pg_stat_wal` bytes and `pg_stat_checkpointer` timed/requested checkpoints and sync time, along with 12 largest tables and dead-row estimates. These stats cannot directly identify operating-system RSS components or prove OOM. If `pg_stat_statements` is unavailable, **do not enable it on production as part of this audit**.
+
+Railway volume backup inventory is separate from PostgreSQL SQL statistics. Use the [Railway volume backups Public API](https://docs.railway.com/integrations/api/manage-volumes#volume-backups) or Railway UI to verify actual completed snapshots for mounted volume `0a1621a8-a176-4816-a38e-9f7b55c89e99`, then propose a **separate isolated restore**, with explicit cost and approval. Do not restart Postgres, change shared_buffers, raise the 1GB cap, delete the detached volume, or apply migrations before this evidence is collected. These are possible future actions, **not authorizations**.
+
+The audit's code changes are read-only and do not automatically deploy on Railway; completing the database diagnosis requires actual authorized SQL access. The historical cost estimate above must also be refreshed before paid changes.
