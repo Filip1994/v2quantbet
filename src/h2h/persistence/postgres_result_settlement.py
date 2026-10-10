@@ -105,10 +105,13 @@ class PostgreSQLResultSettlementRepository:
         lease = now + timedelta(seconds=self.policy.claim_lease_seconds)
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT fixture_id FROM fixture_result_acquisition_states "
-                "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
-                "AND (lease_expires_at IS NULL OR lease_expires_at <= %s) "
-                "ORDER BY next_check_at, fixture_id FOR UPDATE SKIP LOCKED LIMIT %s",
+                "SELECT s.fixture_id FROM fixture_result_acquisition_states s "
+                "WHERE s.phase <> 'COMPLETE' AND s.next_check_at <= %s "
+                "AND (s.lease_expires_at IS NULL OR s.lease_expires_at <= %s) "
+                "AND NOT EXISTS (SELECT 1 FROM production_item_failures f "
+                "WHERE f.worker_name = 'results' AND f.item_id = s.fixture_id "
+                "AND f.last_error_class = 'ResultPersistenceConflictError') "
+                "ORDER BY s.next_check_at, s.fixture_id FOR UPDATE OF s SKIP LOCKED LIMIT %s",
                 (now, now, claim_limit),
             )
             rows = cursor.fetchall()
@@ -124,9 +127,12 @@ class PostgreSQLResultSettlementRepository:
         now = _utc(as_of, "as_of")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM fixture_result_acquisition_states "
-                "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
-                "AND (lease_expires_at IS NULL OR lease_expires_at <= %s))",
+                "SELECT EXISTS (SELECT 1 FROM fixture_result_acquisition_states s "
+                "WHERE s.phase <> 'COMPLETE' AND s.next_check_at <= %s "
+                "AND (s.lease_expires_at IS NULL OR s.lease_expires_at <= %s) "
+                "AND NOT EXISTS (SELECT 1 FROM production_item_failures f "
+                "WHERE f.worker_name = 'results' AND f.item_id = s.fixture_id "
+                "AND f.last_error_class = 'ResultPersistenceConflictError'))",
                 (now, now),
             )
             return bool(cursor.fetchone()[0])

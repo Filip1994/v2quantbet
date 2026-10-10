@@ -722,9 +722,13 @@ class PostgreSQLRuntimeRepository:
                 "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
                 "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
                 "('OpportunityOddsUnavailableError', 'TransportError', "
-                "'QuoteNormalizationError')) FROM production_item_failures"
+                "'QuoteNormalizationError')), COUNT(*) FILTER (WHERE worker_name = 'results' "
+                "AND last_error_class = 'ResultPersistenceConflictError') "
+                "FROM production_item_failures"
             )
-            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
+            retry, model_unavailable, odds_unavailable, result_conflicts = (
+                int(value) for value in cursor.fetchone()
+            )
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
             )
@@ -772,6 +776,7 @@ class PostgreSQLRuntimeRepository:
             "retry": retry,
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
+            "result_conflicts": result_conflicts,
             "pending_results": pending_results,
             "correction_required": corrections,
             "predictions": predictions,
@@ -798,9 +803,13 @@ class PostgreSQLRuntimeRepository:
                 "SELECT COUNT(*), COUNT(*) FILTER (WHERE last_error_class = "
                 "'ActiveModelUnavailableError'), COUNT(*) FILTER (WHERE last_error_class IN "
                 "('OpportunityOddsUnavailableError', 'TransportError', "
-                "'QuoteNormalizationError')) FROM production_item_failures"
+                "'QuoteNormalizationError')), COUNT(*) FILTER (WHERE worker_name = 'results' "
+                "AND last_error_class = 'ResultPersistenceConflictError') "
+                "FROM production_item_failures"
             )
-            retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
+            retry, model_unavailable, odds_unavailable, result_conflicts = (
+                int(value) for value in cursor.fetchone()
+            )
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
             )
@@ -848,6 +857,7 @@ class PostgreSQLRuntimeRepository:
             "retry": retry,
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
+            "result_conflicts": result_conflicts,
             "pending_results": pending_results,
             "correction_required": corrections,
             "predictions": predictions,
