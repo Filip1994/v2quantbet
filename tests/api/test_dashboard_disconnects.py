@@ -11,6 +11,7 @@ from http.client import HTTPConnection, RemoteDisconnected
 
 import pytest
 
+from h2h.api.dashboard import DashboardHTTPService
 from h2h.api.research_dashboard import ResearchDashboardHTTPService
 from h2h.quantlab.dashboard import QuantLabDashboardHTTPService
 
@@ -60,6 +61,40 @@ def test_disconnected_get_does_not_send_second_response(
         assert attempted_statuses == [
             200 if render_result == "success" else 400 if render_result == "invalid" else 503
         ]
+    finally:
+        connection.close()
+        service.close()
+
+
+@pytest.mark.parametrize("disconnect", [BrokenPipeError, ConnectionResetError])
+def test_production_dashboard_disconnect_during_error_response_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    disconnect: type[OSError],
+) -> None:
+    monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
+
+    class FailingDashboard:
+        @staticmethod
+        def render_html() -> str:
+            raise RuntimeError("synthetic read failure")
+
+    attempted_statuses: list[int] = []
+
+    def simulated_disconnected_json(_handler: object, status: int, *_args: object) -> None:
+        attempted_statuses.append(status)
+        raise disconnect("peer closed")
+
+    monkeypatch.setattr(
+        DashboardHTTPService, "_json", staticmethod(simulated_disconnected_json)
+    )
+    service = DashboardHTTPService(FailingDashboard(), host="127.0.0.1", port=0)
+    service.start()
+    connection = HTTPConnection("127.0.0.1", service.port, timeout=5)
+    try:
+        connection.request("GET", "/dashboard")
+        with pytest.raises(RemoteDisconnected):
+            connection.getresponse()
+        assert attempted_statuses == [503]
     finally:
         connection.close()
         service.close()
