@@ -196,21 +196,20 @@ def read_report(database_url: str, account_id: str) -> dict[str, Any]:
         autocommit=True,
         row_factory=dict_row,
         options="-c default_transaction_read_only=on -c statement_timeout=30000",
-    ) as connection:
-        with connection.transaction():
-            connection.execute(
-                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
-            )
-            with connection.cursor() as cursor:
-                cursor.execute(ACCOUNT_SQL, (account_id,))
-                account = cursor.fetchone()
-                if account is None:
-                    raise LookupError("bankroll account does not exist")
-                cursor.execute(STATE_SQL, (account_id,))
-                state_rows = cursor.fetchall()
-                cursor.execute(LEDGER_SQL, (account_id,))
-                ledger_rows = cursor.fetchall()
-                return build_report(account, state_rows, ledger_rows)
+    ) as connection, connection.transaction():
+        connection.execute(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(ACCOUNT_SQL, (account_id,))
+            account = cursor.fetchone()
+            if account is None:
+                raise LookupError("bankroll account does not exist")
+            cursor.execute(STATE_SQL, (account_id,))
+            state_rows = cursor.fetchall()
+            cursor.execute(LEDGER_SQL, (account_id,))
+            ledger_rows = cursor.fetchall()
+            return build_report(account, state_rows, ledger_rows)
 
 
 def main() -> None:
