@@ -24,7 +24,7 @@ Scores are human assessments stored in `assessment.json`; the generator does **n
 | Coupling and shared state | 4 | high | Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown |
 | Data lineage and temporal leakage | 6 | medium | available_at and append-only migrations 025–026; runtime samples unknown |
 | Test coverage and reliability | 6 | medium | 151 test files and PR CI; coverage and flaky trend unknown |
-| CI and release hygiene | 5 | medium | PR CI and predeploy migrations; branch rules unknown |
+| CI and release hygiene | 5 | high | PR CI and predeploy migrations; docs-only PR #243 merge triggered KellyLab production deploy; branch rules unknown |
 | Rollback and recoverability | not assessed | low | No restore exercise, RPO or RTO evidence |
 | Observability and alerting | 5 | medium | Health/readiness and worker dashboard; alert delivery unknown |
 | Incident handling | 4 | medium | Diagnostics exist; central owner/lifecycle record absent |
@@ -48,6 +48,7 @@ Scores are human assessments stored in `assessment.json`; the generator does **n
 | R5 | Baseball README and PostgreSQL runtime contract diverge | 2 × 2 | quantbet-baseball README.md and src/quantbot/baseball/db.py | Update documentation in separate review |
 | R6 | Older Basketball service points at a module absent from its source ref; v1/v2 coexistence lacks retirement evidence | 2 × 2 | Railway quantbet-basketball source/start module versus quantbet-baseball tree at ed2e1c4 | Confirm last successful run and consumers before proposing simplification |
 | R7 | h2h documented workflows not present at reviewed HEAD | 1 × 2 | h2h README.md versus checked-out tree | Verify active scheduler and branch |
+| R8 | Main merge triggers production deployment even for documentation-only changes | 2 × 3 | PR #243 merge SHA 4842946 matched KellyLab Railway deployment at 11:58 UTC | Require explicit deployment-impact approval before merging PR #244; review auto-deploy/watch configuration |
 
 ## Recent code history (metadata only)
 

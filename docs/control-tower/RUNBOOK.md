@@ -19,6 +19,8 @@ V1 je **samo za čitanje**. Svaki korak ispod je inspekcija postojećeg GitHub/R
 4. Pre bilo kakve intervencije proveri koje druge komponente koriste isti PostgreSQL, API budget ili izlaz. Production i shadow laboratorije nisu ista P&L knjiga.
 5. Napravi incident belešku sa hipotezom i dokazima. Za restart/redeploy/rollback, promenu quota ili DB mutaciju traži odobrenje i zaseban reviewable plan.
 
+**Merge gate:** i dokumentacioni merge u `main` može pokrenuti Railway auto-deploy. PR #243 je u 11:58 UTC automatski deploy-ovao `quantbet-kellylab` ([dokaz](FOLLOWUP_2026-10-10.md#naknadno-opažanje-merge-u-main-može-automatski-deploy-ovati)). Pre sledećeg merge-a proveriti servise povezane sa granom i dobiti izričito odobrenje za očekivani produkcioni efekat; sam prolaz CI nije dovoljan.
+
 ## Bezbedne read-only komande
 
 ```text
@@ -28,4 +30,4 @@ git log -n 20 --oneline
 python scripts/control_tower.py build --fixture docs/control-tower/fixtures/railway-2026-10-10.json --out <local-output-directory>
 ```
 
-Railway CLI izlaz može sadržati komande i konfiguracioni tekst: nemoj ga lepiti u javni issue ili PR. Control Tower generator upisuje samo dozvoljena, sanitizovana polja. Nikad ne pokretati `railway run`, `railway up`, `railway restart`, `railway redeploy`, `railway variable`, DB shell ili migration komandu u dijagnostičkom koraku.
+Railway CLI izlaz može sadržati komande i konfiguracioni tekst: nemoj ga lepiti u javni issue ili PR. Control Tower generator upisuje samo dozvoljena, sanitizovana polja. Nikad ne pokretati `railway run`, `railway up`, `railway restart`, `railway redeploy`, DB shell ili migration komandu u rutinskom dijagnostičkom koraku. `railway variable list --json` vraća stvarne tajne; koristiti ga samo za ciljanu proveru prava pristupa uz privatnu, sanitizovanu obradu izlaza.

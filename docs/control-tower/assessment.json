@@ -6,7 +6,7 @@
     {"name": "Coupling and shared state", "score": 4, "confidence": "high", "evidence": "Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown"},
     {"name": "Data lineage and temporal leakage", "score": 6, "confidence": "medium", "evidence": "available_at and append-only migrations 025–026; runtime samples unknown"},
     {"name": "Test coverage and reliability", "score": 6, "confidence": "medium", "evidence": "151 test files and PR CI; coverage and flaky trend unknown"},
-    {"name": "CI and release hygiene", "score": 5, "confidence": "medium", "evidence": "PR CI and predeploy migrations; branch rules unknown"},
+    {"name": "CI and release hygiene", "score": 5, "confidence": "high", "evidence": "PR CI and predeploy migrations; docs-only PR #243 merge triggered KellyLab production deploy; branch rules unknown"},
     {"name": "Rollback and recoverability", "score": null, "confidence": "low", "evidence": "No restore exercise, RPO or RTO evidence"},
     {"name": "Observability and alerting", "score": 5, "confidence": "medium", "evidence": "Health/readiness and worker dashboard; alert delivery unknown"},
     {"name": "Incident handling", "score": 4, "confidence": "medium", "evidence": "Diagnostics exist; central owner/lifecycle record absent"},
@@ -26,6 +26,7 @@
     {"id": "R4", "title": "Deployment status may be mistaken for job or data health; Baseball cold storage later shows CRASHED", "severity": 2, "likelihood": 3, "evidence": "Two observed Railway fixtures show SUCCESS to CRASHED and cron instance drift", "action": "Review last job log/freshness; track process, job and data separately"},
     {"id": "R5", "title": "Baseball README and PostgreSQL runtime contract diverge", "severity": 2, "likelihood": 2, "evidence": "quantbet-baseball README.md and src/quantbot/baseball/db.py", "action": "Update documentation in separate review"},
     {"id": "R6", "title": "Older Basketball service points at a module absent from its source ref; v1/v2 coexistence lacks retirement evidence", "severity": 2, "likelihood": 2, "evidence": "Railway quantbet-basketball source/start module versus quantbet-baseball tree at ed2e1c4", "action": "Confirm last successful run and consumers before proposing simplification"},
-    {"id": "R7", "title": "h2h documented workflows not present at reviewed HEAD", "severity": 1, "likelihood": 2, "evidence": "h2h README.md versus checked-out tree", "action": "Verify active scheduler and branch"}
+    {"id": "R7", "title": "h2h documented workflows not present at reviewed HEAD", "severity": 1, "likelihood": 2, "evidence": "h2h README.md versus checked-out tree", "action": "Verify active scheduler and branch"},
+    {"id": "R8", "title": "Main merge triggers production deployment even for documentation-only changes", "severity": 2, "likelihood": 3, "evidence": "PR #243 merge SHA 4842946 matched KellyLab Railway deployment at 11:58 UTC", "action": "Require explicit deployment-impact approval before merging PR #244; review auto-deploy/watch configuration"}
   ]
 }
