@@ -20,7 +20,7 @@ from h2h.persistence.postgres_production_funnel import (
 )
 
 
-def test_default_intake_contract_excludes_retired_goallab_buckets() -> None:
+def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
     assert len(DEFAULT_BUCKET_IDS) == 4
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
