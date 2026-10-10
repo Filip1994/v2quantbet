@@ -374,6 +374,11 @@ class PostgreSQLProductionFunnelRepository:
               AND latest.kickoff_at > %s
               AND (
                     (
+                        e.market = 'OU_25'
+                        AND e.selected_selection IN ('UNDER', 'OVER')
+                        AND e.selected_odd > 1.80 AND e.selected_odd <= 2.00
+                    )
+                    OR (
                         (
                             (e.market = 'OU_25' AND e.selected_selection = 'UNDER')
                             OR (e.market = 'BTTS' AND e.selected_selection = 'NO')
