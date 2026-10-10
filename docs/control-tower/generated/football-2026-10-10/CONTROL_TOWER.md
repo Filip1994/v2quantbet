@@ -40,12 +40,12 @@ Scores are human assessments stored in `assessment.json`; the generator does **n
 | Data lineage and temporal leakage | 6 | medium | available_at and append-only migrations 025–026; runtime samples unknown |
 | Test coverage and reliability | 6 | medium | 151 test files and PR CI; coverage and flaky trend unknown |
 | CI and release hygiene | 5 | high | PR CI exists; docs-only #243 merge triggered KellyLab production deployment; 14 of 15 linked services have build.watchPatterns, KellyLab has none; checkSuites=false |
-| Rollback and recoverability | not assessed | low | PITR and HA disabled; on-demand backup and schedule lists empty; volume/offsite backup and restore exercise unverified |
+| Rollback and recoverability | not assessed | low | PITR and HA disabled; Railway volume backup and schedule lists empty; external dump and restore exercise unverified |
 | Observability and alerting | 5 | medium | Health/readiness and worker dashboard; alert delivery unknown |
 | Incident handling | 4 | medium | Diagnostics exist; central owner/lifecycle record absent |
 | Security and least privilege | not assessed | high | Only login role postgres is SUPERUSER/BYPASSRLS, owns all 79 public tables, and is shared by 16 of 17 non-DB services |
-| DB migrations, backup and retention | not assessed | medium | Football PostgreSQL is 18 GB; PITR disabled, on-demand backup and schedule lists empty; volume/offsite backups and restore unverified |
-| Runtime cost and API budgets | 5 | medium | Shared football envelope documented; measured usage and bill unknown |
+| DB migrations, backup and retention | not assessed | medium | Football PostgreSQL is 19.482 GB; PITR disabled, Railway volume backup and schedule lists empty; external backup and restore unverified |
+| Runtime cost and API budgets | 5 | medium | Infrastructure period spent $32.993, estimated $33.505, hard cap $40; Agent cap is separate and currently $0 |
 | Deploy complexity | 4 | high | 18 football Railway definitions; 4 cron; 3 without Git source ref in the 09:50 UTC fixture |
 | Single points of failure | 4 | high | One football PostgreSQL service; Railway HA reported one member and isCluster=false; restore unverified |
 | Scalability | not assessed | low | No load, queue-lag or saturation measurements |
@@ -58,8 +58,8 @@ Scores are human assessments stored in `assessment.json`; the generator does **n
 | --- | --- | ---: | --- | --- |
 | R1 | Football services share a PostgreSQL superuser credential | 3 × 2 | Read-only comparison found 16/17 non-DB services share postgres; pg_roles confirms SUPERUSER and ownership of all 79 public tables | After verified backup/restore, test non-superuser Production, QuantLab and migration roles in isolation, then plan staged credential rotation |
 | R2 | Many long-lived diagnostic definitions lack source ownership | 2 × 3 | Football 09:50 UTC fixture: 18 definitions, 3 without Git source ref; 8 mapped by strict owner/purpose/evidence/code criterion | Assign lifecycle/owner before any retirement proposal |
-| R3 | Backup restore is not demonstrated | 3 × 2 | Football PostgreSQL PITR/HA disabled; on-demand backup/schedule lists empty; no verified volume/offsite backup or restore | Confirm volume/offsite inventory, then approve scheduled backups, PITR and isolated restore drill |
-| R4 | Collector fails after GoalLab history load and core captures are stale | 3 × 3 | 08:01 UTC run completed at 09:49; 10-14 UTC runs lack cycle completion; last core fixture/market capture 08:01 at 14:30; 750 MB RAM limit nearly reached | Obtain exit/OOM reason; propose approved collector-only memory mitigation and verify two full cycles plus DB freshness |
+| R3 | Backup restore is not demonstrated | 3 × 2 | Football PostgreSQL PITR/HA disabled; Railway volume backup/schedule lists empty; external dump unknown; no isolated restore proof | Approve a cost-gated volume backup schedule, verify first snapshot, then separately review PITR and isolated restore drill |
+| R4 | Collector fails after GoalLab history load and core captures are stale | 3 × 3 | 08:01 UTC run completed at 09:49; 11-16 UTC runs lack cycle completion; last core fixture/market capture 08:01 at 16:53; 0.750 GB RAM limit nearly reached in 12-hour metrics | Review diagnostic PR #248, then after separately approved merge/deploy obtain exit/OOM reason and verify two full cycles plus DB freshness before choosing mitigation |
 | R8 | Main merge triggers production deployment even for documentation-only changes | 2 × 3 | PR #243 merge SHA 4842946 matched KellyLab deployment with no build.watchPatterns; log recorded applied 0 migration(s) | Review and approve per-service build.watchPatterns, dependency matrix and rollback before merging #244 |
 
 ## Recent code history (metadata only)
