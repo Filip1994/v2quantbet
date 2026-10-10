@@ -6,6 +6,8 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from scripts.control_tower import (
     build_registry,
     diff_registries,
@@ -125,9 +127,16 @@ def test_snapshot_diff_reports_observation_separately_from_reason():
     after = build_registry(later, annotations, previous=before)
     diff = diff_registries(before, after)
     engine = next(row for row in diff["changes"] if row["name"] == "quantbet-engine")
-    later_engine = next(row for row in after["services"] if row["display_name"] == "quantbet-engine")
-    prior_engine = next(row for row in before["services"] if row["display_name"] == "quantbet-engine")
-    assert later_engine["last_successful_deployment_at"] == prior_engine["last_successful_deployment_at"]
+    later_engine = next(
+        row for row in after["services"] if row["display_name"] == "quantbet-engine"
+    )
+    prior_engine = next(
+        row for row in before["services"] if row["display_name"] == "quantbet-engine"
+    )
+    assert (
+        later_engine["last_successful_deployment_at"]
+        == prior_engine["last_successful_deployment_at"]
+    )
     assert "source_commit" in engine["fields"]
     assert "last_changed_at" in engine["fields"]
     assert engine["documented_reason"] == "reason unknown"
@@ -190,6 +199,23 @@ def test_verified_job_evidence_populates_completion_without_changing_deployment_
     assert row["cron_last_successful_completion_at"] == "2026-10-10T08:02:00Z"
     assert row["data_freshness_at"] == "2026-10-10T07:55:00Z"
     assert row["latest_deployment_status"] == cron["latest_deployment_status"]
+
+
+def test_job_timestamp_without_evidence_is_rejected():
+    base = build_registry(_load(FIXTURE), _load(ANNOTATIONS))
+    cron = next(
+        row for row in base["services"] if row["display_name"] == "quantbet-quantlab-collector"
+    )
+    with pytest.raises(ValueError, match="requires valid time and evidence"):
+        build_registry(
+            _load(FIXTURE),
+            _load(ANNOTATIONS),
+            operations={
+                "services": {
+                    cron["component_id"]: {"last_successful_completion_at": "2026-10-10T08:02:00Z"}
+                }
+            },
+        )
 
 
 def test_offline_cli_regeneration_is_byte_for_byte_deterministic(tmp_path):

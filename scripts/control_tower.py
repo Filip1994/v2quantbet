@@ -220,6 +220,16 @@ def build_registry(
         job = operational.get(key, {})
         if not isinstance(job, dict):
             raise TypeError(f"Invalid operational evidence: {key}")
+        for timestamp_field, evidence_field in (
+            ("last_successful_completion_at", "completion_evidence"),
+            ("data_freshness_at", "data_freshness_evidence"),
+        ):
+            if timestamp_field in job and (
+                not _iso(job[timestamp_field])
+                or not isinstance(job.get(evidence_field), str)
+                or not job[evidence_field].strip()
+            ):
+                raise ValueError(f"Operational timestamp requires valid time and evidence: {key}")
         cron = raw.get("cron_schedule") if isinstance(raw.get("cron_schedule"), str) else None
         category = note.get("category") or _category(name)
         repo_snapshot = github_by_repo.get(repo, {})
