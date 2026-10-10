@@ -1,0 +1,23 @@
+flowchart LR
+  %% Solid arrows read or consume; dotted arrows document application writes.
+  AF[API-Football]
+  subgraph P0["Railway sincere-balance / production environment"]
+    S0["Postgres"]
+    S1["quantbet-engine"]
+    S2["example-new-service"]
+  end
+  subgraph M["Football code modules; runtime status separate"]
+    M0["GoalLab"]
+    M1["CornerLab"]
+    M2["CardLab"]
+    M3["H2HLab"]
+  end
+  classDef production fill:#ffd8c2,stroke:#a34b00
+  classDef research fill:#dcecff,stroke:#2e63a0
+  classDef datastore fill:#e3d8ff,stroke:#6545a0
+  class S0 datastore
+  class S1 production
+  class S2 research
+  AF --> S1
+  S0 -->|read documented| S1
+  S1 -.->|write documented, DB grants unknown| S0

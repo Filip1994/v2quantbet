@@ -2,31 +2,145 @@
   "schema_version": 1,
   "rubric": "See ARCHITECTURE_AUDIT_2026-10.md: 1–2 critical missing control, 3–4 documented/partial, 5–6 implemented and tested with runtime blind spots, 7–8 measured operational recovery, 9–10 independently validated. Null means not assessed.",
   "dimensions": [
-    {"name": "Cohesion and modularity", "score": 6, "confidence": "medium", "evidence": "Separate production, research and QuantLab modules; shared repository"},
-    {"name": "Coupling and shared state", "score": 4, "confidence": "high", "evidence": "Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown"},
-    {"name": "Data lineage and temporal leakage", "score": 6, "confidence": "medium", "evidence": "available_at and append-only migrations 025–026; runtime samples unknown"},
-    {"name": "Test coverage and reliability", "score": 6, "confidence": "medium", "evidence": "151 test files and PR CI; coverage and flaky trend unknown"},
-    {"name": "CI and release hygiene", "score": 5, "confidence": "high", "evidence": "PR CI and predeploy migrations; docs-only PR #243 merge triggered KellyLab production deploy; branch rules unknown"},
-    {"name": "Rollback and recoverability", "score": null, "confidence": "low", "evidence": "No restore exercise, RPO or RTO evidence"},
-    {"name": "Observability and alerting", "score": 5, "confidence": "medium", "evidence": "Health/readiness and worker dashboard; alert delivery unknown"},
-    {"name": "Incident handling", "score": 4, "confidence": "medium", "evidence": "Diagnostics exist; central owner/lifecycle record absent"},
-    {"name": "Security and least privilege", "score": null, "confidence": "medium", "evidence": "Production and QuantLab share DB credentials; effective grants and other access boundaries not inspected"},
-    {"name": "DB migrations, backup and retention", "score": null, "confidence": "medium", "evidence": "75 migration files; PITR disabled on both Railway PostgreSQL services; other backups and restore unverified"},
-    {"name": "Runtime cost and API budgets", "score": 5, "confidence": "medium", "evidence": "Shared football envelope documented; measured usage and bill unknown"},
-    {"name": "Deploy complexity", "score": 4, "confidence": "high", "evidence": "48 Railway definitions, 14 cron, 17 without Git source ref"},
-    {"name": "Single points of failure", "score": 4, "confidence": "high", "evidence": "One PostgreSQL definition per project; Railway HA status isCluster=false for both; restore unverified"},
-    {"name": "Scalability", "score": null, "confidence": "low", "evidence": "No load, queue-lag or saturation measurements"},
-    {"name": "Maintainability", "score": 5, "confidence": "medium", "evidence": "Change protocol and tests; Baseball documentation drift"},
-    {"name": "Operational cognitive load", "score": 3, "confidence": "high", "evidence": "48 definitions across two projects, including one-shot and cron"}
+    {
+      "name": "Cohesion and modularity",
+      "score": 6,
+      "confidence": "medium",
+      "evidence": "Separate production, research and QuantLab modules; shared repository"
+    },
+    {
+      "name": "Coupling and shared state",
+      "score": 4,
+      "confidence": "high",
+      "evidence": "Production engine and QuantLab collector resolve to the same DB host, database and credentials; DB grants unknown"
+    },
+    {
+      "name": "Data lineage and temporal leakage",
+      "score": 6,
+      "confidence": "medium",
+      "evidence": "available_at and append-only migrations 025–026; runtime samples unknown"
+    },
+    {
+      "name": "Test coverage and reliability",
+      "score": 6,
+      "confidence": "medium",
+      "evidence": "151 test files and PR CI; coverage and flaky trend unknown"
+    },
+    {
+      "name": "CI and release hygiene",
+      "score": 5,
+      "confidence": "high",
+      "evidence": "PR CI exists; docs-only #243 merge triggered KellyLab production deployment; Railway checkSuites=false and no watchPaths observed on linked football services"
+    },
+    {
+      "name": "Rollback and recoverability",
+      "score": null,
+      "confidence": "low",
+      "evidence": "No restore exercise, RPO or RTO evidence"
+    },
+    {
+      "name": "Observability and alerting",
+      "score": 5,
+      "confidence": "medium",
+      "evidence": "Health/readiness and worker dashboard; alert delivery unknown"
+    },
+    {
+      "name": "Incident handling",
+      "score": 4,
+      "confidence": "medium",
+      "evidence": "Diagnostics exist; central owner/lifecycle record absent"
+    },
+    {
+      "name": "Security and least privilege",
+      "score": null,
+      "confidence": "medium",
+      "evidence": "Production and QuantLab share DB credentials; effective grants and other access boundaries not inspected"
+    },
+    {
+      "name": "DB migrations, backup and retention",
+      "score": null,
+      "confidence": "medium",
+      "evidence": "Football PostgreSQL PITR disabled in read-only 2026-10-10 check; other backups and restore unverified"
+    },
+    {
+      "name": "Runtime cost and API budgets",
+      "score": 5,
+      "confidence": "medium",
+      "evidence": "Shared football envelope documented; measured usage and bill unknown"
+    },
+    {
+      "name": "Deploy complexity",
+      "score": 4,
+      "confidence": "high",
+      "evidence": "18 football Railway definitions; 4 cron; 3 without Git source ref in the 09:50 UTC fixture"
+    },
+    {
+      "name": "Single points of failure",
+      "score": 4,
+      "confidence": "high",
+      "evidence": "One football PostgreSQL service; Railway HA reported one member and isCluster=false; restore unverified"
+    },
+    {
+      "name": "Scalability",
+      "score": null,
+      "confidence": "low",
+      "evidence": "No load, queue-lag or saturation measurements"
+    },
+    {
+      "name": "Maintainability",
+      "score": 5,
+      "confidence": "medium",
+      "evidence": "Football change protocol and tests exist; diagnostic service ownership remains incomplete"
+    },
+    {
+      "name": "Operational cognitive load",
+      "score": 3,
+      "confidence": "high",
+      "evidence": "18 football definitions in one project, including cron and one-shot diagnostics"
+    }
   ],
   "risks": [
-    {"id": "R1", "title": "Football Production and QuantLab use the same DB credentials; effective grants unknown", "severity": 3, "likelihood": 2, "evidence": "Read-only Railway variable comparison 2026-10-10; values redacted", "action": "Read-only DB role/grant review, then propose separate credentials"},
-    {"id": "R2", "title": "Many long-lived diagnostic definitions lack source ownership", "severity": 2, "likelihood": 3, "evidence": "48-service Railway fixture; 17 missing source refs", "action": "Assign lifecycle/owner before any retirement proposal"},
-    {"id": "R3", "title": "Backup restore is not demonstrated", "severity": 3, "likelihood": 1, "evidence": "Railway PITR disabled on both DBs; other backup and restore evidence absent", "action": "Confirm backup inventory, retention and isolated restore exercise"},
-    {"id": "R4", "title": "Deployment status may be mistaken for job or data health; Baseball cold storage later shows CRASHED", "severity": 2, "likelihood": 3, "evidence": "Two observed Railway fixtures show SUCCESS to CRASHED and cron instance drift", "action": "Review last job log/freshness; track process, job and data separately"},
-    {"id": "R5", "title": "Baseball README and PostgreSQL runtime contract diverge", "severity": 2, "likelihood": 2, "evidence": "quantbet-baseball README.md and src/quantbot/baseball/db.py", "action": "Update documentation in separate review"},
-    {"id": "R6", "title": "Older Basketball service points at a module absent from its source ref; v1/v2 coexistence lacks retirement evidence", "severity": 2, "likelihood": 2, "evidence": "Railway quantbet-basketball source/start module versus quantbet-baseball tree at ed2e1c4", "action": "Confirm last successful run and consumers before proposing simplification"},
-    {"id": "R7", "title": "h2h documented workflows not present at reviewed HEAD", "severity": 1, "likelihood": 2, "evidence": "h2h README.md versus checked-out tree", "action": "Verify active scheduler and branch"},
-    {"id": "R8", "title": "Main merge triggers production deployment even for documentation-only changes", "severity": 2, "likelihood": 3, "evidence": "PR #243 merge SHA 4842946 matched KellyLab Railway deployment at 11:58 UTC", "action": "Require explicit deployment-impact approval before merging PR #244; review auto-deploy/watch configuration"}
-  ]
+    {
+      "id": "R1",
+      "title": "Football Production and QuantLab use the same DB credentials; effective grants unknown",
+      "severity": 3,
+      "likelihood": 2,
+      "evidence": "Read-only Railway variable comparison 2026-10-10; values redacted",
+      "action": "Read-only DB role/grant review, then propose separate credentials"
+    },
+    {
+      "id": "R2",
+      "title": "Many long-lived diagnostic definitions lack source ownership",
+      "severity": 2,
+      "likelihood": 3,
+      "evidence": "Football 09:50 UTC fixture: 18 definitions, 3 without Git source ref; 8 mapped by strict owner/purpose/evidence/code criterion",
+      "action": "Assign lifecycle/owner before any retirement proposal"
+    },
+    {
+      "id": "R3",
+      "title": "Backup restore is not demonstrated",
+      "severity": 3,
+      "likelihood": 1,
+      "evidence": "Football PostgreSQL PITR disabled; other backup and restore evidence absent",
+      "action": "Confirm backup inventory, retention and isolated restore exercise"
+    },
+    {
+      "id": "R4",
+      "title": "Deployment status and zero running cron instances can be mistaken for job or data health",
+      "severity": 2,
+      "likelihood": 3,
+      "evidence": "Football collector has scheduled cron and zero running instance in 09:50 UTC fixture; last successful completion and freshness unknown",
+      "action": "Review last job log/freshness; track process, job and data separately"
+    },
+    {
+      "id": "R8",
+      "title": "Main merge triggers production deployment even for documentation-only changes",
+      "severity": 2,
+      "likelihood": 3,
+      "evidence": "PR #243 merge SHA 4842946 matched KellyLab deployment; log recorded applied 0 migration(s)",
+      "action": "Review and approve per-service Railway watch paths before merging #244; keep branch and rollback plan explicit"
+    }
+  ],
+  "project_id": "c0aa8208-dd61-48c4-a1d8-488802e84f36",
+  "project": "sincere-balance"
 }

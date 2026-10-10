@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 
 from scripts.control_tower import (
+    FOOTBALL_PROJECT_ID,
+    FOOTBALL_PROJECT_NAME,
     build_registry,
+    capture_github,
     diff_registries,
     render_graph,
     render_inventory,
@@ -18,12 +21,12 @@ from scripts.control_tower import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / "docs/control-tower/fixtures/railway-2026-10-10-0950.json"
-EARLIER = ROOT / "docs/control-tower/fixtures/railway-2026-10-10.json"
+FIXTURE = ROOT / "docs/control-tower/fixtures/football-2026-10-10-0950.json"
+EARLIER = ROOT / "docs/control-tower/fixtures/football-2026-10-10.json"
 ANNOTATIONS = ROOT / "docs/control-tower/annotations.json"
 ASSESSMENT = ROOT / "docs/control-tower/assessment.json"
-GITHUB = ROOT / "docs/control-tower/fixtures/github-2026-10-10.json"
-GENERATED = ROOT / "docs/control-tower/generated/2026-10-10"
+GITHUB = ROOT / "docs/control-tower/fixtures/football-github-2026-10-10.json"
+GENERATED = ROOT / "docs/control-tower/generated/football-2026-10-10"
 
 
 def _load(path):
@@ -32,21 +35,22 @@ def _load(path):
 
 def test_live_fixture_registers_all_definitions_without_claiming_full_mapping():
     result = build_registry(_load(FIXTURE), _load(ANNOTATIONS))
-    assert result["coverage"]["registered_services"] == 48
-    assert result["coverage"]["registry_rows"] == 48
-    assert result["coverage"]["git_source_refs"] == 31
-    assert result["coverage"]["entrypoint_modules"] == 19
-    assert result["coverage"]["mapped_services"] == 20
-    assert result["coverage"]["services_with_running_instance"] == 12
-    assert result["coverage"]["cron_definitions"] == 14
-    assert result["coverage"]["failed_latest_deployments"] == 2
+    assert result["coverage"]["registered_services"] == 18
+    assert result["coverage"]["registry_rows"] == 18
+    assert result["coverage"]["git_source_refs"] == 15
+    assert result["coverage"]["entrypoint_modules"] == 8
+    assert result["coverage"]["mapped_services"] == 8
+    assert result["coverage"]["services_with_running_instance"] == 8
+    assert result["coverage"]["cron_definitions"] == 4
+    assert result["coverage"]["failed_latest_deployments"] == 1
+    assert {row["project"] for row in result["services"]} == {FOOTBALL_PROJECT_NAME}
     assert any(row["mapping_status"] == "unmapped" for row in result["services"])
     assert all(row["created_at"] is None for row in result["services"])
 
 
 def test_railway_capture_is_allowlisted_and_discards_secret_bearing_fields():
     raw = {
-        "name": "project",
+        "name": FOOTBALL_PROJECT_NAME,
         "environments": {
             "edges": [
                 {
@@ -84,7 +88,7 @@ def test_railway_capture_is_allowlisted_and_discards_secret_bearing_fields():
             ]
         },
     }
-    selected = sanitize_railway_status(raw, "project1", "2026-10-10T00:00:00Z")
+    selected = sanitize_railway_status(raw, FOOTBALL_PROJECT_ID, "2026-10-10T00:00:00Z")
     encoded = json.dumps(selected)
     assert len(selected) == 1
     assert selected[0]["entrypoint_module"] == "safe.worker"
@@ -94,24 +98,69 @@ def test_railway_capture_is_allowlisted_and_discards_secret_bearing_fields():
     assert "DATABASE_URL" not in encoded
 
 
+def test_wrong_project_identity_is_rejected_before_capture_or_build(tmp_path):
+    fixture = _load(FIXTURE)
+    fixture["services"][0]["project_id"] = "unexpected-project"
+    with pytest.raises(ValueError, match="outside the football allowlist"):
+        build_registry(fixture, _load(ANNOTATIONS))
+    with pytest.raises(ValueError, match="football allowlist"):
+        sanitize_railway_status(
+            {"name": "unexpected-project"}, FOOTBALL_PROJECT_ID, fixture["observed_at"]
+        )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/control_tower.py"),
+            "capture-railway",
+            "--project",
+            "unexpected-project",
+            "--out",
+            str(tmp_path / "capture.json"),
+        ],
+        capture_output=True,
+        check=False,
+        cwd=ROOT,
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / "capture.json").exists()
+
+
+def test_github_and_snapshot_diff_reject_out_of_scope_inputs():
+    with pytest.raises(ValueError, match="football repository"):
+        capture_github(["unexpected/other"])
+    fixture = _load(FIXTURE)
+    github = _load(GITHUB)
+    github["repos"].append({"full_name": "unexpected/other"})
+    with pytest.raises(ValueError, match="outside the football allowlist"):
+        build_registry(fixture, _load(ANNOTATIONS), github)
+    before = build_registry(fixture, _load(ANNOTATIONS))
+    after = deepcopy(before)
+    after["services"][0]["project_id"] = "unexpected-project"
+    with pytest.raises(ValueError, match="out-of-scope"):
+        diff_registries(before, after)
+    annotations = _load(ANNOTATIONS)
+    annotations["extra_components"].append({"name": "unexpected-component"})
+    with pytest.raises(ValueError, match="outside the football allowlist"):
+        build_registry(fixture, annotations)
+    assessment = _load(ASSESSMENT)
+    assessment["project"] = "unexpected-project"
+    with pytest.raises(ValueError, match="football allowlist"):
+        render_inventory(before, assessment)
+
+
 def test_graph_uses_database_in_same_project():
     fixture = _load(FIXTURE)
     registry = build_registry(fixture, _load(ANNOTATIONS))
     graph = render_graph(registry)
     rows = registry["services"]
     ids = {row["component_id"]: f"S{index}" for index, row in enumerate(rows)}
-    for worker_name, project in (
-        ("quantbet-engine", "sincere-balance"),
-        ("basketball-v2-worker", "believable-contentment"),
-    ):
-        worker = next(row for row in rows if row["display_name"] == worker_name)
-        database = next(
-            row for row in rows if row["display_name"] == "Postgres" and row["project"] == project
-        )
-        assert (
-            f"{ids[database['component_id']]} -->|read documented| {ids[worker['component_id']]}"
-            in graph
-        )
+    worker = next(row for row in rows if row["display_name"] == "quantbet-engine")
+    database = next(row for row in rows if row["display_name"] == "Postgres")
+    assert (
+        f"{ids[database['component_id']]} -->|read documented| {ids[worker['component_id']]}"
+        in graph
+    )
+    assert "API-Sports" not in graph
 
 
 def test_snapshot_diff_reports_observation_separately_from_reason():
@@ -140,7 +189,7 @@ def test_snapshot_diff_reports_observation_separately_from_reason():
     assert "source_commit" in engine["fields"]
     assert "last_changed_at" in engine["fields"]
     assert engine["documented_reason"] == "reason unknown"
-    assert diff["failure_counts"] == {"before": 2, "after": 3}
+    assert diff["failure_counts"] == {"before": 1, "after": 2}
 
 
 def test_history_survives_new_snapshot_and_failed_deployment():
@@ -152,14 +201,14 @@ def test_history_survives_new_snapshot_and_failed_deployment():
         row["first_seen_at"] == old[row["component_id"]]["first_seen_at"]
         for row in after["services"]
     )
-    cold = next(
-        row for row in after["services"] if row["display_name"] == "quantbet-baseball-cold-storage"
+    collector = next(
+        row for row in after["services"] if row["display_name"] == "quantbet-quantlab-collector"
     )
-    assert cold["latest_deployment_status"] == "CRASHED"
-    assert cold["last_successful_deployment_at"] == "2026-09-29T07:29:06Z"
-    assert cold["last_successful_deployment_observed_at"] == "2026-10-10T01:47:58Z"
+    assert collector["latest_deployment_status"] == "SUCCESS"
+    assert collector["running_instances"] == 0
+    assert collector["last_successful_deployment_at"] == "2026-10-10T00:38:35Z"
     assert (
-        "last observed SUCCESS deploy=2026-09-29T07:29:06Z (seen 2026-10-10T01:47:58Z)"
+        "last observed SUCCESS deploy=2026-10-10T00:38:35Z (seen 2026-10-10T09:50:02Z)"
         in render_inventory(after, _load(ASSESSMENT))
     )
 
@@ -270,11 +319,8 @@ def test_two_observed_snapshots_detect_runtime_status_drift():
     later = build_registry(_load(FIXTURE), annotations)
     diff = diff_registries(earlier, later)
     assert diff["added"] == diff["retired_from_registry"] == []
-    assert diff["failure_counts"] == {"before": 1, "after": 2}
-    assert {item["name"] for item in diff["changes"]} == {
-        "quantbet-baseball-cold-storage",
-        "quantbet-quantlab-collector",
-    }
+    assert diff["failure_counts"] == {"before": 1, "after": 1}
+    assert {item["name"] for item in diff["changes"]} == {"quantbet-quantlab-collector"}
 
 
 def test_diff_catches_owner_dependency_permission_ci_and_freshness_drift():

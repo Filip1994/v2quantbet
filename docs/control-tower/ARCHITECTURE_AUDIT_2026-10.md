@@ -1,5 +1,7 @@
 # QuantBet Control Tower — arhitektonski audit, 10. oktobar 2026.
 
+> **Istorijski Phase A zapis, zamenjen za aktivni opseg Issue #245.** Sadašnji Control Tower prati samo `sincere-balance`; za važeće fudbalske brojeve i rizike koristi [football report](FOOTBALL_REPORT_2026-10-10.md). Ovaj dokument se čuva radi sledljivosti ranijih zaključaka.
+
 Status: **read-only discovery / Phase A**. Presek Railway metapodataka: `2026-10-10T01:47:58Z`. Kod: `v2quantbet` [`8352f01`](https://github.com/Filip1994/v2quantbet/commit/8352f01a9d00ecfcd6a58e95537660a59fa6df55), `h2h` [`b64fd50`](https://github.com/Filip1994/h2h/commit/b64fd507590a6d95ac0d3e56fd906f757fc79f5c), `quantbet-baseball` [`ed2e1c4`](https://github.com/Filip1994/quantbet-baseball/commit/ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7), `quantbet-basketball` [`4987bbc`](https://github.com/Filip1994/quantbet-basketball/commit/4987bbc23a40457aa4deef5c1b0761a3c5dcd394). [Issue #242](https://github.com/Filip1994/v2quantbet/issues/242) je opseg i kriterijum prihvatanja.
 
 ## Sažetak za vlasnika

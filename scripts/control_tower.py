@@ -18,6 +18,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 SCHEMA_VERSION = 1
+FOOTBALL_PROJECT_ID = "c0aa8208-dd61-48c4-a1d8-488802e84f36"
+FOOTBALL_PROJECT_NAME = "sincere-balance"
+FOOTBALL_REPO = "Filip1994/v2quantbet"
+FOOTBALL_MODULES = {"GoalLab", "CornerLab", "CardLab", "H2HLab"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 SAFE_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
@@ -70,8 +74,14 @@ def sanitize_railway_status(
     raw: dict[str, Any], project_id: str, observed_at: str
 ) -> list[dict[str, Any]]:
     """Select metadata only; never copy variables, start commands or deployment meta."""
+    if (
+        project_id != FOOTBALL_PROJECT_ID
+        or raw.get("name") != FOOTBALL_PROJECT_NAME
+        or raw.get("id", FOOTBALL_PROJECT_ID) != FOOTBALL_PROJECT_ID
+    ):
+        raise ValueError("Railway project identity does not match the football allowlist")
     result: list[dict[str, Any]] = []
-    project_name = _allow(raw.get("name"), SAFE_NAME) or project_id
+    project_name = FOOTBALL_PROJECT_NAME
     for environment_edge in raw.get("environments", {}).get("edges", []):
         environment = environment_edge.get("node") or {}
         environment_name = _allow(environment.get("name"), SAFE_NAME)
@@ -157,7 +167,7 @@ def _category(name: str) -> str:
         for word in ("query", "audit", "test", "diagnostic", "inspect", "find", "void")
     ):
         return "diagnostic_or_one_shot"
-    if any(word in lower for word in ("engine", "worker", "baseball", "basketball")):
+    if any(word in lower for word in ("engine", "worker")):
         return "worker"
     return "unknown"
 
@@ -185,6 +195,33 @@ def build_registry(
     services = fixture.get("services")
     if not isinstance(services, list):
         raise TypeError("Fixture services must be a list")
+    if (
+        fixture.get("project_id") != FOOTBALL_PROJECT_ID
+        or fixture.get("project") != FOOTBALL_PROJECT_NAME
+    ):
+        raise ValueError("Fixture project identity does not match the football allowlist")
+    for project in fixture.get("projects", []):
+        if project != {"id": FOOTBALL_PROJECT_ID, "name": FOOTBALL_PROJECT_NAME}:
+            raise ValueError("Fixture contains a project outside the football allowlist")
+    for row in services:
+        if (
+            row.get("project_id") != FOOTBALL_PROJECT_ID
+            or row.get("project") != FOOTBALL_PROJECT_NAME
+        ):
+            raise ValueError("Fixture contains a service outside the football allowlist")
+    for row in (previous or {}).get("services", []):
+        if (
+            row.get("project_id") != FOOTBALL_PROJECT_ID
+            or row.get("project") != FOOTBALL_PROJECT_NAME
+        ):
+            raise ValueError("Previous registry contains a service outside the football allowlist")
+    for repo in (github or {}).get("repos", []):
+        if repo.get("full_name") != FOOTBALL_REPO:
+            raise ValueError("GitHub fixture contains a repository outside the football allowlist")
+    if any(
+        item.get("name") not in FOOTBALL_MODULES for item in annotations.get("extra_components", [])
+    ):
+        raise ValueError("Annotations contain a component outside the football allowlist")
     records = []
     seen = set()
     prior = {row["component_id"]: row for row in (previous or {}).get("services", [])}
@@ -306,6 +343,8 @@ def build_registry(
         "schema_version": SCHEMA_VERSION,
         "observed_at": fixture["observed_at"],
         "source": fixture.get("source") or "unknown",
+        "project_id": FOOTBALL_PROJECT_ID,
+        "project": FOOTBALL_PROJECT_NAME,
         "coverage": {
             "registered_services": len(records),
             "registry_rows": len(records),
@@ -359,6 +398,11 @@ def build_registry(
 
 
 def render_inventory(registry: dict[str, Any], assessment: dict[str, Any]) -> str:
+    if (
+        assessment.get("project_id") != FOOTBALL_PROJECT_ID
+        or assessment.get("project") != FOOTBALL_PROJECT_NAME
+    ):
+        raise ValueError("Assessment project identity does not match the football allowlist")
     coverage = registry["coverage"]
     lines = [
         "# QuantBet Control Tower V1",
@@ -470,8 +514,6 @@ def render_graph(registry: dict[str, Any]) -> str:
         "flowchart LR",
         "  %% Solid arrows read or consume; dotted arrows document application writes.",
         "  AF[API-Football]",
-        "  AB[API-Sports Baseball]",
-        "  AK[API-Sports Basketball]",
     ]
     ids = {row["component_id"]: f"S{index}" for index, row in enumerate(rows)}
     projects = sorted({(row["project_id"], row["project"]) for row in rows})
@@ -486,9 +528,7 @@ def render_graph(registry: dict[str, Any]) -> str:
         lines.append("  end")
     extra = registry.get("extra_components", [])
     if extra:
-        lines.append(
-            '  subgraph M["Code modules / independent repository; runtime status separate"]'
-        )
+        lines.append('  subgraph M["Football code modules; runtime status separate"]')
         for index, component in enumerate(extra):
             label = component["name"].replace('"', "")
             lines.append(f'    M{index}["{label}"]')
@@ -503,7 +543,7 @@ def render_graph(registry: dict[str, Any]) -> str:
             "datastore"
             if row["category"] == "database"
             else "production"
-            if row["category"] in {"production_worker", "baseball_worker", "basketball_v2_worker"}
+            if row["category"] == "production_worker"
             else "research"
         )
         lines.append(f"  class {ids[row['component_id']]} {cls}")
@@ -523,10 +563,6 @@ def render_graph(registry: dict[str, Any]) -> str:
                     edges.add(f"  {source} --> {target}")
             elif dep == "API-Football":
                 edges.add(f"  AF --> {target}")
-            elif dep == "API-Sports Baseball":
-                edges.add(f"  AB --> {target}")
-            elif dep == "API-Sports Basketball":
-                edges.add(f"  AK --> {target}")
     collector = next(
         (row for row in rows if row["display_name"] == "quantbet-quantlab-collector"), None
     )
@@ -541,6 +577,18 @@ def render_graph(registry: dict[str, Any]) -> str:
 
 
 def diff_registries(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    for registry in (before, after):
+        if (
+            registry.get("project_id") != FOOTBALL_PROJECT_ID
+            or registry.get("project") != FOOTBALL_PROJECT_NAME
+        ):
+            raise ValueError("Snapshot diff requires the football project identity")
+        if any(
+            row.get("project_id") != FOOTBALL_PROJECT_ID
+            or row.get("project") != FOOTBALL_PROJECT_NAME
+            for row in registry.get("services", [])
+        ):
+            raise ValueError("Snapshot diff contains an out-of-scope service")
     old = {row["component_id"]: row for row in before["services"]}
     new = {row["component_id"]: row for row in after["services"]}
     changes = []
@@ -625,6 +673,8 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 def capture_github(repos: list[str]) -> dict[str, Any]:
     """Fetch bounded public metadata; omit bodies, emails, secrets and API errors."""
+    if repos != [FOOTBALL_REPO]:
+        raise ValueError("GitHub capture is restricted to the football repository")
     token = os.getenv("GITHUB_TOKEN")
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "quantbet-control-tower-v1"}
     if token:
@@ -701,7 +751,7 @@ def main() -> None:
         "capture-railway", help="Explicit, bounded read-only Railway metadata capture"
     )
     capture.add_argument(
-        "--project", action="append", required=True, help="Railway project ID (repeat, max 8)"
+        "--project", default=FOOTBALL_PROJECT_ID, help="Football Railway project ID"
     )
     capture.add_argument("--environment", default="production")
     capture.add_argument("--out", type=Path, required=True)
@@ -709,9 +759,7 @@ def main() -> None:
     github_capture = command.add_parser(
         "capture-github", help="Bounded read-only commit, PR and CI metadata capture"
     )
-    github_capture.add_argument(
-        "--repo", action="append", required=True, help="owner/repo (repeat, max 8)"
-    )
+    github_capture.add_argument("--repo", default=FOOTBALL_REPO, help="Football repository")
     github_capture.add_argument("--out", type=Path, required=True)
     build = command.add_parser(
         "build", help="Generate deterministic registry, report and dependency graph"
@@ -743,36 +791,36 @@ def main() -> None:
     diff.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "capture-railway":
-        if len(args.project) > 8 or any(not _allow(value, SAFE_NAME) for value in args.project):
-            parser.error("Provide 1–8 explicit project IDs")
+        if args.project != FOOTBALL_PROJECT_ID:
+            parser.error("Only the sincere-balance football project is allowed")
         at = args.at or datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
             "+00:00", "Z"
         )
         if not _iso(at):
             parser.error("--at must be an ISO timestamp with timezone")
-        services = []
-        for project_id in args.project:
-            result = subprocess.run(
-                ["railway", "status", "-p", project_id, "-e", args.environment, "--json"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=45,
-            )
-            services += sanitize_railway_status(json.loads(result.stdout), project_id, at)
+        result = subprocess.run(
+            ["railway", "status", "-p", FOOTBALL_PROJECT_ID, "-e", args.environment, "--json"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        services = sanitize_railway_status(json.loads(result.stdout), FOOTBALL_PROJECT_ID, at)
         data = {
             "schema_version": SCHEMA_VERSION,
             "observed_at": at,
             "source": "Railway CLI status --json; selected metadata only",
+            "project_id": FOOTBALL_PROJECT_ID,
+            "project": FOOTBALL_PROJECT_NAME,
             "services": sorted(services, key=lambda row: (row["project_id"], row["service_id"])),
         }
         args.out.parent.mkdir(parents=True, exist_ok=True)
         _write_json(args.out, data)
     elif args.command == "capture-github":
-        if len(args.repo) > 8 or any(not _allow(value, SAFE_REPO) for value in args.repo):
-            parser.error("Provide 1–8 owner/repo values")
+        if args.repo != FOOTBALL_REPO:
+            parser.error("Only the v2quantbet football repository is allowed")
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        _write_json(args.out, capture_github(args.repo))
+        _write_json(args.out, capture_github([FOOTBALL_REPO]))
     elif args.command == "build":
         registry = build_registry(
             _load(args.fixture),
