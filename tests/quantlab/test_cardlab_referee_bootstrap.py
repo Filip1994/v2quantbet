@@ -587,3 +587,71 @@ def test_referee_bootstrap_skips_candidate_sql_after_api_attempt_cap() -> None:
     assert repo.stats_candidate_queries == ["Ref A"]
     assert captured_events == ["api-football:1"]
     assert captured_stats == ["api-football:1"]
+
+
+def test_referee_history_scopes_stats_and_events_to_matching_fixtures() -> None:
+    """Per-referee lookups must not materialize latest stats for every fixture."""
+    from types import SimpleNamespace
+
+    from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.query = ""
+            self.params = ()
+
+        @property
+        def description(self):
+            return (SimpleNamespace(name="referee"),)
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchall(self):
+            return [("Ref A",)]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def cursor(self):
+            return self._cursor
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    cursor = Cursor()
+    repository = PostgreSQLQuantLabRepository(
+        connect=lambda: Connection(cursor)
+    )
+    rows = repository.referee_history(
+        "Ref A, England", decision_at=NOW, limit=8
+    )
+
+    assert rows == ({"referee": "Ref A"},)
+    assert cursor.params == (
+        "Ref A, England", NOW, NOW, NOW, NOW, 8
+    )
+    sql = " ".join(cursor.query.split())
+    for table in (
+        "quantlab_match_statistics_observations",
+        "quantlab_card_event_observations",
+    ):
+        assert (
+            f"FROM {table} "
+            "WHERE fixture_id IN (SELECT fixture_id FROM context) "
+            "AND available_at <= %s"
+        ) in sql
+    assert "FROM context JOIN stats USING (fixture_id)" in sql
+    assert "LEFT JOIN events USING (fixture_id)" in sql
+    assert "ORDER BY context.kickoff_at DESC LIMIT %s" in sql
