@@ -1,8 +1,8 @@
 """Shared metadata for the Production intake bucket contract.
 
-The order records the six historical promotion candidates, including retired cohorts.
-The default live intake contains Research only; the GoalLab OVER cohorts retired on
-2026-10-10 remain defined for historical analytics and possible future reapproval.
+The specs include all six historically promoted cohorts, regardless of current
+Production selection. The default live intake includes four Research cohorts only;
+the GoalLab OVER buckets remain fully active in GoalLab analytics and discovery.
 """
 
 from __future__ import annotations
@@ -92,8 +92,8 @@ PRODUCTION_BUCKET_SPECS = (
     ),
 )
 
-# Fail-safe default: GoalLab OVER buckets are retired from Production (2026-10-10).
-# Historical specs stay known so evidence/links and explicit future promotions survive.
+# Production selection is independent from GoalLab research/discovery status.
+# Keep the two GoalLab specs available without selecting them for Production by default.
 DEFAULT_BUCKET_IDS = tuple(
     spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS if spec.source_universe == "RESEARCH"
 )
