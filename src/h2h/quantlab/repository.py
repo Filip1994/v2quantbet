@@ -3890,20 +3890,21 @@ class PostgreSQLQuantLabRepository:
         if sql.count(desc) != 1:
             raise RuntimeError("GoalLab scoring query ordering contract changed")
         sql = sql.replace(desc, "ORDER BY f.kickoff_at ASC, f.fixture_id ASC")
-        with self.connect() as connection:
-            with connection.cursor(name="quantlab_goal_scoring_history") as cursor:
-                cursor.execute(sql, (before, before, limit, before, before))
-                columns = tuple(item.name for item in cursor.description)
+        with self.connect() as connection, connection.cursor(
+            name="quantlab_goal_scoring_history"
+        ) as cursor:
+            cursor.execute(sql, (before, before, limit, before, before))
+            columns = tuple(item.name for item in cursor.description)
 
-                def rows() -> Iterator[dict[str, Any]]:
-                    while True:
-                        batch = cursor.fetchmany(batch_size)
-                        if not batch:
-                            return
-                        for row in batch:
-                            yield dict(zip(columns, row, strict=True))
+            def rows() -> Iterator[dict[str, Any]]:
+                while True:
+                    batch = cursor.fetchmany(batch_size)
+                    if not batch:
+                        return
+                    for row in batch:
+                        yield dict(zip(columns, row, strict=True))
 
-                yield rows()
+            yield rows()
 
     def goal_model_by_training_fingerprint(
         self,
