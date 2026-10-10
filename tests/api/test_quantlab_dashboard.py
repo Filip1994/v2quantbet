@@ -1397,3 +1397,18 @@ def test_selected_goallab_production_buckets_are_neon_highlighted() -> None:
     assert "OU OVER · odds 2.01–2.50" in html
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "#18d7ff" in html
+
+
+def test_retired_goallab_production_buckets_are_not_approved(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "QUANTBET_PRODUCTION_INTAKE_BUCKETS",
+        "RESEARCH_OU_UNDER_EDGE_10_15,RESEARCH_OU_UNDER_EDGE_20_30,"
+        "RESEARCH_BTTS_NO_ODDS_2_01_2_50,RESEARCH_LOW_SCORING_NON_EXTREME",
+    )
+    html = QuantLabDashboardService(StubRepository()).render_html("view=analytics&lab=goal")
+
+    assert 'id="production-intake-buckets"' in html
+    assert 'class="panel production-intake-panel"' not in html
+    assert "GoalLab · Production intake suspended" in html
+    assert "Both former OVER 2.5 buckets are retired" in html
+    assert "Historical picks, settlements and ROI remain available" in html
