@@ -67,4 +67,5 @@ def test_sql_queries_are_read_only_and_bounded() -> None:
     assert "pg_stat_checkpointer" in SQL["checkpoint_statistics"]
     assert "pg_stat_wal" in SQL["wal_statistics"]
     assert "pg_stat_activity" in SQL["connection_states"]
+    assert "pg_locks" in SQL["lock_counts"]
     assert "LIMIT 12" in SQL["largest_tables"]
