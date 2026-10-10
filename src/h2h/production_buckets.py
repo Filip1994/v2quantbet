@@ -1,8 +1,8 @@
 """Shared metadata for the Production intake bucket contract.
 
-The order is intentional: it is the current ROI priority of the six approved buckets.
-Presentation layers use the same IDs, labels and analytics drilldown paths so Production
-links always resolve to the cohort that admitted the pick.
+The order records the six historical promotion candidates, including retired cohorts.
+The default live intake contains Research only; the GoalLab OVER cohorts retired on
+2026-10-10 remain defined for historical analytics and possible future reapproval.
 """
 
 from __future__ import annotations
@@ -92,9 +92,15 @@ PRODUCTION_BUCKET_SPECS = (
     ),
 )
 
-DEFAULT_BUCKET_IDS = tuple(spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS)
-KNOWN_BUCKET_IDS = frozenset(DEFAULT_BUCKET_IDS)
-BUCKET_PRIORITY = {bucket_id: index for index, bucket_id in enumerate(DEFAULT_BUCKET_IDS, 1)}
+# Fail-safe default: GoalLab OVER buckets are retired from Production (2026-10-10).
+# Historical specs stay known so evidence/links and explicit future promotions survive.
+DEFAULT_BUCKET_IDS = tuple(
+    spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS if spec.source_universe == "RESEARCH"
+)
+KNOWN_BUCKET_IDS = frozenset(spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS)
+BUCKET_PRIORITY = {
+    spec.bucket_id: index for index, spec in enumerate(PRODUCTION_BUCKET_SPECS, 1)
+}
 BUCKET_BY_ID = {spec.bucket_id: spec for spec in PRODUCTION_BUCKET_SPECS}
 
 
