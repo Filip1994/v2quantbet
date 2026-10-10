@@ -1163,7 +1163,10 @@ class DashboardHTTPService:
                         except (BrokenPipeError, ConnectionResetError):
                             return
                         except Exception as exc:  # noqa: BLE001 - bounded failure response
-                            service._json(self, 503, {"error": type(exc).__name__})
+                            try:
+                                service._json(self, 503, {"error": type(exc).__name__})
+                            except (BrokenPipeError, ConnectionResetError):
+                                return
                 else:
                     service._json(self, 404, {"error": "not_found"})
 
