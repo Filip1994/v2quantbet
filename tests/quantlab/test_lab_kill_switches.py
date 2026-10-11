@@ -204,3 +204,41 @@ def test_cardlab_disabled_is_removed_from_market_collection_allowlist() -> None:
     assert market_fixtures == 1
     assert card_snapshots == 0
     assert collector.allowed_labs == {"CORNER"}
+
+
+def test_goal_history_cache_released_before_following_labs() -> None:
+    runtime = _TrackingRuntime(QuantLabRuntimeSettings())
+
+    class Cache:
+        def release_cached_scoring_context(self) -> None:
+            runtime.calls.append("goal:cache-released")
+
+    runtime._goal_engine = Cache()
+    runtime.run_once()
+
+    assert runtime.calls.index("goal:evaluate") < runtime.calls.index(
+        "goal:cache-released"
+    ) < runtime.calls.index("goal:results")
+    assert "card:referee" in runtime.calls
+
+
+def test_goal_cache_is_released_even_on_evaluation_failure() -> None:
+    class BrokenGoalRuntime(_TrackingRuntime):
+        def _evaluate_goal_picks(self, _now):
+            self.calls.append("goal:evaluate-failed")
+            raise RuntimeError("test failure")
+
+    runtime = BrokenGoalRuntime(QuantLabRuntimeSettings())
+
+    class Cache:
+        def release_cached_scoring_context(self) -> None:
+            runtime.calls.append("goal:cache-released")
+
+    runtime._goal_engine = Cache()
+    result = runtime.run_once()
+
+    assert result["goal_decisions"] == 0
+    assert runtime.calls.index("goal:evaluate-failed") < runtime.calls.index(
+        "goal:cache-released"
+    ) < runtime.calls.index("goal:results")
+    assert "corner:results" in runtime.calls
