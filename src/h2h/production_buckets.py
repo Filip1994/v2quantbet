@@ -1,7 +1,7 @@
 """Shared metadata for the Production intake bucket contract.
 
 The specs include all six historically promoted cohorts, regardless of current
-Production selection. The two-bucket Research pilot is selected by default;
+Production selection. The seven selected Research/CornerLab cohorts are enabled by default;
 the GoalLab OVER buckets remain fully active in GoalLab analytics and discovery.
 """
 
@@ -17,7 +17,12 @@ RESEARCH_OU_UNDER_EDGE_10_15 = "RESEARCH_OU_UNDER_EDGE_10_15"
 RESEARCH_OU_UNDER_EDGE_20_30 = "RESEARCH_OU_UNDER_EDGE_20_30"
 RESEARCH_BTTS_NO_ODDS_2_01_2_50 = "RESEARCH_BTTS_NO_ODDS_2_01_2_50"
 RESEARCH_OU_UNDER_ODDS_1_81_2_00 = "RESEARCH_OU_UNDER_ODDS_1_81_2_00"
+RESEARCH_OU_UNDER_ODDS_2_01_2_50 = "RESEARCH_OU_UNDER_ODDS_2_01_2_50"
 RESEARCH_OU_OVER_ODDS_1_81_2_00 = "RESEARCH_OU_OVER_ODDS_1_81_2_00"
+CORNER_OVER_GAP_1_2_ODDS_1_61_1_80 = "CORNER_OVER_GAP_1_2_ODDS_1_61_1_80"
+CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00 = (
+    "CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00"
+)
 GOALLAB_OU_OVER_XG_2_5_3_0 = "GOALLAB_OU_OVER_XG_2_5_3_0"
 GOALLAB_OU_OVER_ODDS_2_01_2_50 = "GOALLAB_OU_OVER_ODDS_2_01_2_50"
 
@@ -50,6 +55,13 @@ PRODUCTION_BUCKET_SPECS = (
         22.45,
     ),
     ProductionBucketSpec(
+        RESEARCH_OU_UNDER_ODDS_2_01_2_50,
+        "OU UNDER 2.5 · odds 2.01–2.50",
+        "RESEARCH",
+        _research_path(market="OU_25", selection="UNDER", odds_bucket="2.01–2.50"),
+        15.88,
+    ),
+    ProductionBucketSpec(
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
         "OU OVER 2.5 · odds 1.81–2.00",
         "RESEARCH",
@@ -76,6 +88,27 @@ PRODUCTION_BUCKET_SPECS = (
         "RESEARCH",
         _research_path(market="BTTS", selection="NO", odds_bucket="2.01–2.50"),
         20.59,
+    ),
+    ProductionBucketSpec(
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+        "Corner OVER · model−line +1–+2 · odds 1.61–1.80",
+        "CORNERLAB",
+        "/quantlab?view=analytics&lab=corner&bucket=1"
+        "&bucket_market_key=TOTAL_CORNERS&bucket_selection=OVER"
+        "&bucket_corner_model_line_gap_bucket=%2B1%E2%80%93%2B2"
+        "&bucket_entry_odds_bucket=1.61%E2%80%931.80#bucket-picks",
+        31.90,
+    ),
+    ProductionBucketSpec(
+        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+        "Corner OVER · model P 50–55% · market P 45–50% · odds 1.81–2.00",
+        "CORNERLAB",
+        "/quantlab?view=analytics&lab=corner&bucket=1"
+        "&bucket_market_key=TOTAL_CORNERS&bucket_selection=OVER"
+        "&bucket_model_probability_bucket=50%E2%80%9355%25"
+        "&bucket_market_probability_bucket=45%E2%80%9350%25"
+        "&bucket_entry_odds_bucket=1.81%E2%80%932.00#bucket-picks",
+        29.81,
     ),
     ProductionBucketSpec(
         GOALLAB_OU_OVER_XG_2_5_3_0,
@@ -111,8 +144,13 @@ PRODUCTION_BUCKET_SPECS = (
 # Production selection is independent from GoalLab research/discovery status.
 # Keep the two GoalLab specs available without selecting them for Production by default.
 DEFAULT_BUCKET_IDS = (
-    RESEARCH_OU_UNDER_ODDS_1_81_2_00,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    RESEARCH_OU_UNDER_ODDS_2_01_2_50,
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
+    RESEARCH_OU_UNDER_EDGE_10_15,
+    RESEARCH_OU_UNDER_EDGE_20_30,
+    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
 )
 KNOWN_BUCKET_IDS = frozenset(spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS)
 BUCKET_PRIORITY = {
@@ -149,6 +187,8 @@ def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
 
     if bucket_id == RESEARCH_OU_UNDER_ODDS_1_81_2_00:
         return market == "OU_25" and selection == "UNDER" and 1.80 < odds <= 2.00
+    if bucket_id == RESEARCH_OU_UNDER_ODDS_2_01_2_50:
+        return market == "OU_25" and selection == "UNDER" and 2.00 < odds <= 2.50
     if bucket_id == RESEARCH_OU_OVER_ODDS_1_81_2_00:
         return market == "OU_25" and selection == "OVER" and 1.80 < odds <= 2.00
     if bucket_id == RESEARCH_LOW_SCORING_NON_EXTREME:
@@ -162,6 +202,29 @@ def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
         return market == "OU_25" and selection == "UNDER" and 0.20 <= edge < 0.30
     if bucket_id == RESEARCH_BTTS_NO_ODDS_2_01_2_50:
         return market == "BTTS" and selection == "NO" and 2.00 < odds <= 2.50
+    if bucket_id == CORNER_OVER_GAP_1_2_ODDS_1_61_1_80:
+        expected = row.get("expected_total_corners")
+        line = row.get("line")
+        return (
+            market == "TOTAL_CORNERS"
+            and selection == "OVER"
+            and expected is not None
+            and line is not None
+            and 1.0 <= float(expected) - float(line) < 2.0
+            and 1.60 < odds <= 1.80
+        )
+    if bucket_id == CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00:
+        model_p = row.get("model_probability")
+        market_p = row.get("market_probability")
+        return (
+            market == "TOTAL_CORNERS"
+            and selection == "OVER"
+            and model_p is not None
+            and market_p is not None
+            and 0.50 <= float(model_p) < 0.55
+            and 0.45 <= float(market_p) < 0.50
+            and 1.80 < odds <= 2.00
+        )
     if bucket_id == GOALLAB_OU_OVER_XG_2_5_3_0:
         home = row.get("expected_home_goals")
         away = row.get("expected_away_goals")

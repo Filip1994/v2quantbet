@@ -241,6 +241,66 @@ class PostgreSQLProductionFunnelRepository:
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
     @classmethod
+    def _cornerlab_performance_rows(cursor: Any) -> tuple[dict[str, Any], ...]:
+        """Use the same one-settled-pick-per-fixture rule as CornerLab analytics."""
+        cursor.execute(
+            """
+            WITH candidates AS (
+                SELECT q.fixture_id, q.market_key, q.selection, q.line, q.odds,
+                       q.edge, q.expected_value, q.model_probability, q.market_probability,
+                       q.stake_minor, settled.outcome, settled.pnl_minor,
+                       snapshot.expected_total_corners,
+                       COALESCE(qlatest.home_team, platest.home_team) AS home_team,
+                       COALESCE(qlatest.away_team, platest.away_team) AS away_team,
+                       COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name,
+                       COALESCE(qlatest.country, platest.country) AS country,
+                       COALESCE(qlatest.league_id, f.league_id) AS league_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY q.fixture_id
+                           ORDER BY ABS(q.odds - 2.0), q.shadow_bet_id
+                       ) AS fixture_rank
+                FROM quantlab_shadow_bets q
+                JOIN LATERAL (
+                    SELECT e.outcome, e.pnl_minor
+                    FROM quantlab_corner_settlement_events e
+                    WHERE e.shadow_bet_id = q.shadow_bet_id
+                    ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC
+                    LIMIT 1
+                ) settled ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT s.expected_total_corners
+                    FROM quantlab_corner_feature_snapshots s
+                    WHERE s.fixture_id = q.fixture_id
+                      AND s.model_version = q.model_version
+                      AND s.decision_at <= q.decision_at
+                    ORDER BY s.decision_at DESC, s.feature_snapshot_id DESC
+                    LIMIT 1
+                ) snapshot ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT o.home_team, o.away_team, o.competition_name, o.country,
+                           o.league_id
+                    FROM quantlab_fixture_observations o
+                    WHERE o.fixture_id = q.fixture_id
+                    ORDER BY o.captured_at DESC, o.fixture_observation_id DESC
+                    LIMIT 1
+                ) qlatest ON TRUE
+                LEFT JOIN fixtures f ON f.fixture_id = q.fixture_id
+                LEFT JOIN LATERAL (
+                    SELECT o.home_team, o.away_team, o.competition_name, o.country
+                    FROM fixture_observations o
+                    WHERE o.fixture_id = q.fixture_id
+                    ORDER BY o.observed_at DESC, o.fixture_observation_id DESC
+                    LIMIT 1
+                ) platest ON TRUE
+                WHERE q.lab = 'CORNER'
+                  AND settled.outcome IN ('WIN', 'LOSS', 'VOID')
+            )
+            SELECT * FROM candidates WHERE fixture_rank = 1
+            """
+        )
+        return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
+
+    @classmethod
     def _bucket_performance(
         cls,
         cursor: Any,
@@ -289,6 +349,27 @@ class PostgreSQLProductionFunnelRepository:
                 if bucket_id in accumulators:
                     accumulators[bucket_id]["graded_n"] += 1
                     accumulators[bucket_id]["unit_pnl"] += unit_pnl
+
+        if any(bucket.startswith("CORNER_") for bucket in bucket_ids):
+            for row in cls._cornerlab_performance_rows(cursor):
+                if is_universe_blocked_competition(
+                    country=row.get("country"),
+                    competition_name=row.get("competition_name"),
+                    league_id=row.get("league_id"),
+                    home_team=row.get("home_team"),
+                    away_team=row.get("away_team"),
+                ):
+                    continue
+                if str(row.get("outcome") or "") not in {"WIN", "LOSS"}:
+                    continue
+                stake = int(row.get("stake_minor") or 0)
+                if stake <= 0:
+                    continue
+                unit_pnl = int(row.get("pnl_minor") or 0) / stake
+                for bucket_id in matching_bucket_ids(row, source_universe="CORNERLAB"):
+                    if bucket_id in accumulators:
+                        accumulators[bucket_id]["graded_n"] += 1
+                        accumulators[bucket_id]["unit_pnl"] += unit_pnl
 
         stats: dict[str, dict[str, Any]] = {}
         for bucket_id, accumulator in accumulators.items():
@@ -397,6 +478,10 @@ class PostgreSQLProductionFunnelRepository:
                         e.market = 'BTTS' AND e.selected_selection = 'NO'
                         AND e.selected_odd > 2.00 AND e.selected_odd <= 2.50
                     )
+                    OR (
+                        e.market = 'OU_25' AND e.selected_selection = 'UNDER'
+                        AND e.selected_odd > 2.00 AND e.selected_odd <= 2.50
+                    )
               )
             ORDER BY rs.qualified_at ASC, rs.research_signal_id ASC
             LIMIT 5000
@@ -470,6 +555,79 @@ class PostgreSQLProductionFunnelRepository:
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
     @staticmethod
+    def _cornerlab_candidates(cursor: Any, *, now: datetime) -> tuple[dict[str, Any], ...]:
+        cursor.execute(
+            """
+            SELECT 'CORNERLAB'::text AS source_universe,
+                   q.shadow_bet_id AS source_pick_id,
+                   q.fixture_id AS source_fixture_id,
+                   COALESCE(qlatest.home_team, platest.home_team) AS home_team,
+                   COALESCE(qlatest.away_team, platest.away_team) AS away_team,
+                   COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name,
+                   COALESCE(qlatest.country, platest.country) AS country,
+                   COALESCE(qlatest.provider_status, platest.provider_status, 'NS') AS provider_status,
+                   q.market_key, q.selection, q.line, q.bookmaker_id, q.bookmaker_name,
+                   q.odds, q.market_probability, q.model_probability, q.edge, q.expected_value,
+                   q.model_name AS source_model_name,
+                   q.model_version AS source_model_version,
+                   'CORNERLAB_SHADOW_PICK'::text AS source_policy_version,
+                   q.quote_observed_at AS source_quote_observed_at,
+                   q.decision_at AS source_decision_at,
+                   COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at,
+                   snapshot.expected_total_corners,
+                   jsonb_build_object(
+                       'shadow_bet_id', q.shadow_bet_id,
+                       'expected_total_corners', snapshot.expected_total_corners,
+                       'source_stake_minor', q.stake_minor
+                   ) AS source_payload
+            FROM quantlab_shadow_bets q
+            LEFT JOIN LATERAL (
+                SELECT s.expected_total_corners
+                FROM quantlab_corner_feature_snapshots s
+                WHERE s.fixture_id = q.fixture_id
+                  AND s.model_version = q.model_version
+                  AND s.decision_at <= q.decision_at
+                ORDER BY s.decision_at DESC, s.feature_snapshot_id DESC
+                LIMIT 1
+            ) snapshot ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT o.home_team, o.away_team, o.competition_name, o.country,
+                       o.provider_status, o.kickoff_at
+                FROM quantlab_fixture_observations o
+                WHERE o.fixture_id = q.fixture_id
+                ORDER BY o.captured_at DESC, o.fixture_observation_id DESC
+                LIMIT 1
+            ) qlatest ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT o.home_team, o.away_team, o.competition_name, o.country,
+                       o.provider_status, o.kickoff_at
+                FROM fixture_observations o
+                WHERE o.fixture_id = q.fixture_id
+                ORDER BY o.observed_at DESC, o.fixture_observation_id DESC
+                LIMIT 1
+            ) platest ON TRUE
+            WHERE q.lab = 'CORNER'
+              AND q.market_key = 'TOTAL_CORNERS'
+              AND q.selection = 'OVER'
+              AND q.decision_at < COALESCE(qlatest.kickoff_at, platest.kickoff_at)
+              AND COALESCE(qlatest.kickoff_at, platest.kickoff_at) > %s
+              AND (
+                (snapshot.expected_total_corners - q.line >= 1.0
+                 AND snapshot.expected_total_corners - q.line < 2.0
+                 AND q.odds > 1.60 AND q.odds <= 1.80)
+                OR
+                (q.model_probability >= 0.50 AND q.model_probability < 0.55
+                 AND q.market_probability >= 0.45 AND q.market_probability < 0.50
+                 AND q.odds > 1.80 AND q.odds <= 2.00)
+              )
+            ORDER BY q.decision_at ASC, q.shadow_bet_id ASC
+            LIMIT 5000
+            """,
+            (now,),
+        )
+        return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
+
+    @staticmethod
     def _open_exposure(cursor: Any) -> int:
         cursor.execute(
             """
@@ -485,6 +643,11 @@ class PostgreSQLProductionFunnelRepository:
                         WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
                             SELECT 1 FROM quantlab_goal_pick_settlements s
                             WHERE s.goal_pick_id = p.source_pick_id
+                        )
+                        WHEN p.source_universe = 'CORNERLAB' THEN EXISTS (
+                            SELECT 1 FROM quantlab_corner_settlement_events e
+                            WHERE e.shadow_bet_id = p.source_pick_id
+                              AND e.outcome IN ('WIN', 'LOSS', 'VOID')
                         )
                         WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
                             SELECT 1
@@ -532,7 +695,12 @@ class PostgreSQLProductionFunnelRepository:
                                 SELECT 1 FROM quantlab_goal_pick_settlements s
                                 WHERE s.goal_pick_id = p.source_pick_id
                             )
-                            WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
+                            WHEN p.source_universe = 'CORNERLAB' THEN EXISTS (
+                            SELECT 1 FROM quantlab_corner_settlement_events e
+                            WHERE e.shadow_bet_id = p.source_pick_id
+                              AND e.outcome IN ('WIN', 'LOSS', 'VOID')
+                        )
+                        WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
                                 SELECT 1
                                 FROM fixture_result_acquisition_states a
                                 JOIN fixture_result_observations r
@@ -618,6 +786,8 @@ class PostgreSQLProductionFunnelRepository:
                 )
             )
             rows.extend(self._goallab_candidates(cursor, now=cloned_at))
+            if any(item.startswith("CORNER_") for item in selected):
+                rows.extend(self._cornerlab_candidates(cursor, now=cloned_at))
 
             bucket_stats = self._bucket_performance(cursor, bucket_ids=selected)
             bucket_order = tuple(
@@ -639,6 +809,8 @@ class PostgreSQLProductionFunnelRepository:
                     self._research_matches(row)
                     if source == "RESEARCH"
                     else self._goallab_matches(row)
+                    if source == "GOALLAB"
+                    else matching_bucket_ids(row, source_universe="CORNERLAB")
                 )
                 active_matches = tuple(
                     sorted(
@@ -785,6 +957,11 @@ class PostgreSQLProductionFunnelStateRepository:
                 WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
                     SELECT 1 FROM quantlab_goal_pick_settlements s
                     WHERE s.goal_pick_id = p.source_pick_id
+                )
+                WHEN p.source_universe = 'CORNERLAB' THEN EXISTS (
+                    SELECT 1 FROM quantlab_corner_settlement_events e
+                    WHERE e.shadow_bet_id = p.source_pick_id
+                      AND e.outcome IN ('WIN', 'LOSS', 'VOID')
                 )
                 WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
                     SELECT 1

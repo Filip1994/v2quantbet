@@ -31,6 +31,7 @@ from h2h.production_buckets import (
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
     GOALLAB_OU_OVER_XG_2_5_3_0,
     PRODUCTION_BUCKET_SPECS,
+    bucket_matches,
     n_roi_priority_score,
 )
 
@@ -1212,6 +1213,57 @@ def _selected_goal_production_bucket_table(
         + "".join(rendered)
         + "</tbody></table></div></section>"
     )
+
+def _selected_corner_production_bucket_table(
+    rows: tuple[dict[str, Any], ...], *, currency: str
+) -> str:
+    """Display only the selected CornerLab cohorts using the shared live predicate."""
+    active_ids = set(active_bucket_ids())
+    specs = [
+        spec for spec in PRODUCTION_BUCKET_SPECS
+        if spec.source_universe == "CORNERLAB" and spec.bucket_id in active_ids
+    ]
+    if not specs:
+        return ""
+    ranked = []
+    for spec in specs:
+        cohort = tuple(row for row in rows if bucket_matches(row, spec.bucket_id))
+        metrics = goal_pick_metrics(cohort)
+        n = int(metrics.get("wins") or 0) + int(metrics.get("losses") or 0)
+        roi = metrics.get("roi_pct")
+        score = n_roi_priority_score(
+            graded_n=n, roi_pct=None if roi is None else float(roi)
+        )
+        ranked.append((score, float("-inf") if roi is None else float(roi), n, spec, metrics))
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    rendered = []
+    for priority, (score, _roi, n, spec, metrics) in enumerate(ranked, 1):
+        rendered.append(
+            '<tr class="production-bucket-row">'
+            f'<td><span class="priority-rank">#{priority}</span></td>'
+            f'<td><a class="production-bucket-link" href="{escape(spec.analytics_path, quote=True)}" '
+            'target="_blank" rel="noopener noreferrer">'
+            f'{escape(spec.label)}</a>'
+            f'<small><code>{escape(spec.bucket_id)}</code></small></td>'
+            f'<td>{n}</td><td>{metrics["wins"]}-{metrics["losses"]}-{metrics["voids"]}</td>'
+            f'<td>{_metric(metrics["roi_pct"], suffix="%", signed=True)}</td>'
+            f'<td>{_metric(score, digits=2)}</td>'
+            f'<td>{_money(int(metrics["pnl_minor"]), currency)}</td>'
+            f'<td>{_metric(metrics["avg_odds"], digits=2)}</td>'
+            f'<td>{escape(str(metrics["sample_band"]))}</td></tr>'
+        )
+    return (
+        '<section class="panel production-intake-panel" id="production-intake-buckets">'
+        '<div class="panel-title"><b>Production intake · selected CornerLab buckets</b>'
+        '<span>neon blue = approved intake · priority = ROI × min(graded N / 100, 1)</span></div>'
+        '<div class="table"><table><thead><tr>'
+        '<th>Priority</th><th>Bucket</th><th>Graded N</th><th>W-L-V</th>'
+        '<th>Current ROI</th><th>N+ROI score</th><th>P/L</th>'
+        '<th>Avg odds</th><th>Evidence</th>'
+        '</tr></thead><tbody>' + "".join(rendered)
+        + '</tbody></table></div></section>'
+    )
+
 
 def _watchlist_block(content: str, *, lab_key: str) -> str:
     if not content:
@@ -3855,6 +3907,8 @@ def render_analytics(
     production_intake = (
         _selected_goal_production_bucket_table(rows, currency=currency)
         if lab_key == "goal"
+        else _selected_corner_production_bucket_table(rows, currency=currency)
+        if lab_key == "corner"
         else ""
     )
 
