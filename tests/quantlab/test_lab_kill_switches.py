@@ -1,6 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
-from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+from h2h.quantlab.runtime import (
+    QuantLabRuntime,
+    QuantLabRuntimeSettings,
+    _memory_sample_mib,
+)
 
 
 NOW = datetime(2026, 10, 4, 2, 0, tzinfo=UTC)
@@ -242,3 +246,36 @@ def test_goal_cache_is_released_even_on_evaluation_failure() -> None:
         "goal:cache-released"
     ) < runtime.calls.index("goal:results")
     assert "corner:results" in runtime.calls
+
+
+
+def test_memory_diagnostic_distinguishes_rss_anon_and_file_cache() -> None:
+    sample = _memory_sample_mib(
+        proc_status="Name:\tpython\nVmRSS:\t524288 kB\n",
+        cgroup_current=str(786432 * 1024),
+        cgroup_stat="anon 629145600\nfile 157286400\nslab 123456\n",
+    )
+    assert sample == {
+        "process_rss": 512.0,
+        "cgroup_used": 768.0,
+        "cgroup_anon": 600.0,
+        "cgroup_file": 150.0,
+    }
+
+
+def test_memory_diagnostic_tolerates_non_linux_and_unavailable_values() -> None:
+    assert _memory_sample_mib() == {
+        "process_rss": None,
+        "cgroup_used": None,
+        "cgroup_anon": None,
+        "cgroup_file": None,
+    }
+    partial = _memory_sample_mib(
+        proc_status="VmRSS:\tinvalid kB\n",
+        cgroup_current="unknown",
+        cgroup_stat="anon nope\nfile 1048576\n",
+    )
+    assert partial["process_rss"] is None
+    assert partial["cgroup_used"] is None
+    assert partial["cgroup_anon"] is None
+    assert partial["cgroup_file"] == 1.0
