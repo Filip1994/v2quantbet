@@ -240,7 +240,7 @@ class PostgreSQLProductionFunnelRepository:
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
-    @classmethod
+    @staticmethod
     def _cornerlab_performance_rows(cursor: Any) -> tuple[dict[str, Any], ...]:
         """Use the same one-settled-pick-per-fixture rule as CornerLab analytics."""
         cursor.execute(
