@@ -12,6 +12,7 @@ from h2h.quantlab.dashboard_views import (
     _bucket_detail_rows,
     _bucket_pick_table,
     _cohort_table,
+    _sort_cohort_rows,
     _sortable_th,
 )
 
@@ -161,3 +162,34 @@ def test_sort_header_resets_only_its_own_table_page() -> None:
     assert "league_page=1" in html
     assert "bucket_picks_page=4" in html
     assert "league_sort=roi_pct" in html
+
+
+@pytest.mark.parametrize("bucket_key", ["odds_bucket", "line_bucket", "sample_bucket"])
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [
+        ("asc", ("Low", "High", "Unknown")),
+        ("desc", ("Unknown", "High", "Low")),
+    ],
+)
+def test_mixed_numeric_and_named_bucket_sorting_cannot_crash_dashboard(
+    bucket_key: str, direction: str, expected: tuple[str, ...],
+) -> None:
+    rows = (
+        {**_cohort(0), bucket_key: "1.5–2.0", "competition_name": "Low"},
+        {**_cohort(1), bucket_key: "unknown", "competition_name": "Unknown"},
+        {**_cohort(2), bucket_key: "3.5–4.0", "competition_name": "High"},
+    )
+    # Before the fix this raised: TypeError: '<' not supported between
+    # instances of 'str' and 'float', returning HTTP 503 for an analytics sort.
+    sorted_rows = _sort_cohort_rows(rows, key=bucket_key, direction=direction)
+    assert tuple(row["competition_name"] for row in sorted_rows) == expected
+    html = _cohort_table(
+        "Mixed buckets", rows, (bucket_key,),
+        lab_key="goal", table_key="mixed",
+        params={"mixed_sort": [bucket_key], "mixed_dir": [direction]},
+        currency="RSD",
+    )
+    assert html.count("<tr>") == len(rows) + 1
+    for label in ("1.5–2.0", "3.5–4.0", "unknown"):
+        assert label in html
