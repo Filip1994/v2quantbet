@@ -650,6 +650,11 @@ class PostgreSQLProductionFunnelRepository:
                               AND e.outcome IN ('WIN', 'LOSS', 'VOID')
                         )
                         WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
+                    SELECT 1 FROM research_signals rs
+                    JOIN pick_settlement_events e ON e.pick_id = rs.production_pick_id
+                    WHERE rs.research_signal_id = p.source_pick_id
+                      AND e.event_kind = 'MANUAL_VOID' AND e.outcome = 'VOID'
+                ) OR EXISTS (
                             SELECT 1
                             FROM fixture_result_acquisition_states a
                             JOIN fixture_result_observations r
@@ -701,6 +706,11 @@ class PostgreSQLProductionFunnelRepository:
                               AND e.outcome IN ('WIN', 'LOSS', 'VOID')
                         )
                         WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
+                    SELECT 1 FROM research_signals rs
+                    JOIN pick_settlement_events e ON e.pick_id = rs.production_pick_id
+                    WHERE rs.research_signal_id = p.source_pick_id
+                      AND e.event_kind = 'MANUAL_VOID' AND e.outcome = 'VOID'
+                ) OR EXISTS (
                                 SELECT 1
                                 FROM fixture_result_acquisition_states a
                                 JOIN fixture_result_observations r
@@ -964,6 +974,11 @@ class PostgreSQLProductionFunnelStateRepository:
                       AND e.outcome IN ('WIN', 'LOSS', 'VOID')
                 )
                 WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
+                    SELECT 1 FROM research_signals rs
+                    JOIN pick_settlement_events e ON e.pick_id = rs.production_pick_id
+                    WHERE rs.research_signal_id = p.source_pick_id
+                      AND e.event_kind = 'MANUAL_VOID' AND e.outcome = 'VOID'
+                ) OR EXISTS (
                     SELECT 1
                     FROM fixture_result_acquisition_states a
                     JOIN fixture_result_observations r
