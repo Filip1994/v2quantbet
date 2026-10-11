@@ -67,8 +67,8 @@ def test_fresh_schema_migrates_in_order_through_latest() -> None:
             )
             applied = apply_migrations(connection, MIGRATION_DIR)
             assert applied == tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
-            # Production funnel intake is intentionally the current schema tip.
-            assert applied[-1] == "066_manual_settle_94e1448785.sql"
+            # GoalLab result-poll retries are the current append-only migration tip.
+            assert applied[-1] == "067_goallab_result_poll_attempts.sql"
         with psycopg.connect(DATABASE_URL) as inspection:
             inspection.execute(
                 psycopg.sql.SQL("SET search_path TO {}").format(psycopg.sql.Identifier(schema))
