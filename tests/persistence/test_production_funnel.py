@@ -22,6 +22,7 @@ from h2h.production_buckets import (
 )
 from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelRepository,
+    PostgreSQLProductionFunnelStateRepository,
     active_bucket_ids,
     intake_contract_version,
 )
