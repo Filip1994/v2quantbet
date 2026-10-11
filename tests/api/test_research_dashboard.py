@@ -975,8 +975,11 @@ def test_selected_production_buckets_are_neon_highlighted_in_research_analytics(
 
     assert 'id="production-intake-buckets"' in html
     assert 'class="panel production-intake-panel"' in html
-    assert "OU UNDER 2.5 · odds 1.81–2.00" in html
-    assert "OU OVER 2.5 · odds 1.81–2.00" in html
-    assert html.count('class="production-bucket-row"') == 2
+    intake = html.split('id="production-intake-buckets"', 1)[1].split("</section>", 1)[0]
+    assert "OU UNDER 2.5 · odds 2.01–2.50" in intake
+    assert "BTTS NO · odds 2.01–2.50" in intake
+    assert "OU OVER 2.5 · odds 1.81–2.00" in intake
+    assert "OU UNDER 2.5 · odds 1.81–2.00" not in intake
+    assert intake.count('class="production-bucket-row"') == 3
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "#18d7ff" in html
