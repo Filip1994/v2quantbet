@@ -739,3 +739,43 @@ def test_production_pick_bucket_names_link_to_exact_analytics_in_new_tab() -> No
     assert "bucket_expected_total_goals_bucket=2.5%E2%80%933" in html
     assert "bucket_entry_odds_bucket=2.01%E2%80%932.50" in html
     assert html.count('target="_blank" rel="noopener noreferrer"') >= 2
+
+
+def test_research_manual_void_is_projection_of_source_settlement_without_rewriting_provider() -> None:
+    """Cloned Research VOID follows its linked registered-pick settlement, not fixture status."""
+    class Cursor:
+        description = ()
+        query = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def execute(self, statement: str) -> None:
+            self.query = statement
+
+        def fetchall(self):
+            return []
+
+    class Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def cursor(self):
+            return self._cursor
+
+    cursor = Cursor()
+    app = SimpleNamespace(runtime=SimpleNamespace(connect=lambda: Connection(cursor)))
+    assert DashboardService(app)._picks() == []
+    assert "research_manual_settlement" in cursor.query
+    assert "e.pick_id = research_signal.production_pick_id" in cursor.query
+    assert "e.event_kind = 'MANUAL_VOID'" in cursor.query
+    assert "THEN research_manual_settlement.occurred_at" in cursor.query
