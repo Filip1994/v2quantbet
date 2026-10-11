@@ -1947,6 +1947,17 @@ class GoalStructuralModelService:
         self._fit_reason = "NOT_FITTED"
         self._fit_details: dict[str, Any] = {}
 
+    def release_cached_scoring_context(self) -> None:
+        """Release per-cycle historical samples after all fixture decisions.
+
+        A later score regenerates the identical as-of context through _prepare().
+        Persisted model artifact, model coefficients and validation remain intact.
+        """
+        self._cache_at = None
+        self._histories = {}
+        self._player_histories = {}
+        self._pairs = []
+
     def readiness(self, *, decision_at: datetime | None = None) -> dict[str, Any]:
         if decision_at is not None:
             self._prepare(decision_at)
