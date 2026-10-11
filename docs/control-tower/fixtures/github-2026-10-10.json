@@ -1,0 +1,358 @@
+{
+  "observed_at": "2026-10-10T09:45:37Z",
+  "repos": [
+    {
+      "commits": [
+        {
+          "at": "2026-10-10T00:45:19Z",
+          "sha": "8352f01a9d00ecfcd6a58e95537660a59fa6df55",
+          "title": "Production intake pilot: Research OU 2.5 at odds 1.81–2.00",
+          "url": "https://github.com/Filip1994/v2quantbet/commit/8352f01a9d00ecfcd6a58e95537660a59fa6df55"
+        },
+        {
+          "at": "2026-10-10T00:39:04Z",
+          "sha": "7b263afef098c41c6bff5eb0b214846b6b2b9d70",
+          "title": "Rename GoalLab intake test to reflect unselected status",
+          "url": "https://github.com/Filip1994/v2quantbet/commit/7b263afef098c41c6bff5eb0b214846b6b2b9d70"
+        },
+        {
+          "at": "2026-10-10T00:38:59Z",
+          "sha": "a3da222cc388c2fb0e7d1642a6a2f46e83c10d38",
+          "title": "Describe GoalLab buckets as unselected, not retired",
+          "url": "https://github.com/Filip1994/v2quantbet/commit/a3da222cc388c2fb0e7d1642a6a2f46e83c10d38"
+        },
+        {
+          "at": "2026-10-10T00:38:53Z",
+          "sha": "d19629f4f00137e8d7f821078a8f85234c078f0b",
+          "title": "Clarify GoalLab cohorts are unselected for Production, not retired",
+          "url": "https://github.com/Filip1994/v2quantbet/commit/d19629f4f00137e8d7f821078a8f85234c078f0b"
+        },
+        {
+          "at": "2026-10-10T00:38:45Z",
+          "sha": "89d0252324fcf55201b58b4987973f25414634f6",
+          "title": "Test that unselected GoalLab cohorts keep analytics without Production highlight",
+          "url": "https://github.com/Filip1994/v2quantbet/commit/89d0252324fcf55201b58b4987973f25414634f6"
+        }
+      ],
+      "full_name": "Filip1994/v2quantbet",
+      "pull_requests": [
+        {
+          "merge_commit_sha": "be075bad6f84c0e3be4a3dd76c4adb2ba000d5dd",
+          "merged_at": null,
+          "number": 243,
+          "state": "open",
+          "title": "Issue #242 Phase A: evidence-based architecture audit",
+          "url": "https://github.com/Filip1994/v2quantbet/pull/243"
+        },
+        {
+          "merge_commit_sha": "8352f01a9d00ecfcd6a58e95537660a59fa6df55",
+          "merged_at": "2026-10-10T00:45:20Z",
+          "number": 241,
+          "state": "closed",
+          "title": "Pilot Production intake: Research OU 2.5 at 1.81–2.00 only",
+          "url": "https://github.com/Filip1994/v2quantbet/pull/241"
+        },
+        {
+          "merge_commit_sha": "c6a54e23b4fa6af965d97f00191211ddbfb56d17",
+          "merged_at": "2026-10-09T23:38:37Z",
+          "number": 240,
+          "state": "closed",
+          "title": "Fix CI bootstrap: separate one-off settlement from schema migration 066",
+          "url": "https://github.com/Filip1994/v2quantbet/pull/240"
+        },
+        {
+          "merge_commit_sha": "6c0b78852ded75cff0ba2a268a636da325ba13b8",
+          "merged_at": "2026-10-09T23:32:47Z",
+          "number": 239,
+          "state": "closed",
+          "title": "Research: enforce retired odds exclusion on Active board",
+          "url": "https://github.com/Filip1994/v2quantbet/pull/239"
+        },
+        {
+          "merge_commit_sha": "4aa7651d20f0d49af8d7f8751a3613900bc9939f",
+          "merged_at": "2026-10-09T21:07:55Z",
+          "number": 238,
+          "state": "closed",
+          "title": "Trigger FAW Championship retirement rollout",
+          "url": "https://github.com/Filip1994/v2quantbet/pull/238"
+        }
+      ],
+      "status": "ok",
+      "workflow_runs": [
+        {
+          "conclusion": "success",
+          "created_at": "2026-10-10T09:38:09Z",
+          "head_sha": "ee2a2639789f261aec6520f843cf0bfa5f9f7c9e",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/v2quantbet/actions/runs/38042083710"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-10-10T00:45:22Z",
+          "head_sha": "8352f01a9d00ecfcd6a58e95537660a59fa6df55",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/v2quantbet/actions/runs/38010405146"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-10-10T00:43:59Z",
+          "head_sha": "10d0c3d555447fa663c658492426ae3cd45ee7e4",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/v2quantbet/actions/runs/38010303039"
+        },
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-10T00:42:12Z",
+          "head_sha": "cf72f822de2686184ac26ba7135114a00c402ba6",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/v2quantbet/actions/runs/38010179524"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-10-10T00:39:06Z",
+          "head_sha": "7b263afef098c41c6bff5eb0b214846b6b2b9d70",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/v2quantbet/actions/runs/38009958993"
+        }
+      ]
+    },
+    {
+      "commits": [
+        {
+          "at": "2026-09-28T19:59:08Z",
+          "sha": "b64fd507590a6d95ac0d3e56fd906f757fc79f5c",
+          "title": "Repair hard blacklist gate formatting",
+          "url": "https://github.com/Filip1994/h2h/commit/b64fd507590a6d95ac0d3e56fd906f757fc79f5c"
+        },
+        {
+          "at": "2026-09-28T19:58:54Z",
+          "sha": "e370291c68473381460dc860f02abecadb18515c",
+          "title": "Fix Serbia hard blacklist gate",
+          "url": "https://github.com/Filip1994/h2h/commit/e370291c68473381460dc860f02abecadb18515c"
+        },
+        {
+          "at": "2026-09-28T19:58:26Z",
+          "sha": "ea69a0ec9b40acd6f75760a50d98d310f4095a60",
+          "title": "Enforce Serbia hard blacklist in eligibility gate",
+          "url": "https://github.com/Filip1994/h2h/commit/ea69a0ec9b40acd6f75760a50d98d310f4095a60"
+        },
+        {
+          "at": "2026-09-28T19:58:03Z",
+          "sha": "02f79c503334d476e0575d3e0318d93695d983a0",
+          "title": "Test Serbia hard blacklist",
+          "url": "https://github.com/Filip1994/h2h/commit/02f79c503334d476e0575d3e0318d93695d983a0"
+        },
+        {
+          "at": "2026-09-28T19:58:00Z",
+          "sha": "4d3c6629eac1229d97a8c73bb779f81d517510be",
+          "title": "Hard blacklist Serbian football from QuantBet universe",
+          "url": "https://github.com/Filip1994/h2h/commit/4d3c6629eac1229d97a8c73bb779f81d517510be"
+        }
+      ],
+      "full_name": "Filip1994/h2h",
+      "pull_requests": [
+        {
+          "merge_commit_sha": "14f04f0020612f2a75887641501782824f13b25d",
+          "merged_at": "2026-09-11T10:57:27Z",
+          "number": 154,
+          "state": "closed",
+          "title": "Production hardening: canonical observation identity and immutable snapshots",
+          "url": "https://github.com/Filip1994/h2h/pull/154"
+        },
+        {
+          "merge_commit_sha": "7a75d5ee4c01b0fc9d7665d806c88493985f9d11",
+          "merged_at": "2026-09-11T00:04:50Z",
+          "number": 152,
+          "state": "closed",
+          "title": "Move raw API archives out of Git",
+          "url": "https://github.com/Filip1994/h2h/pull/152"
+        },
+        {
+          "merge_commit_sha": "e6e8f730e23e00b251ce6c74b86e8518062f3d1c",
+          "merged_at": "2026-09-10T21:06:26Z",
+          "number": 151,
+          "state": "closed",
+          "title": "P0 #150 — Complete canonical odds lifecycle on dashboard",
+          "url": "https://github.com/Filip1994/h2h/pull/151"
+        },
+        {
+          "merge_commit_sha": "4095a25e26d68f5cb3c017a61a52766761206fe0",
+          "merged_at": null,
+          "number": 148,
+          "state": "closed",
+          "title": "P1 — #73 add hard runtime evidence gate for exhaustive odds capture",
+          "url": "https://github.com/Filip1994/h2h/pull/148"
+        },
+        {
+          "merge_commit_sha": "cd347862d20c597b6225bd42335de2c3f8501b56",
+          "merged_at": "2026-09-09T23:53:14Z",
+          "number": 146,
+          "state": "closed",
+          "title": "fix: harden Near Miss exact identity and terminal lifecycle",
+          "url": "https://github.com/Filip1994/h2h/pull/146"
+        }
+      ],
+      "status": "ok",
+      "workflow_runs": [
+        {
+          "conclusion": "success",
+          "created_at": "2026-09-12T19:48:29Z",
+          "head_sha": "a6e1b933b4e7c08c91db0d59380b6b56454fe26c",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/h2h/actions/runs/34715237729"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-09-12T19:48:25Z",
+          "head_sha": "c301aef85e75ca37785b2a97df18b03532aa1f9a",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/h2h/actions/runs/34715233265"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-09-12T19:48:20Z",
+          "head_sha": "5fa93369263e796ff3cacb061ed5e3a81dd02004",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/h2h/actions/runs/34715229751"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-09-12T19:48:10Z",
+          "head_sha": "3f3a8916bac50feb25520bdf7f46891f5a237e66",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/h2h/actions/runs/34715221435"
+        },
+        {
+          "conclusion": "success",
+          "created_at": "2026-09-12T19:48:05Z",
+          "head_sha": "2669d335a7db11383ccb1af273f330620e608d5d",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/h2h/actions/runs/34715217635"
+        }
+      ]
+    },
+    {
+      "commits": [
+        {
+          "at": "2026-09-29T16:53:52Z",
+          "sha": "ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7",
+          "title": "Add Serbian decision notes to registered picks (#93)",
+          "url": "https://github.com/Filip1994/quantbet-baseball/commit/ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7"
+        },
+        {
+          "at": "2026-09-29T11:05:47Z",
+          "sha": "68f18e6df470d2bd1ffb1915ed4f4722fa0ddf26",
+          "title": "Polish Baseball analytics visuals (#92)",
+          "url": "https://github.com/Filip1994/quantbet-baseball/commit/68f18e6df470d2bd1ffb1915ed4f4722fa0ddf26"
+        },
+        {
+          "at": "2026-09-29T11:01:30Z",
+          "sha": "ec3e33a89a1b246d3aa3b794fd07220aa5628ff9",
+          "title": "Add ultra-detailed Baseball Moneyline analytics (#91)",
+          "url": "https://github.com/Filip1994/quantbet-baseball/commit/ec3e33a89a1b246d3aa3b794fd07220aa5628ff9"
+        },
+        {
+          "at": "2026-09-29T07:28:09Z",
+          "sha": "53ff825a0b6bec0bd1c1b8f9dc6027b0881580ca",
+          "title": "Keep all model and market evidence hot (#90)",
+          "url": "https://github.com/Filip1994/quantbet-baseball/commit/53ff825a0b6bec0bd1c1b8f9dc6027b0881580ca"
+        },
+        {
+          "at": "2026-09-29T03:05:54Z",
+          "sha": "b0291228b172785349044c91a09db32c6ef7c06b",
+          "title": "Harden Baseball cold storage and archive operational exhaust (#89)",
+          "url": "https://github.com/Filip1994/quantbet-baseball/commit/b0291228b172785349044c91a09db32c6ef7c06b"
+        }
+      ],
+      "full_name": "Filip1994/quantbet-baseball",
+      "pull_requests": [
+        {
+          "merge_commit_sha": "ed2e1c4f2756b179f182fac5c32b9fc86f8e80e7",
+          "merged_at": "2026-09-29T16:53:52Z",
+          "number": 93,
+          "state": "closed",
+          "title": "Add Serbian decision notes to registered picks",
+          "url": "https://github.com/Filip1994/quantbet-baseball/pull/93"
+        },
+        {
+          "merge_commit_sha": "68f18e6df470d2bd1ffb1915ed4f4722fa0ddf26",
+          "merged_at": "2026-09-29T11:05:48Z",
+          "number": 92,
+          "state": "closed",
+          "title": "Polish Baseball analytics visuals",
+          "url": "https://github.com/Filip1994/quantbet-baseball/pull/92"
+        },
+        {
+          "merge_commit_sha": "ec3e33a89a1b246d3aa3b794fd07220aa5628ff9",
+          "merged_at": "2026-09-29T11:01:31Z",
+          "number": 91,
+          "state": "closed",
+          "title": "Add ultra-detailed Baseball Moneyline analytics",
+          "url": "https://github.com/Filip1994/quantbet-baseball/pull/91"
+        },
+        {
+          "merge_commit_sha": "53ff825a0b6bec0bd1c1b8f9dc6027b0881580ca",
+          "merged_at": "2026-09-29T07:28:10Z",
+          "number": 90,
+          "state": "closed",
+          "title": "Keep all model and market evidence hot",
+          "url": "https://github.com/Filip1994/quantbet-baseball/pull/90"
+        },
+        {
+          "merge_commit_sha": "b0291228b172785349044c91a09db32c6ef7c06b",
+          "merged_at": "2026-09-29T03:05:54Z",
+          "number": 89,
+          "state": "closed",
+          "title": "Harden Baseball cold storage and archive operational exhaust",
+          "url": "https://github.com/Filip1994/quantbet-baseball/pull/89"
+        }
+      ],
+      "status": "ok",
+      "workflow_runs": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-01T12:03:34Z",
+          "head_sha": "dc9ac3e0af6807ce7146acd42a39874671f005fa",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/quantbet-baseball/actions/runs/36859278200"
+        },
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-01T12:03:31Z",
+          "head_sha": "5dd1c1f38c01c1aaf17dbe1416ea23991f3ca1e0",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/quantbet-baseball/actions/runs/36859273173"
+        },
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-01T12:03:28Z",
+          "head_sha": "02280e8e750d769ae39247db4c10c35fba77becb",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/quantbet-baseball/actions/runs/36859268577"
+        },
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-01T12:03:25Z",
+          "head_sha": "3c6f3e45079fb46e310de4feef235888b1590907",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/quantbet-baseball/actions/runs/36859264115"
+        },
+        {
+          "conclusion": "failure",
+          "created_at": "2026-10-01T11:53:03Z",
+          "head_sha": "673c909ef1d90ea5ed42aac383dbb7f9f2a60698",
+          "status": "completed",
+          "url": "https://github.com/Filip1994/quantbet-baseball/actions/runs/36858162537"
+        }
+      ]
+    },
+    {
+      "commits": [],
+      "full_name": "Filip1994/quantbet-basketball",
+      "pull_requests": [],
+      "status": "unavailable:HTTPError",
+      "workflow_runs": []
+    }
+  ],
+  "schema_version": 1
+}

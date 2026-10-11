@@ -1,5 +1,7 @@
 # Registar Railway definicija — snapshot 2026-10-10
 
+> **Istorijski Phase A zapis, zamenjen za aktivni opseg Issue #245.** Aktuelni fudbalski inventar je [ovde](generated/football-2026-10-10/CONTROL_TOWER.md). Brojevi ispod nisu sadašnji fudbalski footprint.
+
 Izvor: [sanitizovan Railway status](fixtures/railway-2026-10-10.json), snimljeno `2026-10-10T01:47:58Z`. Svih **48** registrovanih definicija je navedeno (coverage registracije 48/48); potvrđen Git source ref postoji za **31/48**, a prepoznat `python -m` entrypoint za **19/48**. To nisu procenat potvrđene funkcionalne mape ni procenat zdravih servisa. Kategorija iz imena je `inferred` osim PostgreSQL. `first seen` svih je vreme ovog snimka, a stvarni datum kreiranja je `unknown`. Owner nije javno dokumentovan za većinu one-shot definicija. Nema zaključka da je bilo koja bezbedna za brisanje.
 
 | Projekat | Servis / ID | Uloga | Status | Repo @ commit | Entrypoint | Poslednji deployment (UTC) |

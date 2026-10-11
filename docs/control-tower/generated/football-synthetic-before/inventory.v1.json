@@ -1,0 +1,156 @@
+{
+  "change_history": [],
+  "coverage": {
+    "cron_definitions": 0,
+    "entrypoint_modules": 1,
+    "failed_latest_deployments": 0,
+    "git_source_refs": 1,
+    "mapped_services": 1,
+    "registered_services": 2,
+    "registry_rows": 2,
+    "services_with_running_instance": 2,
+    "sleeping_latest_deployments": 0
+  },
+  "extra_components": [
+    {
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/GoalLab/README.md",
+      "name": "GoalLab",
+      "purpose": "Goal probability and shadow-pick experiments",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    },
+    {
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/CornerLab/README.md",
+      "name": "CornerLab",
+      "purpose": "Corner probability and shadow-pick experiments",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    },
+    {
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/CardLab/README.md",
+      "name": "CardLab",
+      "purpose": "Card/foul probability and shadow-pick experiments",
+      "runtime_status": "documented disabled on 2026-10-04; current config unverified"
+    },
+    {
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/H2HLab/README.md",
+      "name": "H2HLab",
+      "purpose": "Direct H2H research over read-only Dixon–Coles artifacts",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    }
+  ],
+  "github_observed_at": null,
+  "observed_at": "2026-10-01T00:00:00Z",
+  "project": "sincere-balance",
+  "project_id": "c0aa8208-dd61-48c4-a1d8-488802e84f36",
+  "recent_pull_requests": [],
+  "schema_version": 1,
+  "services": [
+    {
+      "api_cost_envelope": null,
+      "category": "database",
+      "ci_status": null,
+      "code_path": "unknown",
+      "component_id": "railway:c0aa8208-dd61-48c4-a1d8-488802e84f36:environment-example:database-example",
+      "consumers": [],
+      "created_at": null,
+      "cron_completion_evidence": null,
+      "cron_last_successful_completion_at": null,
+      "cron_running_now": false,
+      "cron_schedule": null,
+      "cron_scheduled": false,
+      "data_freshness_at": null,
+      "data_freshness_evidence": null,
+      "datastores_read": [],
+      "datastores_write": [],
+      "dependencies": [],
+      "deprecated": null,
+      "display_name": "Postgres",
+      "documented_reason": "reason unknown",
+      "entrypoint_module": null,
+      "environment": "production",
+      "environment_id": "environment-example",
+      "evidence_observed_at": "2026-10-01T00:00:00Z",
+      "evidence_url": null,
+      "first_seen_at": "2026-10-01T00:00:00Z",
+      "last_changed_at": "2026-09-30T22:00:00Z",
+      "last_successful_deployment_at": "2026-09-30T22:00:00Z",
+      "last_successful_deployment_observed_at": "2026-10-01T00:00:00Z",
+      "latest_deployment_status": "SUCCESS",
+      "mapping_status": "unmapped",
+      "observability": "Railway instance metadata only",
+      "operational_state": "running_instance",
+      "owner": "Railway project",
+      "permission_scope": "unknown",
+      "project": "sincere-balance",
+      "project_id": "c0aa8208-dd61-48c4-a1d8-488802e84f36",
+      "provider_categories": [],
+      "purpose": "Durable data store for services in its Railway project",
+      "risk_classification": "high_shared_state",
+      "running_instances": 1,
+      "service_id": "database-example",
+      "source_commit": null,
+      "source_repo": "unknown",
+      "verification": "inferred"
+    },
+    {
+      "api_cost_envelope": null,
+      "category": "production_worker",
+      "ci_status": null,
+      "code_path": "src/h2h/entrypoint.py",
+      "component_id": "railway:c0aa8208-dd61-48c4-a1d8-488802e84f36:environment-example:engine-example",
+      "consumers": [
+        "quantbet-dashboard",
+        "quantbet-research"
+      ],
+      "created_at": null,
+      "cron_completion_evidence": null,
+      "cron_last_successful_completion_at": null,
+      "cron_running_now": false,
+      "cron_schedule": null,
+      "cron_scheduled": false,
+      "data_freshness_at": null,
+      "data_freshness_evidence": null,
+      "datastores_read": [
+        "football PostgreSQL: fixtures, quotes, model state"
+      ],
+      "datastores_write": [
+        "football PostgreSQL: production decisions, picks, settlement"
+      ],
+      "dependencies": [
+        "API-Football",
+        "Postgres"
+      ],
+      "deprecated": null,
+      "display_name": "quantbet-engine",
+      "documented_reason": "Single-leader scheduler owns the production decision path",
+      "entrypoint_module": "h2h.entrypoint",
+      "environment": "production",
+      "environment_id": "environment-example",
+      "evidence_observed_at": "2026-10-01T00:00:00Z",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/README.md",
+      "first_seen_at": "2026-10-01T00:00:00Z",
+      "last_changed_at": "2026-09-30T23:00:00Z",
+      "last_successful_deployment_at": "2026-09-30T23:00:00Z",
+      "last_successful_deployment_observed_at": "2026-10-01T00:00:00Z",
+      "latest_deployment_status": "SUCCESS",
+      "mapping_status": "mapped",
+      "observability": "livez/readiness, worker status, dashboard",
+      "operational_state": "running_instance",
+      "owner": "Football Production",
+      "permission_scope": "production writes; DB grants unknown",
+      "project": "sincere-balance",
+      "project_id": "c0aa8208-dd61-48c4-a1d8-488802e84f36",
+      "provider_categories": [
+        "API-Football fixtures",
+        "API-Football odds"
+      ],
+      "purpose": "Discover fixtures, evaluate pre-match opportunities, register and settle paper picks",
+      "risk_classification": "high_production_path",
+      "running_instances": 1,
+      "service_id": "engine-example",
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_repo": "Filip1994/v2quantbet",
+      "verification": "inferred"
+    }
+  ],
+  "source": "synthetic test fixture; not production evidence"
+}

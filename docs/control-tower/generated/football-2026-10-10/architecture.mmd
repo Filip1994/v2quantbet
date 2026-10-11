@@ -1,0 +1,71 @@
+flowchart LR
+  %% Solid arrows read or consume; dotted arrows document application writes.
+  AF[API-Football]
+  subgraph P0["Railway sincere-balance / production environment"]
+    S0["goallab-void-26a813a9b6"]
+    S1["quantbet-kellylab"]
+    S2["quantbet-kelly-tournament"]
+    S3["quantbet-research"]
+    S4["quantbet-engine"]
+    S5["quantbet-quantlab"]
+    S6["quantbet-quantlab-collector"]
+    S7["quantbet-dashboard"]
+    S8["quantbet-void-1636701"]
+    S9["quantbet-quantlab-modeler"]
+    S10["Postgres"]
+    S11["south-america-performance-query"]
+    S12["quantbet-void-1636701-ops"]
+    S13["quantbet-find-26a813a9b6"]
+    S14["quantbet-find2-26a813a9b6"]
+    S15["quantbet-quantlab-collector-ACut"]
+    S16["south-america-performance-query-v2"]
+    S17["quantbet-archive-lifecycle"]
+  end
+  subgraph M["Football code modules; runtime status separate"]
+    M0["GoalLab"]
+    M1["CornerLab"]
+    M2["CardLab"]
+    M3["H2HLab"]
+  end
+  classDef production fill:#ffd8c2,stroke:#a34b00
+  classDef research fill:#dcecff,stroke:#2e63a0
+  classDef datastore fill:#e3d8ff,stroke:#6545a0
+  class S0 research
+  class S1 research
+  class S2 research
+  class S3 research
+  class S4 production
+  class S5 research
+  class S6 research
+  class S7 research
+  class S8 research
+  class S9 research
+  class S10 datastore
+  class S11 research
+  class S12 research
+  class S13 research
+  class S14 research
+  class S15 research
+  class S16 research
+  class S17 research
+  AF --> S15
+  AF --> S4
+  AF --> S6
+  S1 --> S2
+  S10 -->|read documented| S1
+  S10 -->|read documented| S17
+  S10 -->|read documented| S3
+  S10 -->|read documented| S4
+  S10 -->|read documented| S5
+  S10 -->|read documented| S6
+  S10 -->|read documented| S7
+  S10 -->|read documented| S9
+  S17 -.->|write documented, DB grants unknown| S10
+  S4 -.->|write documented, DB grants unknown| S10
+  S6 --> S9
+  S6 -.->|documented shared module| M0
+  S6 -.->|documented shared module| M1
+  S6 -.->|documented shared module| M2
+  S6 -.->|documented shared module| M3
+  S6 -.->|write documented, DB grants unknown| S10
+  S9 -.->|write documented, DB grants unknown| S10

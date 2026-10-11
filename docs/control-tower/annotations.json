@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "services": {
+    "Postgres": {
+      "category": "database",
+      "owner": "Railway project",
+      "purpose": "Durable data store for services in its Railway project",
+      "risk_classification": "high_shared_state",
+      "observability": "Railway instance metadata only"
+    },
+    "quantbet-engine": {
+      "category": "production_worker",
+      "owner": "Football Production",
+      "purpose": "Discover fixtures, evaluate pre-match opportunities, register and settle paper picks",
+      "documented_reason": "Single-leader scheduler owns the production decision path",
+      "code_path": "src/h2h/entrypoint.py",
+      "dependencies": [
+        "API-Football",
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: fixtures, quotes, model state"
+      ],
+      "datastores_write": [
+        "football PostgreSQL: production decisions, picks, settlement"
+      ],
+      "provider_categories": [
+        "API-Football fixtures",
+        "API-Football odds"
+      ],
+      "consumers": [
+        "quantbet-dashboard",
+        "quantbet-research"
+      ],
+      "permission_scope": "production writes; DB grants unknown",
+      "observability": "livez/readiness, worker status, dashboard",
+      "risk_classification": "high_production_path",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/README.md"
+    },
+    "quantbet-dashboard": {
+      "category": "dashboard",
+      "owner": "Football Production",
+      "purpose": "Read-only production picks, accounting and operational dashboard",
+      "documented_reason": "Separate dashboard-only process for operational independence",
+      "code_path": "src/h2h/dashboard_entrypoint.py",
+      "dependencies": [
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: production facts"
+      ],
+      "datastores_write": [],
+      "consumers": [
+        "operator"
+      ],
+      "permission_scope": "application read-only; DB grants unknown",
+      "observability": "HTTP read surface",
+      "risk_classification": "medium_sensitive_read_surface",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/README.md"
+    },
+    "quantbet-research": {
+      "category": "research_dashboard",
+      "owner": "Football Research",
+      "purpose": "Display research signals and analytics separately from production picks",
+      "code_path": "src/h2h/research_dashboard_entrypoint.py",
+      "dependencies": [
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: research signals"
+      ],
+      "datastores_write": [],
+      "consumers": [
+        "operator"
+      ],
+      "permission_scope": "application read surface; DB grants unknown",
+      "risk_classification": "medium_shared_database",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/src/h2h/research_dashboard_entrypoint.py"
+    },
+    "quantbet-quantlab": {
+      "category": "research_dashboard",
+      "owner": "QuantLab",
+      "purpose": "Read-only GoalLab, CornerLab, CardLab and H2HLab research dashboard",
+      "documented_reason": "Separate shadow experiments from Production",
+      "code_path": "src/h2h/quantlab_dashboard_entrypoint.py",
+      "dependencies": [
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: quantlab_* shadow facts"
+      ],
+      "datastores_write": [],
+      "consumers": [
+        "operator"
+      ],
+      "permission_scope": "documented read-only surface; DB grants unknown",
+      "risk_classification": "medium_shared_database",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/ARCHITECTURE.md"
+    },
+    "quantbet-quantlab-collector": {
+      "category": "research_collector",
+      "owner": "QuantLab shared core",
+      "purpose": "Collect independent fixture, odds and context evidence for shadow labs",
+      "documented_reason": "One all-market payload is reused across eligible laboratories",
+      "code_path": "src/h2h/quantlab/collector_entrypoint.py",
+      "dependencies": [
+        "API-Football",
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: immutable shared facts, quantlab_* watermarks"
+      ],
+      "datastores_write": [
+        "football PostgreSQL: quantlab_* observations"
+      ],
+      "provider_categories": [
+        "API-Football fixtures",
+        "API-Football odds",
+        "quantlab_context"
+      ],
+      "consumers": [
+        "quantbet-quantlab-modeler",
+        "quantbet-quantlab"
+      ],
+      "permission_scope": "documented quantlab_* writes; DB grants unknown",
+      "api_cost_envelope": "Shared football envelope documented as 75,000 requests/day; actual usage unknown",
+      "risk_classification": "high_shared_provider_and_database",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/ARCHITECTURE.md"
+    },
+    "quantbet-quantlab-modeler": {
+      "category": "research_modeler",
+      "owner": "QuantLab shared core",
+      "purpose": "Run offline/shadow model and audit cycles for enabled labs",
+      "code_path": "src/h2h/quantlab/modeler_entrypoint.py",
+      "dependencies": [
+        "Postgres",
+        "quantbet-quantlab-collector"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: quantlab_* observations"
+      ],
+      "datastores_write": [
+        "football PostgreSQL: quantlab_* model/decision state"
+      ],
+      "consumers": [
+        "quantbet-quantlab"
+      ],
+      "permission_scope": "documented quantlab_* writes; DB grants unknown",
+      "risk_classification": "medium_shadow_only",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/OPERATIONS.md"
+    },
+    "quantbet-quantlab-collector-ACut": {
+      "category": "research_collector",
+      "owner": "unknown",
+      "purpose": "Alternate QuantLab collector; continued need unknown",
+      "code_path": "src/h2h/quantlab/collector_entrypoint.py",
+      "dependencies": [
+        "API-Football",
+        "Postgres"
+      ],
+      "datastores_read": [
+        "unknown"
+      ],
+      "datastores_write": [
+        "unknown"
+      ],
+      "risk_classification": "review_duplicate_candidate",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/OPERATIONS.md"
+    },
+    "quantbet-kellylab": {
+      "category": "shadow_portfolio_dashboard",
+      "owner": "KellyLab",
+      "purpose": "Read-only KellyLab shadow portfolio and allocation analysis",
+      "code_path": "src/h2h/kellylab_dashboard_entrypoint.py",
+      "dependencies": [
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: KellyLab shadow facts"
+      ],
+      "datastores_write": [],
+      "consumers": [
+        "operator",
+        "quantbet-kelly-tournament (inferred)"
+      ],
+      "permission_scope": "application read surface; DB grants unknown",
+      "risk_classification": "medium_shared_database",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/src/h2h/kellylab_dashboard_entrypoint.py"
+    },
+    "quantbet-kelly-tournament": {
+      "category": "shadow_simulation",
+      "owner": "unknown",
+      "purpose": "Kelly strategy tournament simulation; source and rationale unverified",
+      "dependencies": [
+        "quantbet-kellylab"
+      ],
+      "datastores_read": [
+        "unknown"
+      ],
+      "datastores_write": [
+        "unknown"
+      ],
+      "risk_classification": "unmapped_inline_runtime"
+    },
+    "quantbet-archive-lifecycle": {
+      "category": "archive_cron",
+      "owner": "Football storage",
+      "purpose": "Apply documented cold archive lifecycle",
+      "code_path": "src/h2h/archive/lifecycle_entrypoint.py",
+      "dependencies": [
+        "Postgres"
+      ],
+      "datastores_read": [
+        "football PostgreSQL: archive eligible tables"
+      ],
+      "datastores_write": [
+        "football PostgreSQL: archive lifecycle state"
+      ],
+      "risk_classification": "high_data_retention_path",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/src/h2h/archive/lifecycle_entrypoint.py"
+    }
+  },
+  "extra_components": [
+    {
+      "name": "GoalLab",
+      "purpose": "Goal probability and shadow-pick experiments",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/GoalLab/README.md",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    },
+    {
+      "name": "CornerLab",
+      "purpose": "Corner probability and shadow-pick experiments",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/CornerLab/README.md",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    },
+    {
+      "name": "CardLab",
+      "purpose": "Card/foul probability and shadow-pick experiments",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/CardLab/README.md",
+      "runtime_status": "documented disabled on 2026-10-04; current config unverified"
+    },
+    {
+      "name": "H2HLab",
+      "purpose": "Direct H2H research over read-only Dixon–Coles artifacts",
+      "evidence_url": "https://github.com/Filip1994/v2quantbet/blob/8352f01a9d00ecfcd6a58e95537660a59fa6df55/QuantLab/H2HLab/README.md",
+      "runtime_status": "shares QuantLab collector/modeler; switch value unverified"
+    }
+  ]
+}
