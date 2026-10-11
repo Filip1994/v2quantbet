@@ -494,6 +494,8 @@ def main() -> None:
                     type(exc).__name__,
                     error_text,
                 )
+                if one_shot:
+                    raise
             if one_shot:
                 LOGGER.info("QuantLab one-shot collector cycle complete; exiting")
                 break

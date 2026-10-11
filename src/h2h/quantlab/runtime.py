@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from h2h.odds.budget import ApiBudgetExceededError
@@ -47,6 +49,72 @@ from h2h.quantlab.scope import card_corner_scope, goal_scope
 
 
 LOGGER = logging.getLogger("quantbet.quantlab")
+
+
+def _memory_sample_mib(
+    *,
+    proc_status: str = "",
+    cgroup_current: str = "",
+    cgroup_stat: str = "",
+) -> dict[str, float | None]:
+    """Linux diagnostic: separate Python process RSS from cgroup page cache."""
+    measurements: dict[str, float | None] = {
+        "process_rss": None,
+        "cgroup_used": None,
+        "cgroup_anon": None,
+        "cgroup_file": None,
+    }
+    for line in proc_status.splitlines():
+        if line.startswith("VmRSS:"):
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == "kB":
+                try:
+                    measurements["process_rss"] = round(int(parts[1]) / 1024, 1)
+                except ValueError:
+                    pass
+            break
+    if cgroup_current.strip():
+        try:
+            measurements["cgroup_used"] = round(
+                int(cgroup_current.strip()) / (1024 * 1024), 1
+            )
+        except ValueError:
+            pass
+    for line in cgroup_stat.splitlines():
+        key, _, value = line.partition(" ")
+        if key not in {"anon", "file"}:
+            continue
+        try:
+            measurements[f"cgroup_{key}"] = round(
+                int(value.strip()) / (1024 * 1024), 1
+            )
+        except ValueError:
+            pass
+    return measurements
+
+
+def _log_memory_checkpoint(stage: str) -> None:
+    """Read-only, best-effort resource counters; never block collection."""
+    def read(path: str) -> str:
+        try:
+            return Path(path).read_text(encoding="ascii")
+        except (OSError, UnicodeError):
+            return ""
+
+    sample = _memory_sample_mib(
+        proc_status=read("/proc/self/status"),
+        cgroup_current=read("/sys/fs/cgroup/memory.current"),
+        cgroup_stat=read("/sys/fs/cgroup/memory.stat"),
+    )
+    LOGGER.info(
+        "QuantLab memory checkpoint stage=%s process_rss_mib=%s "
+        "cgroup_used_mib=%s cgroup_anon_mib=%s cgroup_file_mib=%s",
+        stage,
+        sample["process_rss"],
+        sample["cgroup_used"],
+        sample["cgroup_anon"],
+        sample["cgroup_file"],
+    )
 
 
 def _utc_fixture_time(value: datetime) -> datetime:
@@ -1172,10 +1240,15 @@ class QuantLabRuntime:
                     )
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
-                event_candidates = self._repository.referee_card_event_backfill_candidates(
-                    referee,
-                    decision_at=now,
-                    limit=max(12, self._settings.card_referee_history_target * 2),
+                # Avoid costly candidate SQL once this cycle's API-attempt cap is spent.
+                event_candidates = (
+                    self._repository.referee_card_event_backfill_candidates(
+                        referee,
+                        decision_at=now,
+                        limit=max(12, self._settings.card_referee_history_target * 2),
+                    )
+                    if event_attempts < self._settings.card_referee_statistics_per_cycle
+                    else ()
                 )
                 for fixture in event_candidates:
                     if current_sample >= self._settings.card_referee_history_target:
@@ -1205,11 +1278,15 @@ class QuantLabRuntime:
                             baseline_samples[referee_key_value] = current_sample
                 if current_sample >= self._settings.card_referee_history_target:
                     continue
-                candidates = self._repository.referee_statistics_backfill_candidates(
-                    referee,
-                    decision_at=now,
-                    retry_after_seconds=self._settings.card_referee_statistics_retry_seconds,
-                    limit=max(12, self._settings.card_referee_history_target * 2),
+                candidates = (
+                    self._repository.referee_statistics_backfill_candidates(
+                        referee,
+                        decision_at=now,
+                        retry_after_seconds=self._settings.card_referee_statistics_retry_seconds,
+                        limit=max(12, self._settings.card_referee_history_target * 2),
+                    )
+                    if statistics_attempts < self._settings.card_referee_statistics_per_cycle
+                    else ()
                 )
                 for fixture in candidates:
                     if current_sample >= self._settings.card_referee_history_target:
@@ -1956,12 +2033,22 @@ class QuantLabRuntime:
         )
 
         if self._settings.goal_enabled:
+            _log_memory_checkpoint("goal_before")
             try:
                 goal_decisions, goal_picks = self._evaluate_goal_picks(now)
                 result["goal_decisions"] = goal_decisions
                 result["goal_picks"] = goal_picks
             except Exception:
                 LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+            finally:
+                # The batch has scored every GoalLab fixture. Retaining 30,000
+                # match histories through Card/Corner/H2H collection raises RSS.
+                release = getattr(self._goal_engine, "release_cached_scoring_context", None)
+                if callable(release):
+                    release()
+                    # Reclaim cyclic objects once per batch; never trim live data.
+                    gc.collect()
+                _log_memory_checkpoint("goal_after_release")
 
             try:
                 result["goal_result_refreshes"] = self._refresh_goal_pick_results(now)
@@ -2071,6 +2158,9 @@ class QuantLabRuntime:
                 )
             except Exception:
                 LOGGER.exception("QuantLab CardLab referee bootstrap failed")
+
+        if self._settings.card_enabled:
+            _log_memory_checkpoint("card_after_bootstrap")
 
         any_lab_enabled = (
             self._settings.goal_enabled

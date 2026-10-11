@@ -520,3 +520,138 @@ def test_cross_competition_day_scan_persists_only_finished_referee_fixtures() ->
     assert repo.scans[0]["response_fixture_count"] == 4
     assert repo.scans[0]["referee_fixture_count"] == 2
     assert repo.scans[0]["page_count"] == 2
+
+
+def test_referee_bootstrap_skips_candidate_sql_after_api_attempt_cap() -> None:
+    """Unused referee candidates must not be queried after cycle budget is exhausted."""
+    from types import MethodType
+
+    from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
+
+    class Repo:
+        def __init__(self) -> None:
+            self.event_candidate_queries: list[str] = []
+            self.stats_candidate_queries: list[str] = []
+
+        def referee_history(self, *_args, **_kwargs):
+            return ()
+
+        def unscanned_referee_history_days(self, **_kwargs):
+            return ()
+
+        def referee_history_scope_due(self, *_args, **_kwargs):
+            return False
+
+        def referee_card_event_backfill_candidates(self, referee, **_kwargs):
+            self.event_candidate_queries.append(referee)
+            return ({"fixture_id": "api-football:1"},)
+
+        def referee_statistics_backfill_candidates(self, referee, **_kwargs):
+            self.stats_candidate_queries.append(referee)
+            return ({"fixture_id": "api-football:1"},)
+
+    repo = Repo()
+    runtime = QuantLabRuntime(
+        repo,
+        object(),
+        settings=QuantLabRuntimeSettings(
+            card_referee_prior_seasons=0,
+            card_referee_history_target=8,
+            card_referee_statistics_per_cycle=1,
+        ),
+        clock=lambda: NOW,
+    )
+    runtime._card_referee_history_targets = MethodType(
+        lambda self, _now: {(39, 2026): {"Ref B", "Ref A"}}, runtime
+    )
+    captured_events: list[str] = []
+    captured_stats: list[str] = []
+
+    def capture_events(self, fixture, now):
+        captured_events.append(str(fixture["fixture_id"]))
+        return False
+
+    def capture_stats(self, fixture, now, *, allow_retry=False):
+        assert allow_retry
+        captured_stats.append(str(fixture["fixture_id"]))
+        return True
+
+    runtime._capture_referee_card_events = MethodType(capture_events, runtime)
+    runtime._capture_historical_statistics = MethodType(capture_stats, runtime)
+    scopes, stats, updated = runtime._bootstrap_card_referee_history(NOW)
+
+    assert scopes == 0
+    assert stats == 1
+    assert updated == frozenset()
+    assert repo.event_candidate_queries == ["Ref A"]
+    assert repo.stats_candidate_queries == ["Ref A"]
+    assert captured_events == ["api-football:1"]
+    assert captured_stats == ["api-football:1"]
+
+
+def test_referee_history_scopes_stats_and_events_to_matching_fixtures() -> None:
+    """Per-referee lookups must not materialize latest stats for every fixture."""
+    from types import SimpleNamespace
+
+    from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.query = ""
+            self.params = ()
+
+        @property
+        def description(self):
+            return (SimpleNamespace(name="referee"),)
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchall(self):
+            return [("Ref A",)]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def cursor(self):
+            return self._cursor
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    cursor = Cursor()
+    repository = PostgreSQLQuantLabRepository(
+        connect=lambda: Connection(cursor)
+    )
+    rows = repository.referee_history(
+        "Ref A, England", decision_at=NOW, limit=8
+    )
+
+    assert rows == ({"referee": "Ref A"},)
+    assert cursor.params == (
+        "Ref A, England", NOW, NOW, NOW, NOW, 8
+    )
+    sql = " ".join(cursor.query.split())
+    for table in (
+        "quantlab_match_statistics_observations",
+        "quantlab_card_event_observations",
+    ):
+        assert (
+            f"FROM {table} "
+            "WHERE fixture_id IN (SELECT fixture_id FROM context) "
+            "AND available_at <= %s"
+        ) in sql
+    assert "FROM context JOIN stats USING (fixture_id)" in sql
+    assert "LEFT JOIN events USING (fixture_id)" in sql
+    assert "ORDER BY context.kickoff_at DESC LIMIT %s" in sql
