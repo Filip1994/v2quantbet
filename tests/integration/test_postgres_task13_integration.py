@@ -67,7 +67,7 @@ def test_fresh_schema_runtime_leadership_and_bankroll(isolated_database) -> None
         applied = apply_migrations(connection, MIGRATION_DIR)
     expected = tuple(path.name for path in sorted(MIGRATION_DIR.glob("*.sql")))
     assert applied == expected
-    assert expected[-1] == "066_manual_settle_94e1448785.sql"
+    assert expected[-1] == "067_goallab_result_poll_attempts.sql"
 
     runtime = PostgreSQLRuntimeRepository(connect=connect)
     assert runtime.check_database()
