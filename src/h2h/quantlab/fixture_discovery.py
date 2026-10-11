@@ -44,8 +44,9 @@ def parse_fixture_discovery_response(
     payload: Mapping[str, Any],
     *,
     captured_at: datetime,
+    include_blocked: bool = False,
 ) -> tuple[QuantLabFixtureObservation, ...]:
-    """Parse one global date shard, dropping fixtures blocked across the universe."""
+    """Parse provider fixtures; allow existing GoalLab picks to finish after scope blocks."""
     captured = _aware_utc(captured_at, "captured_at")
     if not isinstance(payload, Mapping):
         raise TypeError("fixture discovery payload must be a mapping")
@@ -62,7 +63,7 @@ def parse_fixture_discovery_response(
         if not isinstance(raw, Mapping):
             continue
         fixture = adapter.adapt(raw)
-        if is_universe_blocked_competition(
+        if not include_blocked and is_universe_blocked_competition(
             country=fixture.country,
             competition_name=fixture.competition_name,
             league_id=fixture.competition_id,
