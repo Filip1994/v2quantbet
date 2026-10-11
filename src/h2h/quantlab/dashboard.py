@@ -1446,10 +1446,20 @@ class QuantLabDashboardHTTPService:
                         body,
                         "text/html; charset=utf-8",
                     )
+                except (BrokenPipeError, ConnectionResetError):
+                    # Switching mobile/desktop views can abort an in-flight render.
+                    # Never write an error response after a disconnected client.
+                    return
                 except (TypeError, ValueError):
-                    service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
+                    try:
+                        service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
                 except LookupError:
-                    service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
+                    try:
+                        service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
                 except Exception as exc:
                     LOGGER.exception(
                         "QuantLab dashboard render failed path=%s query=%s error_class=%s",
@@ -1457,12 +1467,15 @@ class QuantLabDashboardHTTPService:
                         parsed.query,
                         type(exc).__name__,
                     )
-                    service._text(
-                        self,
-                        503,
-                        type(exc).__name__ + "\n",
-                        "text/plain; charset=utf-8",
-                    )
+                    try:
+                        service._text(
+                            self,
+                            503,
+                            type(exc).__name__ + "\n",
+                            "text/plain; charset=utf-8",
+                        )
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
 
             def do_POST(self) -> None:
                 service._text(self, 405, "read_only\n", "text/plain; charset=utf-8")

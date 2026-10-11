@@ -2270,12 +2270,22 @@ class ResearchDashboardHTTPService:
                         body,
                         content_type,
                     )
+                except (BrokenPipeError, ConnectionResetError):
+                    # Browser navigation can close the connection during a slow render.
+                    # Do not attempt to send another response on a broken socket.
+                    return
                 except (TypeError, ValueError):
-                    service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
+                    try:
+                        service._text(self, 400, "invalid_filter\n", "text/plain; charset=utf-8")
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
                 except Exception as exc:  # noqa: BLE001 - bounded read-only failure response
-                    service._text(
-                        self, 503, type(exc).__name__ + "\n", "text/plain; charset=utf-8"
-                    )
+                    try:
+                        service._text(
+                            self, 503, type(exc).__name__ + "\n", "text/plain; charset=utf-8"
+                        )
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
 
             def do_POST(self) -> None:
                 service._text(self, 405, "read_only\n", "text/plain; charset=utf-8")
