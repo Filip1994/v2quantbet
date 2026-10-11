@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from h2h.quantlab.goal_lab.picks import (
     choose_canonical_candidate,
     settle_goal_pick,
@@ -251,4 +253,122 @@ def test_goal_result_postponed_is_not_voidable() -> None:
         "previous_result_raw_payload": postponed,
     }
 
+    assert stable_goal_result_evidence(row) is None
+
+
+def _extra_time_payload(*, status: str, fulltime: tuple[int, int],
+                        extratime: tuple[int | None, int | None],
+                        goals: tuple[int, int],
+                        penalty: tuple[int | None, int | None]) -> dict[str, object]:
+    payload = _provider_result_payload(status=status, fulltime=fulltime, goals=goals)
+    score = payload["score"]
+    score["extratime"] = {"home": extratime[0], "away": extratime[1]}
+    score["penalty"] = {"home": penalty[0], "away": penalty[1]}
+    return payload
+
+
+def _two_terminal_snapshots(latest, previous=None):
+    return {
+        "fixture_id": "api-football:9001",
+        "latest_result_observation_id": "quantlab-fixture-v1:" + "a" * 64,
+        "latest_result_captured_at": NOW + timedelta(hours=3),
+        "latest_result_raw_payload": latest,
+        "previous_result_observation_id": "quantlab-fixture-v1:" + "b" * 64,
+        "previous_result_captured_at": NOW + timedelta(hours=2),
+        "previous_result_raw_payload": latest if previous is None else previous,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "fulltime", "extratime", "goals", "penalty", "market", "selection", "expected"),
+    [
+        ("PEN", (1, 1), (0, 0), (1, 1), (5, 4), "OU_25", "OVER", "LOSS"),
+        ("PEN", (2, 2), (0, 0), (2, 2), (4, 3), "OU_25", "OVER", "WIN"),
+        ("PEN", (1, 1), (0, 0), (1, 1), (3, 4), "OU_25", "OVER", "LOSS"),
+        ("PEN", (2, 2), (0, 0), (2, 2), (4, 5), "OU_25", "OVER", "WIN"),
+        ("AET", (1, 1), (0, 1), (1, 2), (None, None), "OU_25", "UNDER", "WIN"),
+        ("PEN", (2, 2), (0, 0), (2, 2), (3, 4), "BTTS", "YES", "WIN"),
+        ("PEN", (1, 1), (1, 1), (2, 2), (4, 2), "OU_25", "UNDER", "WIN"),
+    ],
+)
+def test_goal_lab_incremental_extra_time_settlement(
+    status, fulltime, extratime, goals, penalty, market, selection, expected
+) -> None:
+    """Real backlog payload shapes must use 90-minute goals, not shootout/ET totals."""
+    payload = _extra_time_payload(
+        status=status, fulltime=fulltime, extratime=extratime,
+        goals=goals, penalty=penalty,
+    )
+    evidence = stable_goal_result_evidence(_two_terminal_snapshots(payload))
+    assert evidence is not None
+    assert (evidence["regulation_home_goals"], evidence["regulation_away_goals"]) == fulltime
+    assert evidence["result_normalization_compat_version"] == (
+        "GOALLAB_INCREMENTAL_EXTRA_TIME_V1"
+    )
+    row = {**_settlement_row(
+        market_key=market, selection=selection,
+        home=fulltime[0], away=fulltime[1],
+    ), **evidence}
+    settlement = settle_goal_pick(row, settled_at=NOW)
+    assert settlement is not None
+    assert settlement.outcome == expected
+    assert settlement.result_detail["result_confirmation_count"] == 2
+    assert settlement.result_detail["result_normalization_compat_version"] == (
+        "GOALLAB_INCREMENTAL_EXTRA_TIME_V1"
+    )
+
+
+def test_goal_lab_penalty_missing_shootout_score_stays_unsettled() -> None:
+    """Observed fixture 1635982 must remain pending, not be inferred from status."""
+    p = _extra_time_payload(
+        status="PEN", fulltime=(2, 2), extratime=(None, None),
+        goals=(2, 2), penalty=(None, None),
+    )
+    assert stable_goal_result_evidence(_two_terminal_snapshots(p)) is None
+
+
+def test_goal_lab_penalty_missing_et_and_prior_zero_et_are_consistent() -> None:
+    latest = _extra_time_payload(
+        status="PEN", fulltime=(2, 2), extratime=(None, None),
+        goals=(2, 2), penalty=(3, 4),
+    )
+    previous = _extra_time_payload(
+        status="PEN", fulltime=(2, 2), extratime=(0, 0),
+        goals=(2, 2), penalty=(3, 4),
+    )
+    evidence = stable_goal_result_evidence(_two_terminal_snapshots(latest, previous))
+    assert evidence is not None
+    assert (evidence["regulation_home_goals"], evidence["regulation_away_goals"]) == (2, 2)
+    assert evidence["result_confirmation_count"] == 2
+
+
+def test_goal_lab_inconsistent_extra_time_arithmetic_stays_unsettled() -> None:
+    payload = _extra_time_payload(
+        status="AET", fulltime=(1, 1), extratime=(0, 1),
+        goals=(5, 4), penalty=(None, None),
+    )
+    assert stable_goal_result_evidence(_two_terminal_snapshots(payload)) is None
+
+
+def test_goal_lab_extra_time_conflicting_90_minute_snapshots_stay_unsettled() -> None:
+    latest = _extra_time_payload(
+        status="PEN", fulltime=(1, 1), extratime=(0, 0),
+        goals=(1, 1), penalty=(4, 5),
+    )
+    previous = _extra_time_payload(
+        status="PEN", fulltime=(2, 2), extratime=(0, 0),
+        goals=(2, 2), penalty=(4, 5),
+    )
+    assert stable_goal_result_evidence(_two_terminal_snapshots(latest, previous)) is None
+
+
+def test_goal_lab_extra_time_cannot_skip_confirmation_delay() -> None:
+    p = _extra_time_payload(
+        status="AET", fulltime=(1, 1), extratime=(0, 1),
+        goals=(1, 2), penalty=(None, None),
+    )
+    row = _two_terminal_snapshots(p)
+    row["previous_result_captured_at"] = row["latest_result_captured_at"] - timedelta(
+        minutes=14
+    )
     assert stable_goal_result_evidence(row) is None

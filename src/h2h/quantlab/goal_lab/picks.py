@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from h2h.domain.fixture_result import ApiFootballSettlementResultNormalizer
+from h2h.domain.fixture_result import (
+    ApiFootballSettlementResultNormalizer,
+    ResultClassification,
+)
 
 
 PICK_POLICY_VERSION = "GOALLAB_DC_PLUS_PICK_POLICY_V4"
@@ -92,6 +95,57 @@ def choose_canonical_candidate(
 
 
 
+GOALLAB_EXTRA_TIME_SCORE_COMPAT_VERSION = "GOALLAB_INCREMENTAL_EXTRA_TIME_V1"
+
+
+def _goallab_terminal_result(normalizer: ApiFootballSettlementResultNormalizer, payload: dict[str, Any],
+                            *, fixture_id: str, acquired_at: datetime):
+    """Strict canonical provider validation plus a GoalLab-only incremental ET adapter.
+
+    In API-Football responses score.extratime can represent EXTRA goals scored
+    in minutes 91-120, while goals represents the accumulated 120-minute score.
+    Do not alter the production normalizer; 90-minute GoalLab bets settle on
+    score.fulltime. Require arithmetic consistency and a penalty score for PEN.
+    """
+    result = normalizer.normalize(payload, fixture_id=fixture_id, acquired_at=acquired_at)
+    if result.classification is not ResultClassification.INVALID_TERMINAL:
+        return result, None
+    if result.provider_status not in {"AET", "PEN"}:
+        return result, None
+
+    fulltime, extratime = result.fulltime, result.extratime
+    goals, penalty = result.goals, result.penalty
+    if fulltime == (None, None) or goals == (None, None):
+        return result, None
+    if result.provider_status == "AET" and (
+        extratime == (None, None) or penalty != (None, None)
+    ):
+        return result, None
+    if result.provider_status == "PEN" and penalty == (None, None):
+        return result, None
+
+    # Missing extra-time breakdown is allowed only for PEN when the accumulated
+    # score precisely matches 90-minute fulltime. Never infer missing goals.
+    if extratime == (None, None):
+        consistent = result.provider_status == "PEN" and goals == fulltime
+    else:
+        consistent = goals == (
+            fulltime[0] + extratime[0],
+            fulltime[1] + extratime[1],
+        )
+    if not consistent:
+        return result, None
+    return (
+        replace(
+            result,
+            classification=ResultClassification.PLAYED_SETTLEABLE,
+            regulation_goals=fulltime,
+            settlement_fingerprint=normalizer._fingerprint(result.provider_status, fulltime),
+        ),
+        GOALLAB_EXTRA_TIME_SCORE_COMPAT_VERSION,
+    )
+
+
 def stable_goal_result_evidence(
     row: dict[str, Any],
     *,
@@ -128,15 +182,11 @@ def stable_goal_result_evidence(
 
     fixture_id = str(row["fixture_id"])
     normalizer = ApiFootballSettlementResultNormalizer()
-    latest = normalizer.normalize(
-        latest_payload,
-        fixture_id=fixture_id,
-        acquired_at=latest_captured,
+    latest, latest_compat = _goallab_terminal_result(
+        normalizer, latest_payload, fixture_id=fixture_id, acquired_at=latest_captured,
     )
-    previous = normalizer.normalize(
-        previous_payload,
-        fixture_id=fixture_id,
-        acquired_at=previous_captured,
+    previous, previous_compat = _goallab_terminal_result(
+        normalizer, previous_payload, fixture_id=fixture_id, acquired_at=previous_captured,
     )
     if not latest.is_terminal_candidate or not previous.is_terminal_candidate:
         return None
@@ -153,6 +203,7 @@ def stable_goal_result_evidence(
         "result_first_confirmed_at": previous_captured,
         "result_confirmed_at": latest_captured,
         "result_settlement_fingerprint": latest.settlement_fingerprint,
+        "result_normalization_compat_version": latest_compat or previous_compat,
     }
 
 def settle_goal_pick(
@@ -199,6 +250,9 @@ def settle_goal_pick(
                     else None
                 ),
                 "result_settlement_fingerprint": row.get("result_settlement_fingerprint"),
+                "result_normalization_compat_version": row.get(
+                    "result_normalization_compat_version"
+                ),
             },
         )
 
@@ -266,5 +320,8 @@ def settle_goal_pick(
                 else None
             ),
             "result_settlement_fingerprint": row.get("result_settlement_fingerprint"),
+            "result_normalization_compat_version": row.get(
+                "result_normalization_compat_version"
+            ),
         },
     )
