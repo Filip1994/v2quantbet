@@ -139,6 +139,21 @@ def test_pinned_authority_uses_stream_and_never_materializes_history(
     assert result["reason"] == "MODEL_READY"
     assert result["artifact_pinned"] is True
     assert seen == ["stream_opened", "stream_closed"]
+    previous = dict(service._histories)
+    assert previous
+    assert service._pairs
+    service.release_cached_scoring_context()
+    assert service._histories == {}
+    assert service._player_histories == {}
+    assert service._pairs == []
+    assert service._cache_at is None
+    # Identical approved artifact and as-of history are rebuilt on the next score.
+    assert service.readiness(decision_at=NOW) == result
+    assert service._histories == previous
+    assert seen == [
+        "stream_opened", "stream_closed",
+        "stream_opened", "stream_closed",
+    ]
 
 
 @pytest.mark.parametrize("limit,batch_size", [(0, 128), (128, 0), (-1, 128)])
