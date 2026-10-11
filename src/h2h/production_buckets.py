@@ -1,7 +1,7 @@
 """Shared metadata for the Production intake bucket contract.
 
 The specs include all six historically promoted cohorts, regardless of current
-Production selection. The two-bucket Research pilot is selected by default;
+Production selection. The refreshed three-bucket Research pilot is selected by default;
 the GoalLab OVER buckets remain fully active in GoalLab analytics and discovery.
 """
 
@@ -17,6 +17,7 @@ RESEARCH_OU_UNDER_EDGE_10_15 = "RESEARCH_OU_UNDER_EDGE_10_15"
 RESEARCH_OU_UNDER_EDGE_20_30 = "RESEARCH_OU_UNDER_EDGE_20_30"
 RESEARCH_BTTS_NO_ODDS_2_01_2_50 = "RESEARCH_BTTS_NO_ODDS_2_01_2_50"
 RESEARCH_OU_UNDER_ODDS_1_81_2_00 = "RESEARCH_OU_UNDER_ODDS_1_81_2_00"
+RESEARCH_OU_UNDER_ODDS_2_01_2_50 = "RESEARCH_OU_UNDER_ODDS_2_01_2_50"
 RESEARCH_OU_OVER_ODDS_1_81_2_00 = "RESEARCH_OU_OVER_ODDS_1_81_2_00"
 GOALLAB_OU_OVER_XG_2_5_3_0 = "GOALLAB_OU_OVER_XG_2_5_3_0"
 GOALLAB_OU_OVER_ODDS_2_01_2_50 = "GOALLAB_OU_OVER_ODDS_2_01_2_50"
@@ -48,6 +49,13 @@ PRODUCTION_BUCKET_SPECS = (
         "RESEARCH",
         _research_path(market="OU_25", selection="UNDER", odds_bucket="1.81–2.00"),
         22.45,
+    ),
+    ProductionBucketSpec(
+        RESEARCH_OU_UNDER_ODDS_2_01_2_50,
+        "OU UNDER 2.5 · odds 2.01–2.50",
+        "RESEARCH",
+        _research_path(market="OU_25", selection="UNDER", odds_bucket="2.01–2.50"),
+        15.88,
     ),
     ProductionBucketSpec(
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
@@ -111,8 +119,9 @@ PRODUCTION_BUCKET_SPECS = (
 # Production selection is independent from GoalLab research/discovery status.
 # Keep the two GoalLab specs available without selecting them for Production by default.
 DEFAULT_BUCKET_IDS = (
-    RESEARCH_OU_UNDER_ODDS_1_81_2_00,
+    RESEARCH_OU_UNDER_ODDS_2_01_2_50,
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
+    RESEARCH_BTTS_NO_ODDS_2_01_2_50,
 )
 KNOWN_BUCKET_IDS = frozenset(spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS)
 BUCKET_PRIORITY = {
@@ -149,6 +158,8 @@ def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
 
     if bucket_id == RESEARCH_OU_UNDER_ODDS_1_81_2_00:
         return market == "OU_25" and selection == "UNDER" and 1.80 < odds <= 2.00
+    if bucket_id == RESEARCH_OU_UNDER_ODDS_2_01_2_50:
+        return market == "OU_25" and selection == "UNDER" and 2.00 < odds <= 2.50
     if bucket_id == RESEARCH_OU_OVER_ODDS_1_81_2_00:
         return market == "OU_25" and selection == "OVER" and 1.80 < odds <= 2.00
     if bucket_id == RESEARCH_LOW_SCORING_NON_EXTREME:
