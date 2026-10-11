@@ -1,0 +1,62 @@
+name: Ephemeral public bucket read audit
+on:
+  push:
+    branches: [audit/read-bucket-cohorts-20261012]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Read public analytics HTML via GET only
+        shell: bash
+        run: |
+          python - <<'PY'
+          import html, re, urllib.request, urllib.error, time
+          URLS = {
+            "RESEARCH": "https://quantbet-research-production.up.railway.app/research?tab=analytics",
+            "CORNER": "https://quantbet-quantlab-production.up.railway.app/quantlab?view=analytics&lab=corner",
+          }
+          def plain(s):
+              s=re.sub(r'(?is)<(?:script|style)\\b[^>]*>.*?</(?:script|style)>','',s)
+              return re.sub(r'\\s+',' ',html.unescape(re.sub(r'<[^>]*>',' ',s))).strip()
+          def pars_num(s):
+              t=s.replace(' ','').replace(',','')
+              m=re.search(r'-?\\d+(?:\\.\\d+)?',t)
+              return float(m.group(0)) if m else None
+          for name,url in URLS.items():
+              print("=== ",name," ",url,flush=True)
+              try:
+                  req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 QuantBet-readonly-audit","Accept":"text/html"})
+                  with urllib.request.urlopen(req,timeout=35) as response:
+                      code=response.status; src=response.read(4500000).decode("utf-8","replace")
+                  print("HTTP",code,"BYTES",len(src),flush=True)
+              except Exception as exc:
+                  print("FAILED",type(exc).__name__,str(exc)[:600],flush=True)
+                  continue
+              sections=re.findall(r'(?is)<section\\b[^>]*>.*?</section>',src)
+              if not sections:
+                  sections=[src]
+              for n,section in enumerate(sections):
+                  rows=re.findall(r'(?is)<tr\\b[^>]*>.*?</tr>',section)
+                  if not rows: continue
+                  headers=[plain(c) for c in re.findall(r'(?is)<th\\b[^>]*>(.*?)</th>',rows[0])]
+                  cells=[[plain(c) for c in re.findall(r'(?is)<td\\b[^>]*>(.*?)</td>',r)] for r in rows[1:]]
+                  hdr=plain(section[:350])[:140]
+                  print("TABLE",n,"TITLE",repr(hdr),"HEADERS",repr(headers),"ROWS",len(cells),flush=True)
+                  nidx=next((i for i,x in enumerate(headers) if x.upper().strip() in ("N","GRADED N","SETTLED N","BETS","GRADED","SETTLED")),None)
+                  ridx=next((i for i,x in enumerate(headers) if x.upper().strip()=="ROI" or x.upper().strip()=="CURRENT ROI"),None)
+                  eligible=[]
+                  for row in cells:
+                      if nidx is None or ridx is None or len(row)<=max(nidx,ridx): continue
+                      nv,rv=pars_num(row[nidx]),pars_num(row[ridx])
+                      if nv is not None and rv is not None and nv>15:
+                          eligible.append((rv,int(nv),row))
+                  eligible.sort(reverse=True,key=lambda x:x[0])
+                  print("ELIGIBLE_GT15",len(eligible),flush=True)
+                  for item in eligible[:25]:
+                      print("ROW",repr(item),flush=True)
+                  if not eligible:
+                      for row in cells[:8]:print("SAMPLE",repr(row),flush=True)
+          PY
