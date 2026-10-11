@@ -48,11 +48,11 @@ jobs:
                               print("RESEARCH_ROW",kind,repr({k:v for k,v in row.items() if k in ("market","selection","odds_bucket","edge_bucket","graded_n","roi_pct","wins","losses","voids")}),flush=True)
                   continue
               if name.startswith("RESEARCH_X"):
-                  matched=re.findall(r'(?is)<tr\\b[^>]*class="[^"]*row-(?:win|loss|void)[^"]*"[^>]*>.*?</tr>',src)
+                  matched=re.findall(r'(?is)<tr\b[^>]*class="[^"]*row-(?:win|loss|void)[^"]*"[^>]*>.*?</tr>',src)
                   wins=losses=voids=0; pnl=0.0
                   for tr in matched:
                       status=re.search(r'row-(win|loss|void)',tr).group(1)
-                      cells=[plain(cell) for cell in re.findall(r'(?is)<td\\b[^>]*>(.*?)</td>',tr)]
+                      cells=[plain(cell) for cell in re.findall(r'(?is)<td\b[^>]*>(.*?)</td>',tr)]
                       if status=="void":voids+=1;continue
                       if len(cells)<=4: print("BAD_ROW",repr(cells),flush=True);continue
                       odds=pars_num(cells[4])
