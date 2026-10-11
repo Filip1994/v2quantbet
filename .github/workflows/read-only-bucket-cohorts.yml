@@ -15,9 +15,9 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import html, re, urllib.request, urllib.error, time
+          import html, re, urllib.request, urllib.error, time, json
           URLS = {
-            "RESEARCH": "https://quantbet-research-production.up.railway.app/research?tab=analytics",
+            "RESEARCH_JSON": "https://quantbet-research-production.up.railway.app/research/analytics.json",
             "CORNER": "https://quantbet-quantlab-production.up.railway.app/quantlab?view=analytics&lab=corner",
           }
           def plain(s):
@@ -37,6 +37,14 @@ jobs:
               except Exception as exc:
                   print("FAILED",type(exc).__name__,str(exc)[:600],flush=True)
                   continue
+              if name == "RESEARCH_JSON":
+                  snapshot=json.loads(src)
+                  print("RESEARCH KEYS",list(snapshot.keys()),"COHORTS",list(snapshot.get("cohorts",{}).keys()),flush=True)
+                  for kind in ("market_selection_odds","market_selection_edge","market_selection"):
+                      for row in snapshot.get("cohorts",{}).get(kind,[]):
+                          if row.get("selection") in ("UNDER","OVER","NO") and row.get("market") in ("OU_25","BTTS"):
+                              print("RESEARCH_ROW",kind,repr({k:v for k,v in row.items() if k in ("market","selection","odds_bucket","edge_bucket","graded_n","roi_pct","wins","losses","voids")}),flush=True)
+                  continue
               sections=re.findall(r'(?is)<section\b[^>]*>.*?</section>',src)
               if not sections:
                   sections=[src]
@@ -47,7 +55,7 @@ jobs:
                   cells=[[plain(c) for c in re.findall(r'(?is)<td\b[^>]*>(.*?)</td>',r)] for r in rows[1:]]
                   hdr=plain(section[:350])[:140]
                   print("TABLE",n,"TITLE",repr(hdr),"HEADERS",repr(headers),"ROWS",len(cells),flush=True)
-                  nidx=next((i for i,x in enumerate(headers) if x.upper().strip() in ("N","GRADED N","SETTLED N","BETS","GRADED","SETTLED")),None)
+                  nidx=next((i for i,x in enumerate(headers) if x.upper().strip().startswith("N") or x.upper().strip() in ("GRADED N","SETTLED N","BETS","GRADED","SETTLED")),None)
                   ridx=next((i for i,x in enumerate(headers) if x.upper().strip()=="ROI" or x.upper().strip()=="CURRENT ROI"),None)
                   eligible=[]
                   for row in cells:
