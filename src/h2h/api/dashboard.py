@@ -276,6 +276,10 @@ class DashboardService:
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.outcome
                         WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.outcome
                         WHEN p.source_universe = 'RESEARCH'
+                             AND research_manual_settlement.event_kind = 'MANUAL_VOID'
+                             AND research_manual_settlement.outcome = 'VOID'
+                        THEN 'VOID'
+                        WHEN p.source_universe = 'RESEARCH'
                              AND research_result.result_classification = 'NON_PLAYED_VOIDABLE'
                         THEN 'VOID'
                         WHEN p.source_universe = 'RESEARCH'
@@ -308,6 +312,10 @@ class DashboardService:
                     CASE
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.settled_at
                         WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.occurred_at
+                        WHEN p.source_universe = 'RESEARCH'
+                             AND research_manual_settlement.event_kind = 'MANUAL_VOID'
+                             AND research_manual_settlement.outcome = 'VOID'
+                        THEN research_manual_settlement.occurred_at
                         WHEN p.source_universe = 'RESEARCH'
                              AND research_result.result_classification IN (
                                  'PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE'
@@ -375,6 +383,14 @@ class DashboardService:
                 LEFT JOIN research_signals research_signal
                   ON p.source_universe = 'RESEARCH'
                  AND research_signal.research_signal_id = p.source_pick_id
+                LEFT JOIN LATERAL (
+                    SELECT e.outcome, e.event_kind, e.occurred_at
+                    FROM pick_settlement_events e
+                    WHERE p.source_universe = 'RESEARCH'
+                      AND e.pick_id = research_signal.production_pick_id
+                    ORDER BY e.occurred_at DESC, e.settlement_event_id DESC
+                    LIMIT 1
+                ) research_manual_settlement ON TRUE
                 LEFT JOIN value_evaluations research_evaluation
                   ON research_evaluation.evaluation_id = research_signal.evaluation_id
                 LEFT JOIN LATERAL (
