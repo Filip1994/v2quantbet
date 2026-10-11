@@ -239,6 +239,11 @@ def test_runtime_refreshes_goal_result_evidence_for_open_pick() -> None:
             assert kwargs["limit"] == 25
             return ({"fixture_id": "api-football:9302", "provider_fixture_id": 9302},)
 
+        def record_goal_pick_result_poll_attempt(self, *, fixture_id, attempted_at, outcome):
+            assert (fixture_id, attempted_at, outcome) == (
+                "api-football:9302", NOW, "CAPTURED"
+            )
+
         def save_fixture_observations(self, observations):
             items = tuple(observations)
             assert len(items) == 1
@@ -341,3 +346,57 @@ def test_runtime_isolates_one_goal_settlement_failure_and_continues(caplog) -> N
     assert settled == 1
     assert "GoalLab settlement failed fixture=api-football:9301" in caplog.text
 
+
+
+def test_goal_refresh_continues_after_missing_provider_fixture() -> None:
+    """An empty reply is recorded, so it cannot monopolize the next batch."""
+    calls = []
+
+    class Repo:
+        def goal_pick_result_refresh_candidates(self, **kwargs):
+            return (
+                {"fixture_id": "api-football:9301", "provider_fixture_id": 9301},
+                {"fixture_id": "api-football:9302", "provider_fixture_id": 9302},
+            )
+
+        def record_goal_pick_result_poll_attempt(self, *, fixture_id, attempted_at, outcome):
+            calls.append((fixture_id, outcome))
+
+        def save_fixture_observations(self, observations):
+            assert len(tuple(observations)) == 1
+            return 1
+
+    class Provider:
+        def fetch_fixture(self, fixture_id):
+            if fixture_id == 9301:
+                return {"errors": [], "response": []}
+            return {
+                "errors": [],
+                "response": [
+                    {
+                        "fixture": {
+                            "id": fixture_id,
+                            "date": "2026-09-28T08:00:00+00:00",
+                            "status": {"short": "FT"},
+                        },
+                        "league": {
+                            "id": 39, "season": 2026,
+                            "name": "Premier League", "country": "England",
+                            "type": "League",
+                        },
+                        "teams": {
+                            "home": {"id": 1, "name": "Home"},
+                            "away": {"id": 2, "name": "Away"},
+                        },
+                        "goals": {"home": 2, "away": 1},
+                        "score": {
+                            "fulltime": {"home": 2, "away": 1},
+                            "extratime": {"home": None, "away": None},
+                            "penalty": {"home": None, "away": None},
+                        },
+                    }
+                ],
+            }
+
+    assert QuantLabRuntime(Repo(), Provider())._refresh_goal_pick_results(NOW) == 1
+    assert calls == [("api-football:9301", "NO_MATCH"), ("api-football:9302", "CAPTURED")]
