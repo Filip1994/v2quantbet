@@ -418,7 +418,8 @@ def test_corner_performance_cursor_binding_is_static() -> None:
 
 def test_research_manual_void_is_terminal_for_funnel_exposure_and_operator_gate() -> None:
     class Cursor:
-        queries: list[str] = []
+        def __init__(self) -> None:
+            self.queries: list[str] = []
 
         def execute(self, query: str, params: object = None) -> None:
             self.queries.append(query)
