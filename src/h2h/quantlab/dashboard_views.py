@@ -2031,7 +2031,10 @@ def _cohort_sort_value(row: dict[str, Any], key: str) -> Any:
         }.get(str(value))
     if key.endswith("_bucket") or key == "line_bucket":
         numeric = _bucket_sort_value(value)
-        return numeric if numeric is not None else str(value).casefold()
+        # Numeric bins and named bins ("UNKNOWN", "Other", etc.) coexist.
+        # Returning a float for one row and a str for another makes
+        # Python's list.sort raise TypeError and the analytics route 503.
+        return (0, numeric) if numeric is not None else (1, str(value).casefold())
     if key == "sample_band":
         return {
             "SIGNAL_ONLY": 0,
