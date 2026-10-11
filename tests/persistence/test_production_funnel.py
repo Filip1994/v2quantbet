@@ -412,3 +412,22 @@ def test_corner_performance_cursor_binding_is_static() -> None:
     assert PostgreSQLProductionFunnelRepository._cornerlab_performance_rows(
         EmptyCursor()
     ) == ()
+
+
+
+def test_research_manual_void_is_terminal_for_funnel_exposure_and_operator_gate() -> None:
+    class Cursor:
+        queries: list[str] = []
+
+        def execute(self, query: str, params: object = None) -> None:
+            self.queries.append(query)
+
+        def fetchone(self) -> tuple[bool]:
+            return (True,)
+
+    cursor = Cursor()
+    assert PostgreSQLProductionFunnelStateRepository._is_settled(
+        cursor, "production-pick-v1:any"
+    )
+    assert "e.event_kind = 'MANUAL_VOID'" in cursor.queries[0]
+    assert "rs.research_signal_id = p.source_pick_id" in cursor.queries[0]
