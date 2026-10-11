@@ -15,6 +15,8 @@ from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
     PRODUCTION_BUCKET_SPECS,
     RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    RESEARCH_OU_UNDER_EDGE_10_15,
+    RESEARCH_OU_UNDER_EDGE_20_30,
     RESEARCH_OU_UNDER_ODDS_2_01_2_50,
     RESEARCH_OU_UNDER_ODDS_1_81_2_00,
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
@@ -859,6 +861,20 @@ def _selected_research_production_buckets(
         return None
 
     sources = (
+        (
+            RESEARCH_OU_UNDER_EDGE_10_15,
+            find(
+                snapshot["cohorts"]["market_selection_edge"],
+                market="OU_25", selection="UNDER", edge_bucket="10–15%",
+            ),
+        ),
+        (
+            RESEARCH_OU_UNDER_EDGE_20_30,
+            find(
+                snapshot["cohorts"]["market_selection_edge"],
+                market="OU_25", selection="UNDER", edge_bucket="20–30%",
+            ),
+        ),
         (
             RESEARCH_OU_UNDER_ODDS_2_01_2_50,
             find(
