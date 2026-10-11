@@ -4,6 +4,10 @@ import pytest
 
 from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
+    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+    bucket_matches,
+    matching_bucket_ids,
     GOALLAB_OU_OVER_ODDS_2_01_2_50,
     GOALLAB_OU_OVER_XG_2_5_3_0,
     RESEARCH_BTTS_NO_ODDS_2_01_2_50,
@@ -25,7 +29,7 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 3
+    assert len(DEFAULT_BUCKET_IDS) == 7
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
 
@@ -259,9 +263,13 @@ def test_goallab_expected_total_bucket_boundaries(
 
 def test_default_bucket_order_is_stable_contract_order() -> None:
     assert DEFAULT_BUCKET_IDS == (
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
-        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+        RESEARCH_OU_UNDER_EDGE_10_15,
+        RESEARCH_OU_UNDER_EDGE_20_30,
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     )
 
 
@@ -323,3 +331,68 @@ def test_bucket_strength_prefers_better_n_roi_combination() -> None:
     )
 
     assert strongest == RESEARCH_LOW_SCORING_NON_EXTREME
+
+
+
+@pytest.mark.parametrize(
+    ("gap", "odds", "included"),
+    [
+        (0.99, 1.74, False),
+        (1.00, 1.74, True),
+        (1.99, 1.80, True),
+        (2.00, 1.74, False),
+        (1.50, 1.60, False),
+        (1.50, 1.81, False),
+    ],
+)
+def test_corner_c4_gap_and_price_boundaries(
+    gap: float, odds: float, included: bool
+) -> None:
+    row = {
+        "market_key": "TOTAL_CORNERS",
+        "selection": "OVER",
+        "line": 9.5,
+        "expected_total_corners": 9.5 + gap,
+        "odds": odds,
+    }
+    assert bucket_matches(row, CORNER_OVER_GAP_1_2_ODDS_1_61_1_80) is included
+
+
+@pytest.mark.parametrize(
+    ("model_p", "market_p", "odds", "included"),
+    [
+        (0.50, 0.45, 1.81, True),
+        (0.5499, 0.4999, 2.0, True),
+        (0.55, 0.49, 1.95, False),
+        (0.52, 0.50, 1.95, False),
+        (0.52, 0.48, 2.01, False),
+        (0.52, 0.48, 1.80, False),
+    ],
+)
+def test_corner_c5_probability_price_boundaries(
+    model_p: float, market_p: float, odds: float, included: bool
+) -> None:
+    row = {
+        "market_key": "TOTAL_CORNERS",
+        "selection": "OVER",
+        "model_probability": model_p,
+        "market_probability": market_p,
+        "odds": odds,
+    }
+    assert bucket_matches(
+        row, CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00
+    ) is included
+
+
+def test_selected_corner_cohorts_are_independent_and_research_does_not_match() -> None:
+    c4 = {
+        "market_key": "TOTAL_CORNERS",
+        "selection": "OVER",
+        "line": 9.5,
+        "expected_total_corners": 11.2,
+        "odds": 1.74,
+    }
+    assert set(matching_bucket_ids(c4, source_universe="CORNERLAB")) == {
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80
+    }
+    assert PostgreSQLProductionFunnelRepository._research_matches(c4) == ()
