@@ -2,6 +2,8 @@ name: Ephemeral public bucket read audit
 on:
   push:
     branches: [audit/read-bucket-cohorts-20261012]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
