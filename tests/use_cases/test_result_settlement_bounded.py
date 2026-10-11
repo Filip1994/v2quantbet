@@ -58,3 +58,63 @@ def test_result_worker_exposes_reconciliation_pending_state() -> None:
 
     assert worker.has_pending
     assert worker.run_once() == "cycle"
+
+
+def test_fixture_identity_conflict_does_not_stop_other_results() -> None:
+    from h2h.persistence.result_settlement import ResultPersistenceConflictError
+
+    class TwoFixtureRepository:
+        def __init__(self) -> None:
+            self.persisted = []
+
+        def reconcile(self, *, reconciled_at):
+            return ()
+
+        def claim_due(self, *, claimed_at, limit=None):
+            return ("bad", "good")
+
+        def provider_contexts(self, fixture_ids):
+            return (("bad", 101), ("good", 102))
+
+        def persist_result(self, result, *, checked_at):
+            if result.fixture_id == "bad":
+                raise ResultPersistenceConflictError(
+                    "result contradicts durable fixture identity"
+                )
+            self.persisted.append(result.fixture_id)
+
+        def stable_result(self, fixture_id, *, as_of):
+            return None
+
+        def has_due_results(self, *, as_of):
+            return False
+
+    class TwoFixtureSource:
+        def fetch(self, contexts):
+            return {contexts[0][0]: {}}
+
+    repository = TwoFixtureRepository()
+    failures = []
+    successes = []
+    reconcile = ReconcileFixtureResults(
+        repository,  # type: ignore[arg-type]
+        TwoFixtureSource(),  # type: ignore[arg-type]
+        clock=lambda: NOW,
+        on_item_failure=lambda fixture_id, error, at: failures.append(
+            (fixture_id, type(error), at)
+        ),
+        on_item_success=successes.append,
+    )
+    reconcile._normalizer = SimpleNamespace(
+        normalize=lambda payload, *, fixture_id, acquired_at: SimpleNamespace(
+            fixture_id=fixture_id
+        )
+    )
+
+    cycle = reconcile.execute()
+
+    assert repository.persisted == ["good"]
+    assert failures == [("bad", ResultPersistenceConflictError, NOW)]
+    assert successes == ["good"]
+    assert cycle.claimed_fixture_ids == ("bad", "good")
+    assert not cycle.pending_work
