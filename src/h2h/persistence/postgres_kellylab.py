@@ -449,12 +449,28 @@ class PostgreSQLKellyLabRepository:
                     result.provider_status AS result_provider_status,
                     result.regulation_home_goals,
                     result.regulation_away_goals,
-                    result.first_acquired_at AS result_first_acquired_at
+                    result.first_acquired_at AS result_first_acquired_at,
+                    settlement.event_kind AS settlement_event_kind,
+                    settlement.outcome AS settlement_event_outcome,
+                    settlement.occurred_at AS settlement_occurred_at
                 FROM kellylab_picks kp
+                JOIN research_signals rs
+                    ON rs.research_signal_id = kp.research_signal_id
                 LEFT JOIN fixture_result_acquisition_states state
                     ON state.fixture_id = kp.fixture_id
                 LEFT JOIN fixture_result_observations result
                     ON result.result_observation_id = state.current_observation_id
+                LEFT JOIN LATERAL (
+                    SELECT event_kind, outcome, occurred_at
+                    FROM pick_settlement_events pse
+                    WHERE pse.pick_id = rs.production_pick_id
+                      AND NOT EXISTS (
+                          SELECT 1 FROM pick_settlement_events successor
+                          WHERE successor.prior_event_id = pse.settlement_event_id
+                      )
+                    ORDER BY pse.occurred_at DESC, pse.settlement_event_id DESC
+                    LIMIT 1
+                ) settlement ON TRUE
                 WHERE kp.portfolio_id = %s
                 ORDER BY kp.source_decision_at DESC, kp.kelly_pick_id DESC
                 """,
