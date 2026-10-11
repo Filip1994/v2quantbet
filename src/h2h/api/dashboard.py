@@ -274,6 +274,7 @@ class DashboardService:
                     p.*,
                     CASE
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.outcome
+                        WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.outcome
                         WHEN p.source_universe = 'RESEARCH'
                              AND research_result.result_classification = 'NON_PLAYED_VOIDABLE'
                         THEN 'VOID'
@@ -306,6 +307,7 @@ class DashboardService:
                     END AS source_outcome,
                     CASE
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.settled_at
+                        WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.occurred_at
                         WHEN p.source_universe = 'RESEARCH'
                              AND research_result.result_classification IN (
                                  'PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE'
@@ -325,15 +327,29 @@ class DashboardService:
                     END AS source_away_goals,
                     CASE
                         WHEN p.source_universe = 'GOALLAB' THEN goal_closing.odds
+                        WHEN p.source_universe = 'CORNERLAB' THEN corner_pick.closing_odds
                         WHEN p.source_universe = 'RESEARCH' THEN research_closing.odd
                         ELSE NULL
                     END AS source_closing_odd,
                     CASE
                         WHEN p.source_universe = 'GOALLAB' THEN goal_closing.captured_at
+                        WHEN p.source_universe = 'CORNERLAB' THEN corner_pick.closing_observed_at
                         WHEN p.source_universe = 'RESEARCH' THEN research_closing.observed_at
                         ELSE NULL
                     END AS source_closing_observed_at
                 FROM production_funnel_picks p
+                LEFT JOIN quantlab_shadow_bets corner_pick
+                  ON p.source_universe = 'CORNERLAB'
+                 AND corner_pick.lab = 'CORNER'
+                 AND corner_pick.shadow_bet_id = p.source_pick_id
+                LEFT JOIN LATERAL (
+                    SELECT e.outcome, e.occurred_at
+                    FROM quantlab_corner_settlement_events e
+                    WHERE p.source_universe = 'CORNERLAB'
+                      AND e.shadow_bet_id = p.source_pick_id
+                    ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC
+                    LIMIT 1
+                ) corner_settlement ON TRUE
                 LEFT JOIN quantlab_goal_pick_settlements goal_settlement
                   ON p.source_universe = 'GOALLAB'
                  AND goal_settlement.goal_pick_id = p.source_pick_id
