@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,6 +13,10 @@ from h2h.odds.api_football_client import ApiFootballClient
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
+from h2h.persistence.result_settlement import ResultPersistenceConflictError
+
+
+LOGGER = logging.getLogger("quantbet.result_settlement")
 
 
 def _now(clock: Callable[[], datetime]) -> datetime:
@@ -139,7 +144,17 @@ class ReconcileFixtureResults:
             except (TypeError, ValueError) as exc:
                 self._on_item_failure(fixture_id, exc, now)
                 continue
-            self._repository.persist_result(result, checked_at=now)
+            try:
+                self._repository.persist_result(result, checked_at=now)
+            except ResultPersistenceConflictError as exc:
+                # An upstream fixture identity mismatch must never be persisted or
+                # settled, but it also must not stop the independent engine workers.
+                LOGGER.error(
+                    "result fixture identity conflict; skipping fixture",
+                    extra={"fixture_id": fixture_id, "error_class": type(exc).__name__},
+                )
+                self._on_item_failure(fixture_id, exc, now)
+                continue
             self._on_item_success(fixture_id)
             stable = self._repository.stable_result(fixture_id, as_of=now)
             if stable is None:
