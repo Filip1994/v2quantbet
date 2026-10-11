@@ -26,7 +26,7 @@ from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 LOGGER = logging.getLogger("quantbet.goallab.backlog.oneshot")
 LOCK_NAME = "quantbet-goallab-backlog-oneshot-v1"
 MIN_AGE = timedelta(hours=48)
-MAX_CALLS = 75
+MAX_CALLS = 1
 
 
 def stats(repository: PostgreSQLQuantLabRepository) -> dict[str, int]:
@@ -161,9 +161,9 @@ def main() -> None:
                 except ApiBudgetExceededError:
                     LOGGER.warning("GOALLAB_ONESHOT_API_BUDGET_EXHAUSTED")
                     break
-                except Exception:
+                except Exception as exc:
                     failed += 1
-                    LOGGER.exception("GOALLAB_ONESHOT_POLL_FAILED fixture=%s", fixture_id)
+                    LOGGER.exception("GOALLAB_ONESHOT_POLL_FAILED fixture=%s error_class=%s error=%s", fixture_id, type(exc).__name__, str(exc))
                     repo.record_goal_pick_result_poll_attempt(
                         fixture_id=fixture_id, attempted_at=now, outcome="ERROR",
                     )
