@@ -1971,6 +1971,12 @@ class QuantLabRuntime:
                 result["goal_picks"] = goal_picks
             except Exception:
                 LOGGER.exception("QuantLab GoalLab shadow evaluation failed")
+            finally:
+                # The batch has scored every GoalLab fixture. Retaining 30,000
+                # match histories through Card/Corner/H2H collection raises RSS.
+                release = getattr(self._goal_engine, "release_cached_scoring_context", None)
+                if callable(release):
+                    release()
 
             try:
                 result["goal_result_refreshes"] = self._refresh_goal_pick_results(now)
