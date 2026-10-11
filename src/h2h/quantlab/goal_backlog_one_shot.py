@@ -26,7 +26,7 @@ from h2h.quantlab.repository import PostgreSQLQuantLabRepository
 LOGGER = logging.getLogger("quantbet.goallab.backlog.oneshot")
 LOCK_NAME = "quantbet-goallab-backlog-oneshot-v1"
 MIN_AGE = timedelta(hours=48)
-MAX_CALLS = 1
+MAX_CALLS = 75
 
 
 def stats(repository: PostgreSQLQuantLabRepository) -> dict[str, int]:
@@ -103,7 +103,7 @@ def pending_historical_targets(repository: PostgreSQLQuantLabRepository, now: da
 def main() -> None:
     configure_logging("INFO")
     url = os.environ["DATABASE_URL"]
-    key = os.environ["API_FOOTBALL_KEY"]
+    key = os.environ["API_FOOTBALL_KEY"].strip()
     daily_limit = int(os.environ["QUANTBET_API_DAILY_LIMIT"])
     reserve = int(os.environ["QUANTBET_API_RESERVE"])
     connection = psycopg.connect(url, autocommit=True)
