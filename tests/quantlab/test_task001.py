@@ -1371,3 +1371,22 @@ def test_quantlab_fixture_discovery_drops_ecuador_before_persistence() -> None:
 
     assert [row.fixture.provider_fixture_id for row in rows] == ["3003"]
 
+
+
+def test_result_refresh_can_parse_historical_blocked_fixture_without_new_pick_scope() -> None:
+    """Past canonical picks remain settleable after a country/league is retired."""
+    payload = {
+        "response": [
+            _fixture_payload(1492985, 358, "First Division", "Ireland"),
+            _fixture_payload(1496163, 473, "2. Division - Group 1", "Norway"),
+            _fixture_payload(3003, 39, "Premier League", "England"),
+        ]
+    }
+    normal = parse_fixture_discovery_response(payload, captured_at=NOW)
+    historical = parse_fixture_discovery_response(
+        payload, captured_at=NOW, include_blocked=True,
+    )
+    assert [r.fixture.provider_fixture_id for r in normal] == ["3003"]
+    assert [r.fixture.provider_fixture_id for r in historical] == [
+        "1492985", "1496163", "3003",
+    ]
