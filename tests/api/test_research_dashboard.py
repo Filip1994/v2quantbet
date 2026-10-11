@@ -980,6 +980,8 @@ def test_selected_production_buckets_are_neon_highlighted_in_research_analytics(
     assert "BTTS NO · odds 2.01–2.50" in intake
     assert "OU OVER 2.5 · odds 1.81–2.00" in intake
     assert "OU UNDER 2.5 · odds 1.81–2.00" not in intake
-    assert intake.count('class="production-bucket-row"') == 3
+    assert "OU UNDER · edge 10–15%" in intake
+    assert "OU UNDER · edge 20–30%" in intake
+    assert intake.count('class="production-bucket-row"') == 5
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "#18d7ff" in html
