@@ -396,3 +396,19 @@ def test_selected_corner_cohorts_are_independent_and_research_does_not_match() -
         CORNER_OVER_GAP_1_2_ODDS_1_61_1_80
     }
     assert PostgreSQLProductionFunnelRepository._research_matches(c4) == ()
+
+
+def test_corner_performance_cursor_binding_is_static() -> None:
+    """Guard the live funnel against classmethod injection of an extra cls argument."""
+    class EmptyCursor:
+        description = ()
+
+        def execute(self, query: str) -> None:
+            assert "quantlab_corner_settlement_events" in query
+
+        def fetchall(self) -> list[tuple[()]]:
+            return []
+
+    assert PostgreSQLProductionFunnelRepository._cornerlab_performance_rows(
+        EmptyCursor()
+    ) == ()
