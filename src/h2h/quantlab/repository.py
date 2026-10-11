@@ -891,7 +891,11 @@ class PostgreSQLQuantLabRepository:
         postponed_refresh_seconds: int = 21600,
         limit: int = 25,
     ) -> tuple[dict[str, Any], ...]:
-        """Return unsettled GoalLab fixtures whose QuantLab-owned result needs refreshing."""
+        """Fairly poll unsettled GoalLab fixtures, including stale/no-match attempts.
+
+        Retry accounting is operational only: immutable result and settlement
+        evidence is never synthesized or overwritten.
+        """
         if (
             post_kickoff_delay_seconds <= 0
             or refresh_after_seconds <= 0
@@ -901,25 +905,35 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("GoalLab result refresh settings and limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT DISTINCT ON (p.fixture_id) p.fixture_id, f.provider_fixture_id, "
-                "latest.kickoff_at, latest.provider_status, latest.captured_at "
-                "FROM quantlab_goal_picks p "
-                "JOIN quantlab_fixtures f ON f.fixture_id = p.fixture_id "
-                "JOIN LATERAL ("
-                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
-                " FROM quantlab_fixture_observations o "
-                " WHERE o.fixture_id = p.fixture_id "
-                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
-                ") latest ON TRUE "
-                "WHERE NOT EXISTS ("
-                " SELECT 1 FROM quantlab_goal_pick_settlements s "
-                " WHERE s.goal_pick_id = p.goal_pick_id"
-                ") "
-                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
-                "AND latest.captured_at <= %s - ("
-                " CASE WHEN latest.provider_status = 'PST' THEN %s ELSE %s END"
-                " * interval '1 second') "
-                "ORDER BY p.fixture_id, p.decision_at ASC LIMIT %s",
+                "WITH due AS ("
+                " SELECT DISTINCT ON (p.fixture_id)"
+                " p.fixture_id, f.provider_fixture_id,"
+                " latest.kickoff_at, latest.provider_status, latest.captured_at,"
+                " GREATEST(latest.captured_at,"
+                " COALESCE(attempt.last_attempt_at, latest.captured_at)) AS last_polled_at"
+                " FROM quantlab_goal_picks p"
+                " JOIN quantlab_fixtures f ON f.fixture_id = p.fixture_id"
+                " JOIN LATERAL ("
+                "  SELECT o.kickoff_at, o.provider_status, o.captured_at"
+                "  FROM quantlab_fixture_observations o"
+                "  WHERE o.fixture_id = p.fixture_id"
+                "  ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                " ) latest ON TRUE"
+                " LEFT JOIN quantlab_goal_result_poll_attempts attempt"
+                "   ON attempt.fixture_id = p.fixture_id"
+                " WHERE NOT EXISTS ("
+                "  SELECT 1 FROM quantlab_goal_pick_settlements s"
+                "  WHERE s.goal_pick_id = p.goal_pick_id"
+                " )"
+                " AND latest.kickoff_at <= %s - (%s * interval '1 second')"
+                " AND GREATEST(latest.captured_at,"
+                "   COALESCE(attempt.last_attempt_at, latest.captured_at)) <= %s - ("
+                "   CASE WHEN latest.provider_status = 'PST' THEN %s ELSE %s END"
+                "   * interval '1 second')"
+                " ORDER BY p.fixture_id, p.decision_at ASC"
+                ") SELECT fixture_id, provider_fixture_id, kickoff_at,"
+                " provider_status, captured_at"
+                " FROM due ORDER BY last_polled_at ASC, fixture_id ASC LIMIT %s",
                 (
                     now,
                     post_kickoff_delay_seconds,
@@ -930,6 +944,33 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
             return _row_dicts(cursor)
+
+    def record_goal_pick_result_poll_attempt(
+        self,
+        *,
+        fixture_id: str,
+        attempted_at: datetime,
+        outcome: str,
+    ) -> None:
+        """Advance operational retry order even when a provider returns no result."""
+        if outcome not in {"CAPTURED", "NO_MATCH", "ERROR"}:
+            raise ValueError("invalid GoalLab result poll outcome")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_result_poll_attempts "
+                "(fixture_id, last_attempt_at, attempt_count, last_outcome) "
+                "VALUES (%s, %s, 1, %s) "
+                "ON CONFLICT (fixture_id) DO UPDATE SET "
+                "last_attempt_at = GREATEST("
+                "quantlab_goal_result_poll_attempts.last_attempt_at, "
+                "EXCLUDED.last_attempt_at), "
+                "attempt_count = quantlab_goal_result_poll_attempts.attempt_count + 1, "
+                "last_outcome = CASE WHEN EXCLUDED.last_attempt_at >= "
+                "quantlab_goal_result_poll_attempts.last_attempt_at "
+                "THEN EXCLUDED.last_outcome "
+                "ELSE quantlab_goal_result_poll_attempts.last_outcome END",
+                (fixture_id, attempted_at, outcome),
+            )
 
     def goal_pick_settlement_candidates(
         self,
