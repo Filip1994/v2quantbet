@@ -21,11 +21,11 @@ jobs:
             "CORNER": "https://quantbet-quantlab-production.up.railway.app/quantlab?view=analytics&lab=corner",
           }
           def plain(s):
-              s=re.sub(r'(?is)<(?:script|style)\\b[^>]*>.*?</(?:script|style)>','',s)
-              return re.sub(r'\\s+',' ',html.unescape(re.sub(r'<[^>]*>',' ',s))).strip()
+              s=re.sub(r'(?is)<(?:script|style)\b[^>]*>.*?</(?:script|style)>','',s)
+              return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]*>',' ',s))).strip()
           def pars_num(s):
               t=s.replace(' ','').replace(',','')
-              m=re.search(r'-?\\d+(?:\\.\\d+)?',t)
+              m=re.search(r'-?\d+(?:\.\d+)?',t)
               return float(m.group(0)) if m else None
           for name,url in URLS.items():
               print("=== ",name," ",url,flush=True)
@@ -37,14 +37,14 @@ jobs:
               except Exception as exc:
                   print("FAILED",type(exc).__name__,str(exc)[:600],flush=True)
                   continue
-              sections=re.findall(r'(?is)<section\\b[^>]*>.*?</section>',src)
+              sections=re.findall(r'(?is)<section\b[^>]*>.*?</section>',src)
               if not sections:
                   sections=[src]
               for n,section in enumerate(sections):
-                  rows=re.findall(r'(?is)<tr\\b[^>]*>.*?</tr>',section)
+                  rows=re.findall(r'(?is)<tr\b[^>]*>.*?</tr>',section)
                   if not rows: continue
-                  headers=[plain(c) for c in re.findall(r'(?is)<th\\b[^>]*>(.*?)</th>',rows[0])]
-                  cells=[[plain(c) for c in re.findall(r'(?is)<td\\b[^>]*>(.*?)</td>',r)] for r in rows[1:]]
+                  headers=[plain(c) for c in re.findall(r'(?is)<th\b[^>]*>(.*?)</th>',rows[0])]
+                  cells=[[plain(c) for c in re.findall(r'(?is)<td\b[^>]*>(.*?)</td>',r)] for r in rows[1:]]
                   hdr=plain(section[:350])[:140]
                   print("TABLE",n,"TITLE",repr(hdr),"HEADERS",repr(headers),"ROWS",len(cells),flush=True)
                   nidx=next((i for i,x in enumerate(headers) if x.upper().strip() in ("N","GRADED N","SETTLED N","BETS","GRADED","SETTLED")),None)
