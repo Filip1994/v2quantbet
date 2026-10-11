@@ -19,6 +19,7 @@ jobs:
           URLS = {
             "RESEARCH_JSON": "https://quantbet-research-production.up.railway.app/research/analytics.json",
             "CORNER": "https://quantbet-quantlab-production.up.railway.app/quantlab?view=analytics&lab=corner",
+            "RESEARCH_UI": "https://quantbet-research-production.up.railway.app/research/analytics",
             "RESEARCH_X1": "https://quantbet-research-production.up.railway.app/research?" + urllib.parse.urlencode({"tab":"history","market":"BTTS","selection":"NO","odds_bucket":"2.01–2.50","edge_bucket":"10–15%"}),
             "RESEARCH_X2": "https://quantbet-research-production.up.railway.app/research?" + urllib.parse.urlencode({"tab":"history","market":"OU_25","selection":"UNDER","odds_bucket":"2.01–2.50","edge_bucket":"10–15%"}),
           }
@@ -61,6 +62,14 @@ jobs:
                       else:losses+=1;pnl-=1
                   print("RESEARCH_INTERSECTION",name,"W",wins,"L",losses,"VOID",voids,"N_GRADED",wins+losses,"ROI",round(100*pnl/(wins+losses),2) if wins+losses else None,"TOTAL_HTML_ROWS",len(matched),flush=True)
                   continue
+              if name in ("CORNER", "RESEARCH_UI"):
+                  panel=re.search(r'(?is)<section\\b[^>]*id="production-intake-buckets"[^>]*>(.*?)</section>',src)
+                  if panel:
+                      piece=panel.group(1)
+                      ids=sorted(set(re.findall(r'(?:RESEARCH|CORNER)_[A-Z0-9_]+',piece)))
+                      print("BLUE_PANEL",name,"ROWS",piece.count('class="production-bucket-row"'),"IDS",ids,flush=True)
+                  else:
+                      print("BLUE_PANEL",name,"MISSING",flush=True)
               sections=re.findall(r'(?is)<section\b[^>]*>.*?</section>',src)
               if not sections:
                   sections=[src]
