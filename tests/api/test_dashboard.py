@@ -777,5 +777,5 @@ def test_research_manual_void_is_projection_of_source_settlement_without_rewriti
     assert DashboardService(app)._picks() == []
     assert "research_manual_settlement" in cursor.query
     assert "e.pick_id = research_signal.production_pick_id" in cursor.query
-    assert "e.event_kind = 'MANUAL_VOID'" in cursor.query
+    assert "research_manual_settlement.event_kind = 'MANUAL_VOID'" in cursor.query
     assert "THEN research_manual_settlement.occurred_at" in cursor.query
