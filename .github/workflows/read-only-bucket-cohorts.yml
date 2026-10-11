@@ -63,7 +63,7 @@ jobs:
                   print("RESEARCH_INTERSECTION",name,"W",wins,"L",losses,"VOID",voids,"N_GRADED",wins+losses,"ROI",round(100*pnl/(wins+losses),2) if wins+losses else None,"TOTAL_HTML_ROWS",len(matched),flush=True)
                   continue
               if name in ("CORNER", "RESEARCH_UI"):
-                  panel=re.search(r'(?is)<section\\b[^>]*id="production-intake-buckets"[^>]*>(.*?)</section>',src)
+                  panel=re.search(r'(?is)<section\b[^>]*id="production-intake-buckets"[^>]*>(.*?)</section>',src)
                   if panel:
                       piece=panel.group(1)
                       ids=sorted(set(re.findall(r'(?:RESEARCH|CORNER)_[A-Z0-9_]+',piece)))
