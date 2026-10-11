@@ -169,9 +169,27 @@ def test_realized_pnl_kpi_color_tracks_sign(
     html = RenderingDashboard(snapshot).render_html()
 
     assert (
-        f'<article class="kpi {expected_css}"><span>Realized P/L</span>'
+        f'<article class="kpi {expected_css}"><span>Realized P/L · PLAYED</span>'
         f"<strong>{expected_value}</strong></article>"
     ) in html
+
+
+def test_operator_financial_kpis_do_not_masquerade_as_system_ledger() -> None:
+    html = RenderingDashboard(
+        _snapshot([_pick(), _pick(operator_state="SKIPPED", pick_id="skipped")])
+    ).render_html()
+    for label in (
+        "Operator bankroll (PLAYED)",
+        "Realized P/L · PLAYED",
+        "Staked · PLAYED",
+        "Returns · PLAYED",
+        "Open PLAYED stakes",
+    ):
+        assert f"<span>{label}</span>" in html
+    assert "Derived PLAYED-only balance" in html
+    assert "not the last immutable system-ledger balance" in html
+    assert "SKIPPED and PENDING picks are excluded" in html
+    assert "<span>Current bankroll</span>" not in html
 
 
 def test_country_flag_is_shown_beside_league_metadata() -> None:

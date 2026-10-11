@@ -997,7 +997,7 @@ class DashboardService:
             else "pnl-zero"
         )
         cards = [
-            ("Current bankroll", self._money(bankroll["available_minor"], currency), "primary"),
+            ("Operator bankroll (PLAYED)", self._money(bankroll["available_minor"], currency), "primary"),
             ("Initial bankroll", self._money(bankroll["initial_minor"], currency), ""),
             (
                 "Risk exposure / cap",
@@ -1007,11 +1007,11 @@ class DashboardService:
                 ),
                 "warn",
             ),
-            ("Realized P/L", self._money(realized_pnl_minor, currency), pnl_css),
-            ("Total staked", self._money(bankroll["total_staked_minor"], currency), ""),
+            ("Realized P/L · PLAYED", self._money(realized_pnl_minor, currency), pnl_css),
+            ("Staked · PLAYED", self._money(bankroll["total_staked_minor"], currency), ""),
             ("Settled stakes", self._money(bankroll["settled_stake_minor"], currency), ""),
-            ("Gross returns", self._money(bankroll["gross_returns_minor"], currency), ""),
-            ("Pending", self._money(bankroll["pending_minor"], currency), "warn"),
+            ("Returns · PLAYED", self._money(bankroll["gross_returns_minor"], currency), ""),
+            ("Open PLAYED stakes", self._money(bankroll["pending_minor"], currency), "warn"),
         ]
         cards_html = "".join(
             f'<article class="kpi {css}"><span>{escape(label)}</span><strong>{escape(value)}</strong>'
@@ -1129,6 +1129,8 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 <div class="table-wrap"><table><thead><tr><th>Worker</th><th>Freshness</th><th>Last success</th><th>Consecutive failures</th></tr></thead>
 <tbody>{context["worker_rows"]}</tbody></table></div></section>
 <section class="panel glossary"><div class="section-label">Plain-language glossary</div><dl>
+<dt>Operator bankroll</dt><dd>Derived PLAYED-only balance: initial capital plus realized PLAYED P/L minus open PLAYED exposure. SKIPPED and PENDING picks are excluded. This is not the last immutable system-ledger balance or a bookmaker statement.</dd>
+<dt>Operator P/L</dt><dd>Settled PLAYED picks only. System settlement and immutable ledger entries are a separate accounting basis and must not be added to this value.</dd>
 <dt>First seen</dt><dd>First stored pre-match price for the registered market and bookmaker series.</dd>
 <dt>Pick odds</dt><dd>Immutable decimal odds cloned from the source universe when the intake contract matched.</dd>
 <dt>Last observed</dt><dd>Newest stored pre-kickoff price. In the final live window this may come from the API-Football live-market proxy and is labeled LIVE PROXY.</dd>
