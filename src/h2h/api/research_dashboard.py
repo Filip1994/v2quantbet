@@ -219,6 +219,11 @@ def _time_to_kickoff_bucket(qualified_at: Any, kickoff_at: Any) -> str:
 
 
 def counterfactual_outcome(row: dict[str, Any]) -> str:
+    # The most recent append-only correction supersedes a prior manual VOID.
+    # The provider's result status remains independently displayed.
+    manual_outcome = row.get("manual_correction_outcome")
+    if manual_outcome in ("WIN", "LOSS", "VOID"):
+        return str(manual_outcome)
     if row.get("production_manual_void"):
         return "VOID"
     classification = row.get("result_classification")
