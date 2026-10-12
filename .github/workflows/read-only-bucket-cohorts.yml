@@ -1,46 +1,40 @@
-name: Temporary read-only short-ID lookup
+name: Read-only Research Tbilisi fixture status
 on:
-  push:
-    branches: [audit/read-bucket-cohorts-20261012]
   pull_request:
     branches: [main]
 permissions:
   contents: read
 jobs:
-  lookup:
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
-      - name: Locate suffix in public dashboard and Research history
+      - name: Inspect active awaiting and history (GET only)
         shell: bash
         run: |
           python - <<'PY'
-          import urllib.request,re,html,urllib.parse
-          target="6aae7c6666"
-          urls={
-            "PRODUCTION":"https://quantbet-dashboard-production.up.railway.app/dashboard",
-            "RESEARCH_HISTORY":"https://quantbet-research-production.up.railway.app/research?tab=history",
-            "RESEARCH_ACTIVE":"https://quantbet-research-production.up.railway.app/research?tab=active",
-            "RESEARCH_AWAITING":"https://quantbet-research-production.up.railway.app/research?tab=awaiting",
-            "CORNER":"https://quantbet-quantlab-production.up.railway.app/quantlab?view=analytics&lab=corner"
-          }
-          def plain(raw):return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]*>',' ',raw))).strip()
-          for name,url in urls.items():
-            try:
-              req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 read-only-id-check"})
-              with urllib.request.urlopen(req,timeout=35) as r:
-                src=r.read(9000000).decode('utf-8','replace')
-                print("HTTP",name,r.status,"BYTES",len(src),flush=True)
-            except Exception as e:
-              print("ERROR",name,type(e).__name__,str(e)[:150],flush=True);continue
-            positions=[m.start() for m in re.finditer(target,src,re.I)]
-            print("MATCH_COUNT",name,len(positions),flush=True)
-            for pos in positions[:7]:
-              trstart=src.rfind("<tr",0,pos);trend=src.find("</tr>",pos)
-              if trstart>=0 and trend>=0 and pos-trstart<15000 and trend-pos<15000:
-                row=src[trstart:trend+5]
-                codes=re.findall(r'title="([^"]+)"',row)
-                print("MATCH_ROW",name,"title_ids",codes[:6],"text",plain(row)[:1100],flush=True)
-              else:
-                print("MATCH_CONTEXT",name,plain(src[max(0,pos-800):pos+1000])[:1000],flush=True)
+          import re,html,urllib.request,urllib.error
+          targets=("Tbilisi 2025","Dinamo Tbilisi 2","Din. Tbilisi 2","Tbilisi 2")
+          base="https://quantbet-research-production.up.railway.app/research?tab="
+          def plain(s):
+              s=re.sub(r"(?is)<(?:script|style)\\b[^>]*>.*?</(?:script|style)>","",s)
+              return re.sub(r"\\s+"," ",html.unescape(re.sub(r"<[^>]*>"," ",s))).strip()
+          for tab in ("active","awaiting","history"):
+              try:
+                  req=urllib.request.Request(base+tab,headers={"User-Agent":"QuantBet-read-only-fixture-lookup/1.0","Accept":"text/html"})
+                  with urllib.request.urlopen(req,timeout=40) as response:
+                      src=response.read(9000000).decode("utf-8","replace")
+                      print("TAB",tab,"HTTP",response.status,"BYTES",len(src),flush=True)
+                  heading=re.search(r'(?is)<a[^>]*href="[^"]*tab='+tab+r'[^"]*"[^>]*>.*?</a>',src)
+                  print("TAB_COUNT",tab,plain(heading.group(0))[:120] if heading else "missing",flush=True)
+                  found=[]
+                  for row in re.findall(r"(?is)<tr\\b[^>]*>.*?</tr>",src):
+                      readable=plain(row)
+                      if any(t.casefold() in readable.casefold() for t in targets):
+                          found.append((readable,row))
+                  print("FOUND",tab,len(found),flush=True)
+                  for readable,row in found[:30]:
+                      print("MATCH",tab,"TEXT",readable[:1700],flush=True)
+                      print("MATCH",tab,"IDS",re.findall(r'(?:api-football:\\d+|(?:research-signal|registered-pick|production-pick)-v1:[a-f0-9]+)',row),flush=True)
+              except Exception as e:print("ERROR",tab,type(e).__name__,str(e)[:220],flush=True)
           PY
