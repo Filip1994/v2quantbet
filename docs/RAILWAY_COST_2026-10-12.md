@@ -41,6 +41,8 @@ over the two new indexes. No archive row eligibility, data, service cadence,
 or volume setting was changed. An earlier concurrent-index attempt timed out
 behind a long archive transaction and left an invalid index; that index was
 removed before the successful application. No invalid index remains.
+Within minutes, `pg_stat_user_indexes` reported more than 50,000 scans on
+each new index, confirming the live workload is using them.
 
 Migration 068 remains in the branch for durable schema history. Once merged,
 its `IF NOT EXISTS` statements will see the live indexes and record the
