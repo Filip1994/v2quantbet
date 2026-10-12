@@ -309,11 +309,11 @@ def test_virsliga_global_hard_ban_cannot_be_bypassed_by_metadata_aliases(
         universe_block_reason,
     )
 
-    kwargs = dict(
-        country=country,
-        competition_name=competition_name,
-        league_id=league_id,
-    )
+    kwargs = {
+        "country": country,
+        "competition_name": competition_name,
+        "league_id": league_id,
+    }
     assert universe_block_reason(**kwargs) == RejectionReason.BLACKLISTED_LEAGUE
     assert is_universe_blocked_competition(**kwargs)
     assert classify_phase_i(
