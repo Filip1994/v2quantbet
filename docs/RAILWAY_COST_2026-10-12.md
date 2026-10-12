@@ -37,8 +37,8 @@ At approximately 11:44 UTC on October 12, both indexes were created directly
 in production in one short transaction. Both report `indisvalid = true` and
 `indisready = true` and occupy about 3.2 MB each. A read-only `EXPLAIN` of the
 same H2H reference predicate changed from a sequential scan to a `BitmapOr`
-over the two new indexes. No archive row eligibility, data, service cadence,
-or volume setting was changed. An earlier concurrent-index attempt timed out
+over the two new indexes. The index change did not alter archive row
+eligibility, data, service cadence, or volume settings. An earlier concurrent-index attempt timed out
 behind a long archive transaction and left an invalid index; that index was
 removed before the successful application. No invalid index remains.
 Within minutes, `pg_stat_user_indexes` reported more than 50,000 scans on
@@ -51,7 +51,22 @@ and billed CPU dollars for several full days. Also check that archive batches
 verify and mark hot-row deletion normally. There is no defensible dollar
 savings claim until those observations are made.
 
-Indexing this one query does not by itself establish the user's $30 monthly
-total target. The two PostgreSQL services' current billed pace alone is near
-that budget. Reaching it while retaining all football, basketball, and
-QuantLab services may require changing their operating scope or hosting.
+## Service cadence changes
+
+After the user chose a lower-cost schedule, the production Railway settings
+were changed on October 12. `basketball-v2-worker` now runs at 05 minutes past
+00, 06, 12, and 18 UTC instead of every five minutes. The football QuantLab
+collector runs at 00, 06, 12, and 18 UTC instead of hourly. Its modeler runs
+daily at 01:15 UTC instead of twice daily. The legacy basketball cold-storage
+job runs every six hours instead of hourly. Both Basketball v2 and QuantLab
+dashboards have Railway serverless mode enabled, so they may sleep when idle.
+Football research, operations dashboard, engine, and PostgreSQL remain online.
+The Basketball PostgreSQL service was briefly redeployed during this change
+and is online with its original volume. Repository sources were reconnected
+to the affected services so future changes remain deployable.
+
+The current billing cycle's early estimate was $24.39 at about 12:10 UTC,
+before a full day of the new schedule. It is not yet evidence that the $30
+monthly target will be met. The workspace retains a $20 soft usage alert and
+$40 hard usage limit. Compare daily spend for at least one full day after the
+new cadence before making further changes.
