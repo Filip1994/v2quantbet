@@ -226,7 +226,7 @@ def test_rejects_national_team_football_globally(metadata: CompetitionMetadata) 
     assert decision.rejection_reason == RejectionReason.NATIONAL_TEAM
 
 
-@pytest.mark.parametrize("league_id", [72, 75, 236, 595])
+@pytest.mark.parametrize("league_id", [72, 75, 236, 365, 595])
 def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
     decision = classify_phase_i(
         CompetitionMetadata(
@@ -289,3 +289,49 @@ def test_rejects_klubi_04_across_entire_universe(metadata: CompetitionMetadata) 
 
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.BLOCKED_TEAM
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name", "league_id"),
+    [
+        ("Latvia", "Virslīga", 365),
+        ("LATVIA", "Virsliga", "365"),
+        ("Latvia", "Virslīga", None),
+        ("latvia", "VIRSLIGA", None),
+        ("Other Country", "Other Competition", 365),
+    ],
+)
+def test_virsliga_global_hard_ban_cannot_be_bypassed_by_metadata_aliases(
+    country: str, competition_name: str, league_id: object,
+) -> None:
+    from h2h.domain.competition_scope import (
+        is_universe_blocked_competition,
+        universe_block_reason,
+    )
+
+    kwargs = {
+        "country": country,
+        "competition_name": competition_name,
+        "league_id": league_id,
+    }
+    assert universe_block_reason(**kwargs) == RejectionReason.BLACKLISTED_LEAGUE
+    assert is_universe_blocked_competition(**kwargs)
+    assert classify_phase_i(
+        CompetitionMetadata(
+            country=country, name=competition_name, type="league", league_id=league_id,
+        )
+    ).eligible is False
+
+
+@pytest.mark.parametrize(
+    ("competition_name", "league_id"),
+    [("1. Liga", 368), ("2. Liga", 369), ("Latvian Cup", 367)],
+)
+def test_other_latvian_leagues_are_not_globally_blacklisted(
+    competition_name: str, league_id: int,
+) -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(
+        country="Latvia", competition_name=competition_name, league_id=league_id
+    ) is None
