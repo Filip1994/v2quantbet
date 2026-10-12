@@ -32,6 +32,13 @@ jobs:
                       readable=plain(row)
                       if any(t.casefold() in readable.casefold() for t in targets):
                           found.append((readable,row))
+                  fallback=[]
+                  for row in re.findall(r"(?is)<tr\b[^>]*>.*?</tr>",src):
+                      readable=plain(row)
+                      if any(t.casefold() in readable.casefold() for t in ("Tbilisi","Georgia","09 Oct 2026","09.10.2026")):
+                          fallback.append(readable[:550])
+                  print("ALIAS_ROWS",tab,len(fallback),flush=True)
+                  for row in fallback[:30]: print("ALIAS_MATCH",tab,row,flush=True)
                   print("FOUND",tab,len(found),flush=True)
                   for readable,row in found[:30]:
                       print("MATCH",tab,"TEXT",readable[:1700],flush=True)
