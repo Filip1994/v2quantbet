@@ -247,7 +247,9 @@ class PostgreSQLResearchSignalRepository:
                 "state.phase, result.result_classification, result.provider_status, "
                 "result.regulation_home_goals, result.regulation_away_goals, "
                 "(settlement.event_kind = 'MANUAL_VOID' AND settlement.outcome = 'VOID') "
-                "AS production_manual_void "
+                "AS production_manual_void, "
+                "CASE WHEN settlement.event_kind = 'CORRECTION' "
+                "THEN settlement.outcome ELSE NULL END AS manual_correction_outcome "
                 "FROM research_signals rs "
                 "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id "
                 "JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id "
@@ -293,6 +295,7 @@ class PostgreSQLResearchSignalRepository:
                 "source", "closing_odds", "closing_observed_at", "closing_captured_at",
                 "result_phase", "result_classification", "result_provider_status",
                 "regulation_home_goals", "regulation_away_goals", "production_manual_void",
+                "manual_correction_outcome",
             )
             return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
 
