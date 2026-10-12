@@ -31,16 +31,23 @@ Production has about 33,000 H2H decision rows (69 MB). A read-only production
 that table. The two partial indexes in migration 068 target exactly those
 lookups. They do not change which observations may be archived or deleted.
 
-## Rollout and proof of savings
+## Production index application and proof of savings
 
-The migration has not been applied to production. Railway's migration runner
-executes migrations in one transaction, so these indexes are created without
-`CONCURRENTLY`. The H2H table is relatively small, but index creation will
-briefly lock writes to it during pre-deploy. Deploy during a quiet period.
-Before and after deployment, compare the archive job duration, football
-PostgreSQL CPU usage, and billed CPU dollars for several full days. Also check
-that archive batches verify and mark hot-row deletion normally. There is no
-defensible dollar savings claim until those observations are made.
+At approximately 11:44 UTC on October 12, both indexes were created directly
+in production in one short transaction. Both report `indisvalid = true` and
+`indisready = true` and occupy about 3.2 MB each. A read-only `EXPLAIN` of the
+same H2H reference predicate changed from a sequential scan to a `BitmapOr`
+over the two new indexes. No archive row eligibility, data, service cadence,
+or volume setting was changed. An earlier concurrent-index attempt timed out
+behind a long archive transaction and left an invalid index; that index was
+removed before the successful application. No invalid index remains.
+
+Migration 068 remains in the branch for durable schema history. Once merged,
+its `IF NOT EXISTS` statements will see the live indexes and record the
+migration version. Compare archive job duration, football PostgreSQL CPU usage,
+and billed CPU dollars for several full days. Also check that archive batches
+verify and mark hot-row deletion normally. There is no defensible dollar
+savings claim until those observations are made.
 
 Indexing this one query does not by itself establish the user's $30 monthly
 total target. The two PostgreSQL services' current billed pace alone is near
