@@ -17,8 +17,8 @@ jobs:
           targets=("Tbilisi 2025","Dinamo Tbilisi 2","Din. Tbilisi 2","Tbilisi 2")
           base="https://quantbet-research-production.up.railway.app/research?tab="
           def plain(s):
-              s=re.sub(r"(?is)<(?:script|style)\\b[^>]*>.*?</(?:script|style)>","",s)
-              return re.sub(r"\\s+"," ",html.unescape(re.sub(r"<[^>]*>"," ",s))).strip()
+              s=re.sub(r"(?is)<(?:script|style)\b[^>]*>.*?</(?:script|style)>","",s)
+              return re.sub(r"\s+"," ",html.unescape(re.sub(r"<[^>]*>"," ",s))).strip()
           for tab in ("active","awaiting","history"):
               try:
                   req=urllib.request.Request(base+tab,headers={"User-Agent":"QuantBet-read-only-fixture-lookup/1.0","Accept":"text/html"})
@@ -28,13 +28,13 @@ jobs:
                   heading=re.search(r'(?is)<a[^>]*href="[^"]*tab='+tab+r'[^"]*"[^>]*>.*?</a>',src)
                   print("TAB_COUNT",tab,plain(heading.group(0))[:120] if heading else "missing",flush=True)
                   found=[]
-                  for row in re.findall(r"(?is)<tr\\b[^>]*>.*?</tr>",src):
+                  for row in re.findall(r"(?is)<tr\b[^>]*>.*?</tr>",src):
                       readable=plain(row)
                       if any(t.casefold() in readable.casefold() for t in targets):
                           found.append((readable,row))
                   print("FOUND",tab,len(found),flush=True)
                   for readable,row in found[:30]:
                       print("MATCH",tab,"TEXT",readable[:1700],flush=True)
-                      print("MATCH",tab,"IDS",re.findall(r'(?:api-football:\\d+|(?:research-signal|registered-pick|production-pick)-v1:[a-f0-9]+)',row),flush=True)
+                      print("MATCH",tab,"IDS",re.findall(r'(?:api-football:\d+|(?:research-signal|registered-pick|production-pick)-v1:[a-f0-9]+)',row),flush=True)
               except Exception as e:print("ERROR",tab,type(e).__name__,str(e)[:220],flush=True)
           PY
