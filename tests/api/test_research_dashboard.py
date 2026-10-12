@@ -985,3 +985,24 @@ def test_selected_production_buckets_are_neon_highlighted_in_research_analytics(
     assert intake.count('class="production-bucket-row"') == 5
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "#18d7ff" in html
+
+
+def test_manual_research_win_correction_overrides_prior_void_without_ft() -> None:
+    row = signal_row()
+    row.update(
+        market="OU_25", selection="OVER", odds=1.65,
+        production_manual_void=False,
+        manual_correction_outcome="WIN",
+        result_phase="POLLING",
+        result_classification="NON_TERMINAL",
+        result_provider_status="2H",
+        regulation_home_goals=None,
+        regulation_away_goals=None,
+    )
+    assert counterfactual_outcome(row) == "WIN"
+    assert counterfactual_pnl_minor(row, 30_000) == 19_500
+
+    row["manual_correction_outcome"] = None
+    row["production_manual_void"] = True
+    assert counterfactual_outcome(row) == "VOID"
+    assert counterfactual_pnl_minor(row, 30_000) == 0
