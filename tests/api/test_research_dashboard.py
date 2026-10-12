@@ -650,6 +650,15 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
             blocked_id["league_id"] = 72
             blocked_id["competition_name"] = "Blacklisted League ID"
 
+            virsliga = signal_row()
+            virsliga["research_signal_id"] = "research-signal-v1:" + "v" * 64
+            virsliga["evaluation_id"] = "value-evaluation-v1:" + "v" * 64
+            virsliga["fixture_id"] = "api-football:710"
+            virsliga["provider_fixture_id"] = "710"
+            virsliga["league_id"] = 365
+            virsliga["country"] = "Latvia"
+            virsliga["competition_name"] = "Virsliga"
+
             women = signal_row()
             women["research_signal_id"] = "research-signal-v1:" + "w" * 64
             women["evaluation_id"] = "value-evaluation-v1:" + "w" * 64
@@ -713,6 +722,7 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
                 allowed,
                 ireland,
                 blocked_id,
+                virsliga,
                 women,
                 friendly,
                 nations,
@@ -738,6 +748,7 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
         assert "Allowed Research League" in html
         assert "Ireland Premier Division" not in html
         assert "Blacklisted League ID" not in html
+        assert "Virsliga" not in html
         assert "Women's Test League" not in html
         assert "Friendlies Clubs" not in html
         assert "UEFA Nations League" not in html
@@ -749,6 +760,10 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
     blocked_drilldown = dashboard.league_details(72, 2026)
     assert blocked_drilldown["summary"]["n"] == 0
     assert blocked_drilldown["rows"] == []
+
+    virsliga_drilldown = dashboard.league_details(365, 2026)
+    assert virsliga_drilldown["summary"]["n"] == 0
+    assert virsliga_drilldown["rows"] == []
 
 
 def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
