@@ -63,6 +63,13 @@ BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 365, 595})
 BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("latvia", "virsliga")})
 BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
 BLOCKED_TEAMS = frozenset({"klubi 04", "klubi04"})
+# Explicit competition bans must be authoritative for every QuantBet consumer,
+# not only for Phase I Production intake.
+EXPLICITLY_BLOCKED_COMPETITIONS_BY_NAME = frozenset({
+    ("czech republic", "3 liga msfl"),
+    ("czechia", "3 liga msfl"),
+    ("wales", "faw championship"),
+})
 FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})
 NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS = frozenset({1, 4, 5, 6, 7, 8, 9})
 
@@ -321,6 +328,27 @@ _WOMEN_ONLY_COMPETITIONS = {
 }
 
 
+_YOUTH_MARKERS_RE = re.compile(
+    r"\b(?:u|under)\s*(?:[5-9]|1[0-9]|2[0-3])\b|"
+    r"\b(?:youth|juniors?|academy|reserves?|amateurs?|olympic)\b",
+    re.IGNORECASE,
+)
+
+
+def is_youth_football(
+    *,
+    competition_name: object,
+    competition_type: object = "",
+    home_team: object = "",
+    away_team: object = "",
+) -> bool:
+    """Global youth/academy/reserve gate, including team labels in senior leagues."""
+    return any(
+        _YOUTH_MARKERS_RE.search(_normalise(str(value or ""))) is not None
+        for value in (competition_name, competition_type, home_team, away_team)
+    )
+
+
 def is_womens_football(
     *,
     competition_name: object,
@@ -391,6 +419,18 @@ def universe_block_reason(
         away_team=away_team,
     ):
         return RejectionReason.WOMEN
+    if is_youth_football(
+        competition_name=competition_name,
+        competition_type=competition_type,
+        home_team=home_team,
+        away_team=away_team,
+    ):
+        return RejectionReason.YOUTH
+    if (
+        _normalise(str(country or "")),
+        _normalise(str(competition_name or "")),
+    ) in EXPLICITLY_BLOCKED_COMPETITIONS_BY_NAME:
+        return RejectionReason.EXPLICIT_COMPETITION
     return blocked_domestic_tier_reason(
         country=country,
         competition_name=competition_name,
@@ -440,14 +480,6 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
     if not country or not name or not competition_type:
         return ScopeDecision(False, RejectionReason.AMBIGUOUS)
 
-    explicitly_excluded_competitions = {
-        ("czech republic", "3 liga msfl"),
-        ("czechia", "3 liga msfl"),
-        ("wales", "faw championship"),  # retired from Phase I intake
-    }
-    if (country, name) in explicitly_excluded_competitions:
-        return ScopeDecision(False, RejectionReason.EXPLICIT_COMPETITION)
-
     african_markers = {
         "algeria", "angola", "benin", "botswana", "burkina faso", "cameroon",
         "cape verde", "central african republic", "chad", "comoros", "congo",
@@ -485,13 +517,6 @@ def classify_phase_i(metadata: CompetitionMetadata) -> ScopeDecision:
         or _contains_phrase(name, ("asia", "afc"))
     ):
         return ScopeDecision(False, RejectionReason.ASIA)
-
-    youth_pattern = (
-        r"\b(?:u|under)\s*\d{1,2}\b|\byouth\b|\bjuniors?\b|\bacademy\b|"
-        r"\breserves?\b|\bolympic\b"
-    )
-    if re.search(youth_pattern, name) or re.search(youth_pattern, competition_type):
-        return ScopeDecision(False, RejectionReason.YOUTH)
 
     cup_markers = (
         "beker",
