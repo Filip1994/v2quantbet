@@ -1390,3 +1390,32 @@ def test_result_refresh_can_parse_historical_blocked_fixture_without_new_pick_sc
     assert [r.fixture.provider_fixture_id for r in historical] == [
         "1492985", "1496163", "3003",
     ]
+
+
+def test_universe_youth_bans_apply_to_all_quantlab_labs() -> None:
+    for fixture in (
+        {
+            "country": "England",
+            "competition_name": "Professional Development League",
+            "home_team": "QPR U21",
+            "away_team": "Cardiff City U21",
+        },
+        {
+            "country": "Italy",
+            "competition_name": "Serie C",
+            "home_team": "Giugliano",
+            "away_team": "Inter U23",
+        },
+    ):
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == "youth_or_amateur"
+        assert context.reason == "youth_or_amateur"
+
+
+def test_explicit_global_league_ban_applies_to_all_quantlab_labs() -> None:
+    fixture = {"country": "Wales", "competition_name": "FAW Championship"}
+    assert goal_scope(**fixture).reason == "blocked_competition"
+    assert card_corner_scope(**fixture).reason == "blocked_competition"
