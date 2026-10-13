@@ -150,6 +150,8 @@ _UNIVERSE_REASON_LABELS = {
     RejectionReason.SWEDEN_TIER: "blocked_domestic_tier",
     RejectionReason.FINLAND_TIER: "blocked_domestic_tier",
     RejectionReason.NORWAY_TIER: "blocked_domestic_tier",
+    RejectionReason.YOUTH: "youth_or_amateur",
+    RejectionReason.EXPLICIT_COMPETITION: "blocked_competition",
 }
 
 
