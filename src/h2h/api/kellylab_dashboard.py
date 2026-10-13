@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from h2h.api.dashboard_time import local_time
+from h2h.api.hub_return import with_hub_return
 
 
 def _money(minor: Any) -> str:
@@ -289,6 +290,8 @@ class KellyLabHTTPService:
         body: str,
         content_type: str,
     ) -> None:
+        if content_type.startswith("text/html"):
+            body = with_hub_return(body)
         encoded = body.encode()
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
