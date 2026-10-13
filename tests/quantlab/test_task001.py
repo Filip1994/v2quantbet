@@ -792,7 +792,7 @@ def test_cardlab_dashboard_is_operational_only() -> None:
     assert "MATCH_IMPORTANCE_V1" not in html
 
 
-def test_global_discovery_is_independent_from_production_scope() -> None:
+def test_global_discovery_respects_youth_bans_and_retains_other_leagues() -> None:
     payload = {
         "response": [
             _fixture_payload(1, 1001, "III Liga", "Poland"),
@@ -806,7 +806,6 @@ def test_global_discovery_is_independent_from_production_scope() -> None:
     assert [row.fixture.fixture_id for row in rows] == [
         "api-football:1",
         "api-football:2",
-        "api-football:3",
     ]
     assert rows[0].fixture.competition_name == "III Liga"
     assert rows[1].fixture.country == "Japan"
@@ -904,14 +903,13 @@ def test_runtime_scans_global_discovery_for_market_driven_card_corner_research()
 
     result = runtime.run_once()
 
-    assert result["fixtures_discovered"] == 3
-    assert result["market_fixtures"] == 3
+    assert result["fixtures_discovered"] == 2
+    assert result["market_fixtures"] == 2
     assert provider.date_calls == [NOW.date()]
-    assert provider.odds_calls == [1, 2, 3]
+    assert provider.odds_calls == [1, 2]
     assert {item.fixture.competition_name for item in repo.observations} == {
         "III Liga",
         "J1 League",
-        "Premier League U20",
     }
 
 
