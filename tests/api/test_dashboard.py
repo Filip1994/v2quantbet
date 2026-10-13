@@ -123,6 +123,34 @@ class RenderingDashboard(DashboardService):
         return self._snapshot
 
 
+def test_exact_corner_line_is_visible_in_active_and_history() -> None:
+    corner = _pick(
+        market="TOTAL_CORNERS",
+        selection="OVER",
+        line="9.500",
+        dashboard_phase="PREMATCH",
+        settlement_outcome=None,
+        settled_at=None,
+    )
+    active = RenderingDashboard(_snapshot([corner])).render_html()
+    history = RenderingDashboard(
+        _snapshot([_pick(market="TOTAL_CORNERS", selection="OVER", line="9.500")])
+    ).render_html()
+
+    assert "<strong>OVER 9.5 CORNERS</strong>" in active
+    assert "<strong>OVER 9.5 CORNERS</strong>" in history
+
+
+def test_missing_corner_line_is_visible_as_unavailable() -> None:
+    html = RenderingDashboard(
+        _snapshot(
+            [_pick(market="TOTAL_CORNERS", selection="OVER", line=None,
+                   dashboard_phase="PREMATCH", settlement_outcome=None)]
+        )
+    ).render_html()
+    assert "OVER · LINE UNAVAILABLE" in html
+
+
 def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None:
     html = RenderingDashboard(_snapshot([_pick()])).render_html()
 

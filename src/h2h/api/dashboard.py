@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
@@ -416,7 +416,7 @@ class DashboardService:
                 p.pick_id, p.cloned_at AS registered_at, p.source_fixture_id AS fixture_id,
                 p.home_team, p.away_team, p.competition_name, p.country,
                 p.kickoff_at, p.provider_status,
-                p.market_key AS market, p.selection, p.stake_minor, p.currency,
+                p.market_key AS market, p.selection, p.line, p.stake_minor, p.currency,
                 p.odds AS pick_odd, p.source_quote_observed_at AS pick_observed_at,
                 p.cloned_at AS pick_captured_at,
                 p.odds AS first_seen_odd,
@@ -761,6 +761,23 @@ class DashboardService:
             css, verdict = "flat", "FLAT"
         return f"{value:+.2f}%", css, verdict, source
 
+    @staticmethod
+    def _selection_label(pick: dict[str, Any]) -> str:
+        """Show the exact bookmaker line for corner markets, never infer it from odds."""
+        selection = str(pick.get("selection") or "—")
+        if str(pick.get("market") or "").upper() != "TOTAL_CORNERS":
+            return selection
+        raw_line = pick.get("line")
+        if raw_line is None:
+            return f"{selection} · LINE UNAVAILABLE"
+        try:
+            line = Decimal(str(raw_line))
+        except (InvalidOperation, ValueError):
+            return f"{selection} · LINE UNAVAILABLE"
+        if not line.is_finite():
+            return f"{selection} · LINE UNAVAILABLE"
+        return f"{selection} {format(line.normalize(), 'f')} CORNERS"
+
     def _render_history_row(self, pick: dict[str, Any], currency: str) -> str:
         fixture = f"{pick.get('home_team') or '—'} – {pick.get('away_team') or '—'}"
         outcome = str(pick.get("settlement_outcome") or "").upper()
@@ -777,7 +794,7 @@ class DashboardService:
             else "—"
         )
         pick_market = str(pick.get("market") or "—")
-        pick_selection = str(pick.get("selection") or "—")
+        pick_selection = self._selection_label(pick)
         outcome_tile_class = (
             "win" if status == "WIN"
             else "loss" if status == "LOSS"
@@ -947,7 +964,7 @@ class DashboardService:
             f"{_production_bucket_links_html(pick.get('matched_bucket_ids'))}"
             f'<span class="pick-book" title="Source bookmaker">{registered_bookmaker}</span></td>'
             f'<td><span class="market">{escape(str(pick.get("market") or "—"))}</span>'
-            f"<strong>{escape(str(pick.get('selection') or '—'))}</strong></td>"
+            f"<strong>{escape(self._selection_label(pick))}</strong></td>"
             f'<td>{odds}<small class="timestamps">{escape(checkpoint_times)}</small></td>'
             f'<td class="num"><strong>{self._pct(pick.get("model_probability"))}</strong>'
             f"<small>implied {self._pct(pick.get('implied_probability'))} · "
