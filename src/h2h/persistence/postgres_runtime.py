@@ -259,12 +259,13 @@ class PostgreSQLRuntimeRepository:
             cursor.execute(
                 "SELECT f.fixture_id, f.provider_fixture_id::bigint, f.league_id, f.season, "
                 "latest.kickoff_at, latest.country, latest.competition_name, "
-                "latest.competition_type, captures.last_captured_at, failures.next_retry_at, "
+                "latest.competition_type, latest.home_team, latest.away_team, "
+                "captures.last_captured_at, failures.next_retry_at, "
                 "refresh.freshness_state, refresh.stale_attempt_count, refresh.next_retry_at, "
                 "refresh.last_attempt_at, "
                 "complete.latest_observed_at, complete.latest_captured_at "
                 "FROM fixtures f JOIN LATERAL (SELECT kickoff_at, provider_status, country, "
-                "competition_name, competition_type "
+                "competition_name, competition_type, home_team, away_team "
                 "FROM fixture_observations o WHERE o.fixture_id = f.fixture_id "
                 "ORDER BY observed_at DESC, fixture_observation_id DESC LIMIT 1) latest ON TRUE "
                 "LEFT JOIN LATERAL (SELECT MAX(q.captured_at) AS last_captured_at "
@@ -329,6 +330,8 @@ class PostgreSQLRuntimeRepository:
                 country,
                 competition_name,
                 competition_type,
+                home_team,
+                away_team,
                 last_captured,
                 next_retry_at,
                 freshness_state,
@@ -346,6 +349,8 @@ class PostgreSQLRuntimeRepository:
                     type=competition_type,
                     level=None,
                     league_id=int(league_id),
+                    home_team=home_team,
+                    away_team=away_team,
                 )
             )
             if not scope.eligible:
