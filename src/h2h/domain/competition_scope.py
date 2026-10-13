@@ -330,7 +330,7 @@ _WOMEN_ONLY_COMPETITIONS = {
 
 _YOUTH_MARKERS_RE = re.compile(
     r"\b(?:u|under)\s*(?:[5-9]|1[0-9]|2[0-3])\b|"
-    r"\b(?:youth|juniors?|academy|reserves?|amateurs?|olympic)\b",
+    r"\b(?:youth|juniors?|academy|reserves?|olympic)\b",
     re.IGNORECASE,
 )
 
