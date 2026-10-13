@@ -25,6 +25,7 @@ from h2h.api.dashboard_time import (
     local_time,
 )
 from h2h.api.universe_hub import manifest_json, render_hub
+from h2h.api.hub_return import with_hub_return
 from h2h.domain.operator_pick_state import OperatorPickState
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.production_buckets import bucket_spec
@@ -1281,7 +1282,7 @@ class DashboardHTTPService:
 
     @staticmethod
     def _html(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
-        encoded = body.encode()
+        encoded = with_hub_return(body).encode()
         handler.send_response(status)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Cache-Control", "no-store")

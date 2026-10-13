@@ -20,10 +20,10 @@ its own authentication. No business data is fetched while rendering the Hub.
 The other Railway domains are outside the Hub manifest's scope. On iOS, Apple
 documents that such links open in Safari View Controller. Android Chrome can
 also show browser controls for an out-of-scope destination. Use **Done**, the
-browser's **Back** control, or the QuantBet Home Screen icon to return. Direct
-links do not request a new tab. The Hub cannot add a persistent return button
-inside the other services without changing those services, and it does not
-proxy their traffic or relax their frame restrictions.
+browser's **Back** control, or the QuantBet Home Screen icon to return. The
+existing dashboard HTML pages also provide a fixed **Hub** button that points
+directly to `/hub` in the same tab. JSON and health endpoints are unchanged.
+The button does not proxy traffic or relax frame restrictions.
 
 Actual Home Screen behavior depends on the device and browser version and
 must be checked on an iPhone and Android phone after deployment. Desktop

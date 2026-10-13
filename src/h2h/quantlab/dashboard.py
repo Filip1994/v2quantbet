@@ -34,6 +34,7 @@ from h2h.quantlab.goal_lab.explanations import render_goal_pick_note_html
 from h2h.quantlab.goal_lab.picks import PICK_POLICY_VERSION
 from h2h.quantlab.note_dialog import NOTE_DIALOG_CSS, NOTE_DIALOG_HTML, NOTE_DIALOG_SCRIPT_HASH
 from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+from h2h.api.hub_return import with_hub_return
 from h2h.quantlab.scope import goal_scope
 
 
@@ -1490,6 +1491,8 @@ class QuantLabDashboardHTTPService:
     def _text(
         handler: BaseHTTPRequestHandler, status: int, body: str, content_type: str
     ) -> None:
+        if content_type.startswith("text/html"):
+            body = with_hub_return(body)
         encoded = body.encode()
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
