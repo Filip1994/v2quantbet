@@ -452,7 +452,23 @@ class PostgreSQLKellyLabRepository:
                     result.first_acquired_at AS result_first_acquired_at,
                     settlement.event_kind AS settlement_event_kind,
                     settlement.outcome AS settlement_event_outcome,
-                    settlement.occurred_at AS settlement_occurred_at
+                    settlement.occurred_at AS settlement_occurred_at,
+                    (
+                        SELECT COALESCE(
+                            jsonb_agg(
+                                jsonb_build_object(
+                                    'settlement_event_id', history.settlement_event_id,
+                                    'prior_event_id', history.prior_event_id,
+                                    'event_kind', history.event_kind,
+                                    'outcome', history.outcome,
+                                    'occurred_at', history.occurred_at
+                                ) ORDER BY history.occurred_at, history.settlement_event_id
+                            ),
+                            '[]'::jsonb
+                        )
+                        FROM pick_settlement_events history
+                        WHERE history.pick_id = rs.production_pick_id
+                    ) AS settlement_event_chain
                 FROM kellylab_picks kp
                 JOIN research_signals rs
                     ON rs.research_signal_id = kp.research_signal_id
