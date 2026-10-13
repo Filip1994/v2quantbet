@@ -28,3 +28,6 @@ lint.ignore = ["I001", "PYI034", "UP017"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["h2h"]
+
+[tool.setuptools.package-data]
+"h2h.api" = ["icon-180.png", "icon-192.png", "icon-512.png"]

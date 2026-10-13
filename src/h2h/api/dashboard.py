@@ -6,6 +6,7 @@ import base64
 import hmac
 import json
 import os
+from pathlib import Path
 from uuid import uuid4
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -23,6 +24,7 @@ from h2h.api.dashboard_time import (
     kickoff_countdown,
     local_time,
 )
+from h2h.api.universe_hub import manifest_json, render_hub
 from h2h.domain.operator_pick_state import OperatorPickState
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.production_buckets import bucket_spec
@@ -1199,6 +1201,17 @@ class DashboardHTTPService:
                                 service._json(self, 503, {"error": type(exc).__name__})
                             except (BrokenPipeError, ConnectionResetError):
                                 return
+                elif path == "/hub":
+                    if service._authorize(self):
+                        try:
+                            service._hub_html(self, render_hub())
+                        except (BrokenPipeError, ConnectionResetError):
+                            return
+                elif path == "/hub/manifest.webmanifest":
+                    service._asset(self, manifest_json(), "application/manifest+json")
+                elif path in {"/hub/icon-180.png", "/hub/icon-192.png", "/hub/icon-512.png"}:
+                    icon = Path(__file__).with_name(path.rsplit("/", 1)[-1])
+                    service._asset(self, icon.read_bytes(), "image/png")
                 else:
                     service._json(self, 404, {"error": "not_found"})
 
@@ -1264,6 +1277,34 @@ class DashboardHTTPService:
         handler.send_header("Content-Length", str(len(encoded)))
         handler.end_headers()
         handler.wfile.write(encoded)
+
+    @staticmethod
+    def _hub_html(handler: BaseHTTPRequestHandler, body: str) -> None:
+        encoded = body.encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; "
+            "manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        )
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.send_header("X-Frame-Options", "DENY")
+        handler.send_header("Referrer-Policy", "no-referrer")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    @staticmethod
+    def _asset(handler: BaseHTTPRequestHandler, body: bytes, content_type: str) -> None:
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Cache-Control", "public, max-age=86400")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
 
     def _authorize(self, handler: BaseHTTPRequestHandler, *, allow_public: bool = True) -> bool:
         if allow_public and dashboard_is_public():
