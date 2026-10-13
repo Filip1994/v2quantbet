@@ -51,6 +51,8 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "Spain",
                 "La Liga",
                 "League",
+                "Real Madrid",
+                "Barcelona",
                 None,
                 None,
                 None,
@@ -69,6 +71,8 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "Premier League",
                 "League",
+                "Man City",
+                "Arsenal",
                 None,
                 None,
                 None,
@@ -87,6 +91,8 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "Italy",
                 "Serie A",
                 "League",
+                "Milan",
+                "Napoli",
                 now,
                 None,
                 None,
@@ -105,6 +111,28 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
                 "England",
                 "League Two",
                 "League",
+                "Bradford",
+                "Walsall",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                "api-football:5",
+                5,
+                999,
+                2026,
+                now + timedelta(hours=2),
+                "England",
+                "Professional Development League",
+                "League",
+                "QPR U21",
+                "Cardiff City U21",
                 None,
                 None,
                 None,
@@ -136,10 +164,12 @@ def test_opportunity_selection_uses_phase_i_policy_without_league_allowlist() ->
         "api-football:1",
     )
     assert selection.eligible_fixture_count == 3
-    assert selection.phase_i_excluded_count == 1
+    assert selection.phase_i_excluded_count == 2
     assert selection.waiting_for_window_count == 1
     assert selection.waiting_for_refresh_count == 1
     assert "f.league_id =" not in cursor.query
+    assert "latest.home_team" in cursor.query
+    assert "latest.away_team" in cursor.query
     assert cursor.parameters == (
         8,
         8,

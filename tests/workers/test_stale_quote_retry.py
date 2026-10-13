@@ -71,6 +71,8 @@ def selection_row(
         "Colombia",
         "Primera A",
         "League",
+        "Atletico Nacional",
+        "Millonarios",
         last_captured_at,
         None,
         freshness_state,

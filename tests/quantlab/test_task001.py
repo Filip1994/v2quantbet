@@ -792,7 +792,7 @@ def test_cardlab_dashboard_is_operational_only() -> None:
     assert "MATCH_IMPORTANCE_V1" not in html
 
 
-def test_global_discovery_is_independent_from_production_scope() -> None:
+def test_global_discovery_respects_youth_bans_and_retains_other_leagues() -> None:
     payload = {
         "response": [
             _fixture_payload(1, 1001, "III Liga", "Poland"),
@@ -806,7 +806,6 @@ def test_global_discovery_is_independent_from_production_scope() -> None:
     assert [row.fixture.fixture_id for row in rows] == [
         "api-football:1",
         "api-football:2",
-        "api-football:3",
     ]
     assert rows[0].fixture.competition_name == "III Liga"
     assert rows[1].fixture.country == "Japan"
@@ -904,14 +903,13 @@ def test_runtime_scans_global_discovery_for_market_driven_card_corner_research()
 
     result = runtime.run_once()
 
-    assert result["fixtures_discovered"] == 3
-    assert result["market_fixtures"] == 3
+    assert result["fixtures_discovered"] == 2
+    assert result["market_fixtures"] == 2
     assert provider.date_calls == [NOW.date()]
-    assert provider.odds_calls == [1, 2, 3]
+    assert provider.odds_calls == [1, 2]
     assert {item.fixture.competition_name for item in repo.observations} == {
         "III Liga",
         "J1 League",
-        "Premier League U20",
     }
 
 
@@ -1390,3 +1388,32 @@ def test_result_refresh_can_parse_historical_blocked_fixture_without_new_pick_sc
     assert [r.fixture.provider_fixture_id for r in historical] == [
         "1492985", "1496163", "3003",
     ]
+
+
+def test_universe_youth_bans_apply_to_all_quantlab_labs() -> None:
+    for fixture in (
+        {
+            "country": "England",
+            "competition_name": "Professional Development League",
+            "home_team": "QPR U21",
+            "away_team": "Cardiff City U21",
+        },
+        {
+            "country": "Italy",
+            "competition_name": "Serie C",
+            "home_team": "Giugliano",
+            "away_team": "Inter U23",
+        },
+    ):
+        goal = goal_scope(**fixture)
+        context = card_corner_scope(**fixture)
+        assert not goal.allowed
+        assert not context.allowed
+        assert goal.reason == "youth_or_amateur"
+        assert context.reason == "youth_or_amateur"
+
+
+def test_explicit_global_league_ban_applies_to_all_quantlab_labs() -> None:
+    fixture = {"country": "Wales", "competition_name": "FAW Championship"}
+    assert goal_scope(**fixture).reason == "blocked_competition"
+    assert card_corner_scope(**fixture).reason == "blocked_competition"

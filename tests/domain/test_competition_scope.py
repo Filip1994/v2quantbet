@@ -4,6 +4,8 @@ from h2h.domain.competition_scope import (
     CompetitionMetadata,
     RejectionReason,
     classify_phase_i,
+    is_universe_blocked_competition,
+    universe_block_reason,
 )
 
 
@@ -335,3 +337,61 @@ def test_other_latvian_leagues_are_not_globally_blacklisted(
     assert universe_block_reason(
         country="Latvia", competition_name=competition_name, league_id=league_id
     ) is None
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name", "home_team", "away_team"),
+    [
+        ("England", "Professional Development League", "QPR U21", "Cardiff City U21"),
+        ("Italy", "Serie C", "Giugliano", "Inter U23"),
+        ("Spain", "Segunda División", "Under-19 Academy", "Senior XI"),
+        ("Belgium", "Pro League", "Senior XI", "Club Reserves"),
+    ],
+)
+def test_youth_team_ban_is_shared_by_every_universe_consumer(
+    country: str, competition_name: str, home_team: str, away_team: str
+) -> None:
+    metadata = CompetitionMetadata(
+        country=country, name=competition_name, type="League",
+        home_team=home_team, away_team=away_team,
+    )
+    kwargs = {
+        "country": country,
+        "competition_name": competition_name,
+        "competition_type": "League",
+        "home_team": home_team,
+        "away_team": away_team,
+    }
+    # A banned U21/U23 team must be excluded even in a nominally senior league.
+    assert universe_block_reason(**kwargs) == RejectionReason.YOUTH
+    assert is_universe_blocked_competition(**kwargs)
+    assert classify_phase_i(metadata).rejection_reason == RejectionReason.YOUTH
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name"),
+    [
+        ("Wales", "FAW Championship"),
+        ("Czech-Republic", "3. liga - MSFL"),
+    ],
+)
+def test_explicit_competition_bans_are_global(
+    country: str, competition_name: str
+) -> None:
+    kwargs = {"country": country, "competition_name": competition_name}
+    assert universe_block_reason(**kwargs) == RejectionReason.EXPLICIT_COMPETITION
+    assert is_universe_blocked_competition(**kwargs)
+
+
+def test_senior_match_with_no_youth_markers_remains_eligible() -> None:
+    metadata = CompetitionMetadata(
+        country="Italy", name="Serie C", type="League",
+        home_team="Giugliano", away_team="Pescara",
+    )
+    assert classify_phase_i(metadata).eligible
+    assert not is_universe_blocked_competition(
+        country=metadata.country,
+        competition_name=metadata.name,
+        home_team=metadata.home_team,
+        away_team=metadata.away_team,
+    )

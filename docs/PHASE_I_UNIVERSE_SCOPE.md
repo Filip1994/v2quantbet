@@ -92,9 +92,10 @@ fixture-specific odds, context, standings or statistics acquisition.
 Exclude specifically blocked competitions whose production behavior is not accepted even when
 the provider classifies them as senior leagues.
 
-Current explicit exclusion:
+Current explicit exclusions (universe-wide, not only Phase I):
 
-- Czech-Republic `3. liga - MSFL`.
+- Czech-Republic `3. liga - MSFL`;
+- Wales `FAW Championship`.
 
 ### 9. Cup competitions
 
@@ -108,6 +109,26 @@ Exclude all cup and knockout competitions from Phase I, including but not limite
 - competitions classified as cup, knockout or similar.
 
 League competitions and senior international league-style competitions may remain eligible when their normalized competition type is not cup/knockout.
+
+## Universe-wide hard-ban contract
+
+A competition/team/country ban is universal: it applies to Production,
+Research, GoalLab, CornerLab, CardLab, H2H and Kelly, regardless of the
+branch or dashboard rendering it. The single canonical Python contract is
+`universe_block_reason` in `src/h2h/domain/competition_scope.py`.
+No lab-specific scope may override its rejection.
+
+Youth/academy/reserve bans must check normalized competition metadata **and
+both team names**. This includes U21/U23 teams playing in nominally senior
+leagues (for example, Professional Development League or Serie C). The
+preflight gate must run before fixture-specific collection/modeling/pick
+registration. Existing observations and settled history remain immutable
+audit facts; banned candidates do not belong to the active/eligible
+Research/Production/Kelly/QuantLab universe or current analytics.
+
+New permanent exclusions must be added to the shared contract and covered
+by tests for the shared gate and all relevant intake paths. Strategy-specific
+eligibility remains additional and cannot relax universe-wide exclusions.
 
 ## Classification requirements
 
