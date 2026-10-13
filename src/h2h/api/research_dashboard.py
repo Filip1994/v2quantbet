@@ -23,6 +23,7 @@ from h2h.api.dashboard_time import (
     local_iso,
     local_time,
 )
+from h2h.api.hub_return import with_hub_return
 from h2h.api.research_analytics import (
     DIAGNOSTIC_BUCKETS,
     build_research_analytics_snapshot,
@@ -2305,6 +2306,8 @@ class ResearchDashboardHTTPService:
     def _text(
         handler: BaseHTTPRequestHandler, status: int, body: str, content_type: str
     ) -> None:
+        if content_type.startswith("text/html"):
+            body = with_hub_return(body)
         encoded = body.encode()
         handler.send_response(status)
         handler.send_header("Content-Type", content_type)
