@@ -345,7 +345,7 @@ def test_other_latvian_leagues_are_not_globally_blacklisted(
         ("England", "Professional Development League", "QPR U21", "Cardiff City U21"),
         ("Italy", "Serie C", "Giugliano", "Inter U23"),
         ("Spain", "Segunda División", "Under-19 Academy", "Senior XI"),
-        ("Germany", "Regionalliga", "Senior XI", "Club Reserves"),
+        ("Belgium", "Pro League", "Senior XI", "Club Reserves"),
     ],
 )
 def test_youth_team_ban_is_shared_by_every_universe_consumer(
