@@ -450,6 +450,13 @@ class PostgreSQLKellyLabRepository:
                     result.regulation_home_goals,
                     result.regulation_away_goals,
                     result.first_acquired_at AS result_first_acquired_at,
+                    (
+                        SELECT fo.kickoff_at
+                        FROM fixture_observations fo
+                        WHERE fo.fixture_id = kp.fixture_id
+                        ORDER BY fo.observed_at DESC, fo.fixture_observation_id DESC
+                        LIMIT 1
+                    ) AS current_kickoff_at,
                     settlement.event_kind AS settlement_event_kind,
                     settlement.outcome AS settlement_event_outcome,
                     settlement.occurred_at AS settlement_occurred_at,
