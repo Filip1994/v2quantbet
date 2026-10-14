@@ -3,8 +3,8 @@
 Production does not decide which bets are good. It clones already-formed picks from
 research universes when they match the active intake contract, then owns only operational
 state (PENDING/PLAYED/SKIPPED) and the shared exposure cap. When capacity is constrained,
-approved buckets are consumed in the current ROI-priority order; EV and edge only break
-ties inside the same ROI-ranked bucket.
+approved CornerLab C5 and then C4 are consumed first; remaining buckets follow
+current ROI-priority order. EV and edge break ties inside a ranked bucket.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from h2h.domain.competition_scope import is_universe_blocked_competition
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
+    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     DEFAULT_BUCKET_IDS,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
     matching_bucket_ids,
@@ -29,6 +31,14 @@ from h2h.production_buckets import (
 
 
 ConnectionFactory = Callable[[], Any]
+
+# Explicit operator preference: only the two already-approved CornerLab buckets
+# outrank dynamic ROI; all other eligible buckets retain evidence-weighted ROI order.
+_CORNER_FIRST_PRIORITY = {
+    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00: 2,  # C5
+    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80: 1,  # C4
+}
+_PRIORITY_POLICY_VERSION = "CORNER_FIRST_C5_C4_THEN_DYNAMIC_ROI_V1"
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -56,8 +66,8 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
 
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
-    canonical = ",".join(bucket_ids)
-    return "PRODUCTION_FUNNEL_INTAKE_V3:" + sha256(canonical.encode("utf-8")).hexdigest()
+    canonical = _PRIORITY_POLICY_VERSION + ":" + ",".join(bucket_ids)
+    return "PRODUCTION_FUNNEL_INTAKE_V4:" + sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +412,18 @@ class PostgreSQLProductionFunnelRepository:
             min(int(item["graded_n"]), 100),
             int(item["graded_n"]),
             -_BUCKET_PRIORITY[bucket_id],
+        )
+
+    @classmethod
+    def _bucket_intake_sort_key(
+        cls,
+        bucket_id: str,
+        stats: dict[str, dict[str, Any]],
+    ) -> tuple[int, float, float, int, int, int]:
+        """C5, then C4, then dynamically ranked approved Research/GoalLab buckets."""
+        return (
+            _CORNER_FIRST_PRIORITY.get(bucket_id, 0),
+            *cls._bucket_strength_key(bucket_id, stats),
         )
 
     @staticmethod
@@ -803,7 +825,7 @@ class PostgreSQLProductionFunnelRepository:
             bucket_order = tuple(
                 sorted(
                     selected,
-                    key=lambda bucket_id: self._bucket_strength_key(bucket_id, bucket_stats),
+                    key=lambda bucket_id: self._bucket_intake_sort_key(bucket_id, bucket_stats),
                     reverse=True,
                 )
             )
