@@ -1079,9 +1079,13 @@ class ResearchDashboardService:
         if isinstance(season, bool) or not isinstance(season, int) or season <= 0:
             raise ValueError("season must be a positive integer")
 
+        # Historical league audits must survive future universe intake bans.
         settled = tuple(
             row
-            for row in self._analytics_signal_rows()
+            for row in (
+                self._derived(raw)
+                for raw in _one_signal_per_fixture(self._all_signal_rows())
+            )
             if row.get("outcome") in {"WIN", "LOSS", "VOID"}
             and int(row.get("league_id") or 0) == league_id
             and int(row.get("season") or 0) == season
