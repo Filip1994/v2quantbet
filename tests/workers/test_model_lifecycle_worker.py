@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from threading import Event
+
+import pytest
 
 from h2h.domain.model_coverage import ModelCoverageStatus, ProductionTrainingPolicy
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.persistence.postgres_model_coverage import ModelCoverageRecord
-from h2h.quant.dixon_coles import DixonColesFitAbortedError
-from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError
+from h2h.quant.dixon_coles import DixonColesFitAbortedError, DixonColesFitError
+from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError, UnchangedTrainingDataError
 from h2h.workers.model_lifecycle import ModelLifecycleWorker, ModelQualityError
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 
@@ -37,6 +40,7 @@ class CoverageFake:
         self.active: list[DixonColesModelScope] = []
         self.insufficient: list[DixonColesModelScope] = []
         self.failed: list[DixonColesModelScope] = []
+        self.failure_details = []
         self.released: list[DixonColesModelScope] = []
         self.claim_limits: list[int] = []
 
@@ -60,6 +64,7 @@ class CoverageFake:
 
     def mark_failed(self, scope, _error, **_kwargs):
         self.failed.append(scope)
+        self.failure_details.append((_error, _kwargs))
 
     def release_pending(self, scope, **_kwargs):
         self.released.append(scope)
@@ -90,7 +95,8 @@ class ActivatorFake:
 
 
 def version(scope: DixonColesModelScope, version_id: str = "model-v1"):
-    provenance = SimpleNamespace(accepted_match_count=120, fitted_match_count=120)
+    provenance = SimpleNamespace(accepted_match_count=120, fitted_match_count=120,
+                                 dataset_sha256="a" * 64)
     return SimpleNamespace(
         model_version_id=version_id,
         artifact=SimpleNamespace(provenance=provenance, scope=scope),
@@ -364,3 +370,95 @@ def test_invalid_artifact_quality_gate_never_changes_active_pointer() -> None:
     assert cycle.failed_scopes == 1
     assert coverage.failed == [record(39).scope]
     assert activator.calls == []
+
+
+def test_failed_510_retrain_preserves_active_model_and_other_scope_trains(caplog) -> None:
+    failed_record = replace(record(510), active_model_version_id="last-good",
+                            active_generation=4, failed_dataset_sha256="b" * 64,
+                            failure_streak=1)
+    coverage = CoverageFake([failed_record, record(39)])
+    usage = [0]
+    activator = ActivatorFake()
+
+    class Trainer:
+        def execute(self, _scope, _config, *, target_scope, should_abort, **kwargs):
+            usage[0] += 1
+            if target_scope.league_id == 510:
+                assert kwargs["failure_streak"] == 1
+                error = DixonColesFitError("ABNORMAL")
+                error.dataset_sha256 = "b" * 64
+                error.training_sample_size = 99
+                error.optimizer_status = 2
+                raise error
+            return version(target_scope)
+
+    cycle = worker(coverage, Trainer(), ActiveFake(SimpleNamespace(
+        model_version_id="last-good", generation=4)), activator, usage,
+        max_scopes=2).run_once()
+    assert cycle.failed_scopes == cycle.activated_scopes == 1
+    assert coverage.failed == [failed_record.scope]
+    assert coverage.active == [record(39).scope]
+    assert coverage.failure_details[0][1]["retry_after"] == timedelta(hours=6)
+    assert all(call[0] != failed_record.scope for call in activator.calls)
+    warning = next(item for item in caplog.records if item.message == "model scope training failed")
+    assert warning.canonical_scope_id == "api-football:api-football:510:2026"
+    assert warning.dataset_fingerprint == "b" * 64
+    assert warning.fallback_active is True
+
+
+@pytest.mark.parametrize(("streak", "delay"), [
+    (0, timedelta(hours=1)),
+    (1, timedelta(hours=6)),
+    (2, timedelta(days=1)),
+])
+def test_optimizer_failure_backoff_is_bounded(streak, delay) -> None:
+    previous = "b" * 64 if streak else None
+    coverage = CoverageFake([replace(record(510), failed_dataset_sha256=previous,
+                                     failure_streak=streak)])
+    class Trainer:
+        def execute(self, *_args, **_kwargs):
+            error = DixonColesFitError("ABNORMAL")
+            error.dataset_sha256 = "b" * 64
+            raise error
+    worker(coverage, Trainer(), ActiveFake(), ActivatorFake(), [0]).run_once()
+    assert coverage.failure_details[0][1]["retry_after"] == delay
+
+
+def test_unchanged_dataset_check_is_logged_as_skipped_fit(caplog) -> None:
+    coverage = CoverageFake([replace(record(510), failed_dataset_sha256="b" * 64,
+                                     failure_streak=3)])
+    class Trainer:
+        def execute(self, *_args, **_kwargs):
+            error = UnchangedTrainingDataError("unchanged dataset")
+            error.dataset_sha256 = "b" * 64
+            raise error
+    worker(coverage, Trainer(), ActiveFake(), ActivatorFake(), [0]).run_once()
+    assert coverage.failure_details[0][1]["count_fit_failure"] is False
+    warning = next(item for item in caplog.records if item.message == "model scope training failed")
+    assert warning.failure_classification == "unchanged_dataset"
+    assert warning.fit_skipped is True
+    assert warning.retry_count == 3
+
+
+def test_transient_optimizer_failure_can_activate_on_next_claim() -> None:
+    coverage = CoverageFake([record(510)])
+    usage = [0]
+    activator = ActivatorFake()
+    class Trainer:
+        calls = 0
+        def execute(self, _scope, _config, *, target_scope, should_abort, **_kwargs):
+            self.calls += 1
+            usage[0] += 1
+            if self.calls == 1:
+                error = DixonColesFitError("ABNORMAL")
+                error.dataset_sha256 = "b" * 64
+                raise error
+            return version(target_scope, "new-good")
+    trainer = Trainer()
+    lifecycle = worker(coverage, trainer, ActiveFake(), activator, usage)
+    assert lifecycle.run_once().failed_scopes == 1
+    coverage.records = [replace(record(510), failed_dataset_sha256="b" * 64,
+                                failure_streak=1)]
+    assert lifecycle.run_once().activated_scopes == 1
+    assert trainer.calls == 2
+    assert activator.calls[0][0] == record(510).scope

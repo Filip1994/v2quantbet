@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import isclose, isfinite
 from time import monotonic
 
@@ -24,6 +24,7 @@ from h2h.use_cases.model_lifecycle import (
     ActivateDixonColesModel,
     InsufficientTrainingDataError,
     TrainApiFootballDixonColesModel,
+    UnchangedTrainingDataError,
 )
 
 
@@ -165,11 +166,17 @@ class ModelLifecycleWorker:
                         trainer_code_version=self._policy.provenance_trainer_version,
                     )
                     try:
+                        retry_context = (
+                            {"failed_dataset_sha256": record.failed_dataset_sha256,
+                             "failure_streak": record.failure_streak}
+                            if record.failure_streak else {}
+                        )
                         candidate = self._trainer.execute(
                             training_scope,
                             config,
                             target_scope=record.scope,
                             should_abort=training_should_abort,
+                            **retry_context,
                         )
                         best_accepted = max(
                             best_accepted,
@@ -182,6 +189,9 @@ class ModelLifecycleWorker:
                                 best_accepted,
                                 exc.accepted_match_count or 0,
                             )
+                        else:
+                            exc.dataset_sha256 = candidate.artifact.provenance.dataset_sha256
+                            exc.training_sample_size = candidate.artifact.provenance.accepted_match_count
                         last_insufficient = exc
                         continue
                     trained = candidate
@@ -219,6 +229,9 @@ class ModelLifecycleWorker:
                         "active_generation": active.generation,
                         "accepted_matches": provenance.accepted_match_count,
                         "fitted_matches": provenance.fitted_match_count,
+                        "dataset_fingerprint": provenance.dataset_sha256,
+                        "previous_active_model": record.active_model_version_id,
+                        "fallback_active": False,
                     },
                 )
             except DixonColesFitAbortedError as exc:
@@ -261,22 +274,65 @@ class ModelLifecycleWorker:
                     extra={
                         "model_scope": self._scope_key(record.scope),
                         "accepted_matches": best_accepted,
+                        "training_sample_size": best_accepted,
+                        "dataset_fingerprint": getattr(exc, "dataset_sha256", None),
+                        "failure_classification": "insufficient_data",
+                        "retry_count": record.attempt_count,
+                        "next_eligible_retry_at": (self._clock() + timedelta(days=1)).isoformat(),
+                        "previous_active_model": record.active_model_version_id,
+                        "fallback_active": record.active_model_version_id is not None,
                         "error_class": type(exc).__name__,
                         "error_message": str(exc),
                     },
                 )
             except (ApiBudgetExceededError, DixonColesFitError, TypeError, ValueError, RuntimeError) as exc:
                 failed += 1
+                fingerprint = getattr(exc, "dataset_sha256", None)
+                classification = (
+                    "unchanged_dataset" if isinstance(exc, UnchangedTrainingDataError)
+                    else "optimizer" if isinstance(exc, DixonColesFitError)
+                    else "invalid_data" if isinstance(exc, (TypeError, ValueError))
+                    else "transient"
+                )
+                fit_skipped = isinstance(exc, UnchangedTrainingDataError)
+                retry_count = (
+                    record.failure_streak if fit_skipped
+                    else record.failure_streak + 1
+                    if fingerprint and fingerprint == record.failed_dataset_sha256
+                    else 1
+                )
+                retry_after = (
+                    timedelta(hours=1) if retry_count == 1 and classification == "optimizer"
+                    else timedelta(hours=6) if retry_count == 2 and classification == "optimizer"
+                    else timedelta(days=1)
+                )
+                failure_time = self._clock()
                 self._coverage.mark_failed(
                     record.scope,
                     exc,
                     duration_seconds=self._monotonic() - scope_started,
-                    now=self._clock(),
+                    now=failure_time,
+                    retry_after=retry_after,
+                    count_fit_failure=not fit_skipped,
                 )
                 LOGGER.warning(
                     "model scope training failed",
                     extra={
                         "model_scope": self._scope_key(record.scope),
+                        "canonical_scope_id": self._scope_key(record.scope),
+                        "training_sample_size": getattr(exc, "training_sample_size", None),
+                        "dataset_fingerprint": fingerprint,
+                        "optimizer_status": getattr(exc, "optimizer_status", None),
+                        "optimizer_message": getattr(exc, "optimizer_message", None),
+                        "optimizer_iterations": getattr(exc, "optimizer_iterations", None),
+                        "optimizer_objective": getattr(exc, "optimizer_objective", None),
+                        "optimizer_gradient_norm": getattr(exc, "optimizer_gradient_norm", None),
+                        "failure_classification": classification,
+                        "fit_skipped": fit_skipped,
+                        "retry_count": retry_count,
+                        "next_eligible_retry_at": (failure_time + retry_after).isoformat(),
+                        "previous_active_model": record.active_model_version_id,
+                        "fallback_active": record.active_model_version_id is not None,
                         "error_class": type(exc).__name__,
                         "error_message": str(exc),
                     },

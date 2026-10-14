@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+import logging
 
 from h2h.domain.fixture_identity import API_FOOTBALL_PROVIDER
 from h2h.domain.model_lifecycle import (
@@ -22,7 +23,9 @@ from h2h.persistence.model_lifecycle import (
 from h2h.quant.dixon_coles_artifact import (
     DixonColesArtifactCodecV1,
     _trusted_candidate_from_training,
+    api_football_training_dataset_sha256,
 )
+from h2h.quant.dixon_coles import DixonColesFitError
 from h2h.use_cases.api_football_training import (
     ApiFootballHistoricalResults,
     ApiFootballTrainingScope,
@@ -36,6 +39,13 @@ class InsufficientTrainingDataError(ValueError):
     def __init__(self, message: str, *, accepted_match_count: int | None = None) -> None:
         super().__init__(message)
         self.accepted_match_count = accepted_match_count
+
+
+class UnchangedTrainingDataError(DixonColesFitError):
+    """A repeatedly failing dataset was acquired but does not warrant another fit."""
+
+
+LOGGER = logging.getLogger("quantbet.model_lifecycle")
 
 
 def _utc_now(clock: Callable[[], datetime]) -> datetime:
@@ -72,6 +82,8 @@ class TrainApiFootballDixonColesModel:
         *,
         target_scope: DixonColesModelScope | None = None,
         should_abort: Callable[[], bool] | None = None,
+        failed_dataset_sha256: str | None = None,
+        failure_streak: int = 0,
     ) -> DixonColesModelVersion:
         if not isinstance(scope, ApiFootballTrainingScope):
             raise TypeError("scope must be an ApiFootballTrainingScope")
@@ -89,19 +101,42 @@ class TrainApiFootballDixonColesModel:
         if resolved_target.league_id != scope.league_id:
             raise ValueError("target model league must match the trusted training league")
         dataset = self._historical_results.acquire(scope)
+        dataset_sha256 = api_football_training_dataset_sha256(dataset.records)
         if len(dataset) < config.min_matches:
-            raise InsufficientTrainingDataError(
+            error = InsufficientTrainingDataError(
                 f"trusted dataset has {len(dataset)} matches; {config.min_matches} required",
                 accepted_match_count=len(dataset),
             )
-        model = fit_api_football_dixon_coles(
-            dataset,
-            reference_time=config.reference_time,
-            xi=config.xi,
-            ridge=config.ridge,
-            min_matches=config.min_matches,
-            should_abort=should_abort,
-        )
+            error.dataset_sha256 = dataset_sha256
+            raise error
+        if failure_streak >= 3 and dataset_sha256 == failed_dataset_sha256:
+            error = UnchangedTrainingDataError("unchanged dataset after three failed fits")
+            error.dataset_sha256 = dataset_sha256
+            error.training_sample_size = len(dataset)
+            raise error
+        try:
+            model = fit_api_football_dixon_coles(
+                dataset,
+                reference_time=config.reference_time,
+                xi=config.xi,
+                ridge=config.ridge,
+                min_matches=config.min_matches,
+                should_abort=should_abort,
+            )
+        except DixonColesFitError as error:
+            error.dataset_sha256 = dataset_sha256
+            error.training_sample_size = len(dataset)
+            raise
+        LOGGER.info("model fit converged", extra={
+            "model_scope": f"{resolved_target.provider}:{resolved_target.team_id_namespace}:"
+                           f"{resolved_target.league_id}:{resolved_target.season}",
+            "training_sample_size": len(dataset),
+            "dataset_fingerprint": dataset_sha256,
+            "optimizer_status": 0,
+            "optimizer_iterations": model.optimizer_iterations,
+            "optimizer_objective": model.objective,
+            "optimizer_gradient_norm": model.optimizer_gradient_norm,
+        })
         if model.fitted_matches != len(dataset):
             raise InsufficientTrainingDataError(
                 "accepted match count does not equal fitted match count",

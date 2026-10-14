@@ -47,3 +47,12 @@ def test_policy_fingerprint_changes_for_every_decision_affecting_value() -> None
     assert ProductionTrainingPolicy(min_matches=81).fingerprint != baseline
     assert ProductionTrainingPolicy(min_team_matches=4).fingerprint != baseline
     assert ProductionTrainingPolicy(previous_seasons=0).fingerprint != baseline
+
+
+def test_optimizer_v2_has_distinct_provenance_and_recognizes_v1_rollout() -> None:
+    policy = ProductionTrainingPolicy()
+    previous = ProductionTrainingPolicy(trainer_version="production-dc-v1")
+    assert policy.trainer_version == "production-dc-v2"
+    assert policy.previous_trainer_policy_fingerprint == previous.fingerprint
+    assert policy.fingerprint != previous.fingerprint
+    assert policy.provenance_trainer_version.startswith("production-dc-v2:")

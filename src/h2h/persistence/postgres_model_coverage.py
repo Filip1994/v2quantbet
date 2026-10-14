@@ -38,6 +38,8 @@ class ModelCoverageRecord:
     fitted_match_count: int | None
     active_model_version_id: str | None
     active_generation: int | None
+    failed_dataset_sha256: str | None = None
+    failure_streak: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +129,8 @@ class PostgreSQLModelCoverageRepository:
                 "active_model_version_id = a.model_version_id, active_generation = a.generation, "
                 "next_attempt_at = CASE WHEN a.activated_at < %s THEN %s ELSE NULL END, "
                 "updated_at = %s FROM dixon_coles_active_models a WHERE "
-                "c.eligible AND a.provider = c.provider "
+                "c.eligible AND c.status NOT IN ('TRAINING_FAILED', 'INSUFFICIENT_DATA', "
+                "'TRAINING_PENDING') AND a.provider = c.provider "
                 "AND a.team_id_namespace = c.team_id_namespace "
                 "AND a.league_id = c.league_id AND a.season = c.season",
                 (
@@ -142,11 +145,20 @@ class PostgreSQLModelCoverageRepository:
             cursor.execute(
                 "UPDATE model_coverage_scopes SET status = CASE "
                 "WHEN status = 'MISSING' THEN 'TRAINING_REQUIRED' "
-                "WHEN policy_fingerprint <> %s AND status = 'ACTIVE' THEN 'RETRAIN_REQUIRED' "
+                "WHEN policy_fingerprint <> %s AND policy_fingerprint <> %s "
+                "THEN 'RETRAIN_REQUIRED' "
                 "ELSE status END, next_attempt_at = CASE WHEN status = 'MISSING' "
-                "THEN %s ELSE next_attempt_at END, policy_fingerprint = %s, updated_at = %s "
+                "OR (policy_fingerprint <> %s AND policy_fingerprint <> %s) "
+                "THEN %s ELSE next_attempt_at END, "
+                "failed_dataset_sha256 = CASE WHEN policy_fingerprint <> %s THEN NULL "
+                "ELSE failed_dataset_sha256 END, failure_streak = CASE WHEN "
+                "policy_fingerprint <> %s THEN 0 ELSE failure_streak END, "
+                "policy_fingerprint = %s, updated_at = %s "
                 "WHERE eligible",
-                (policy.fingerprint, current, policy.fingerprint, current),
+                (policy.fingerprint, policy.previous_trainer_policy_fingerprint,
+                 policy.fingerprint, policy.previous_trainer_policy_fingerprint,
+                 current, policy.fingerprint, policy.fingerprint,
+                 policy.fingerprint, current),
             )
         return len(eligible)
 
@@ -190,7 +202,7 @@ class PostgreSQLModelCoverageRepository:
                 "c.provider, c.team_id_namespace, c.league_id, c.season, c.status, "
                 "c.first_required_at, c.updated_at, c.next_attempt_at, c.attempt_count, "
                 "c.accepted_match_count, c.fitted_match_count, c.active_model_version_id, "
-                "c.active_generation",
+                "c.active_generation, c.failed_dataset_sha256, c.failure_streak",
                 (current, limit, current, current),
             )
             return tuple(self._record(row) for row in cursor.fetchall())
@@ -287,7 +299,11 @@ class PostgreSQLModelCoverageRepository:
         duration_seconds: float,
         now: datetime,
         retry_after: timedelta = timedelta(hours=6),
+        count_fit_failure: bool = True,
     ) -> None:
+        dataset_sha256 = (
+            getattr(error, "dataset_sha256", None) if count_fit_failure else None
+        )
         self._finish(
             scope,
             status=ModelCoverageStatus.TRAINING_FAILED,
@@ -297,6 +313,7 @@ class PostgreSQLModelCoverageRepository:
             fitted_matches=None,
             duration_seconds=duration_seconds,
             error=error,
+            failed_dataset_sha256=dataset_sha256,
         )
 
     def release_pending(
@@ -331,6 +348,7 @@ class PostgreSQLModelCoverageRepository:
         model_version_id: str | None = None,
         generation: int | None = None,
         error: BaseException | None = None,
+        failed_dataset_sha256: str | None = None,
     ) -> None:
         current = _utc(now)
         error_class = None if error is None else type(error).__name__[:100]
@@ -342,7 +360,13 @@ class PostgreSQLModelCoverageRepository:
                 "fitted_match_count = %s, last_training_duration_seconds = %s, "
                 "last_error_class = %s, last_error_message = %s, "
                 "active_model_version_id = COALESCE(%s, active_model_version_id), "
-                "active_generation = COALESCE(%s, active_generation) WHERE provider = %s "
+                "active_generation = COALESCE(%s, active_generation), "
+                "failed_dataset_sha256 = CASE WHEN %s = 'ACTIVE' THEN NULL "
+                "WHEN %s IS NOT NULL THEN %s ELSE failed_dataset_sha256 END, "
+                "failure_streak = CASE WHEN %s = 'ACTIVE' THEN 0 "
+                "WHEN %s IS NOT NULL AND %s = failed_dataset_sha256 "
+                "THEN failure_streak + 1 WHEN %s IS NOT NULL THEN 1 "
+                "ELSE failure_streak END WHERE provider = %s "
                 "AND team_id_namespace = %s AND league_id = %s AND season = %s",
                 (
                     status.value,
@@ -356,6 +380,13 @@ class PostgreSQLModelCoverageRepository:
                     error_message,
                     model_version_id,
                     generation,
+                    status.value,
+                    failed_dataset_sha256,
+                    failed_dataset_sha256,
+                    status.value,
+                    failed_dataset_sha256,
+                    failed_dataset_sha256,
+                    failed_dataset_sha256,
                     *_scope_values(scope),
                 ),
             )
@@ -464,4 +495,6 @@ class PostgreSQLModelCoverageRepository:
             fitted_match_count=row[10],
             active_model_version_id=row[11],
             active_generation=row[12],
+            failed_dataset_sha256=row[13],
+            failure_streak=int(row[14]),
         )

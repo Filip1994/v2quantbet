@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -32,7 +32,7 @@ class ProductionTrainingPolicy:
     freshness_days: int = 14
     previous_seasons: int = 1
     min_team_matches: int = 3
-    trainer_version: str = "production-dc-v1"
+    trainer_version: str = "production-dc-v2"
 
     def __post_init__(self) -> None:
         for name in (
@@ -67,6 +67,11 @@ class ProductionTrainingPolicy:
     @property
     def provenance_trainer_version(self) -> str:
         return f"{self.trainer_version}:{self.fingerprint}"
+
+    @property
+    def previous_trainer_policy_fingerprint(self) -> str:
+        """Recognize a version-only v1→v2 rollout without retraining fresh models."""
+        return replace(self, trainer_version="production-dc-v1").fingerprint
 
     def reference_time(self, now: datetime) -> datetime:
         if now.tzinfo is None or now.utcoffset() is None:
