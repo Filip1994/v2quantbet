@@ -557,7 +557,7 @@ def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
     for country, competition in (
         ("England", "Premier League"),
         ("Scotland", "Premiership"),
-        ("England", "Championship"),
+        ("Scotland", "Championship"),
         ("Poland", "Ekstraklasa"),
         ("World", "UEFA Champions League"),
         ("Sweden", "Allsvenskan"),
@@ -571,6 +571,10 @@ def test_scope_blocks_waste_before_fixture_specific_calls() -> None:
         decision = card_corner_scope(country=country, competition_name=competition)
         assert decision.allowed
         assert decision.reason == "market_driven_candidate"
+
+    banned = card_corner_scope(country="England", competition_name="Championship")
+    assert not banned.allowed
+    assert banned.reason == "blacklisted_league"
 
     for country, competition in (
         ("Sweden", "Division 2 - Norrland"),
