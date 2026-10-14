@@ -11,6 +11,7 @@ psycopg = pytest.importorskip("psycopg")
 from psycopg import sql
 
 from h2h.domain.model_coverage import ModelCoverageStatus, ProductionTrainingPolicy
+from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.odds.budget import (
     ApiBudgetExceededError,
     PostgreSQLApiBudget,
@@ -141,3 +142,45 @@ def test_persistent_training_budget_reserves_live_capacity(isolated_database) ->
         "results_monitoring": 0,
         "quantlab_context": 0,
     }
+
+
+def test_training_completion_handles_null_and_fingerprinted_failures(isolated_database) -> None:
+    connect = isolated_database
+    now = datetime(2026, 10, 14, 12, tzinfo=UTC)
+    scope = DixonColesModelScope("api-football", "api-football", 510, 2026)
+    insert_fixture(connect, fixture_id=510001, league_id=510, season=2026, now=now)
+    repository = PostgreSQLModelCoverageRepository(connect=connect)
+    repository.refresh_inventory(ProductionTrainingPolicy(), now=now)
+
+    repository.mark_insufficient(
+        scope, ValueError("too few matches"), accepted_matches=1,
+        duration_seconds=0.1, now=now,
+    )
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT status, failure_streak, failed_dataset_sha256 "
+            "FROM model_coverage_scopes WHERE league_id = 510"
+        ).fetchone()
+    assert row == ("INSUFFICIENT_DATA", 0, None)
+
+    error = ValueError("optimizer failed")
+    error.dataset_sha256 = "a" * 64
+    repository.mark_failed(scope, error, duration_seconds=0.2, now=now)
+    repository.mark_failed(scope, error, duration_seconds=0.2, now=now)
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT status, failure_streak, failed_dataset_sha256 "
+            "FROM model_coverage_scopes WHERE league_id = 510"
+        ).fetchone()
+    assert row == ("TRAINING_FAILED", 2, "a" * 64)
+
+    repository.mark_active(
+        scope, model_version_id="verified-model", generation=1,
+        accepted_matches=100, fitted_matches=99, duration_seconds=1.0, now=now,
+    )
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT status, failure_streak, failed_dataset_sha256, "
+            "active_model_version_id FROM model_coverage_scopes WHERE league_id = 510"
+        ).fetchone()
+    assert row == ("ACTIVE", 0, None, "verified-model")
