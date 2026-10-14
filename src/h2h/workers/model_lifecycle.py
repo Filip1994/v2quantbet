@@ -288,16 +288,18 @@ class ModelLifecycleWorker:
             except (ApiBudgetExceededError, DixonColesFitError, TypeError, ValueError, RuntimeError) as exc:
                 failed += 1
                 fingerprint = getattr(exc, "dataset_sha256", None)
-                retry_count = (
-                    record.failure_streak + 1
-                    if fingerprint and fingerprint == record.failed_dataset_sha256
-                    else 1
-                )
                 classification = (
                     "unchanged_dataset" if isinstance(exc, UnchangedTrainingDataError)
                     else "optimizer" if isinstance(exc, DixonColesFitError)
                     else "invalid_data" if isinstance(exc, (TypeError, ValueError))
                     else "transient"
+                )
+                fit_skipped = isinstance(exc, UnchangedTrainingDataError)
+                retry_count = (
+                    record.failure_streak if fit_skipped
+                    else record.failure_streak + 1
+                    if fingerprint and fingerprint == record.failed_dataset_sha256
+                    else 1
                 )
                 retry_after = (
                     timedelta(hours=1) if retry_count == 1 and classification == "optimizer"
@@ -311,6 +313,7 @@ class ModelLifecycleWorker:
                     duration_seconds=self._monotonic() - scope_started,
                     now=failure_time,
                     retry_after=retry_after,
+                    count_fit_failure=not fit_skipped,
                 )
                 LOGGER.warning(
                     "model scope training failed",
@@ -325,6 +328,7 @@ class ModelLifecycleWorker:
                         "optimizer_objective": getattr(exc, "optimizer_objective", None),
                         "optimizer_gradient_norm": getattr(exc, "optimizer_gradient_norm", None),
                         "failure_classification": classification,
+                        "fit_skipped": fit_skipped,
                         "retry_count": retry_count,
                         "next_eligible_retry_at": (failure_time + retry_after).isoformat(),
                         "previous_active_model": record.active_model_version_id,

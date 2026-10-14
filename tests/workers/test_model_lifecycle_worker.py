@@ -11,7 +11,7 @@ from h2h.domain.model_coverage import ModelCoverageStatus, ProductionTrainingPol
 from h2h.domain.model_lifecycle import DixonColesModelScope
 from h2h.persistence.postgres_model_coverage import ModelCoverageRecord
 from h2h.quant.dixon_coles import DixonColesFitAbortedError, DixonColesFitError
-from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError
+from h2h.use_cases.model_lifecycle import InsufficientTrainingDataError, UnchangedTrainingDataError
 from h2h.workers.model_lifecycle import ModelLifecycleWorker, ModelQualityError
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 
@@ -422,6 +422,22 @@ def test_optimizer_failure_backoff_is_bounded(streak, delay) -> None:
             raise error
     worker(coverage, Trainer(), ActiveFake(), ActivatorFake(), [0]).run_once()
     assert coverage.failure_details[0][1]["retry_after"] == delay
+
+
+def test_unchanged_dataset_check_is_logged_as_skipped_fit(caplog) -> None:
+    coverage = CoverageFake([replace(record(510), failed_dataset_sha256="b" * 64,
+                                     failure_streak=3)])
+    class Trainer:
+        def execute(self, *_args, **_kwargs):
+            error = UnchangedTrainingDataError("unchanged dataset")
+            error.dataset_sha256 = "b" * 64
+            raise error
+    worker(coverage, Trainer(), ActiveFake(), ActivatorFake(), [0]).run_once()
+    assert coverage.failure_details[0][1]["count_fit_failure"] is False
+    warning = next(item for item in caplog.records if item.message == "model scope training failed")
+    assert warning.failure_classification == "unchanged_dataset"
+    assert warning.fit_skipped is True
+    assert warning.retry_count == 3
 
 
 def test_transient_optimizer_failure_can_activate_on_next_claim() -> None:

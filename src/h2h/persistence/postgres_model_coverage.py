@@ -145,16 +145,20 @@ class PostgreSQLModelCoverageRepository:
             cursor.execute(
                 "UPDATE model_coverage_scopes SET status = CASE "
                 "WHEN status = 'MISSING' THEN 'TRAINING_REQUIRED' "
-                "WHEN policy_fingerprint <> %s THEN 'RETRAIN_REQUIRED' "
+                "WHEN policy_fingerprint <> %s AND policy_fingerprint <> %s "
+                "THEN 'RETRAIN_REQUIRED' "
                 "ELSE status END, next_attempt_at = CASE WHEN status = 'MISSING' "
-                "OR policy_fingerprint <> %s THEN %s ELSE next_attempt_at END, "
+                "OR (policy_fingerprint <> %s AND policy_fingerprint <> %s) "
+                "THEN %s ELSE next_attempt_at END, "
                 "failed_dataset_sha256 = CASE WHEN policy_fingerprint <> %s THEN NULL "
                 "ELSE failed_dataset_sha256 END, failure_streak = CASE WHEN "
                 "policy_fingerprint <> %s THEN 0 ELSE failure_streak END, "
                 "policy_fingerprint = %s, updated_at = %s "
                 "WHERE eligible",
-                (policy.fingerprint, policy.fingerprint, current, policy.fingerprint,
-                 policy.fingerprint, policy.fingerprint, current),
+                (policy.fingerprint, policy.previous_trainer_policy_fingerprint,
+                 policy.fingerprint, policy.previous_trainer_policy_fingerprint,
+                 current, policy.fingerprint, policy.fingerprint,
+                 policy.fingerprint, current),
             )
         return len(eligible)
 
@@ -295,8 +299,11 @@ class PostgreSQLModelCoverageRepository:
         duration_seconds: float,
         now: datetime,
         retry_after: timedelta = timedelta(hours=6),
+        count_fit_failure: bool = True,
     ) -> None:
-        dataset_sha256 = getattr(error, "dataset_sha256", None)
+        dataset_sha256 = (
+            getattr(error, "dataset_sha256", None) if count_fit_failure else None
+        )
         self._finish(
             scope,
             status=ModelCoverageStatus.TRAINING_FAILED,

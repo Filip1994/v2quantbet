@@ -35,6 +35,13 @@ retry, but `refresh_inventory` changed scopes with old active pointers to `STALE
 and set `next_attempt_at` to the current time on every cycle. That erased the
 failed-retrain backoff. The active pointer was not replaced by the failed fit.
 
+An offline read-only comparison used the latest cached 2025/2026 acquisitions
+for 13 leagues. The old fit failed with `ABNORMAL` for 353, 364, and 510; the
+new fit converged for all three. For the 10 leagues where both fits converged,
+the maximum absolute market-probability change across observed matchups ranged
+from below 0.00001 to 0.02396 (league 262); league 39 reached 0.01277. This
+measures output drift, not predictive calibration or betting performance.
+
 ## Behavior after this patch
 
 The optimizer uses a continuous penalty and a narrower rho interval. It still
@@ -44,9 +51,14 @@ artifact and probability validation. Existing artifact JSON remains unchanged.
 Failed retraining retains the active model. Optimizer retries for the same dataset
 wait 1 hour, then 6 hours, then 24 hours. After three failures, a daily acquisition
 check compares the normalized dataset SHA-256 and skips the expensive fit while
-the dataset is unchanged. A changed dataset is fitted on that check and starts a
+the dataset is unchanged. The check is logged as `fit_skipped` and does not raise
+the numerical `failure_streak`. A changed dataset is fitted on that check and starts a
 new failure streak if it fails. A changed training policy resets the streak and
-queues retraining. Invalid input and other failures use a one-day retry. Each
+queues retraining. The numerical trainer is versioned `production-dc-v2` in new
+artifact provenance. The v1-to-v2 version-only rollout updates policy fingerprints
+without forcing fresh active scopes to retrain or changing a failed scope's
+existing retry time. Real policy-parameter changes still queue retraining.
+Invalid input and other failures use a one-day retry. Each
 scope has its own persisted state; one failed league does not stop the cycle's
 other claimed scopes. Daily-window acquisition caching means newly completed
 matches may not be visible until the next UTC training window.
@@ -89,7 +101,8 @@ passes strict normalization, so it is retried after one day.
 4. If a fit fails, verify `active_model_version_id` and `active_generation` still
    identify the prior model and `next_attempt_at` stays in the future across
    several worker cycles. If the same dataset fails three times, confirm later
-   logs classify it as `unchanged_dataset` and do not run an optimizer fit.
+   logs classify it as `unchanged_dataset`, show `fit_skipped=true`, and do not
+   increase `failure_streak` or run an optimizer fit.
 5. Inspect at least one other league/season row and its lifecycle logs to confirm
    its claim and activation proceed independently. Check opportunities continue
    to resolve existing active models during a retrain failure.
