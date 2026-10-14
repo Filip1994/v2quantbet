@@ -58,7 +58,7 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
     subset = intake_contract_version(DEFAULT_BUCKET_IDS[:1])
 
-    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V3:")
+    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V4:")
     assert full != subset
 
 
@@ -301,6 +301,70 @@ def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
         "research-top-bucket",
         "goallab-higher-ev",
     ]
+
+
+def test_corner_c5_precedes_c4_and_research_despite_lower_roi_score() -> None:
+    # Explicit production preference dominates dynamically measured bucket performance.
+    stats = {
+        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00: {
+            "graded_n": 26, "roi_pct": 29.81, "priority_score": 7.75,
+        },
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80: {
+            "graded_n": 29, "roi_pct": 31.90, "priority_score": 9.25,
+        },
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50: {
+            "graded_n": 200, "roi_pct": 95.00, "priority_score": 95.00,
+        },
+    }
+    ranked = sorted(
+        stats,
+        key=lambda bucket: PostgreSQLProductionFunnelRepository._bucket_intake_sort_key(
+            bucket, stats
+        ),
+        reverse=True,
+    )
+    assert ranked == [
+        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    ]
+
+
+def test_research_priority_still_uses_evidence_weighted_roi() -> None:
+    stats = {
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50: {
+            "graded_n": 50, "roi_pct": 40.0, "priority_score": 20.0,
+        },
+        RESEARCH_OU_UNDER_ODDS_2_01_2_50: {
+            "graded_n": 150, "roi_pct": 25.0, "priority_score": 25.0,
+        },
+    }
+    ranked = sorted(
+        stats,
+        key=lambda bucket: PostgreSQLProductionFunnelRepository._bucket_intake_sort_key(
+            bucket, stats
+        ),
+        reverse=True,
+    )
+    assert ranked == [
+        RESEARCH_OU_UNDER_ODDS_2_01_2_50,
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50,
+    ]
+
+
+def test_nonselected_corner_does_not_enter_research_only_ranking() -> None:
+    stats = {
+        RESEARCH_BTTS_NO_ODDS_2_01_2_50: {
+            "graded_n": 100, "roi_pct": 10.0, "priority_score": 10.0,
+        },
+    }
+    assert sorted(
+        stats,
+        key=lambda bucket: PostgreSQLProductionFunnelRepository._bucket_intake_sort_key(
+            bucket, stats
+        ),
+        reverse=True,
+    ) == [RESEARCH_BTTS_NO_ODDS_2_01_2_50]
 
 
 def test_n_roi_priority_score_discounts_small_samples_until_n_100() -> None:
