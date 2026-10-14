@@ -15,11 +15,14 @@ from h2h.persistence.model_lifecycle import ActiveModelUnavailableError
 from h2h.persistence.model_lifecycle import ModelActivationConflictError
 from h2h.quant.dixon_coles_artifact import _create_dixon_coles_model_artifact
 from h2h.use_cases.api_football_training import ApiFootballTrainingScope
+from h2h.use_cases.api_football_training import normalize_api_football_historical_response
+from h2h.quant.dixon_coles_artifact import api_football_training_dataset_sha256
 from h2h.use_cases.model_lifecycle import (
     ActivateDixonColesModel,
     InsufficientTrainingDataError,
     LoadActiveDixonColesModel,
     TrainApiFootballDixonColesModel,
+    UnchangedTrainingDataError,
 )
 
 
@@ -160,6 +163,32 @@ def test_training_persists_inactive_version_and_loader_requires_activation() -> 
     assert active.get_active(SCOPE) is None
     with pytest.raises(ActiveModelUnavailableError, match="no active"):
         LoadActiveDixonColesModel(versions, active).execute(SCOPE)
+
+
+def test_unchanged_failed_dataset_skips_fit_but_new_scores_reset_eligibility() -> None:
+    scope = ApiFootballTrainingScope(39, 2024, START, END)
+    original = provider_payload()
+    digest = api_football_training_dataset_sha256(
+        normalize_api_football_historical_response(original, scope=scope)
+    )
+    trainer = TrainApiFootballDixonColesModel(
+        historical_results(), MemoryVersions(), clock=lambda: NOW
+    )
+    with patch.object(UrllibJsonTransport, "get_json", return_value=original), \
+         patch("h2h.use_cases.model_lifecycle.fit_api_football_dixon_coles") as fit:
+        with pytest.raises(UnchangedTrainingDataError) as caught:
+            trainer.execute(scope, config(), failed_dataset_sha256=digest, failure_streak=3)
+        fit.assert_not_called()
+    assert caught.value.dataset_sha256 == digest
+    changed = provider_payload()
+    changed["response"][0]["goals"]["home"] = 2
+    changed["response"][0]["score"]["fulltime"]["home"] = 2
+    with patch.object(UrllibJsonTransport, "get_json", return_value=changed), \
+         patch("h2h.use_cases.model_lifecycle.fit_api_football_dixon_coles") as fit:
+        fit.side_effect = RuntimeError("fit reached")
+        with pytest.raises(RuntimeError, match="fit reached"):
+            trainer.execute(scope, config(), failed_dataset_sha256=digest, failure_streak=3)
+        fit.assert_called_once()
 
 
 def test_training_season_provenance_is_distinct_from_prediction_target_season() -> None:

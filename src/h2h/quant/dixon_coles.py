@@ -55,6 +55,8 @@ class DixonColesModel:
     xi: float
     fitted_matches: int
     objective: float
+    optimizer_iterations: int | None = None
+    optimizer_gradient_norm: float | None = None
 
     def __post_init__(self) -> None:
         self._validate_team_id_namespace(self.team_id_namespace)
@@ -113,6 +115,9 @@ class DixonColesModel:
             raise DixonColesFitError(
                 f"Premalo trening mečeva: {len(records)} < {min_matches}"
             )
+        if any(record.home_id == record.away_id or record.home_goals < 0
+               or record.away_goals < 0 for record in records):
+            raise DixonColesFitError("Training records contain an invalid team or score")
 
         team_ids = tuple(
             sorted(
@@ -177,14 +182,16 @@ class DixonColesModel:
             lambda_home = np.exp(log_lambda_home)
             lambda_away = np.exp(log_lambda_away)
 
-            valid_corrections = (
-                (1.0 - lambda_home * lambda_away * rho > 1e-10)
-                & (1.0 + lambda_home * rho > 1e-10)
-                & (1.0 + lambda_away * rho > 1e-10)
-                & (1.0 - rho > 1e-10)
-            )
-            if not np.all(valid_corrections):
-                return 1e12
+            corrections = np.stack((
+                1.0 - lambda_home * lambda_away * rho,
+                1.0 + lambda_home * rho,
+                1.0 + lambda_away * rho,
+                np.full_like(lambda_home, 1.0 - rho),
+            ))
+            # A flat sentinel gives finite-difference L-BFGS-B no direction back
+            # into the valid region. This continuously penalizes invalid taus.
+            violation = np.minimum(corrections - 1e-8, 0.0)
+            correction_penalty = 1e4 * float(np.sum(violation * violation))
 
             log_likelihood = (
                 home_goals * log_lambda_home
@@ -206,18 +213,19 @@ class DixonColesModel:
             tau[masks[(0, 1)]] = 1.0 + lambda_home[masks[(0, 1)]] * rho
             tau[masks[(1, 0)]] = 1.0 + lambda_away[masks[(1, 0)]] * rho
             tau[masks[(1, 1)]] = 1.0 - rho
-            if np.any(tau <= 1e-10) or not np.all(np.isfinite(tau)):
-                return 1e12
 
             penalty = ridge * (
                 float(np.dot(attacks, attacks)) + float(np.dot(defenses, defenses))
             )
-            return -float(np.sum(weights * (log_likelihood + np.log(tau)))) + penalty
+            return (
+                -float(np.sum(weights * (log_likelihood + np.log(np.maximum(tau, 1e-8)))))
+                + penalty + correction_penalty
+            )
 
         bounds = (
             [(-3.0, 3.0)] * (n_teams - 1)
             + [(-3.0, 3.0)] * (n_teams - 1)
-            + [(-2.0, 2.0), (-1.0, 1.0), (-0.20, 0.20)]
+            + [(-2.0, 2.0), (-1.0, 1.0), (-0.10, 0.10)]
         )
         check_abort()
         result = minimize(
@@ -229,9 +237,20 @@ class DixonColesModel:
         )
         check_abort()
         if not result.success or not np.isfinite(result.fun):
-            raise DixonColesFitError(f"Optimizacija nije konvergirala: {result.message}")
+            error = DixonColesFitError(f"Optimizacija nije konvergirala: {result.message}")
+            error.optimizer_status = int(result.status)
+            error.optimizer_message = str(result.message)
+            error.optimizer_iterations = int(result.nit)
+            error.optimizer_objective = float(result.fun)
+            error.optimizer_gradient_norm = float(np.linalg.norm(result.jac, ord=np.inf))
+            raise error
 
         attacks, defenses, intercept, home_advantage, rho = unpack(result.x)
+        final_home = np.exp(np.clip(intercept + home_advantage + attacks[home_indices] + defenses[away_indices], -5.0, 3.0))
+        final_away = np.exp(np.clip(intercept + attacks[away_indices] + defenses[home_indices], -5.0, 3.0))
+        if np.any(1.0 - final_home * final_away * rho <= 1e-8) or np.any(1.0 + final_home * rho <= 1e-8) or np.any(1.0 + final_away * rho <= 1e-8) or 1.0 - rho <= 1e-8:
+            raise DixonColesFitError("Converged fit has an invalid Dixon-Coles correction")
+
         return cls(
             team_ids=team_ids,
             team_id_namespace=team_id_namespace,
@@ -243,6 +262,8 @@ class DixonColesModel:
             xi=xi,
             fitted_matches=len(records),
             objective=float(result.fun),
+            optimizer_iterations=int(result.nit),
+            optimizer_gradient_norm=float(np.linalg.norm(result.jac, ord=np.inf)),
         )
 
     def expected_goals(self, home_id: int, away_id: int) -> tuple[float, float]:
