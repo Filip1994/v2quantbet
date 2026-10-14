@@ -61,6 +61,12 @@ passes strict normalization, so it is retried after one day.
 1. Confirm `quantbet-engine` pre-deploy completed and migration
    `068_model_training_failure_fingerprint.sql` appears in `schema_migrations`.
    The service's `railway.json` runs `python -m h2h.migrate` before deployment.
+
+   ```sql
+   SELECT version, applied_at FROM schema_migrations
+   WHERE version = '068_model_training_failure_fingerprint.sql';
+   ```
+
 2. In a read-only SQL session on the `sincere-balance` production Postgres,
    inspect the target row:
 
