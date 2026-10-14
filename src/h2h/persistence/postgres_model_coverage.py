@@ -362,10 +362,10 @@ class PostgreSQLModelCoverageRepository:
                 "active_model_version_id = COALESCE(%s, active_model_version_id), "
                 "active_generation = COALESCE(%s, active_generation), "
                 "failed_dataset_sha256 = CASE WHEN %s = 'ACTIVE' THEN NULL "
-                "WHEN %s IS NOT NULL THEN %s ELSE failed_dataset_sha256 END, "
+                "WHEN %s::text IS NOT NULL THEN %s ELSE failed_dataset_sha256 END, "
                 "failure_streak = CASE WHEN %s = 'ACTIVE' THEN 0 "
-                "WHEN %s IS NOT NULL AND %s = failed_dataset_sha256 "
-                "THEN failure_streak + 1 WHEN %s IS NOT NULL THEN 1 "
+                "WHEN %s::text IS NOT NULL AND %s = failed_dataset_sha256 "
+                "THEN failure_streak + 1 WHEN %s::text IS NOT NULL THEN 1 "
                 "ELSE failure_streak END WHERE provider = %s "
                 "AND team_id_namespace = %s AND league_id = %s AND season = %s",
                 (
