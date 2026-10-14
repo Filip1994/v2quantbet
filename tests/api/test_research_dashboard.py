@@ -263,7 +263,7 @@ class LeagueVersionRepository:
         other_league["evaluation_id"] = "value-evaluation-v1:" + "9" * 64
         other_league["fixture_id"] = "api-football:128"
         other_league["provider_fixture_id"] = "128"
-        other_league["league_id"] = 40
+        other_league["league_id"] = 41
         other_league["competition_name"] = "Other League"
         other_league["home_team"] = "Other Home"
         other_league["away_team"] = "Other Away"
