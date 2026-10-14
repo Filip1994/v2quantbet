@@ -56,7 +56,10 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
     return any(f" {phrase} " in padded for phrase in phrases)
 
 
-BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 595})
+# Global hard ban: same contract used by Research, Production, QuantLab and Kelly.
+# 40 England Championship and 365 Latvia Virsliga; not all English/Scottish/Latvian leagues.
+BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({40, 72, 75, 236, 365, 595})
+BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("england", "championship"), ("latvia", "virsliga")})
 BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
 BLOCKED_TEAMS = frozenset({"klubi 04", "klubi04"})
 FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})
@@ -361,7 +364,10 @@ def universe_block_reason(
         return RejectionReason.BLOCKED_COUNTRY
     if is_blacklisted_team(home_team) or is_blacklisted_team(away_team):
         return RejectionReason.BLOCKED_TEAM
-    if is_blacklisted_league_id(league_id):
+    if is_blacklisted_league_id(league_id) or (
+        _normalise(str(country or "")),
+        _normalise(str(competition_name or "")),
+    ) in BLACKLISTED_COMPETITIONS_BY_NAME:
         return RejectionReason.BLACKLISTED_LEAGUE
     if is_friendly_football(
         country=country,
