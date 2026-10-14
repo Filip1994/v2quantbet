@@ -226,7 +226,7 @@ def test_rejects_national_team_football_globally(metadata: CompetitionMetadata) 
     assert decision.rejection_reason == RejectionReason.NATIONAL_TEAM
 
 
-@pytest.mark.parametrize("league_id", [72, 75, 236, 365, 595])
+@pytest.mark.parametrize("league_id", [40, 72, 75, 236, 365, 595])
 def test_rejects_global_blacklisted_league_ids(league_id: int) -> None:
     decision = classify_phase_i(
         CompetitionMetadata(
@@ -334,4 +334,59 @@ def test_other_latvian_leagues_are_not_globally_blacklisted(
 
     assert universe_block_reason(
         country="Latvia", competition_name=competition_name, league_id=league_id
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name", "league_id"),
+    [
+        ("England", "Championship", 40),
+        ("England", "Championship", "40"),
+        ("ENGLAND", "CHAMPIONSHIP", None),
+        ("England", "Championship", None),
+        ("England", "Other League Label", 40),
+        ("Other Country", "Different League", 40),
+    ],
+)
+def test_england_championship_is_globally_banned_with_id_or_exact_country_name(
+    country: str, competition_name: str, league_id: object,
+) -> None:
+    from h2h.domain.competition_scope import (
+        is_universe_blocked_competition,
+        universe_block_reason,
+    )
+
+    kwargs = {
+        "country": country,
+        "competition_name": competition_name,
+        "league_id": league_id,
+    }
+    assert universe_block_reason(**kwargs) == RejectionReason.BLACKLISTED_LEAGUE
+    assert is_universe_blocked_competition(**kwargs)
+    assert classify_phase_i(CompetitionMetadata(
+        country=country,
+        name=competition_name,
+        type="league",
+        league_id=league_id,
+    )).rejection_reason == RejectionReason.BLACKLISTED_LEAGUE
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name", "league_id"),
+    [
+        ("England", "Premier League", 39),
+        ("England", "League One", 41),
+        ("Scotland", "Championship", 179),
+        ("Scotland", "Championship", None),
+    ],
+)
+def test_championship_ban_does_not_block_other_domestic_leagues(
+    country: str, competition_name: str, league_id: object,
+) -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(
+        country=country,
+        competition_name=competition_name,
+        league_id=league_id,
     ) is None

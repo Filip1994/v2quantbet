@@ -70,13 +70,14 @@ def test_inventory_queue_is_scope_bounded_and_restart_safe(isolated_database) ->
     connect = isolated_database
     now = datetime(2026, 9, 23, 12, tzinfo=UTC)
     insert_fixture(connect, fixture_id=100, league_id=39, season=2026, now=now)
+    # Championship fixture remains persisted, but must not enter training inventory.
     insert_fixture(connect, fixture_id=200, league_id=40, season=2026, now=now)
     repository = PostgreSQLModelCoverageRepository(connect=connect)
     policy = ProductionTrainingPolicy()
 
-    assert repository.refresh_inventory(policy, now=now) == 2
+    assert repository.refresh_inventory(policy, now=now) == 1
     counts = repository.coverage_counts()
-    assert counts.total_eligible == counts.training_required == 2
+    assert counts.total_eligible == counts.training_required == 1
     claimed = repository.claim_training_scopes(now=now, limit=1)
     assert len(claimed) == 1
     assert claimed[0].status is ModelCoverageStatus.TRAINING_PENDING
@@ -84,7 +85,7 @@ def test_inventory_queue_is_scope_bounded_and_restart_safe(isolated_database) ->
     assert repository.recover_abandoned_claims(
         now=now + timedelta(seconds=91), lease_seconds=90
     ) == 1
-    assert repository.coverage_counts().training_required == 2
+    assert repository.coverage_counts().training_required == 1
 
     payload = {"errors": [], "results": 0, "paging": {"current": 1, "total": 1}, "response": []}
     start, end = policy.training_window(now)

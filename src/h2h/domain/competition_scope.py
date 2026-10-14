@@ -57,10 +57,11 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 
 
 # Global hard ban: same contract used by Research, Production, QuantLab and Kelly.
+# League 40 is England's Championship (not all English or Scottish tiers).
 # League 365 is Latvia's Virslīga (not a country-wide Latvia block).
-BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({72, 75, 236, 365, 595})
+BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({40, 72, 75, 236, 365, 595})
 # Guard against inconsistent/missing league_id in downstream metadata.
-BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("latvia", "virsliga")})
+BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("england", "championship"), ("latvia", "virsliga")})
 BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
 BLOCKED_TEAMS = frozenset({"klubi 04", "klubi04"})
 FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})

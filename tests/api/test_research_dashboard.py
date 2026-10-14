@@ -263,7 +263,7 @@ class LeagueVersionRepository:
         other_league["evaluation_id"] = "value-evaluation-v1:" + "9" * 64
         other_league["fixture_id"] = "api-football:128"
         other_league["provider_fixture_id"] = "128"
-        other_league["league_id"] = 40
+        other_league["league_id"] = 41
         other_league["competition_name"] = "Other League"
         other_league["home_team"] = "Other Home"
         other_league["away_team"] = "Other Away"
@@ -757,13 +757,14 @@ def test_research_board_and_analytics_exclude_universe_blocked_rows() -> None:
         assert "Kakkonen" not in html
         assert "2. Division - Group 1" not in html
 
+    # Even globally banned leagues retain immutable, settled historical audit views.
     blocked_drilldown = dashboard.league_details(72, 2026)
-    assert blocked_drilldown["summary"]["n"] == 0
-    assert blocked_drilldown["rows"] == []
+    assert blocked_drilldown["summary"]["n"] == 1
+    assert len(blocked_drilldown["rows"]) == 1
 
     virsliga_drilldown = dashboard.league_details(365, 2026)
-    assert virsliga_drilldown["summary"]["n"] == 0
-    assert virsliga_drilldown["rows"] == []
+    assert virsliga_drilldown["summary"]["n"] == 1
+    assert len(virsliga_drilldown["rows"]) == 1
 
 
 def test_research_dashboard_exposes_continuous_analytics_v1() -> None:
@@ -1018,3 +1019,30 @@ def test_corrected_manual_void_is_win_when_over_2_5_hit_during_play() -> None:
     row["production_manual_void"] = True
     assert counterfactual_outcome(row) == "VOID"
     assert counterfactual_pnl_minor(row, 30_000) == 0
+
+
+def test_championship_is_excluded_from_consideration_but_kept_in_historic_drilldown() -> None:
+    class ChampionshipHistoryRepository:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            allowed = signal_row()
+            championship = signal_row()
+            championship["research_signal_id"] = "research-signal-v1:" + "c" * 64
+            championship["evaluation_id"] = "value-evaluation-v1:" + "c" * 64
+            championship["fixture_id"] = "api-football:940"
+            championship["provider_fixture_id"] = "940"
+            championship["country"] = "England"
+            championship["competition_name"] = "Championship"
+            championship["league_id"] = 40
+            championship["home_team"] = "Lincoln"
+            championship["away_team"] = "West Ham"
+            return (allowed, championship)
+
+    dashboard = ResearchDashboardService(ChampionshipHistoryRepository())
+    assert not dashboard.signals({"league_id": ["40"]})
+    assert dashboard.analytics_snapshot()["windows"]["lifetime"]["n"] == 1
+    history = dashboard.league_details(40, 2026)
+    assert history["summary"]["n"] == 1
+    assert history["league"]["competition_name"] == "Championship"
+    assert history["rows"][0]["fixture_id"] == "api-football:940"
+    assert "Lincoln" in dashboard.render_league_html(40, 2026)
