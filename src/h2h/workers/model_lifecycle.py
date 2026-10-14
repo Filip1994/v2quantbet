@@ -189,6 +189,9 @@ class ModelLifecycleWorker:
                                 best_accepted,
                                 exc.accepted_match_count or 0,
                             )
+                        else:
+                            exc.dataset_sha256 = candidate.artifact.provenance.dataset_sha256
+                            exc.training_sample_size = candidate.artifact.provenance.accepted_match_count
                         last_insufficient = exc
                         continue
                     trained = candidate

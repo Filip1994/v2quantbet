@@ -50,6 +50,11 @@ queues retraining. Invalid input and other failures use a one-day retry. Each
 scope has its own persisted state; one failed league does not stop the cycle's
 other claimed scopes. Daily-window acquisition caching means newly completed
 matches may not be visible until the next UTC training window.
+The retry key tracks one failed dataset per target scope. A target whose current
+and previous training seasons both fail for different datasets may still refit
+one of them during a later retry; each failure remains bounded by the daily
+schedule. A raw malformed provider response cannot be fingerprinted until it
+passes strict normalization, so it is retried after one day.
 
 ## Railway validation after an approved deployment
 
