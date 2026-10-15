@@ -109,9 +109,8 @@ def test_intake_horizon_rejects_invalid_configuration(raw: str) -> None:
 
 def test_source_candidate_queries_apply_prematch_24h_window_before_limit() -> None:
     class Cursor:
-        description: list[object] = []
-
         def __init__(self) -> None:
+            self.description: list[object] = []
             self.query = ""
             self.parameters: tuple[object, ...] = ()
 
