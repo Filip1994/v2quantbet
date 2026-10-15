@@ -10,6 +10,7 @@ from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelRepository,
     ProductionFunnelSyncResult,
     active_bucket_ids,
+    production_intake_max_lead_hours,
 )
 
 
@@ -36,12 +37,14 @@ class ProductionFunnelWorker:
 
     def run_once(self) -> ProductionFunnelSyncResult:
         bucket_ids = active_bucket_ids()
+        max_lead_hours = production_intake_max_lead_hours()
         result = self._repository.sync(
             now=self._clock(),
             max_open_exposure_minor=self._max_open_exposure_minor,
             currency=self._currency,
             fallback_stake_minor=self._fallback_stake_minor,
             bucket_ids=bucket_ids,
+            max_lead_hours=max_lead_hours,
         )
         LOGGER.info(
             "production funnel intake outcomes",
@@ -55,6 +58,7 @@ class ProductionFunnelWorker:
                 "open_exposure_minor": result.open_exposure_minor,
                 "intake_contract_version": result.intake_contract_version,
                 "active_bucket_ids": bucket_ids,
+                "intake_max_lead_hours": max_lead_hours,
             },
         )
         return result
