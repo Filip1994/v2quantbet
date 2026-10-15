@@ -19,7 +19,7 @@ from h2h.application_postgres import (
 )
 from h2h.config import ProductionSettings
 from h2h.domain.model_lifecycle import DixonColesModelScope
-from h2h.domain.bookmaker_policy import API_FOOTBALL_BOOKMAKERS
+from h2h.domain.bookmaker_policy import PRODUCTION_BOOKMAKER_ID
 from h2h.odds import ApiFootballOddsService, PostgreSQLApiBudget
 from h2h.odds.http import UrllibJsonTransport
 from h2h.persistence import (
@@ -296,8 +296,8 @@ def build_production_application(
         prediction.predictor,
         prediction.evaluator,
         registration.register_pick,
-        bookmaker_id=settings.bookmaker_id,
-        bookmaker_ids=tuple(API_FOOTBALL_BOOKMAKERS),
+        bookmaker_id=PRODUCTION_BOOKMAKER_ID,
+        bookmaker_ids=(PRODUCTION_BOOKMAKER_ID,),
         allowed_statuses=application_settings.registration_policy.allowed_fixture_statuses,
         ensure_model_available=ensure_model_available,
         should_stop=should_stop,

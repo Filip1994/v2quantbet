@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 from h2h.domain.competition_scope import is_universe_blocked_competition
+from h2h.domain.bookmaker_policy import is_production_bookmaker
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
@@ -885,6 +886,12 @@ class PostgreSQLProductionFunnelRepository:
 
             matched: list[tuple[int, dict[str, Any], tuple[str, ...], str]] = []
             for row in rows:
+                # Research and lab histories retain their original bookmaker.
+                # Only 1xBet source prices may become new actionable picks.
+                if not is_production_bookmaker(
+                    row.get("bookmaker_id"), row.get("bookmaker_name")
+                ):
+                    continue
                 source = str(row["source_universe"])
                 all_matches = (
                     self._research_matches(row)

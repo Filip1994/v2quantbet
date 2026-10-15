@@ -16,6 +16,7 @@ from h2h.logging_config import configure_logging
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.production import ProductionApplication, build_production_application
+from h2h.domain.bookmaker_policy import PRODUCTION_BOOKMAKER_ID
 from h2h.workers.orchestrator import ProductionOrchestrator, ScheduledJob
 from h2h.workers.daily_bulletin import DailyBulletinWorker
 from h2h.workers.runtime import install_shutdown_handlers
@@ -86,7 +87,7 @@ def _run_active_leader(
     risk_snapshot = application.production_funnel.exposure_breakdown()
     LOGGER.info("production funnel exposure snapshot", extra=risk_snapshot)
     application.runtime.due_opportunity_fixtures(
-        bookmaker_id=application.settings.bookmaker_id,
+        bookmaker_id=PRODUCTION_BOOKMAKER_ID,
         allowed_statuses=policy.allowed_fixture_statuses,
         now=datetime.now(UTC),
         maximum_quote_age_seconds=policy.maximum_quote_age_seconds,

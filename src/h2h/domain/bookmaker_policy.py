@@ -21,6 +21,19 @@ API_FOOTBALL_BOOKMAKERS: Final[dict[int, str]] = {
     34: "superbet",
 }
 
+# Only this bookmaker may provide a new actionable Production price.
+PRODUCTION_BOOKMAKER_ID: Final[int] = 11
+
+
+def is_production_bookmaker(provider_id: object, provider_name: object) -> bool:
+    """Require both provider identity fields before a new Production intake."""
+    return (
+        type(provider_id) is int
+        and provider_id == PRODUCTION_BOOKMAKER_ID
+        and isinstance(provider_name, str)
+        and provider_name.strip().casefold() == "1xbet"
+    )
+
 _EXPECTED_PROVIDER_NAMES: Final[dict[int, str]] = {
     8: "bet365",
     11: "1xbet",

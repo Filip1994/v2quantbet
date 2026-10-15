@@ -123,6 +123,8 @@ def test_legacy_pilot_allowlists_do_not_define_production_universe() -> None:
 
 def test_production_composition_uses_categorized_clients_with_one_durable_budget() -> None:
     application = build_production_application(load_production_settings(production_environment()))
+    assert application.opportunity._bookmaker_id == 11
+    assert application.opportunity._bookmaker_ids == (11,)
     assert application.opportunity._source.client is application.client
     assert application.client.transport.transport.budget is application.budget
     monitoring_client = application.monitoring.refresh_odds._source.client

@@ -1,17 +1,13 @@
 # QuantBet — Bookmaker Policy
 
-## Production best-price universe
+## Production bookmaker
 
-Production compares only Bet365 (`8`), 1xBet (`11`) and Superbet (`34`). One unfiltered
-API-Football request can return all three without tripling budget use; normalization rejects
-every other bookmaker. Quotes are comparable only for the same fixture, market, selection,
-source and settlement semantics. Highest executable decimal odds win, with provider ID as a
-deterministic tie-breaker.
-
-The winner receives a mandatory bookmaker-specific final refresh. Unavailable, incomplete,
-stale or no-longer-playable prices fall back to the next ranked approved bookmaker. Initial
-and final observations remain in append-only history; registered bookmaker and Entry never
-change afterward.
+New actionable Production picks use only 1xBet (`11`). The opportunity worker fetches
+1xBet specifically and still requires its mandatory bookmaker-specific final refresh.
+If 1xBet is unavailable, incomplete, stale, or no longer playable, no other bookmaker
+is substituted. Production intake also rejects non-1xBet Research and lab source picks.
+Historical quotes, picks, settlements, bookmaker attribution, and Research/lab analytics
+remain intact.
 
 ## 1. Allowlist
 

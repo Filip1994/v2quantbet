@@ -4,6 +4,7 @@ from h2h.domain.bookmaker_policy import (
     SUPPORTED_BOOKMAKERS,
     UnsupportedBookmakerError,
     is_supported_bookmaker,
+    is_production_bookmaker,
     normalize_bookmaker_id,
     require_supported_bookmaker,
 )
@@ -32,3 +33,13 @@ def test_unsupported_or_empty_bookmakers_are_rejected(bookmaker_id: str) -> None
 def test_non_string_identifier_is_rejected() -> None:
     with pytest.raises(TypeError, match="must be a string"):
         normalize_bookmaker_id(365)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "provider_name", "allowed"),
+    [(11, "1xBet", True), (11, " 1xbet ", True), (8, "Bet365", False),
+     (34, "Superbet", False), (11, "Bet365", False), (8, "1xBet", False),
+     (None, "1xBet", False), (True, "1xBet", False)],
+)
+def test_only_exact_1xbet_identity_can_enter_production(provider_id, provider_name, allowed):
+    assert is_production_bookmaker(provider_id, provider_name) is allowed
