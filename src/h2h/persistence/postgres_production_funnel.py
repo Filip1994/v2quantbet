@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from collections.abc import Callable
 from typing import Any
@@ -39,7 +39,9 @@ _CORNER_FIRST_PRIORITY = {
     CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00: 2,  # C5
     CORNER_OVER_GAP_1_2_ODDS_1_61_1_80: 1,  # C4
 }
-_PRIORITY_POLICY_VERSION = "CORNER_FIRST_C5_C4_THEN_DYNAMIC_ROI_V1"
+_PRIORITY_POLICY_VERSION = "CORNER_FIRST_C5_C4_THEN_DYNAMIC_ROI_KICKOFF_V2"
+_DEFAULT_MAX_LEAD_HOURS = 24
+_MAX_SUPPORTED_LEAD_HOURS = 72
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -69,9 +71,29 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
     return tuple(sorted(approved, key=_BUCKET_PRIORITY.__getitem__))
 
 
-def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
-    canonical = _PRIORITY_POLICY_VERSION + ":" + ",".join(bucket_ids)
-    return "PRODUCTION_FUNNEL_INTAKE_V4:" + sha256(canonical.encode("utf-8")).hexdigest()
+def production_intake_max_lead_hours(values: dict[str, str] | None = None) -> int:
+    """Bound Production cloning to the near-term window; discovery is unchanged."""
+    env = os.environ if values is None else values
+    raw = env.get("QUANTBET_PRODUCTION_INTAKE_MAX_LEAD_HOURS", "24").strip()
+    try:
+        hours = int(raw)
+    except ValueError as exc:
+        raise ValueError("Production intake max lead hours must be an integer") from exc
+    if not 1 <= hours <= _MAX_SUPPORTED_LEAD_HOURS:
+        raise ValueError("Production intake max lead hours must be in 1..72")
+    return hours
+
+
+def intake_contract_version(
+    bucket_ids: tuple[str, ...],
+    *,
+    max_lead_hours: int = _DEFAULT_MAX_LEAD_HOURS,
+) -> str:
+    canonical = (
+        f"{_PRIORITY_POLICY_VERSION}:MAX_LEAD_HOURS={max_lead_hours}:"
+        + ",".join(bucket_ids)
+    )
+    return "PRODUCTION_FUNNEL_INTAKE_V5:" + sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,10 +151,11 @@ class PostgreSQLProductionFunnelRepository:
     def _candidate_sort_key(
         priority: int,
         row: dict[str, Any],
-    ) -> tuple[int, float, float, Any, str, str]:
-        """Rank by current bucket N+ROI strength, then by pick EV and edge."""
+    ) -> tuple[int, datetime, float, float, Any, str, str]:
+        """Preserve bucket priority; select the earliest kickoff inside a bucket."""
         return (
             priority,
+            row["kickoff_at"],
             -float(row["expected_value"]),
             -float(row["edge"]),
             row["source_decision_at"],
@@ -431,7 +454,13 @@ class PostgreSQLProductionFunnelRepository:
         )
 
     @staticmethod
-    def _research_candidates(cursor: Any, *, now: datetime, fallback_stake_minor: int) -> tuple[dict[str, Any], ...]:
+    def _research_candidates(
+        cursor: Any,
+        *,
+        now: datetime,
+        horizon_end: datetime,
+        fallback_stake_minor: int,
+    ) -> tuple[dict[str, Any], ...]:
         cursor.execute(
             """
             SELECT
@@ -479,6 +508,7 @@ class PostgreSQLProductionFunnelRepository:
             ) latest ON TRUE
             WHERE rs.qualified_at IS NOT NULL
               AND latest.kickoff_at > %s
+              AND latest.kickoff_at <= %s
               AND (
                     (
                         e.market = 'OU_25'
@@ -509,15 +539,17 @@ class PostgreSQLProductionFunnelRepository:
                         AND e.selected_odd > 2.00 AND e.selected_odd <= 2.50
                     )
               )
-            ORDER BY rs.qualified_at ASC, rs.research_signal_id ASC
+            ORDER BY latest.kickoff_at ASC, rs.qualified_at ASC, rs.research_signal_id ASC
             LIMIT 5000
             """,
-            (fallback_stake_minor, fallback_stake_minor, now),
+            (fallback_stake_minor, fallback_stake_minor, now, horizon_end),
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
     @staticmethod
-    def _goallab_candidates(cursor: Any, *, now: datetime) -> tuple[dict[str, Any], ...]:
+    def _goallab_candidates(
+        cursor: Any, *, now: datetime, horizon_end: datetime
+    ) -> tuple[dict[str, Any], ...]:
         cursor.execute(
             """
             SELECT
@@ -564,6 +596,7 @@ class PostgreSQLProductionFunnelRepository:
                 LIMIT 1
             ) platest ON TRUE
             WHERE p.kickoff_at > %s
+              AND p.kickoff_at <= %s
               AND p.market_key = 'OU_25'
               AND p.selection = 'OVER'
               AND (
@@ -573,15 +606,17 @@ class PostgreSQLProductionFunnelRepository:
                     )
                     OR (p.odds > 2.00 AND p.odds <= 2.50)
               )
-            ORDER BY p.decision_at ASC, p.goal_pick_id ASC
+            ORDER BY p.kickoff_at ASC, p.decision_at ASC, p.goal_pick_id ASC
             LIMIT 5000
             """,
-            (now,),
+            (now, horizon_end),
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
     @staticmethod
-    def _cornerlab_candidates(cursor: Any, *, now: datetime) -> tuple[dict[str, Any], ...]:
+    def _cornerlab_candidates(
+        cursor: Any, *, now: datetime, horizon_end: datetime
+    ) -> tuple[dict[str, Any], ...]:
         cursor.execute(
             """
             SELECT 'CORNERLAB'::text AS source_universe,
@@ -637,6 +672,7 @@ class PostgreSQLProductionFunnelRepository:
               AND q.selection = 'OVER'
               AND q.decision_at < COALESCE(qlatest.kickoff_at, platest.kickoff_at)
               AND COALESCE(qlatest.kickoff_at, platest.kickoff_at) > %s
+              AND COALESCE(qlatest.kickoff_at, platest.kickoff_at) <= %s
               AND (
                 (snapshot.expected_total_corners - q.line >= 1.0
                  AND snapshot.expected_total_corners - q.line < 2.0
@@ -646,10 +682,10 @@ class PostgreSQLProductionFunnelRepository:
                  AND q.market_probability >= 0.45 AND q.market_probability < 0.50
                  AND q.odds > 1.80 AND q.odds <= 2.00)
               )
-            ORDER BY q.decision_at ASC, q.shadow_bet_id ASC
+            ORDER BY kickoff_at ASC, q.decision_at ASC, q.shadow_bet_id ASC
             LIMIT 5000
             """,
-            (now,),
+            (now, horizon_end),
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
 
@@ -794,8 +830,16 @@ class PostgreSQLProductionFunnelRepository:
         currency: str,
         fallback_stake_minor: int,
         bucket_ids: tuple[str, ...] | None = None,
+        max_lead_hours: int = _DEFAULT_MAX_LEAD_HOURS,
     ) -> ProductionFunnelSyncResult:
         cloned_at = _utc(now, "now")
+        if (
+            isinstance(max_lead_hours, bool)
+            or not isinstance(max_lead_hours, int)
+            or not 1 <= max_lead_hours <= _MAX_SUPPORTED_LEAD_HOURS
+        ):
+            raise ValueError("max_lead_hours must be an integer in 1..72")
+        horizon_end = cloned_at + timedelta(hours=max_lead_hours)
         if isinstance(max_open_exposure_minor, bool) or max_open_exposure_minor <= 0:
             raise ValueError("max_open_exposure_minor must be positive")
         if isinstance(fallback_stake_minor, bool) or fallback_stake_minor <= 0:
@@ -806,7 +850,7 @@ class PostgreSQLProductionFunnelRepository:
         selected = tuple(
             sorted(dict.fromkeys(requested), key=_BUCKET_PRIORITY.__getitem__)
         )
-        contract = intake_contract_version(selected)
+        contract = intake_contract_version(selected, max_lead_hours=max_lead_hours)
         allowed = frozenset(selected)
 
         with self.connect() as connection, connection.cursor() as cursor:
@@ -818,12 +862,13 @@ class PostgreSQLProductionFunnelRepository:
                 self._research_candidates(
                     cursor,
                     now=cloned_at,
+                    horizon_end=horizon_end,
                     fallback_stake_minor=fallback_stake_minor,
                 )
             )
-            rows.extend(self._goallab_candidates(cursor, now=cloned_at))
+            rows.extend(self._goallab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
             if any(item.startswith("CORNER_") for item in selected):
-                rows.extend(self._cornerlab_candidates(cursor, now=cloned_at))
+                rows.extend(self._cornerlab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
 
             bucket_stats = self._bucket_performance(cursor, bucket_ids=selected)
             bucket_order = tuple(
