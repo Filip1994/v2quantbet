@@ -1468,12 +1468,13 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
 .row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}
 .empty{{text-align:center;color:var(--muted);padding:36px!important}}@media(max-width:900px){{
 .cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>RESEARCH_LEAGUE_DRILLDOWN_V1</small>
 <h1>{competition_name} · {season}</h1>
 <div class="meta">{country} · League ID {league_id} · all DC retrains combined</div>
 <p>League performance first; model versions remain available as the audit layer.</p></div>
-<div><a href="/research/analytics">← Analytics V2</a> ·
+<div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research/analytics">← Analytics V2</a> ·
 <a href="/research/analytics/league.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
 <section id="models" class="panel"><h2>Model versions · retrain history</h2>
@@ -1685,11 +1686,12 @@ margin-top:4px}}.result{{display:inline-block;padding:4px 7px;border-radius:999p
 .row-void{{box-shadow:inset 3px 0 var(--void)}}.empty{{text-align:center;color:var(--muted);
 padding:36px!important}}@media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}
 main{{padding:14px}}header{{display:block}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>RESEARCH_MODEL_VERSION_DRILLDOWN_V1</small>
 <h1>Model version picks</h1><span class="model-id">{model_label}</span>
 <p>Exact settled Research rows behind this Analytics V2 model cohort.</p></div>
-<div><a href="/research/analytics">← Analytics V2</a> ·
+<div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research/analytics">← Analytics V2</a> ·
 <a href="/research/analytics/model.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
 <section id="picks" class="panel"><div class="scroll"><table><thead><tr>{headers}</tr></thead>
@@ -2142,9 +2144,11 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 .empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#7f878e;margin-top:12px;font-size:11px}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
 @media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.health-strip{{align-items:stretch}}.health-label{{width:100%;margin-bottom:1px}}.health-item{{min-width:calc(50% - 4px);flex:1}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header class="topbar">
 <div class="brand"><div class="sportsbook-logo" aria-label="QuantBet"><span class="logo-q">Q</span><span class="logo-word">QUANT</span><span class="logo-bet">BET</span></div><div><div class="eyebrow">Research universe</div><h1>Research Board</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
+<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
 <section class="health-strip" aria-label="System status"><span class="health-label">System status</span>{health_html}</section>
