@@ -1,6 +1,10 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from h2h.persistence.result_settlement import (
+    FixtureResultIdentityConflictError,
+    ResultIdentityQuarantine,
+)
 from h2h.use_cases.result_settlement import ReconcileFixtureResults
 from h2h.workers.result_settlement import ResultSettlementWorker
 
@@ -118,3 +122,64 @@ def test_fixture_identity_conflict_does_not_stop_other_results() -> None:
     assert successes == ["good"]
     assert cycle.claimed_fixture_ids == ("bad", "good")
     assert not cycle.pending_work
+
+
+def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processing() -> None:
+    class Repository:
+        quarantined = False
+        persisted: list[str]
+        quarantine_calls = 0
+
+        def __init__(self) -> None:
+            self.persisted = []
+
+        def reconcile(self, *, reconciled_at):
+            return ()
+
+        def claim_due(self, *, claimed_at, limit=None):
+            return ("bad", "good") if not self.quarantined else ()
+
+        def provider_contexts(self, fixture_ids):
+            return (("bad", 101), ("good", 102)) if fixture_ids else ()
+
+        def persist_result(self, result, *, checked_at):
+            if result.fixture_id == "bad":
+                raise FixtureResultIdentityConflictError("identity mismatch")
+            self.persisted.append(result.fixture_id)
+
+        def quarantine_identity_conflict(self, result, *, quarantined_at):
+            self.quarantine_calls += 1
+            self.quarantined = True
+            return ResultIdentityQuarantine(result.fixture_id, True, "OPEN_PLAYED", 1, 0)
+
+        def stable_result(self, fixture_id, *, as_of):
+            return None
+
+        def has_due_results(self, *, as_of):
+            return False
+
+    class Source:
+        calls = 0
+
+        def fetch(self, contexts):
+            self.calls += 1
+            return {contexts[0][0]: {}}
+
+    repository, source = Repository(), Source()
+    reconcile = ReconcileFixtureResults(
+        repository,  # type: ignore[arg-type]
+        source,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+    reconcile._normalizer = SimpleNamespace(
+        normalize=lambda payload, *, fixture_id, acquired_at: SimpleNamespace(
+            fixture_id=fixture_id
+        )
+    )
+
+    assert reconcile.execute().claimed_fixture_ids == ("bad", "good")
+    assert repository.persisted == ["good"]
+    assert repository.quarantine_calls == 1
+    assert source.calls == 2
+    assert reconcile.execute().claimed_fixture_ids == ()
+    assert source.calls == 2

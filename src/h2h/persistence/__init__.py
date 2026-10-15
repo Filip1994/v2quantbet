@@ -21,7 +21,9 @@ from .postgres_result_settlement import PostgreSQLResultSettlementRepository
 from .postgres_performance import PostgreSQLPerformanceRepository
 from .result_settlement import (
     ClvResult,
+    FixtureResultIdentityConflictError,
     ResultNotStableError,
+    ResultIdentityQuarantine,
     ResultPersistenceConflictError,
     SettlementConflictError,
     SettlementRecord,
@@ -60,6 +62,7 @@ __all__ = [
     "FixturePersistenceConflictError",
     "FixturePredictionRepository",
     "FixtureRepository",
+    "FixtureResultIdentityConflictError",
     "InMemoryQuoteHistoryRepository",
     "InMemoryQuoteRepository",
     "ModelActivationConflictError",
@@ -85,6 +88,7 @@ __all__ = [
     "QuoteRepository",
     "RegistrationPersistenceConflictError",
     "RegistrationProvenanceError",
+    "ResultIdentityQuarantine",
     "ResultNotStableError",
     "ResultPersistenceConflictError",
     "SQLiteQuoteRepository",

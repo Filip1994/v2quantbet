@@ -25,7 +25,9 @@ from h2h.domain.settlement import (
 )
 from h2h.persistence.result_settlement import (
     ClvResult,
+    FixtureResultIdentityConflictError,
     ResultNotStableError,
+    ResultIdentityQuarantine,
     ResultPersistenceConflictError,
     SettlementConflictError,
     SettlementRecord,
@@ -106,7 +108,7 @@ class PostgreSQLResultSettlementRepository:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT fixture_id FROM fixture_result_acquisition_states "
-                "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
+                "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED') AND next_check_at <= %s "
                 "AND (lease_expires_at IS NULL OR lease_expires_at <= %s) "
                 "ORDER BY next_check_at, fixture_id FOR UPDATE SKIP LOCKED LIMIT %s",
                 (now, now, claim_limit),
@@ -125,7 +127,7 @@ class PostgreSQLResultSettlementRepository:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT EXISTS (SELECT 1 FROM fixture_result_acquisition_states "
-                "WHERE phase <> 'COMPLETE' AND next_check_at <= %s "
+                "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED') AND next_check_at <= %s "
                 "AND (lease_expires_at IS NULL OR lease_expires_at <= %s))",
                 (now, now),
             )
@@ -162,7 +164,9 @@ class PostgreSQLResultSettlementRepository:
                 result.provider_away_team_id,
             )
             if anchor is None or tuple(anchor) != expected:
-                raise ResultPersistenceConflictError("result contradicts durable fixture identity")
+                raise FixtureResultIdentityConflictError(
+                    "result contradicts durable fixture identity"
+                )
             self._append_fixture_observation(cursor, result, checked)
             cursor.execute(
                 "INSERT INTO fixture_result_observations ("
@@ -212,17 +216,104 @@ class PostgreSQLResultSettlementRepository:
             self._advance_state(cursor, result, checked)
         return result
 
+    def quarantine_identity_conflict(
+        self, result: FixtureResultObservation, *, quarantined_at: datetime
+    ) -> ResultIdentityQuarantine:
+        """Stop only the conflicting result path, retaining every financial fact."""
+        now = _utc(quarantined_at, "quarantined_at")
+        if not isinstance(result, FixtureResultObservation):
+            raise TypeError("result must be a FixtureResultObservation")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT provider, provider_fixture_id, provider_home_team_id, "
+                "provider_away_team_id FROM fixtures WHERE fixture_id = %s FOR UPDATE",
+                (result.fixture_id,),
+            )
+            anchor = cursor.fetchone()
+            observed = (
+                result.provider, result.provider_fixture_id,
+                result.provider_home_team_id, result.provider_away_team_id,
+            )
+            if anchor is None or tuple(anchor) == observed:
+                raise ResultPersistenceConflictError(
+                    "fixture identity changed before quarantine could be recorded"
+                )
+            cursor.execute(
+                "SELECT phase, quarantine_reason FROM fixture_result_acquisition_states "
+                "WHERE fixture_id = %s FOR UPDATE",
+                (result.fixture_id,),
+            )
+            state = cursor.fetchone()
+            if state is None:
+                raise ResultPersistenceConflictError("fixture acquisition state is missing")
+            if state[0] == "QUARANTINED":
+                reason = state[1]
+                if isinstance(reason, str):
+                    reason = json.loads(reason)
+                return ResultIdentityQuarantine(
+                    result.fixture_id, False, reason["financial_dependency"],
+                    reason["open_played_picks"], reason["settled_played_picks"],
+                )
+            cursor.execute(
+                "SELECT COUNT(*) FILTER (WHERE NOT EXISTS ("
+                "SELECT 1 FROM pick_settlement_events e WHERE e.pick_id = p.pick_id "
+                "AND e.event_kind IN ('NORMAL', 'MANUAL_VOID'))), "
+                "COUNT(*) FILTER (WHERE EXISTS ("
+                "SELECT 1 FROM pick_settlement_events e WHERE e.pick_id = p.pick_id "
+                "AND e.event_kind IN ('NORMAL', 'MANUAL_VOID'))) "
+                "FROM registered_picks p WHERE p.fixture_id = %s",
+                (result.fixture_id,),
+            )
+            open_picks, settled_picks = map(int, cursor.fetchone())
+            dependency = (
+                "OPEN_PLAYED" if open_picks else
+                "SETTLED_PLAYED" if settled_picks else "NONE"
+            )
+            reason = {
+                "code": "DURABLE_FIXTURE_IDENTITY_MISMATCH",
+                "expected": {
+                    "provider": anchor[0], "provider_fixture_id": anchor[1],
+                    "home_team_id": anchor[2], "away_team_id": anchor[3],
+                },
+                "observed": {
+                    "provider": result.provider,
+                    "provider_fixture_id": result.provider_fixture_id,
+                    "home_team_id": result.provider_home_team_id,
+                    "away_team_id": result.provider_away_team_id,
+                    "kickoff_at": result.provider_kickoff_at.isoformat(),
+                    "provider_status": result.provider_status,
+                    "provider_record_sha256": result.provider_record_sha256,
+                },
+                "financial_dependency": dependency,
+                "open_played_picks": open_picks,
+                "settled_played_picks": settled_picks,
+            }
+            cursor.execute(
+                "UPDATE fixture_result_acquisition_states SET phase = 'QUARANTINED', "
+                "quarantine_reason = %s::jsonb, quarantined_at = %s, "
+                "lease_expires_at = NULL, updated_at = %s, version = version + 1 "
+                "WHERE fixture_id = %s",
+                (json.dumps(reason, sort_keys=True), now, now, result.fixture_id),
+            )
+            return ResultIdentityQuarantine(
+                result.fixture_id, True, dependency, open_picks, settled_picks
+            )
+
     def _advance_state(self, cursor: Any, result: FixtureResultObservation, checked: datetime) -> None:
         cursor.execute(
             "SELECT candidate_settlement_fingerprint, candidate_first_seen_at, "
             "candidate_confirmation_count, correction_required, "
-            "contradicting_observation_id FROM fixture_result_acquisition_states "
+            "contradicting_observation_id, phase FROM fixture_result_acquisition_states "
             "WHERE fixture_id = %s FOR UPDATE",
             (result.fixture_id,),
         )
         state = cursor.fetchone()
         if state is None:
             raise ResultPersistenceConflictError("fixture acquisition state is missing")
+        if state[5] == "QUARANTINED":
+            raise ResultPersistenceConflictError(
+                "quarantined fixture requires operator review before result persistence"
+            )
         if result.is_terminal_candidate:
             same = state[0] == result.settlement_fingerprint
             first_seen = state[1] if same else checked

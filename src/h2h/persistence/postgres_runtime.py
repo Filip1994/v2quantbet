@@ -726,9 +726,18 @@ class PostgreSQLRuntimeRepository:
             )
             retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
             cursor.execute(
-                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states "
+                "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED')"
             )
             pending_results = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE "
+                "quarantine_reason->>'financial_dependency' = 'OPEN_PLAYED') "
+                "FROM fixture_result_acquisition_states WHERE phase = 'QUARANTINED'"
+            )
+            quarantined_results, quarantined_open_played = (
+                int(value) for value in cursor.fetchone()
+            )
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
             )
@@ -773,6 +782,8 @@ class PostgreSQLRuntimeRepository:
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
             "pending_results": pending_results,
+            "quarantined_results": quarantined_results,
+            "quarantined_open_played": quarantined_open_played,
             "correction_required": corrections,
             "predictions": predictions,
             "evaluations": evaluations,
@@ -802,9 +813,18 @@ class PostgreSQLRuntimeRepository:
             )
             retry, model_unavailable, odds_unavailable = (int(value) for value in cursor.fetchone())
             cursor.execute(
-                "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE phase <> 'COMPLETE'"
+                "SELECT COUNT(*) FROM fixture_result_acquisition_states "
+                "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED')"
             )
             pending_results = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE "
+                "quarantine_reason->>'financial_dependency' = 'OPEN_PLAYED') "
+                "FROM fixture_result_acquisition_states WHERE phase = 'QUARANTINED'"
+            )
+            quarantined_results, quarantined_open_played = (
+                int(value) for value in cursor.fetchone()
+            )
             cursor.execute(
                 "SELECT COUNT(*) FROM fixture_result_acquisition_states WHERE correction_required"
             )
@@ -849,6 +869,8 @@ class PostgreSQLRuntimeRepository:
             "model_unavailable": model_unavailable,
             "odds_unavailable": odds_unavailable,
             "pending_results": pending_results,
+            "quarantined_results": quarantined_results,
+            "quarantined_open_played": quarantined_open_played,
             "correction_required": corrections,
             "predictions": predictions,
             "evaluations": evaluations,

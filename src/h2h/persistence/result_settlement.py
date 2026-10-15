@@ -15,6 +15,19 @@ class ResultPersistenceConflictError(ValueError):
     """An immutable result identity or fixture anchor conflicts."""
 
 
+class FixtureResultIdentityConflictError(ResultPersistenceConflictError):
+    """Provider fixture identity contradicts the durable fixture anchor."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResultIdentityQuarantine:
+    fixture_id: str
+    newly_quarantined: bool
+    financial_dependency: str
+    open_played_picks: int
+    settled_played_picks: int
+
+
 class ResultNotStableError(RuntimeError):
     """Settlement was requested before a confirmed final result exists."""
 
@@ -46,6 +59,10 @@ class ClvResult:
 
 class ResultSettlementRepository(Protocol):
     def persist_result(self, result: FixtureResultObservation, *, checked_at: datetime): ...
+
+    def quarantine_identity_conflict(
+        self, result: FixtureResultObservation, *, quarantined_at: datetime
+    ) -> ResultIdentityQuarantine: ...
 
     def settle_pick(
         self, pick_id: str, result_observation_id: str, *, settled_at: datetime
