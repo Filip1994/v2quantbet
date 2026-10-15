@@ -32,7 +32,7 @@ class ProductionTrainingPolicy:
     freshness_days: int = 14
     previous_seasons: int = 1
     min_team_matches: int = 3
-    trainer_version: str = "production-dc-v2"
+    trainer_version: str = "production-dc-v3"
 
     def __post_init__(self) -> None:
         for name in (
@@ -70,8 +70,8 @@ class ProductionTrainingPolicy:
 
     @property
     def previous_trainer_policy_fingerprint(self) -> str:
-        """Recognize a version-only v1→v2 rollout without retraining fresh models."""
-        return replace(self, trainer_version="production-dc-v1").fingerprint
+        """Recognize a version-only v2→v3 rollout without retraining fresh models."""
+        return replace(self, trainer_version="production-dc-v2").fingerprint
 
     def reference_time(self, now: datetime) -> datetime:
         if now.tzinfo is None or now.utcoffset() is None:

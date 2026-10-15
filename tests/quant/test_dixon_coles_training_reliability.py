@@ -30,6 +30,7 @@ def test_sanitized_510_2026_converges_with_valid_corrections() -> None:
     assert model.fitted_matches == 99
     assert np.isfinite(model.objective)
     assert abs(model.rho) <= 0.1
+    assert model.optimizer_fallback is None
     for home in model.team_ids:
         for away in model.team_ids:
             if home != away:
