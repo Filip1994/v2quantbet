@@ -499,11 +499,13 @@ td.match{{min-width:250px}}small{{display:block;color:var(--muted);font-size:10p
 footer{{margin-top:14px;color:#7f878e;font-size:11px;line-height:1.6}}
 @media(max-width:1100px){{.cards{{grid-template-columns:repeat(4,1fr)}}.analytics-grid{{grid-template-columns:1fr}}}}
 @media(max-width:700px){{main{{padding:14px}}.topbar{{flex-direction:column}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style>
 </head>
 <body><main>
 <header class="topbar">
 <div><div class="eyebrow">QuantBet · QuantLab</div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div>
+<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="readonly">● SHADOW ONLY · NO PRODUCTION WRITES</div>
 </header>
 {primary}
