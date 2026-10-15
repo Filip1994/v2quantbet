@@ -1375,10 +1375,11 @@ font-size:11px;color:#7f8992;line-height:1.5}}
 @media(max-width:760px){{.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}
 .group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}.focus-note{{display:block}}
 .focus-note span{{display:block;margin-top:5px}}.legend-grid{{grid-template-columns:1fr}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
 <p>ROI-first evidence dashboard. Every aggregate row drills into its constituent picks.</p></div>
-<div><a href="/research">← Research Board</a> ·
+<div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
 <nav class="section-nav">
 <a href="#overview">Overview</a><a href="#decision">ROI decision lab</a>
