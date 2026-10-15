@@ -1,7 +1,7 @@
 """Shared metadata for the Production intake bucket contract.
 
 The specs include all six historically promoted cohorts, regardless of current
-Production selection. The seven selected Research/CornerLab cohorts are enabled by default;
+Production selection. Six Research/CornerLab cohorts are selected by default;
 the GoalLab OVER buckets remain fully active in GoalLab analytics and discovery.
 """
 
@@ -142,13 +142,15 @@ PRODUCTION_BUCKET_SPECS = (
 )
 
 # Production selection is independent from GoalLab research/discovery status.
+# Keep historical bucket definitions for audits even when no longer approved for intake.
+# B5 is removed from Operations routing, including stale explicit env selections.
+PRODUCTION_DESELECTED_BUCKET_IDS = frozenset({RESEARCH_OU_UNDER_EDGE_20_30})
 # Keep the two GoalLab specs available without selecting them for Production by default.
 DEFAULT_BUCKET_IDS = (
     RESEARCH_BTTS_NO_ODDS_2_01_2_50,
     RESEARCH_OU_UNDER_ODDS_2_01_2_50,
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
     RESEARCH_OU_UNDER_EDGE_10_15,
-    RESEARCH_OU_UNDER_EDGE_20_30,
     CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
     CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
 )
