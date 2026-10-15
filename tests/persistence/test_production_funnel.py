@@ -51,11 +51,13 @@ def test_intake_contract_can_change_by_environment_without_core_code_change() ->
 
 
 def test_deselected_b5_is_ignored_even_when_old_railway_env_lists_it() -> None:
-    candidate = { "QUANTBET_PRODUCTION_INTAKE_BUCKETS": ",".join((
-        RESEARCH_OU_UNDER_EDGE_20_30,
-        RESEARCH_OU_UNDER_ODDS_2_01_2_50,
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
-    )) }
+    candidate = {
+        "QUANTBET_PRODUCTION_INTAKE_BUCKETS": (
+            f"{RESEARCH_OU_UNDER_EDGE_20_30},"
+            f"{RESEARCH_OU_UNDER_ODDS_2_01_2_50},"
+            f"{CORNER_OVER_GAP_1_2_ODDS_1_61_1_80}"
+        )
+    }
     assert active_bucket_ids(candidate) == (
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
         CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
