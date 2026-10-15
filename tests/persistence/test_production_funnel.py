@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from h2h.production_buckets import (
@@ -25,6 +27,7 @@ from h2h.persistence.postgres_production_funnel import (
     PostgreSQLProductionFunnelStateRepository,
     active_bucket_ids,
     intake_contract_version,
+    production_intake_max_lead_hours,
 )
 
 
@@ -84,8 +87,79 @@ def test_contract_version_changes_when_active_bucket_set_changes() -> None:
     full = intake_contract_version(DEFAULT_BUCKET_IDS)
     subset = intake_contract_version(DEFAULT_BUCKET_IDS[:1])
 
-    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V4:")
+    assert full.startswith("PRODUCTION_FUNNEL_INTAKE_V5:")
     assert full != subset
+    assert full != intake_contract_version(DEFAULT_BUCKET_IDS, max_lead_hours=72)
+
+
+def test_intake_horizon_defaults_to_24_hours_and_can_be_configured() -> None:
+    assert production_intake_max_lead_hours({}) == 24
+    assert production_intake_max_lead_hours({
+        "QUANTBET_PRODUCTION_INTAKE_MAX_LEAD_HOURS": "72",
+    }) == 72
+
+
+@pytest.mark.parametrize("raw", ["", "0", "73", "1.5", "not-a-number", "-1"])
+def test_intake_horizon_rejects_invalid_configuration(raw: str) -> None:
+    with pytest.raises(ValueError, match="Production intake max lead hours"):
+        production_intake_max_lead_hours({
+            "QUANTBET_PRODUCTION_INTAKE_MAX_LEAD_HOURS": raw,
+        })
+
+
+def test_source_candidate_queries_apply_prematch_24h_window_before_limit() -> None:
+    class Cursor:
+        def __init__(self) -> None:
+            self.description: list[object] = []
+            self.query = ""
+            self.parameters: tuple[object, ...] = ()
+
+        def execute(self, query: str, parameters: tuple[object, ...]) -> None:
+            self.query = query
+            self.parameters = parameters
+
+        def fetchall(self) -> list[object]:
+            return []
+
+    now = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    horizon_end = now + timedelta(hours=24)
+    source_queries = (
+        (PostgreSQLProductionFunnelRepository._research_candidates, {
+            "fallback_stake_minor": 30000,
+        }, "latest.kickoff_at"),
+        (PostgreSQLProductionFunnelRepository._goallab_candidates, {}, "p.kickoff_at"),
+        (PostgreSQLProductionFunnelRepository._cornerlab_candidates, {}, "COALESCE(qlatest.kickoff_at, platest.kickoff_at)"),
+    )
+    for query_function, extra, kickoff_expression in source_queries:
+        cursor = Cursor()
+        query_function(cursor, now=now, horizon_end=horizon_end, **extra)
+        assert f"{kickoff_expression} > %s" in cursor.query
+        assert f"{kickoff_expression} <= %s" in cursor.query
+        assert cursor.parameters[-2:] == (now, horizon_end)
+        assert cursor.query.index("ORDER BY") < cursor.query.index("LIMIT 5000")
+
+
+def test_candidate_order_within_same_bucket_prefers_earliest_kickoff() -> None:
+    now = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    near = {
+        "kickoff_at": now + timedelta(hours=2),
+        "source_universe": "RESEARCH",
+        "source_pick_id": "near",
+        "expected_value": 0.10,
+        "edge": 0.08,
+        "source_decision_at": now,
+    }
+    far = {**near,
+        "kickoff_at": now + timedelta(hours=20),
+        "source_pick_id": "far",
+        "expected_value": 0.30,
+        "edge": 0.25,
+    }
+    ordered = sorted(
+        [far, near],
+        key=lambda row: PostgreSQLProductionFunnelRepository._candidate_sort_key(1, row),
+    )
+    assert [row["source_pick_id"] for row in ordered] == ["near", "far"]
 
 
 
@@ -303,6 +377,7 @@ def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
     research = {
         "source_universe": "RESEARCH",
         "source_pick_id": "research-top-bucket",
+        "kickoff_at": datetime(2026, 10, 15, 21, tzinfo=UTC),
         "expected_value": 0.12,
         "edge": 0.11,
         "source_decision_at": 1,
@@ -310,6 +385,7 @@ def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
     goallab = {
         "source_universe": "GOALLAB",
         "source_pick_id": "goallab-higher-ev",
+        "kickoff_at": datetime(2026, 10, 15, 18, tzinfo=UTC),
         "expected_value": 0.31,
         "edge": 0.20,
         "source_decision_at": 2,
