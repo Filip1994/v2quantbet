@@ -30,7 +30,8 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 7
+    assert len(DEFAULT_BUCKET_IDS) == 6
+    assert RESEARCH_OU_UNDER_EDGE_20_30 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
 
@@ -47,6 +48,31 @@ def test_intake_contract_can_change_by_environment_without_core_code_change() ->
         GOALLAB_OU_OVER_ODDS_2_01_2_50,
         RESEARCH_LOW_SCORING_NON_EXTREME,
     )
+
+
+def test_deselected_b5_is_ignored_even_when_old_railway_env_lists_it() -> None:
+    candidate = {
+        "QUANTBET_PRODUCTION_INTAKE_BUCKETS": (
+            f"{RESEARCH_OU_UNDER_EDGE_20_30},"
+            f"{RESEARCH_OU_UNDER_ODDS_2_01_2_50},"
+            f"{CORNER_OVER_GAP_1_2_ODDS_1_61_1_80}"
+        )
+    }
+    assert active_bucket_ids(candidate) == (
+        RESEARCH_OU_UNDER_ODDS_2_01_2_50,
+        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+    )
+    # Historical matching and data remain intact; only Operations intake is de-selected.
+    assert bucket_matches({
+        "market": "OU_25", "selection": "UNDER", "odds": 2.20, "edge": 0.25,
+    }, RESEARCH_OU_UNDER_EDGE_20_30)
+
+
+def test_deselected_b5_cannot_be_the_only_approved_intake_bucket() -> None:
+    with pytest.raises(ValueError, match="at least one approved bucket"):
+        active_bucket_ids({
+            "QUANTBET_PRODUCTION_INTAKE_BUCKETS": RESEARCH_OU_UNDER_EDGE_20_30,
+        })
 
 
 def test_intake_contract_rejects_unknown_bucket() -> None:
@@ -268,7 +294,6 @@ def test_default_bucket_order_is_stable_contract_order() -> None:
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
         RESEARCH_OU_UNDER_EDGE_10_15,
-        RESEARCH_OU_UNDER_EDGE_20_30,
         CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
         CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     )

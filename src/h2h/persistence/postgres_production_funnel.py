@@ -24,6 +24,7 @@ from h2h.production_buckets import (
     CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
     CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     DEFAULT_BUCKET_IDS,
+    PRODUCTION_DESELECTED_BUCKET_IDS,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
     matching_bucket_ids,
     n_roi_priority_score,
@@ -60,9 +61,12 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
     unknown = tuple(item for item in requested if item not in _KNOWN_BUCKET_IDS)
     if unknown:
         raise ValueError("unknown production intake bucket(s): " + ", ".join(unknown))
-    if not requested:
-        raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one bucket")
-    return tuple(sorted(requested, key=_BUCKET_PRIORITY.__getitem__))
+    # Stale Railway env overrides must not silently re-enable a de-selected
+    # bucket. Retain its definition/history for analytics and audit.
+    approved = tuple(item for item in requested if item not in PRODUCTION_DESELECTED_BUCKET_IDS)
+    if not approved:
+        raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one approved bucket")
+    return tuple(sorted(approved, key=_BUCKET_PRIORITY.__getitem__))
 
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
