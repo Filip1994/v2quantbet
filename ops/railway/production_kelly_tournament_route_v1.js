@@ -129,7 +129,7 @@ function prodSimulate(rows, s, asOf) {
         a.outcome==="LOSS"?-a.stake:0;
       available += a.stake+gain;
       reserved -= a.stake;
-      pnl+=gain;staked+=a.stake;settled++;a.pnl=gain;a.paid=true;
+      pnl+=gain;if(a.stake>0){staked+=a.stake;settled++;}a.pnl=gain;a.paid=true;
       const equity=available+reserved;
       peak=Math.max(peak,equity);
       if (peak>0) maxDd=Math.max(maxDd,(peak-equity)/peak);
@@ -172,7 +172,7 @@ function prodSimulate(rows, s, asOf) {
   const policies={};
   for (const a of allocations) {
     const z=policies[a.policy]||(policies[a.policy]={picks:0,bets:0,settled:0,pnl_minor:0});
-    z.picks++; if (a.stake>0) z.bets++;if(a.paid){z.settled++;z.pnl_minor+=a.pnl;}
+    z.picks++; if (a.stake>0) z.bets++;if(a.paid&&a.stake>0){z.settled++;z.pnl_minor+=a.pnl;}
   }
   return {strategy_id:s.id,label:s.label,mode:s.mode,fraction:s.frac,cap:s.cap,
     candidate_count:rows.length,bet_count:bets,settled_count:settled,no_bet_count:rows.length-bets,
@@ -228,6 +228,16 @@ function productionHtml(t){
     '</td><td>'+prodPct(r.max_drawdown_pct)+'</td><td>'+r.bet_count+
     '</td><td>'+r.settled_count+'</td><td>'+prodMoney(r.reserved_bankroll_minor)+'</td></tr>').join("");
   const policies=Object.entries(t.policy_counts).map(([k,v])=>'<tr><td>'+prodEsc(k)+'</td><td>'+v+'</td></tr>').join("");
+  const flat=t.results.find(r=>r.strategy_id==="P_FLAT_300");
+  const k10=t.results.find(r=>r.strategy_id==="P_K25_C10");
+  const k2=t.results.find(r=>r.strategy_id==="P_K25_C2");
+  const recentRows=(flat?flat.allocations:[]).slice(-30).reverse().map(a=>{
+    const s10=k10.allocations.find(x=>x.id===a.id),s2=k2.allocations.find(x=>x.id===a.id);
+    return '<tr><td>'+prodEsc(new Date(a.at).toISOString())+'</td><td><b>'+prodEsc(a.home)+' – '+prodEsc(a.away)+
+      '</b><small>'+prodEsc(a.source)+' · '+prodEsc(a.market)+' '+prodEsc(a.selection)+' @ '+a.odds+'</small></td><td>'+prodEsc(a.outcome)+
+      '</td><td>'+prodMoney(s2.stake)+'<small>'+prodEsc(s2.reason||'BET')+'</small></td><td>'+prodMoney(s10.stake)+
+      '<small>'+prodEsc(s10.reason||'BET')+'</small></td><td>'+prodEsc(a.policy)+'</td></tr>';
+  }).join("");
   return '<!doctype html><html lang="sr"><head><meta charset="utf-8">'+
     '<meta name="viewport" content="width=device-width,initial-scale=1">'+
     '<title>QuantBet · Production Kelly Tournament</title>'+
@@ -246,6 +256,7 @@ function productionHtml(t){
     '<p class="warning"><b>PROVISIONAL REPLAY:</b> Rezultati su simulacija, ne stvarne opklade. Naknadne korekcije settlementa mogu promeniti rekonstruisane istorijske uloge dok ne postoji trajni append-only ledger.</p>'+
     '<section><h2>Rang lista</h2><div class="scroll"><table><thead><tr><th>#</th><th>Staking</th><th>P/L</th><th>Return</th><th>Stake ROI</th><th>Max DD</th><th>Bets</th><th>Settled</th><th>Reserved</th></tr></thead><tbody>'+
     rows+'</tbody></table></div></section>'+
+    '<section><h2>Latest 30 Production picks</h2><p>Isti kandidati, različita veličina uloga; svako polje čuva izvorni Production policy ID.</p><div class="scroll"><table><thead><tr><th>Clone UTC</th><th>Match / market</th><th>Source result</th><th>¼ Kelly 2%</th><th>¼ Kelly 10%</th><th>Intake policy</th></tr></thead><tbody>'+recentRows+'</tbody></table></div></section>'+
     '<section><h2>Production intake policy versions</h2><p>Istorijski pikovi ostaju vezani za verziju politike pri kloniranju, bez retroaktivnog rerangiranja.</p>'+
     '<div class="scroll"><table><thead><tr><th>Frozen intake contract version</th><th>Candidates</th></tr></thead><tbody>'+
     policies+'</tbody></table></div></section>'+
