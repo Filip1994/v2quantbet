@@ -13,7 +13,10 @@ from h2h.odds.api_football_client import ApiFootballClient
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
 from h2h.persistence.postgres_result_settlement import PostgreSQLResultSettlementRepository
-from h2h.persistence.result_settlement import ResultPersistenceConflictError
+from h2h.persistence.result_settlement import (
+    FixtureResultIdentityConflictError,
+    ResultPersistenceConflictError,
+)
 
 
 LOGGER = logging.getLogger("quantbet.result_settlement")
@@ -146,9 +149,24 @@ class ReconcileFixtureResults:
                 continue
             try:
                 self._repository.persist_result(result, checked_at=now)
+            except FixtureResultIdentityConflictError:
+                quarantine = self._repository.quarantine_identity_conflict(
+                    result, quarantined_at=now
+                )
+                if quarantine.newly_quarantined:
+                    LOGGER.warning(
+                        "result fixture identity quarantined; operator review required",
+                        extra={
+                            "fixture_id": fixture_id,
+                            "reason_code": "DURABLE_FIXTURE_IDENTITY_MISMATCH",
+                            "financial_dependency": quarantine.financial_dependency,
+                            "open_played_picks": quarantine.open_played_picks,
+                            "settled_played_picks": quarantine.settled_played_picks,
+                        },
+                    )
+                continue
             except ResultPersistenceConflictError as exc:
-                # An upstream fixture identity mismatch must never be persisted or
-                # settled, but it also must not stop the independent engine workers.
+                # Other persistence conflicts still require normal error reporting.
                 LOGGER.error(
                     "result fixture identity conflict; skipping fixture",
                     extra={"fixture_id": fixture_id, "error_class": type(exc).__name__},

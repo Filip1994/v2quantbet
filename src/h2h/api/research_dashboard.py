@@ -487,11 +487,18 @@ class ResearchDashboardService:
                 )
                 quote_fresh, quote_stale, quote_unusable, quote_updated = cursor.fetchone()
                 cursor.execute(
-                    "SELECT COUNT(*) FILTER (WHERE phase <> 'COMPLETE'), "
-                    "COUNT(*) FILTER (WHERE correction_required), MAX(updated_at) "
+                    "SELECT COUNT(*) FILTER (WHERE phase NOT IN ('COMPLETE', 'QUARANTINED')), "
+                    "COUNT(*) FILTER (WHERE correction_required), "
+                    "COUNT(*) FILTER (WHERE phase = 'QUARANTINED'), "
+                    "COUNT(*) FILTER (WHERE phase = 'QUARANTINED' AND "
+                    "quarantine_reason->>'financial_dependency' = 'OPEN_PLAYED'), "
+                    "MAX(updated_at) "
                     "FROM fixture_result_acquisition_states"
                 )
-                pending_results, corrections, results_updated = cursor.fetchone()
+                (
+                    pending_results, corrections, quarantined_results,
+                    quarantined_open_played, results_updated,
+                ) = cursor.fetchone()
         except Exception:  # noqa: BLE001 - health UI must degrade without breaking Research
             return (
                 {"label": "Database", "state": "bad", "summary": "Unreachable", "detail": "Research could not read operational PostgreSQL facts."},
@@ -594,7 +601,18 @@ class ResearchDashboardService:
         )
         results = worker_component("Results", _HEALTH_WORKER_GROUPS["Results"])
 
-        if int(corrections or 0) > 0 and results["state"] == "ok":
+        if int(quarantined_results or 0) > 0 and results["state"] == "ok":
+            results = {
+                **results,
+                "state": "warn",
+                "summary": f"{int(quarantined_results)} identity quarantined",
+                "detail": (
+                    f"{int(quarantined_open_played or 0)} with open PLAYED picks; "
+                    "operator review required; "
+                    f"{int(pending_results or 0)} result states pending"
+                ),
+            }
+        elif int(corrections or 0) > 0 and results["state"] == "ok":
             results = {
                 **results,
                 "state": "warn",
