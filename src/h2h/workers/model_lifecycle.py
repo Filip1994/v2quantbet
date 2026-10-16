@@ -327,6 +327,8 @@ class ModelLifecycleWorker:
                         "optimizer_iterations": getattr(exc, "optimizer_iterations", None),
                         "optimizer_objective": getattr(exc, "optimizer_objective", None),
                         "optimizer_gradient_norm": getattr(exc, "optimizer_gradient_norm", None),
+                        "optimizer_fallback_status": getattr(exc, "fallback_status", None),
+                        "optimizer_fallback_message": getattr(exc, "fallback_message", None),
                         "failure_classification": classification,
                         "fit_skipped": fit_skipped,
                         "retry_count": retry_count,

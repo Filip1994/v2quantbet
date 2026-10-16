@@ -222,6 +222,27 @@ def test_empty_and_insufficient_training_data_create_no_version(count) -> None:
     assert versions.items == {}
 
 
+def test_sparse_team_coverage_skips_optimizer() -> None:
+    payload = provider_payload()
+    for index, fixture in enumerate(payload["response"]):
+        fixture["teams"]["home"]["id"] = 2 * index + 1
+        fixture["teams"]["away"]["id"] = 2 * index + 2
+    versions = MemoryVersions()
+    trainer = TrainApiFootballDixonColesModel(
+        historical_results(), versions, clock=lambda: NOW
+    )
+    with (
+        patch.object(UrllibJsonTransport, "get_json", return_value=payload),
+        patch("h2h.use_cases.model_lifecycle.fit_api_football_dixon_coles") as fit,
+        pytest.raises(InsufficientTrainingDataError, match="24 matches for 48 teams") as caught,
+    ):
+        trainer.execute(ApiFootballTrainingScope(39, 2024, START, END), config())
+    fit.assert_not_called()
+    assert caught.value.accepted_match_count == 24
+    assert len(caught.value.dataset_sha256) == 64
+    assert versions.items == {}
+
+
 def test_reference_time_before_scope_end_fails_before_acquisition() -> None:
     versions = MemoryVersions()
     trainer = TrainApiFootballDixonColesModel(

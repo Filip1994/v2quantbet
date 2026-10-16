@@ -185,3 +185,32 @@ def test_training_completion_handles_null_and_fingerprinted_failures(isolated_da
             "active_model_version_id FROM model_coverage_scopes WHERE league_id = 510"
         ).fetchone()
     assert row == ("ACTIVE", 0, None, "verified-model")
+
+
+def test_v3_rollout_preserves_v2_retry_time_without_global_retraining(
+    isolated_database,
+) -> None:
+    connect = isolated_database
+    now = datetime(2026, 10, 15, 1, tzinfo=UTC)
+    retry_at = now + timedelta(hours=6)
+    insert_fixture(connect, fixture_id=510002, league_id=510, season=2026, now=now)
+    repository = PostgreSQLModelCoverageRepository(connect=connect)
+    repository.refresh_inventory(
+        ProductionTrainingPolicy(trainer_version="production-dc-v2"), now=now
+    )
+    with connect() as connection:
+        connection.execute(
+            "UPDATE model_coverage_scopes SET status = 'TRAINING_FAILED', "
+            "next_attempt_at = %s, failure_streak = 2, failed_dataset_sha256 = %s "
+            "WHERE league_id = 510",
+            (retry_at, "a" * 64),
+        )
+
+    policy = ProductionTrainingPolicy()
+    repository.refresh_inventory(policy, now=now + timedelta(minutes=1))
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT status, next_attempt_at, failure_streak, failed_dataset_sha256, "
+            "policy_fingerprint FROM model_coverage_scopes WHERE league_id = 510"
+        ).fetchone()
+    assert row == ("TRAINING_FAILED", retry_at, 0, None, policy.fingerprint)
