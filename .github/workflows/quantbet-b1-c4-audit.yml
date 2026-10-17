@@ -1,0 +1,129 @@
+name: Read-only B1 C4 forward audit
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/quantbet-b1-c4-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-buckets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch public history and tally last seven days
+        run: |
+          python - <<'PY'
+          import json, re, html, sys, time
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          from html.parser import HTMLParser
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+          
+          TZ = ZoneInfo("Europe/Belgrade")
+          now = datetime.now(TZ)
+          cutoff = now - timedelta(days=7)
+          print("WINDOW", cutoff.isoformat(), now.isoformat(), flush=True)
+          
+          class Rows(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.in_body = False
+                  self.in_tr = False
+                  self.in_td = False
+                  self.rows = []
+                  self.cur = []
+                  self.cell = []
+              def handle_starttag(self, tag, attrs):
+                  if tag == "tbody": self.in_body = True
+                  elif tag == "tr" and self.in_body:
+                      self.in_tr = True
+                      self.cur = []
+                  elif tag == "td" and self.in_tr:
+                      self.in_td = True
+                      self.cell = []
+              def handle_data(self, data):
+                  if self.in_td: self.cell.append(data)
+              def handle_endtag(self, tag):
+                  if tag == "td" and self.in_td:
+                      self.cur.append(" ".join(" ".join(self.cell).split()))
+                      self.in_td = False
+                  elif tag == "tr" and self.in_tr:
+                      if self.cur: self.rows.append(self.cur)
+                      self.in_tr = False
+                  elif tag == "tbody":
+                      self.in_body = False
+          
+          def get(url):
+              error = None
+              for attempt in range(3):
+                  try:
+                      with urlopen(Request(url, headers={"User-Agent":"QuantBetReadOnlyAudit/1.0","Accept":"text/html"}),timeout=70) as r:
+                          content = r.read().decode("utf-8", "replace")
+                          print("HTTP", r.status, "bytes", len(content), "url", url, flush=True)
+                          return content
+                  except Exception as exc:
+                      error = str(exc)
+                      print("FETCH_RETRY", attempt, error, flush=True)
+                      time.sleep(3)
+              raise RuntimeError("cannot fetch "+url+": "+str(error))
+          
+          def parse_date(cell):
+              m = re.search(r"20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}", cell)
+              if not m: return None
+              return datetime.strptime(m.group(), "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+          
+          def odds(cell):
+              match = re.search(r"\b([1-9][0-9]?\.[0-9]{2})\b", cell)
+              return float(match.group(1)) if match else None
+          
+          def tally(kind, all_rows, date_i, result_i, odd_i, pnl_i):
+              kept = []
+              w = l = v = 0
+              profit = 0.
+              for row in all_rows:
+                  if len(row) <= max(date_i, result_i, odd_i, pnl_i):
+                      continue
+                  dt = parse_date(row[date_i])
+                  if dt is None or not (cutoff <= dt <= now): continue
+                  result = next((x for x in ("WIN", "LOSS", "VOID") if re.search(r"\b"+x+r"\b",row[result_i])),None)
+                  odd = odds(row[odd_i])
+                  if result == "WIN":
+                      w += 1
+                      if odd: profit += odd - 1
+                  elif result == "LOSS":
+                      l += 1
+                      profit -= 1
+                  elif result == "VOID":
+                      v += 1
+                  entry={"date":dt.isoformat(),"result":result,"odds":odd,"match":row[0][:110],"pnl":row[pnl_i][:60]}
+                  kept.append(entry)
+              n = w+l
+              print("SUMMARY",json.dumps({"bucket":kind,"all_table_rows":len(all_rows),"rolling7":len(kept),"n":n,"wins":w,"losses":l,"voids":v,"roi_pct":round(100*profit/n,2) if n else None,"basis":"entry odds, flat stakes, VOID excluded"}),flush=True)
+              for x in kept:
+                  print("PICK",kind,json.dumps(x,ensure_ascii=False),flush=True)
+          
+          rparams={"tab":"history","market":"BTTS","selection":"NO","odds_bucket":"2.01–2.50"}
+          rurl="https://quantbet-research-production.up.railway.app/research?"+urlencode(rparams)
+          rhtml=get(rurl)
+          rp=Rows()
+          rp.feed(rhtml)
+          print("B1_ROW_SAMPLE",json.dumps(rp.rows[:2],ensure_ascii=False),flush=True)
+          tally("B1",rp.rows,3,1,4,10)
+          
+          cparams={"view":"analytics","lab":"corner","bucket":"1","bucket_market_key":"TOTAL_CORNERS","bucket_selection":"OVER","bucket_corner_model_line_gap_bucket":"+1–+2","bucket_entry_odds_bucket":"1.61–1.80"}
+          curl="https://quantbet-quantlab-production.up.railway.app/quantlab?"+urlencode(cparams)
+          chtml=get(curl)
+          start=chtml.find('<section class="panel" id="bucket-picks">')
+          if start < 0:
+              print("C4_MISSING_BUCKET_TABLE",chtml[:1000],flush=True)
+              sys.exit(1)
+          block=chtml[start:chtml.index("</section>",start)+10]
+          cp=Rows()
+          cp.feed(block)
+          print("C4_ROW_SAMPLE",json.dumps(cp.rows[:2],ensure_ascii=False),flush=True)
+          tally("C4",cp.rows,9,7,4,8)
+          
+          PY
