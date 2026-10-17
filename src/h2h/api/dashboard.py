@@ -121,7 +121,7 @@ _COUNTRY_FLAG_CODES = {
 
 
 def dashboard_is_public() -> bool:
-    """Return whether dashboard read routes are intentionally public."""
+    """Return whether public Hub routes are accessible without login."""
     return os.environ.get("QUANTBET_DASHBOARD_PUBLIC", "").strip().lower() in {
         "1",
         "true",
@@ -1210,7 +1210,7 @@ class DashboardHTTPService:
                 if path == "/livez":
                     service._json(self, 200, {"live": True})
                 elif path in {"/", "/dashboard"}:
-                    if service._authorize(self):
+                    if service._authorize(self, allow_public=False):
                         try:
                             service._html(self, 200, dashboard.render_html())
                         except (BrokenPipeError, ConnectionResetError):
