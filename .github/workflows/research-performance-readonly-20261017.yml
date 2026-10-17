@@ -44,6 +44,11 @@ jobs:
           rows.sort(key=lambda r:(r["kickoff"],r["fixture"] or ""),reverse=True)
           valid=[r for r in rows if r["outcome"] in {"WIN","LOSS"} and r["odds"] is not None and r["p"] is not None]
           played=[r for r in valid if "PLAYED" in r["route"]]
+          nonret=[r for r in valid if not r["retired"]]
+          from datetime import datetime,timezone
+          from zoneinfo import ZoneInfo
+          future=[r for r in rows if datetime.strptime(r["kickoff"],"%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Belgrade"))>datetime.now(timezone.utc)]
+          print("FUTURE_AUDIT",json.dumps(dict(count=len(future),graded=sum(r["outcome"] in {"WIN","LOSS"} for r in future),examples=[{k:r[k] for k in ("kickoff","outcome","market","fixture")} for r in future[:8]])))
           def metrics(rs):
               n=len(rs); w=sum(r["outcome"]=="WIN" for r in rs)
               pnl=sum(r["pnl"] or 0 for r in rs); ex=sum(r["p"] for r in rs)
@@ -51,19 +56,20 @@ jobs:
               ll=-sum(int(r["outcome"]=="WIN")*math.log(max(1e-8,r["p"]))+int(r["outcome"]=="LOSS")*math.log(max(1e-8,1-r["p"])) for r in rs)/n if n else None
               return dict(n=n,w=w,l=n-w,win_pct=round(100*w/n,2) if n else None,expected_pct=round(100*ex/n,2) if n else None,gap_pp=round(100*(w-ex)/n,2) if n else None,pnl_rsd=round(pnl,2),roi_pct=round(100*pnl/(300*n),2) if n else None,brier=round(br,4) if br is not None else None,logloss=round(ll,4) if ll is not None else None)
           print("AUDIT_META",json.dumps(dict(snapshot_at=snapshot.get("generated_at"),history_rows=len(rows),graded=len(valid),played_graded=len(played),voids=sum(r["outcome"]=="VOID" for r in rows),missing_grade=sum(r["outcome"] in {"WIN","LOSS"} for r in rows)-len(valid),fixture_duplicates=len(rows)-len({r["fixture"] for r in rows}),first=rows[0]["kickoff"] if rows else None,last=rows[-1]["kickoff"] if rows else None)))
-          for label,rr in [("ALL",valid),("NONRETIRED",[r for r in valid if not r["retired"]]),("PLAYED",played),("LAST50",valid[:50]),("LAST100",valid[:100]),("LAST200",valid[:200]),("PLAYED50",played[:50]),("PLAYED100",played[:100])]:
+          for label,rr in [("ALL",valid),("NONRETIRED",[r for r in valid if not r["retired"]]),("PLAYED",played),("LAST50",valid[:50]),("LAST100",valid[:100]),("LAST200",valid[:200]),("NR50",nonret[:50]),("NR100",nonret[:100]),("NR200",nonret[:200]),("PLAYED50",played[:50]),("PLAYED100",played[:100])]:
               print("COHORT",label,json.dumps(metrics(rr)))
-          for label,rr in [("ALL",valid),("LAST50",valid[:50]),("LAST100",valid[:100]),("PLAYED100",played[:100])]:
+          for label,rr in [("ALL",valid),("LAST50",valid[:50]),("LAST100",valid[:100]),("NR50",nonret[:50]),("NR100",nonret[:100]),("PLAYED100",played[:100])]:
               groups=defaultdict(list)
               for r in rr:groups[r["market"]].append(r)
               for key,g in sorted(groups.items()):print("MARKET",label,key,json.dumps(metrics(g)))
-          for label,rr in [("ALL",valid),("LAST100",valid[:100])]:
+          for label,rr in [("ALL",valid),("LAST100",valid[:100]),("NR100",nonret[:100])]:
               groups=defaultdict(list)
               for r in rr:
                   lo=min(95,int(r["p"]*100)//5*5)
                   groups[f"{lo:02d}-{lo+5:02d}"].append(r)
               for key,g in sorted(groups.items()):
                   if len(g)>=5:print("CALIBRATION",label,key,json.dumps(metrics(g)))
+          print("BOUNDS",json.dumps({label:dict(first=r[0]["kickoff"] if r else None,last=r[-1]["kickoff"] if r else None) for label,r in (("LAST50",valid[:50]),("LAST100",valid[:100]),("NR50",nonret[:50]),("NR100",nonret[:100]),("PLAYED50",played[:50]))}))
           for key in ("market_selection","model_probability_bucket"):
               for row in snapshot.get("cohorts",{}).get(key,[]):
                   if key=="market_selection":print("OFFICIAL_MARKET",json.dumps({k:row.get(k) for k in ("market","selection","graded_n","wins","losses","voids","roi_pct","win_rate_pct","expected_win_rate_pct","calibration_gap_pp")}))
