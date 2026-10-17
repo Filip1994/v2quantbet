@@ -799,6 +799,71 @@ class PostgreSQLProductionFunnelRepository:
         row = cursor.fetchone()
         return 0 if row is None else int(row[0])
 
+    @staticmethod
+    def _active_concentration_exposure(
+        cursor: Any,
+    ) -> tuple[dict[str, int], dict[tuple[str, str], int]]:
+        """Aggregate exactly the same open state and settlement classes as the risk cap."""
+        cursor.execute(
+            """
+            WITH latest_state AS (
+                SELECT DISTINCT ON (pick_id) pick_id, state
+                FROM production_funnel_state_events
+                ORDER BY pick_id, occurred_at DESC, persisted_at DESC, event_id DESC
+            ),
+            settlement AS (
+                SELECT p.pick_id,
+                    CASE
+                        WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
+                            SELECT 1 FROM quantlab_goal_pick_settlements s
+                            WHERE s.goal_pick_id = p.source_pick_id
+                        )
+                        WHEN p.source_universe = 'CORNERLAB' THEN EXISTS (
+                            SELECT 1 FROM quantlab_corner_settlement_events e
+                            WHERE e.shadow_bet_id = p.source_pick_id
+                              AND e.outcome IN ('WIN', 'LOSS', 'VOID')
+                        )
+                        WHEN p.source_universe = 'RESEARCH' THEN EXISTS (
+                            SELECT 1 FROM research_signals rs
+                            JOIN pick_settlement_events e
+                              ON e.pick_id = rs.production_pick_id
+                            WHERE rs.research_signal_id = p.source_pick_id
+                              AND e.event_kind = 'MANUAL_VOID' AND e.outcome = 'VOID'
+                        ) OR EXISTS (
+                            SELECT 1 FROM fixture_result_acquisition_states a
+                            JOIN fixture_result_observations r
+                              ON r.result_observation_id = a.current_observation_id
+                            WHERE a.fixture_id = p.source_fixture_id
+                              AND r.result_classification IN (
+                                  'PLAYED_SETTLEABLE', 'NON_PLAYED_VOIDABLE'
+                              )
+                        )
+                        ELSE FALSE
+                    END AS settled
+                FROM production_funnel_picks p
+            )
+            SELECT p.market_key, p.country, p.competition_name,
+                   SUM(p.stake_minor) AS open_minor
+            FROM production_funnel_picks p
+            LEFT JOIN latest_state s ON s.pick_id = p.pick_id
+            JOIN settlement ON settlement.pick_id = p.pick_id
+            WHERE COALESCE(s.state, 'PENDING') <> 'SKIPPED'
+              AND NOT settlement.settled
+            GROUP BY p.market_key, p.country, p.competition_name
+            """
+        )
+        markets: dict[str, int] = {}
+        leagues: dict[tuple[str, str], int] = {}
+        for market_key, country, competition_name, open_minor in cursor.fetchall():
+            market, league = _exposure_keys({
+                "market_key": market_key,
+                "country": country,
+                "competition_name": competition_name,
+            })
+            markets[market] = markets.get(market, 0) + int(open_minor)
+            leagues[league] = leagues.get(league, 0) + int(open_minor)
+        return markets, leagues
+
     def exposure_breakdown(self) -> dict[str, int]:
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
