@@ -130,7 +130,7 @@ jobs:
                   if len(row) <= max(date_i, result_i, odd_i, bookmaker_i): continue
                   event = parse_date(row[date_i])
                   if event is None or not (cutoff <= event <= now): continue
-                  result = next((x for x in ("WIN","LOSS","VOID") if re.search(r"\\b"+x+r"\\b",row[result_i])),None)
+                  result = next((x for x in ("WIN","LOSS","VOID") if x in row[result_i]),None)
                   bookie = row[bookmaker_i]
                   b = grouped.setdefault(bookie,{"wins":0,"losses":0,"voids":0,"profit":0.})
                   odd = odds(row[odd_i])
