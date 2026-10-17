@@ -1,0 +1,72 @@
+name: QuantBet Research audit (read-only)
+on:
+  push:
+    branches:
+      - 'audit/research-performance-20261017'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read and score public Research history
+        shell: bash
+        run: |
+          python -m pip install -q --disable-pip-version-check beautifulsoup4
+          python - <<'PY'
+          import json,math,re,urllib.request
+          from collections import defaultdict
+          from bs4 import BeautifulSoup
+          ROOT="https://quantbet-research-production.up.railway.app"
+          def fetch(path):
+              req=urllib.request.Request(ROOT+path,headers={"User-Agent":"QuantBet-ReadOnly-Audit-2026-10-17"})
+              with urllib.request.urlopen(req,timeout=55) as r:
+                  assert r.status==200
+                  return r.read(6000000).decode("utf-8")
+          snapshot=json.loads(fetch("/research/analytics.json"))
+          soup=BeautifulSoup(fetch("/research?tab=history"),"html.parser")
+          def num(s):
+              m=re.search(r"[+-]?\d+(?:\.\d+)?",str(s).replace(",",""))
+              return float(m.group()) if m else None
+          rows=[]
+          for tr in soup.select("tr.row-win, tr.row-loss, tr.row-void"):
+              td=tr.find_all("td",recursive=False)
+              if len(td)!=13:continue
+              outcome=next((s[4:].upper() for s in tr.get("class",[]) if s.startswith("row-")),None)
+              pick=td[2].select_one(".pick-pill")
+              ptext=td[7].find("b"); otext=td[4].find("b"); pnltext=td[10].find("b")
+              p=num(ptext.get_text(" ",strip=True)) if ptext else None
+              p=p/100 if p is not None else None
+              market=(pick.get_text(" ",strip=True) if pick else td[2].get_text(" ",strip=True)).replace("O/U 2.5","OU_25")
+              f=re.search(r"fixture\s+(\d+)",td[0].get_text(" ",strip=True))
+              rows.append(dict(outcome=outcome,p=p,odds=num(otext.get_text(" ",strip=True)) if otext else None,pnl=num(pnltext.get_text(" ",strip=True)) if pnltext else None,market=market,fixture=f.group(1) if f else None,kickoff=td[3].get_text(" ",strip=True),route=td[9].get_text(" ",strip=True).upper(),retired=bool(td[2].select_one(".status-retired"))))
+          rows.sort(key=lambda r:(r["kickoff"],r["fixture"] or ""),reverse=True)
+          valid=[r for r in rows if r["outcome"] in {"WIN","LOSS"} and r["odds"] is not None and r["p"] is not None]
+          played=[r for r in valid if "PLAYED" in r["route"]]
+          def metrics(rs):
+              n=len(rs); w=sum(r["outcome"]=="WIN" for r in rs)
+              pnl=sum(r["pnl"] or 0 for r in rs); ex=sum(r["p"] for r in rs)
+              br=sum((int(r["outcome"]=="WIN")-r["p"])**2 for r in rs)/n if n else None
+              ll=-sum(int(r["outcome"]=="WIN")*math.log(max(1e-8,r["p"]))+int(r["outcome"]=="LOSS")*math.log(max(1e-8,1-r["p"])) for r in rs)/n if n else None
+              return dict(n=n,w=w,l=n-w,win_pct=round(100*w/n,2) if n else None,expected_pct=round(100*ex/n,2) if n else None,gap_pp=round(100*(w-ex)/n,2) if n else None,pnl_rsd=round(pnl,2),roi_pct=round(100*pnl/(300*n),2) if n else None,brier=round(br,4) if br is not None else None,logloss=round(ll,4) if ll is not None else None)
+          print("AUDIT_META",json.dumps(dict(snapshot_at=snapshot.get("generated_at"),history_rows=len(rows),graded=len(valid),played_graded=len(played),voids=sum(r["outcome"]=="VOID" for r in rows),missing_grade=sum(r["outcome"] in {"WIN","LOSS"} for r in rows)-len(valid),fixture_duplicates=len(rows)-len({r["fixture"] for r in rows}),first=rows[0]["kickoff"] if rows else None,last=rows[-1]["kickoff"] if rows else None)))
+          for label,rr in [("ALL",valid),("NONRETIRED",[r for r in valid if not r["retired"]]),("PLAYED",played),("LAST50",valid[:50]),("LAST100",valid[:100]),("LAST200",valid[:200]),("PLAYED50",played[:50]),("PLAYED100",played[:100])]:
+              print("COHORT",label,json.dumps(metrics(rr)))
+          for label,rr in [("ALL",valid),("LAST50",valid[:50]),("LAST100",valid[:100]),("PLAYED100",played[:100])]:
+              groups=defaultdict(list)
+              for r in rr:groups[r["market"]].append(r)
+              for key,g in sorted(groups.items()):print("MARKET",label,key,json.dumps(metrics(g)))
+          for label,rr in [("ALL",valid),("LAST100",valid[:100])]:
+              groups=defaultdict(list)
+              for r in rr:
+                  lo=min(95,int(r["p"]*100)//5*5)
+                  groups[f"{lo:02d}-{lo+5:02d}"].append(r)
+              for key,g in sorted(groups.items()):
+                  if len(g)>=5:print("CALIBRATION",label,key,json.dumps(metrics(g)))
+          for key in ("market_selection","model_probability_bucket"):
+              for row in snapshot.get("cohorts",{}).get(key,[]):
+                  if key=="market_selection":print("OFFICIAL_MARKET",json.dumps({k:row.get(k) for k in ("market","selection","graded_n","wins","losses","voids","roi_pct","win_rate_pct","expected_win_rate_pct","calibration_gap_pp")}))
+                  elif int(row.get("graded_n") or 0)>=20:print("OFFICIAL_PROB",json.dumps({k:row.get(k) for k in ("probability_bucket","graded_n","wins","losses","voids","roi_pct","win_rate_pct","expected_win_rate_pct","calibration_gap_pp")}))
+          
+          PY
