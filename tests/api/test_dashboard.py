@@ -653,7 +653,14 @@ def test_operator_write_is_authenticated_even_when_dashboard_is_public(
         with pytest.raises(HTTPError) as unauthorized:
             urlopen(Request(f"http://127.0.0.1:{service.port}{path}", data=data))
         assert unauthorized.value.code == 401
+        dashboard_url = f"http://127.0.0.1:{service.port}/dashboard"
+        with pytest.raises(HTTPError) as locked_dashboard:
+            urlopen(dashboard_url)
+        assert locked_dashboard.value.code == 401
         token = base64.b64encode(b"operator:correct horse").decode()
+        with urlopen(Request(dashboard_url, headers={"Authorization": f"Basic {token}"})) as page:
+            assert page.status == 200
+            assert b"PLAYED" in page.read()
         request = Request(
             f"http://127.0.0.1:{service.port}{path}",
             data=data,
@@ -712,16 +719,19 @@ def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch
         service.close()
 
 
-def test_dashboard_public_mode_needs_no_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_public_hub_does_not_expose_unauthenticated_operations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
     monkeypatch.delenv("QUANTBET_DASHBOARD_USER", raising=False)
     monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
     service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)
     service.start()
     try:
-        with urlopen(f"http://127.0.0.1:{service.port}/") as response:
+        with urlopen(f"http://127.0.0.1:{service.port}/hub") as response:
             assert response.status == 200
             assert b"QuantBet" in response.read()
+        with pytest.raises(HTTPError) as blocked:
+            urlopen(f"http://127.0.0.1:{service.port}/dashboard")
+        assert blocked.value.code == 404
     finally:
         service.close()
 
