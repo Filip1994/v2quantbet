@@ -124,6 +124,28 @@ jobs:
           cp=Rows()
           cp.feed(block)
           print("C4_ROW_SAMPLE",json.dumps(cp.rows[:2],ensure_ascii=False),flush=True)
+          def bookie_report(kind, all_rows, date_i, result_i, odd_i, bookmaker_i):
+              grouped = {}
+              for row in all_rows:
+                  if len(row) <= max(date_i, result_i, odd_i, bookmaker_i): continue
+                  event = parse_date(row[date_i])
+                  if event is None or not (cutoff <= event <= now): continue
+                  result = next((x for x in ("WIN","LOSS","VOID") if re.search(r"\\b"+x+r"\\b",row[result_i])),None)
+                  bookie = row[bookmaker_i]
+                  b = grouped.setdefault(bookie,{"wins":0,"losses":0,"voids":0,"profit":0.})
+                  odd = odds(row[odd_i])
+                  if result=="WIN":
+                      b["wins"]+=1
+                      if odd: b["profit"]+=odd-1
+                  elif result=="LOSS":
+                      b["losses"]+=1
+                      b["profit"]-=1
+                  elif result=="VOID": b["voids"]+=1
+              print("BOOKMAKER_BREAKDOWN",kind,json.dumps(grouped,ensure_ascii=False),flush=True)
+          
+          bookie_report("B1",rp.rows,3,1,4,11)
+          bookie_report("C4",cp.rows,0,7,4,2)
+          tally("C4_KICKOFF_WINDOW",cp.rows,0,7,4,8)
           tally("C4",cp.rows,9,7,4,8)
           
           PY
