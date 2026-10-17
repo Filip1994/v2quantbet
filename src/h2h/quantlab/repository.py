@@ -585,7 +585,7 @@ class PostgreSQLQuantLabRepository:
                 "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
                 "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
                 "captured_at FROM quantlab_market_observations "
-                "WHERE fixture_id = %s AND lab_owner = 'GOAL' "
+                "WHERE fixture_id = %s AND lab_owner = 'GOAL' AND bookmaker_id = 11 "
                 "AND provider_bet_id IN (5, 8) AND captured_at <= %s "
                 "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, market_observation_id",
                 (fixture_id, decision_at),
@@ -672,7 +672,7 @@ class PostgreSQLQuantLabRepository:
                 "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
                 "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
                 "captured_at FROM quantlab_market_observations "
-                "WHERE fixture_id = %s AND lab_owner = %s AND parsed_line IS NOT NULL "
+                "WHERE fixture_id = %s AND lab_owner = %s AND bookmaker_id = 11 AND parsed_line IS NOT NULL "
                 "AND captured_at <= %s "
                 "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, "
                 "parsed_line, market_observation_id",
