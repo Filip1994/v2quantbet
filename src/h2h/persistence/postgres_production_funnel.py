@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from collections.abc import Callable
@@ -43,6 +44,54 @@ _CORNER_FIRST_PRIORITY = {
 _PRIORITY_POLICY_VERSION = "CORNER_FIRST_C5_C4_THEN_DYNAMIC_ROI_KICKOFF_V2"
 _DEFAULT_MAX_LEAD_HOURS = 24
 _MAX_SUPPORTED_LEAD_HOURS = 72
+_DEFAULT_MAX_MARKET_EXPOSURE_PCT = 50
+_DEFAULT_MAX_LEAGUE_EXPOSURE_PCT = 25
+
+
+def production_concentration_policy(values: dict[str, str] | None = None) -> tuple[int, int]:
+    """Exposure caps in percentage of maximum allowed open stake (100 disables)."""
+    env = os.environ if values is None else values
+    result: list[int] = []
+    for name, default in (
+        ("QUANTBET_PRODUCTION_MAX_MARKET_EXPOSURE_PCT", _DEFAULT_MAX_MARKET_EXPOSURE_PCT),
+        ("QUANTBET_PRODUCTION_MAX_LEAGUE_EXPOSURE_PCT", _DEFAULT_MAX_LEAGUE_EXPOSURE_PCT),
+    ):
+        raw = env.get(name, str(default)).strip()
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer in 1..100") from exc
+        if not 1 <= value <= 100:
+            raise ValueError(f"{name} must be an integer in 1..100")
+        result.append(value)
+    return result[0], result[1]
+
+
+def _exposure_keys(row: dict[str, Any]) -> tuple[str, tuple[str, str]]:
+    market = str(row.get("market_key") or "").strip().upper() or "UNKNOWN"
+    country = str(row.get("country") or "").strip().casefold() or "unknown"
+    league = str(row.get("competition_name") or "").strip().casefold() or "unknown"
+    return market, (country, league)
+
+
+def concentration_block_reason(
+    row: dict[str, Any],
+    *,
+    stake_minor: int,
+    max_open_exposure_minor: int,
+    market_pct: int,
+    league_pct: int,
+    market_exposure: dict[str, int],
+    league_exposure: dict[tuple[str, str], int],
+) -> str | None:
+    """Reject only new allocations; never mutate existing bets or exposure."""
+    market, league = _exposure_keys(row)
+    if market_exposure.get(market, 0) + stake_minor > max_open_exposure_minor * market_pct // 100:
+        return "MARKET_CAP"
+    if league_exposure.get(league, 0) + stake_minor > max_open_exposure_minor * league_pct // 100:
+        return "LEAGUE_CAP"
+    return None
+
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -89,9 +138,12 @@ def intake_contract_version(
     bucket_ids: tuple[str, ...],
     *,
     max_lead_hours: int = _DEFAULT_MAX_LEAD_HOURS,
+    max_market_pct: int = _DEFAULT_MAX_MARKET_EXPOSURE_PCT,
+    max_league_pct: int = _DEFAULT_MAX_LEAGUE_EXPOSURE_PCT,
 ) -> str:
     canonical = (
         f"{_PRIORITY_POLICY_VERSION}:MAX_LEAD_HOURS={max_lead_hours}:"
+        f"MAX_MARKET_PCT={max_market_pct}:MAX_LEAGUE_PCT={max_league_pct}:"
         + ",".join(bucket_ids)
     )
     return "PRODUCTION_FUNNEL_INTAKE_V5:" + sha256(canonical.encode("utf-8")).hexdigest()
@@ -106,6 +158,7 @@ class ProductionFunnelSyncResult:
     exposure_blocked: int
     open_exposure_minor: int
     intake_contract_version: str
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 class ProductionFunnelStateConflictError(ValueError):
