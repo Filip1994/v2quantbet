@@ -182,10 +182,12 @@ def test_season_filter_changes_weighted_web_average(monkeypatch) -> None:
     assert "2025/26" in html  # Other season remains available as a filter.
 
 
-def test_cardlab_nav_contains_referee_directory() -> None:
-    from h2h.quantlab.dashboard_views import _nav
+def test_retired_cardlab_has_no_navigation() -> None:
+    from h2h.quantlab.dashboard_views import ANALYTICS_LABS, LABS, _nav
 
-    _primary, secondary = _nav("analytics", "card")
-    assert 'href="/quantlab/card/referees"' in secondary
-    _primary, other_lab = _nav("analytics", "corner")
-    assert "/quantlab/card/referees" not in other_lab
+    assert "card" not in LABS
+    assert "card" not in ANALYTICS_LABS
+    for lab in ("goal", "corner", "h2h"):
+        _primary, secondary = _nav("analytics", lab)
+        assert "CardLab" not in secondary
+        assert "/quantlab/card/referees" not in secondary
