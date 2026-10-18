@@ -390,3 +390,58 @@ def test_championship_ban_does_not_block_other_domestic_leagues(
         competition_name=competition_name,
         league_id=league_id,
     ) is None
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name"),
+    [
+        ("Netherlands", "Derde Divisie"),
+        ("Netherlands", "Derde Divisie - Sunday"),
+        ("Netherlands", "Derde Divisie - Relegation Round"),
+        ("Holland", "Derde Divisie - Saturday"),
+        ("THE NETHERLANDS", "DERDE DIVISIE - SUNDAY"),
+        ("Nederland", "Derde Divisie - Zaterdag"),
+    ],
+)
+def test_dutch_derde_divisie_family_is_globally_blacklisted(
+    country: str, competition_name: str,
+) -> None:
+    from h2h.domain.competition_scope import (
+        is_universe_blocked_competition,
+        universe_block_reason,
+    )
+
+    for league_id in (None, 0):
+        kwargs = {
+            "country": country,
+            "competition_name": competition_name,
+            "league_id": league_id,
+        }
+        assert universe_block_reason(**kwargs) == RejectionReason.BLACKLISTED_LEAGUE
+        assert is_universe_blocked_competition(**kwargs)
+        assert classify_phase_i(
+            CompetitionMetadata(
+                country=country, name=competition_name,
+                type="league", league_id=league_id,
+            )
+        ).rejection_reason == RejectionReason.BLACKLISTED_LEAGUE
+
+
+@pytest.mark.parametrize(
+    ("country", "competition_name"),
+    [
+        ("Netherlands", "Eredivisie"),
+        ("Netherlands", "Eerste Divisie"),
+        ("Netherlands", "Tweede Divisie"),
+        ("Netherlands", "Derde DivisieX"),
+        ("Belgium", "Derde Divisie"),
+    ],
+)
+def test_derde_divisie_ban_is_limited_to_correct_competition_family(
+    country: str, competition_name: str,
+) -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(
+        country=country, competition_name=competition_name,
+    ) is None
