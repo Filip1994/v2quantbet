@@ -70,11 +70,13 @@ Budget display uses `QUANTBET_API_DAILY_LIMIT`, `QUANTBET_API_RESERVE`,
 `QUANTBET_MODEL_TRAINING_DAILY_REQUEST_LIMIT`, and
 `QUANTBET_MODEL_TRAINING_OPERATIONAL_RESERVE`, with the same defaults as the worker.
 `LOG_LEVEL` and `PORT` are optional. Railway supplies `PORT` automatically. Do not commit
-the password; configure it as a Railway variable. If the password is absent, dashboard
-routes fail closed with `404`. HTTP Basic authentication remains mandatory when enabled.
-To intentionally publish the read-only page without credentials, set
-`QUANTBET_DASHBOARD_PUBLIC=true`; this bypasses Basic Auth for dashboard read routes only.
-Do not expose this mode if fixture, model or financial reporting must remain private.
+the password; configure it as a Railway variable. If the password is absent and public mode is disabled, dashboard
+routes fail closed with `404`. HTTP Basic authentication remains mandatory when public mode is disabled.
+To publish the Operations page and its PLAYED/SKIPPED controls without credentials, set
+`QUANTBET_DASHBOARD_PUBLIC=true` on the dashboard service. In this mode, anyone with the
+public URL can read bankroll/pick data and change operator state; the same-origin form check
+is not an authentication boundary. Do not use this mode for private financial records or
+operator controls unless unrestricted public access is explicitly intended.
 
 The result/settlement/realized-CLV path is implemented, persisted and scheduled in production. This repository does **not** claim that a representative sample of real picks has already completed settlement or that profitability has been established.
 

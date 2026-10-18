@@ -583,6 +583,7 @@ def test_worker_due_lag_allows_serial_engine_cycle_but_detects_long_stall() -> N
 
 @pytest.fixture
 def dashboard_server(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "false")
     monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
     monkeypatch.setenv("QUANTBET_DASHBOARD_PASSWORD", "correct horse")
     service = DashboardHTTPService(RenderingDashboard(_snapshot([])), host="127.0.0.1", port=0)
@@ -630,7 +631,7 @@ def test_dashboard_reuses_short_lived_data_but_renders_unique_action_ids() -> No
     assert dashboard.calls == 2
 
 
-def test_operator_write_is_authenticated_even_when_dashboard_is_public(
+def test_operator_write_is_available_without_login_in_public_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
@@ -650,21 +651,22 @@ def test_operator_write_is_authenticated_even_when_dashboard_is_public(
     path = "/api/picks/registered-pick-v1%3A0123456789abcdef/operator-state"
     data = urlencode({"state": "SKIPPED", "request_id": "request-1"}).encode()
     try:
-        with pytest.raises(HTTPError) as unauthorized:
-            urlopen(Request(f"http://127.0.0.1:{service.port}{path}", data=data))
-        assert unauthorized.value.code == 401
         dashboard_url = f"http://127.0.0.1:{service.port}/dashboard"
-        with pytest.raises(HTTPError) as locked_dashboard:
-            urlopen(dashboard_url)
-        assert locked_dashboard.value.code == 401
-        token = base64.b64encode(b"operator:correct horse").decode()
-        with urlopen(Request(dashboard_url, headers={"Authorization": f"Basic {token}"})) as page:
+        with urlopen(dashboard_url) as page:
             assert page.status == 200
             assert b"PLAYED" in page.read()
+        with pytest.raises(HTTPError) as cross_origin:
+            urlopen(Request(
+                f"http://127.0.0.1:{service.port}{path}",
+                data=data,
+                headers={"Origin": "https://other.example"},
+            ))
+        assert cross_origin.value.code == 403
+        assert calls == []
         request = Request(
             f"http://127.0.0.1:{service.port}{path}",
             data=data,
-            headers={"Authorization": f"Basic {token}", "Accept": "application/json"},
+            headers={"Accept": "application/json"},
         )
         with urlopen(request) as response:
             assert response.status == 200
@@ -719,7 +721,7 @@ def test_dashboard_fails_closed_without_password(monkeypatch: pytest.MonkeyPatch
         service.close()
 
 
-def test_public_hub_does_not_expose_unauthenticated_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_public_hub_and_operations_are_available_without_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
     monkeypatch.delenv("QUANTBET_DASHBOARD_USER", raising=False)
     monkeypatch.delenv("QUANTBET_DASHBOARD_PASSWORD", raising=False)
@@ -729,9 +731,9 @@ def test_public_hub_does_not_expose_unauthenticated_operations(monkeypatch: pyte
         with urlopen(f"http://127.0.0.1:{service.port}/hub") as response:
             assert response.status == 200
             assert b"QuantBet" in response.read()
-        with pytest.raises(HTTPError) as blocked:
-            urlopen(f"http://127.0.0.1:{service.port}/dashboard")
-        assert blocked.value.code == 404
+        with urlopen(f"http://127.0.0.1:{service.port}/dashboard") as page:
+            assert page.status == 200
+            assert b"Operations Dashboard" in page.read()
     finally:
         service.close()
 

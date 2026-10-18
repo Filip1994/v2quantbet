@@ -1210,7 +1210,7 @@ class DashboardHTTPService:
                 if path == "/livez":
                     service._json(self, 200, {"live": True})
                 elif path in {"/", "/dashboard"}:
-                    if service._authorize(self, allow_public=False):
+                    if service._authorize(self):
                         try:
                             service._html(self, 200, dashboard.render_html())
                         except (BrokenPipeError, ConnectionResetError):
@@ -1243,7 +1243,7 @@ class DashboardHTTPService:
                 if not service._same_origin(self):
                     service._json(self, 403, {"error": "origin_forbidden"})
                     return
-                if not service._authorize(self, allow_public=False):
+                if not service._authorize(self):
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
