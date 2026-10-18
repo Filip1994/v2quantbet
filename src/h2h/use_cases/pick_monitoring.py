@@ -165,7 +165,12 @@ class ReconcileRegisteredPickMonitoring:
             self._repository.start(pick_id, self._policy, started_at=now)
             started.append(pick_id)
         finalized: list[str] = []
-        for pick_id in self._repository.monitored_pick_ids():
+        candidate_loader = getattr(self._repository, "closing_candidate_pick_ids", None)
+        candidates = (
+            self._repository.monitored_pick_ids()
+            if candidate_loader is None else candidate_loader(as_of=now)
+        )
+        for pick_id in candidates:
             try:
                 self._repository.finalize(pick_id, finalized_at=now)
             except PickClosingNotDueError:

@@ -15,6 +15,31 @@ NOW = datetime(2026, 9, 16, 12, tzinfo=UTC)
 POLICY = OddsLifecyclePolicy(300, 600, 900)
 
 
+def test_reconciliation_batches_cutoff_but_rechecks_racing_reschedule():
+    from h2h.persistence.pick_monitoring import PickClosingNotDueError
+
+    class BatchRepository:
+        def unstarted_pick_ids(self):
+            return ()
+
+        def closing_candidate_pick_ids(self, *, as_of):
+            assert as_of == NOW
+            return ("due", "rescheduled")
+
+        def monitored_pick_ids(self):
+            raise AssertionError("must not individually inspect every future pick")
+
+        def finalize(self, pick_id, *, finalized_at):
+            assert finalized_at == NOW
+            if pick_id == "rescheduled":
+                raise PickClosingNotDueError("new fixture observation moved kickoff")
+
+    result = ReconcileRegisteredPickMonitoring(
+        BatchRepository(), POLICY, clock=lambda: NOW
+    ).execute()
+    assert result.finalized_pick_ids == ("due",)
+
+
 class Repository:
     def __init__(self):
         self.started = []
