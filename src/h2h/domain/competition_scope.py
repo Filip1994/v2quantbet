@@ -76,6 +76,20 @@ def is_blacklisted_team(team: object) -> bool:
     return _normalise(str(team or "")) in BLOCKED_TEAMS
 
 
+def is_blacklisted_competition_name(country: object, competition_name: object) -> bool:
+    """Hard-block exact named competitions and every Dutch Derde Divisie variant."""
+    country_key = _normalise(str(country or ""))
+    name_key = _normalise(str(competition_name or ""))
+    if (country_key, name_key) in BLACKLISTED_COMPETITIONS_BY_NAME:
+        return True
+
+    # All Dutch Derde Divisie branches (including Sunday and relegation rounds).
+    # Country-scoped: Eredivisie, Eerste Divisie and Tweede Divisie stay eligible.
+    return country_key in {"netherlands", "the netherlands", "holland", "nederland"} and (
+        name_key == "derde divisie" or name_key.startswith("derde divisie ")
+    )
+
+
 def is_blacklisted_league_id(league_id: object) -> bool:
     """Return True for globally disabled API-Football league IDs."""
     if isinstance(league_id, bool):
@@ -364,10 +378,9 @@ def universe_block_reason(
         return RejectionReason.BLOCKED_COUNTRY
     if is_blacklisted_team(home_team) or is_blacklisted_team(away_team):
         return RejectionReason.BLOCKED_TEAM
-    if is_blacklisted_league_id(league_id) or (
-        _normalise(str(country or "")),
-        _normalise(str(competition_name or "")),
-    ) in BLACKLISTED_COMPETITIONS_BY_NAME:
+    if is_blacklisted_league_id(league_id) or is_blacklisted_competition_name(
+        country, competition_name
+    ):
         return RejectionReason.BLACKLISTED_LEAGUE
     if is_friendly_football(
         country=country,
