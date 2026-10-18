@@ -4,7 +4,7 @@
     "preDeployCommand": "python -m h2h.migrate",
     "startCommand": "python -m h2h.quantlab.collector_entrypoint",
     "restartPolicyType": "NEVER",
-    "cronSchedule": "0 * * * *",
+    "cronSchedule": "0 */6 * * *",
     "numReplicas": 1
   }
 }
