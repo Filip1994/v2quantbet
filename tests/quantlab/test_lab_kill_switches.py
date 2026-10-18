@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from h2h.odds.http import TransportRateLimitError
 from h2h.quantlab.runtime import QuantLabRuntime, QuantLabRuntimeSettings
 
 
@@ -204,3 +205,81 @@ def test_cardlab_disabled_is_removed_from_market_collection_allowlist() -> None:
     assert market_fixtures == 1
     assert card_snapshots == 0
     assert collector.allowed_labs == {"CORNER"}
+
+def _rate_limit_test_fixtures():
+    return tuple(
+        {
+            "fixture_id": f"api-football:{provider_id}",
+            "provider_fixture_id": provider_id,
+            "league_id": 39,
+            "season": 2026,
+            "home_team_id": provider_id * 2,
+            "away_team_id": provider_id * 2 + 1,
+            "home_team": "Home",
+            "away_team": "Away",
+            "competition_name": "Premier League",
+            "country": "England",
+            "competition_type": "League",
+            "kickoff_at": NOW + timedelta(hours=2),
+            "provider_status": "NS",
+        }
+        for provider_id in (101, 102)
+    )
+
+
+def _upcoming_runtime_for_429_test(collector):
+    class Repo:
+        def upcoming_fixtures(self, **_kwargs):
+            return _rate_limit_test_fixtures()
+
+        def market_capture_due(self, *_args, **_kwargs):
+            return True
+
+        def market_labs_for_fixture(self, _fixture_id):
+            return frozenset()
+
+    runtime = QuantLabRuntime(
+        Repo(),
+        object(),
+        settings=QuantLabRuntimeSettings(
+            goal_enabled=False, corner_enabled=False,
+            card_enabled=False, h2h_enabled=True,
+        ),
+        clock=lambda: NOW,
+    )
+    runtime._collector = collector
+    return runtime
+
+
+def test_upcoming_market_collection_stops_after_provider_429() -> None:
+    class RateLimitedCollector:
+        def __init__(self):
+            self.calls = []
+
+        def collect_fixture(self, **kwargs):
+            self.calls.append(kwargs["provider_fixture_id"])
+            raise TransportRateLimitError("HTTP 429", retry_after=3600)
+
+    collector = RateLimitedCollector()
+    runtime = _upcoming_runtime_for_429_test(collector)
+
+    assert runtime._collect_upcoming(NOW) == (0, 0)
+    assert collector.calls == [101]
+
+
+def test_upcoming_market_collection_continues_after_non_rate_limit_error() -> None:
+    class TransientCollector:
+        def __init__(self):
+            self.calls = []
+
+        def collect_fixture(self, **kwargs):
+            fixture_id = kwargs["provider_fixture_id"]
+            self.calls.append(fixture_id)
+            if fixture_id == 101:
+                raise ValueError("fixture-specific bad response")
+
+    collector = TransientCollector()
+    runtime = _upcoming_runtime_for_429_test(collector)
+
+    assert runtime._collect_upcoming(NOW) == (1, 0)
+    assert collector.calls == [101, 102]
