@@ -42,7 +42,6 @@ BELGRADE = ZoneInfo("Europe/Belgrade")
 LABS = {
     "goal": ("GOAL", "GoalLab", "Goals · DC+ and goal-market experiments"),
     "corner": ("CORNER", "CornerLab", "Corners · totals, team totals and handicaps"),
-    "card": ("CARD", "CardLab", "Cards · totals, team cards and referee-sensitive models"),
     "h2h": ("H2H", "H2HLab", "Direct H2H · Dixon-Coles + mutual-match evidence"),
 }
 
@@ -1402,7 +1401,7 @@ footer{{margin-top:12px;color:#7f878e;font-size:11px;line-height:1.6}}
 <section class="table-shell" id="canonical-picks"><div class="table-title"><b>{escape(ledger_title)}</b><span>{len(rows)} shown · click match for exact pick evidence</span></div><div class="table"><table><thead><tr>
 {ledger_headers}
 </tr></thead><tbody>{rows_html}</tbody></table></div></section>
-<footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; CardLab = card/referee models. Times are Europe/Belgrade.</footer>
+<footer>QuantLab is analytically isolated from production registration and bankroll. GoalLab = goal models/DC+; CornerLab = corner models; H2HLab = mutual matches. Times are Europe/Belgrade.</footer>
 </main>{NOTE_DIALOG_HTML}</body></html>"""
 
 
@@ -1422,7 +1421,6 @@ class QuantLabDashboardHTTPService:
                     "/quantlab/goal/analytics",
                     "/quantlab/goal/model",
                     "/quantlab/goal/pick",
-                    "/quantlab/card/referees",
                 }
                 if parsed.path not in allowed_paths:
                     service._text(self, 404, "not_found\n", "text/plain; charset=utf-8")
@@ -1430,9 +1428,7 @@ class QuantLabDashboardHTTPService:
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/quantlab/card/referees":
-                        body = dashboard.render_referee_directory(parsed.query)
-                    elif parsed.path == "/quantlab/goal/analytics":
+                    if parsed.path == "/quantlab/goal/analytics":
                         body = dashboard.render_goal_analytics()
                     elif parsed.path == "/quantlab/goal/model":
                         body = dashboard.render_goal_model(parsed.query)
