@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from h2h.odds.budget import ApiBudgetExceededError
+from h2h.odds.http import TransportRateLimitError
 from h2h.quantlab.card_lab.context import (
     parse_fixture_context,
     parse_fixture_contexts_from_fixture_response,
@@ -1548,6 +1549,15 @@ class QuantLabRuntime:
                 card_snapshots += 1
             except ApiBudgetExceededError:
                 raise
+            except TransportRateLimitError as exc:
+                LOGGER.warning(
+                    "QuantLab odds provider rate-limited at fixture=%s; "
+                    "skipping remaining upcoming market requests until next cron cycle "
+                    "(retry_after=%s)",
+                    fixture_id,
+                    exc.retry_after,
+                )
+                break
             except FeatureLeakageError as exc:
                 LOGGER.warning(
                     "QuantLab feature snapshot rejected fixture=%s error=%s",
