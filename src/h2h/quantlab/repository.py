@@ -2779,12 +2779,21 @@ class PostgreSQLQuantLabRepository:
             return ()
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "WITH latest AS ("
-                " SELECT DISTINCT ON (fixture_id) fixture_id, home_team_id, away_team_id, "
-                " kickoff_at, provider_status "
-                " FROM quantlab_fixture_observations "
-                " WHERE kickoff_at < %s "
-                " ORDER BY fixture_id, captured_at DESC, fixture_observation_id DESC"
+                # Narrow fixture IDs first, then resolve the latest observation
+                # across ALL identities for each candidate. Filtering team IDs
+                # inside the latest-row lookup would resurrect corrected teams.
+                "WITH candidates AS ("
+                " SELECT fixture_id FROM quantlab_fixture_observations "
+                " WHERE home_team_id = %s AND kickoff_at < %s "
+                " UNION SELECT fixture_id FROM quantlab_fixture_observations "
+                " WHERE away_team_id = %s AND kickoff_at < %s"
+                "), latest AS ("
+                " SELECT o.* FROM candidates c CROSS JOIN LATERAL ("
+                " SELECT fixture_id, home_team_id, away_team_id, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = c.fixture_id AND o.kickoff_at < %s "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") o"
                 ") "
                 "SELECT CASE WHEN home_team_id = %s THEN away_team_id ELSE home_team_id END "
                 "AS opponent_team_id "
@@ -2794,7 +2803,8 @@ class PostgreSQLQuantLabRepository:
                 "AND home_team_id IS NOT NULL AND away_team_id IS NOT NULL "
                 "AND home_team_id <> away_team_id "
                 "ORDER BY kickoff_at DESC, fixture_id LIMIT %s",
-                (before, team_id, team_id, team_id, limit),
+                (team_id, before, team_id, before, before,
+                 team_id, team_id, team_id, limit),
             )
             return tuple(int(row[0]) for row in cursor.fetchall() if int(row[0]) > 0)
 
