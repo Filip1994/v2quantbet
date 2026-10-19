@@ -152,7 +152,7 @@ def _production_bucket_links_html(bucket_ids: Any) -> str:
         if spec is None:
             links.append(f'<span class="production-bucket-link unknown">{escape(bucket_id)}</span>')
             continue
-        base = research_base if spec.source_universe == "RESEARCH" else quantlab_base
+        base = research_base if spec.analytics_path.startswith('/research') else quantlab_base
         href = base + spec.analytics_path
         links.append(
             f'<a class="production-bucket-link" href="{escape(href, quote=True)}" '
