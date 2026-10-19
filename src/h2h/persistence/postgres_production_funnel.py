@@ -18,12 +18,11 @@ from collections.abc import Callable
 from typing import Any
 
 from h2h.domain.competition_scope import is_universe_blocked_competition
+from h2h.corner_buckets import CORNER_OPERATIONS_IDS
 from h2h.domain.bookmaker_policy import is_production_bookmaker
 from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateEvent
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
-    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
-    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     DEFAULT_BUCKET_IDS,
     PRODUCTION_DESELECTED_BUCKET_IDS,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
@@ -34,13 +33,10 @@ from h2h.production_buckets import (
 
 ConnectionFactory = Callable[[], Any]
 
-# Explicit operator preference: only the two already-approved CornerLab buckets
-# outrank dynamic ROI; all other eligible buckets retain evidence-weighted ROI order.
-_CORNER_FIRST_PRIORITY = {
-    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00: 2,  # C5
-    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80: 1,  # C4
-}
-_PRIORITY_POLICY_VERSION = "CORNER_FIRST_C5_C4_THEN_DYNAMIC_ROI_KICKOFF_V2"
+# Explicit operator preference: the seven selected Corner cubes share first priority;
+# measured evidence-weighted ROI orders them, then the existing Football buckets.
+_CORNER_FIRST_PRIORITY = dict.fromkeys(CORNER_OPERATIONS_IDS, 1)
+_PRIORITY_POLICY_VERSION = "CORNER_SELECTED_CUBES_N_GT_10_THEN_DYNAMIC_ROI_KICKOFF_V3"
 _DEFAULT_MAX_LEAD_HOURS = 24
 _MAX_SUPPORTED_LEAD_HOURS = 72
 
@@ -280,7 +276,7 @@ class PostgreSQLProductionFunnelRepository:
 
     @staticmethod
     def _cornerlab_performance_rows(cursor: Any) -> tuple[dict[str, Any], ...]:
-        """Use the same one-settled-pick-per-fixture rule as CornerLab analytics."""
+        """Use Research's latest settlement per immutable source pick, without collapsing fixtures."""
         cursor.execute(
             """
             WITH candidates AS (
@@ -292,11 +288,7 @@ class PostgreSQLProductionFunnelRepository:
                        COALESCE(qlatest.away_team, platest.away_team) AS away_team,
                        COALESCE(qlatest.competition_name, platest.competition_name) AS competition_name,
                        COALESCE(qlatest.country, platest.country) AS country,
-                       COALESCE(qlatest.league_id, f.league_id) AS league_id,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY q.fixture_id
-                           ORDER BY ABS(q.odds - 2.0), q.shadow_bet_id
-                       ) AS fixture_rank
+                       COALESCE(qlatest.league_id, f.league_id) AS league_id
                 FROM quantlab_shadow_bets q
                 JOIN LATERAL (
                     SELECT e.outcome, e.pnl_minor
@@ -333,7 +325,7 @@ class PostgreSQLProductionFunnelRepository:
                 WHERE q.lab = 'CORNER'
                   AND settled.outcome IN ('WIN', 'LOSS', 'VOID')
             )
-            SELECT * FROM candidates WHERE fixture_rank = 1
+            SELECT * FROM candidates
             """
         )
         return PostgreSQLProductionFunnelRepository._row_dicts(cursor)
@@ -390,14 +382,8 @@ class PostgreSQLProductionFunnelRepository:
 
         if any(bucket.startswith("CORNER_") for bucket in bucket_ids):
             for row in cls._cornerlab_performance_rows(cursor):
-                if is_universe_blocked_competition(
-                    country=row.get("country"),
-                    competition_name=row.get("competition_name"),
-                    league_id=row.get("league_id"),
-                    home_team=row.get("home_team"),
-                    away_team=row.get("away_team"),
-                ):
-                    continue
+                # Cube evidence uses the same preserved PAPER history as Research.
+                # Live candidate universe hard gates remain enforced during intake.
                 if str(row.get("outcome") or "") not in {"WIN", "LOSS"}:
                     continue
                 stake = int(row.get("stake_minor") or 0)
@@ -670,19 +656,10 @@ class PostgreSQLProductionFunnelRepository:
             ) platest ON TRUE
             WHERE q.lab = 'CORNER'
               AND q.market_key = 'TOTAL_CORNERS'
-              AND q.selection = 'OVER'
+              AND q.selection IN ('OVER','UNDER')
               AND q.decision_at < COALESCE(qlatest.kickoff_at, platest.kickoff_at)
               AND COALESCE(qlatest.kickoff_at, platest.kickoff_at) > %s
               AND COALESCE(qlatest.kickoff_at, platest.kickoff_at) <= %s
-              AND (
-                (snapshot.expected_total_corners - q.line >= 1.0
-                 AND snapshot.expected_total_corners - q.line < 2.0
-                 AND q.odds > 1.60 AND q.odds <= 1.80)
-                OR
-                (q.model_probability >= 0.50 AND q.model_probability < 0.55
-                 AND q.market_probability >= 0.45 AND q.market_probability < 0.50
-                 AND q.odds > 1.80 AND q.odds <= 2.00)
-              )
             ORDER BY kickoff_at ASC, q.decision_at ASC, q.shadow_bet_id ASC
             LIMIT 5000
             """,
@@ -902,7 +879,8 @@ class PostgreSQLProductionFunnelRepository:
                 )
                 active_matches = tuple(
                     sorted(
-                        (item for item in all_matches if item in allowed),
+                        (item for item in all_matches if item in allowed
+                         and (item not in CORNER_OPERATIONS_IDS or bucket_stats[item]['graded_n'] > 10)),
                         key=dynamic_priority.__getitem__,
                     )
                 )
