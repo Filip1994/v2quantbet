@@ -1,8 +1,7 @@
 """Shared metadata for the Production intake bucket contract.
 
-The specs include all six historically promoted cohorts, regardless of current
-Production selection. Six Research/CornerLab cohorts are selected by default;
-the GoalLab OVER buckets remain fully active in GoalLab analytics and discovery.
+Historical definitions remain available for provenance. Active selection comes
+from the explicit Operations allowlist; retired GoalLab discovery is disabled.
 """
 
 from __future__ import annotations

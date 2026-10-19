@@ -184,7 +184,9 @@ def test_rejects_womens_football_globally(metadata: CompetitionMetadata) -> None
     decision = classify_phase_i(metadata)
 
     assert decision.eligible is False
-    assert decision.rejection_reason == RejectionReason.WOMEN
+    # The existing global Serie A ban precedes demographic classification.
+    expected = RejectionReason.BLACKLISTED_LEAGUE if metadata.name == 'Serie A Femminile' else RejectionReason.WOMEN
+    assert decision.rejection_reason == expected
 
 
 @pytest.mark.parametrize(

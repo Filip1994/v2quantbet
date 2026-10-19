@@ -26,6 +26,7 @@ from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
     PRODUCTION_DESELECTED_BUCKET_IDS,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
+    bucket_spec,
     matching_bucket_ids,
     n_roi_priority_score,
 )
@@ -341,8 +342,12 @@ class PostgreSQLProductionFunnelRepository:
             bucket_id: {"graded_n": 0, "unit_pnl": 0.0}
             for bucket_id in bucket_ids
         }
+        sources = {
+            spec.source_universe for bucket_id in bucket_ids
+            if (spec := bucket_spec(bucket_id)) is not None
+        }
 
-        for row in cls._research_performance_rows(cursor):
+        for row in cls._research_performance_rows(cursor) if 'RESEARCH' in sources else ():
             if is_universe_blocked_competition(
                 country=row.get("country"),
                 competition_name=row.get("competition_name"),
@@ -360,7 +365,7 @@ class PostgreSQLProductionFunnelRepository:
                     accumulators[bucket_id]["graded_n"] += 1
                     accumulators[bucket_id]["unit_pnl"] += unit_pnl
 
-        for row in cls._goallab_performance_rows(cursor):
+        for row in cls._goallab_performance_rows(cursor) if 'GOALLAB' in sources else ():
             if is_universe_blocked_competition(
                 country=row.get("country"),
                 competition_name=row.get("competition_name"),
@@ -380,7 +385,7 @@ class PostgreSQLProductionFunnelRepository:
                     accumulators[bucket_id]["graded_n"] += 1
                     accumulators[bucket_id]["unit_pnl"] += unit_pnl
 
-        if any(bucket.startswith("CORNER_") for bucket in bucket_ids):
+        if 'CORNERLAB' in sources:
             for row in cls._cornerlab_performance_rows(cursor):
                 # Cube evidence uses the same preserved PAPER history as Research.
                 # Live bookmaker, horizon and exposure gates remain in intake.
@@ -830,6 +835,7 @@ class PostgreSQLProductionFunnelRepository:
         )
         contract = intake_contract_version(selected, max_lead_hours=max_lead_hours)
         allowed = frozenset(selected)
+        sources = {bucket_spec(bucket_id).source_universe for bucket_id in selected}
 
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -842,10 +848,11 @@ class PostgreSQLProductionFunnelRepository:
                     now=cloned_at,
                     horizon_end=horizon_end,
                     fallback_stake_minor=fallback_stake_minor,
-                )
+                ) if 'RESEARCH' in sources else ()
             )
-            rows.extend(self._goallab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
-            if any(item.startswith("CORNER_") for item in selected):
+            if 'GOALLAB' in sources:
+                rows.extend(self._goallab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
+            if 'CORNERLAB' in sources:
                 rows.extend(self._cornerlab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
 
             bucket_stats = self._bucket_performance(cursor, bucket_ids=selected)
