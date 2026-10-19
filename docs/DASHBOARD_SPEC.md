@@ -2,6 +2,13 @@
 
 ## Operator PLAYED/SKIPPED tracking
 
+Operations (`/` and `/dashboard`) requires HTTP Basic authentication even if
+`QUANTBET_DASHBOARD_PUBLIC=true`; this flag leaves the HUB public, not the
+operator write surface. A browser authenticates once on opening Operations and
+then automatically reuses the credentials for `PLAYED`/`SKIPPED` forms. The
+write API always requires the same authentication and checks request origin.
+No password or reusable token is embedded into rendered HTML.
+
 Every registered system pick is shown and defaults to operator state `PENDING` until the
 operator explicitly chooses `PLAYED` or `SKIPPED`. Both actions are visible beside the
 pick ID/fixture for pre-match processing. The action appends an immutable operator-state

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from html import escape
 
 
@@ -83,12 +84,19 @@ def manifest_json() -> bytes:
 
 
 def render_hub() -> str:
-    cards = "".join(
-        '<a class="card ' + tone + '" href="' + escape(href, quote=True) + '">'
+    # Static pause card never contacts or wakes the suspended Tournament service.
+    tournament_paused = os.getenv('QUANTBET_KELLY_TOURNAMENT_PAUSED', '').lower() == 'true'
+    def card(name, href, symbol, tone, description):
+        paused = tournament_paused and tone == 'tournament'
+        opening = ('<div class="card tournament" aria-disabled="true">' if paused else
+                   '<a class="card ' + tone + '" href="' + escape(href, quote=True) + '">')
+        return opening + (
         '<span class="symbol" aria-hidden="true">' + escape(symbol) + '</span>'
         '<span class="copy"><strong>' + escape(name) + '</strong><small>'
-        + escape(description)
-        + '</small></span><span class="arrow" aria-hidden="true">↗</span></a>'
+        + escape('PAUZIRANO · fokus na flat uloge' if paused else description)
+        + '</small></span>' + ('</div>' if paused else '<span class="arrow" aria-hidden="true">↗</span></a>'))
+    cards = "".join(
+        card(name, href, symbol, tone, description)
         for name, href, symbol, tone, description in MODULES
     )
     return """<!doctype html>

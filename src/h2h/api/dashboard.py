@@ -121,7 +121,7 @@ _COUNTRY_FLAG_CODES = {
 
 
 def dashboard_is_public() -> bool:
-    """Return whether dashboard read routes are intentionally public."""
+    """Return whether public Hub routes are accessible without login."""
     return os.environ.get("QUANTBET_DASHBOARD_PUBLIC", "").strip().lower() in {
         "1",
         "true",
@@ -152,7 +152,7 @@ def _production_bucket_links_html(bucket_ids: Any) -> str:
         if spec is None:
             links.append(f'<span class="production-bucket-link unknown">{escape(bucket_id)}</span>')
             continue
-        base = research_base if spec.source_universe == "RESEARCH" else quantlab_base
+        base = research_base if spec.analytics_path.startswith('/research') else quantlab_base
         href = base + spec.analytics_path
         links.append(
             f'<a class="production-bucket-link" href="{escape(href, quote=True)}" '
@@ -1154,9 +1154,11 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
 .odds-grid{{grid-template-columns:repeat(4,minmax(100px,1fr));min-width:430px}}.odds-grid>span{{min-height:68px;padding:8px 6px}}.pick-book{{margin-top:7px}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
+<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="live"><span class="dot"></span>Database Connected · Generated {escape(self._dt(context["generated_at"]))}</div></header>
 <section class="kpis">{cards_html}</section>
 <section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
@@ -1241,7 +1243,7 @@ class DashboardHTTPService:
                 if not service._same_origin(self):
                     service._json(self, 403, {"error": "origin_forbidden"})
                     return
-                if not service._authorize(self, allow_public=False):
+                if not service._authorize(self):
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))

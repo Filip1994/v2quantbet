@@ -7,6 +7,7 @@ and must not trigger a second response on a closed socket.
 
 from __future__ import annotations
 
+import base64
 from http.client import HTTPConnection, RemoteDisconnected
 
 import pytest
@@ -72,6 +73,8 @@ def test_production_dashboard_disconnect_during_error_response_is_not_retried(
     disconnect: type[OSError],
 ) -> None:
     monkeypatch.setenv("QUANTBET_DASHBOARD_PUBLIC", "true")
+    monkeypatch.setenv("QUANTBET_DASHBOARD_USER", "operator")
+    monkeypatch.setenv("QUANTBET_DASHBOARD_PASSWORD", "correct horse")
 
     class FailingDashboard:
         @staticmethod
@@ -91,7 +94,8 @@ def test_production_dashboard_disconnect_during_error_response_is_not_retried(
     service.start()
     connection = HTTPConnection("127.0.0.1", service.port, timeout=5)
     try:
-        connection.request("GET", "/dashboard")
+        token = base64.b64encode(b"operator:correct horse").decode()
+        connection.request("GET", "/dashboard", headers={"Authorization": f"Basic {token}"})
         with pytest.raises(RemoteDisconnected):
             connection.getresponse()
         assert attempted_statuses == [503]
