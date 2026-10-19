@@ -8,6 +8,7 @@ from threading import Event
 from h2h.api.research_dashboard import ResearchDashboardHTTPService, ResearchDashboardService
 from h2h.logging_config import configure_logging
 from h2h.persistence.postgres_research_signals import PostgreSQLResearchSignalRepository
+from h2h.persistence.postgres_corner_research import PostgreSQLCornerResearchRepository
 from h2h.workers.runtime import install_shutdown_handlers
 
 
@@ -37,6 +38,7 @@ def main() -> None:
         raise RuntimeError("research_signals schema is unavailable")
     dashboard = ResearchDashboardService(
         repository,
+        corner_repository=PostgreSQLCornerResearchRepository(_database_url()),
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
         strict_quote_age_seconds=_integer("QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS", "300"),
         provider_snapshot_max_age_seconds=_integer(

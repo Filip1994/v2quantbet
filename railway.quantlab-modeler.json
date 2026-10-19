@@ -2,9 +2,9 @@
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
     "preDeployCommand": "python -m h2h.migrate",
-    "startCommand": "timeout 55m python -m h2h.quantlab.modeler_entrypoint",
+    "startCommand": "timeout 55m python -m h2h.cornerlab_modeler_entrypoint",
     "restartPolicyType": "NEVER",
-    "cronSchedule": "15 */12 * * *",
+    "cronSchedule": "15 1 * * *",
     "numReplicas": 1
   }
 }

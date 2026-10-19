@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -144,6 +145,8 @@ class PostgreSQLQuantLabRepository:
                 " WHEN q.lab = 'CORNER' THEN corner_event.result_detail "
                 " WHEN q.lab = 'CARD' THEN card_event.result_detail "
                 " ELSE q.result_detail END AS result_detail, "
+                "corner_event.corner_settlement_event_id AS source_settlement_event_id, "
+                "cs.feature_snapshot_id AS source_feature_snapshot_id, "
                 "cs.expected_total_corners, cs.home_history_size, cs.away_history_size, "
                 "cs.feature_payload AS corner_feature_payload, "
                 "card.referee, card.referee_card_rate, card.referee_sample_size, "
@@ -160,7 +163,7 @@ class PostgreSQLQuantLabRepository:
                 "COALESCE(qlatest.kickoff_at, platest.kickoff_at) AS kickoff_at "
                 "FROM quantlab_shadow_bets q "
                 "LEFT JOIN LATERAL ("
-                " SELECT e.event_kind, e.outcome, e.pnl_minor, e.occurred_at, e.result_detail "
+                " SELECT e.corner_settlement_event_id, e.event_kind, e.outcome, e.pnl_minor, e.occurred_at, e.result_detail "
                 " FROM quantlab_corner_settlement_events e "
                 " WHERE q.lab = 'CORNER' AND e.shadow_bet_id = q.shadow_bet_id "
                 " ORDER BY e.occurred_at DESC, e.corner_settlement_event_id DESC LIMIT 1"
@@ -183,7 +186,7 @@ class PostgreSQLQuantLabRepository:
                 " ORDER BY d.decision_id DESC LIMIT 1"
                 ") decision ON TRUE "
                 "LEFT JOIN LATERAL ("
-                " SELECT expected_total_corners, home_history_size, away_history_size, feature_payload "
+                " SELECT feature_snapshot_id, expected_total_corners, home_history_size, away_history_size, feature_payload "
                 " FROM quantlab_corner_feature_snapshots s "
                 " WHERE q.lab = 'CORNER' AND s.fixture_id = q.fixture_id "
                 " AND s.model_version = q.model_version AND s.decision_at <= q.decision_at "
@@ -584,7 +587,7 @@ class PostgreSQLQuantLabRepository:
                 "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
                 "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
                 "captured_at FROM quantlab_market_observations "
-                "WHERE fixture_id = %s AND lab_owner = 'GOAL' "
+                "WHERE fixture_id = %s AND lab_owner = 'GOAL' AND bookmaker_id = 11 "
                 "AND provider_bet_id IN (5, 8) AND captured_at <= %s "
                 "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, market_observation_id",
                 (fixture_id, decision_at),
@@ -671,7 +674,7 @@ class PostgreSQLQuantLabRepository:
                 "SELECT market_observation_id, bookmaker_id, bookmaker_name, provider_bet_id, "
                 "provider_bet_name, raw_selection, parsed_line, odds, provider_updated_at, "
                 "captured_at FROM quantlab_market_observations "
-                "WHERE fixture_id = %s AND lab_owner = %s AND parsed_line IS NOT NULL "
+                "WHERE fixture_id = %s AND lab_owner = %s AND bookmaker_id = 11 AND parsed_line IS NOT NULL "
                 "AND captured_at <= %s "
                 "ORDER BY captured_at DESC, bookmaker_id, provider_bet_id, "
                 "parsed_line, market_observation_id",
@@ -890,7 +893,11 @@ class PostgreSQLQuantLabRepository:
         postponed_refresh_seconds: int = 21600,
         limit: int = 25,
     ) -> tuple[dict[str, Any], ...]:
-        """Return unsettled GoalLab fixtures whose QuantLab-owned result needs refreshing."""
+        """Fairly poll unsettled GoalLab fixtures, including stale/no-match attempts.
+
+        Retry accounting is operational only: immutable result and settlement
+        evidence is never synthesized or overwritten.
+        """
         if (
             post_kickoff_delay_seconds <= 0
             or refresh_after_seconds <= 0
@@ -900,25 +907,35 @@ class PostgreSQLQuantLabRepository:
             raise ValueError("GoalLab result refresh settings and limit must be positive")
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT DISTINCT ON (p.fixture_id) p.fixture_id, f.provider_fixture_id, "
-                "latest.kickoff_at, latest.provider_status, latest.captured_at "
-                "FROM quantlab_goal_picks p "
-                "JOIN quantlab_fixtures f ON f.fixture_id = p.fixture_id "
-                "JOIN LATERAL ("
-                " SELECT o.kickoff_at, o.provider_status, o.captured_at "
-                " FROM quantlab_fixture_observations o "
-                " WHERE o.fixture_id = p.fixture_id "
-                " ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
-                ") latest ON TRUE "
-                "WHERE NOT EXISTS ("
-                " SELECT 1 FROM quantlab_goal_pick_settlements s "
-                " WHERE s.goal_pick_id = p.goal_pick_id"
-                ") "
-                "AND latest.kickoff_at <= %s - (%s * interval '1 second') "
-                "AND latest.captured_at <= %s - ("
-                " CASE WHEN latest.provider_status = 'PST' THEN %s ELSE %s END"
-                " * interval '1 second') "
-                "ORDER BY p.fixture_id, p.decision_at ASC LIMIT %s",
+                "WITH due AS ("
+                " SELECT DISTINCT ON (p.fixture_id)"
+                " p.fixture_id, f.provider_fixture_id,"
+                " latest.kickoff_at, latest.provider_status, latest.captured_at,"
+                " GREATEST(latest.captured_at,"
+                " COALESCE(attempt.last_attempt_at, latest.captured_at)) AS last_polled_at"
+                " FROM quantlab_goal_picks p"
+                " JOIN quantlab_fixtures f ON f.fixture_id = p.fixture_id"
+                " JOIN LATERAL ("
+                "  SELECT o.kickoff_at, o.provider_status, o.captured_at"
+                "  FROM quantlab_fixture_observations o"
+                "  WHERE o.fixture_id = p.fixture_id"
+                "  ORDER BY o.captured_at DESC, o.fixture_observation_id DESC LIMIT 1"
+                " ) latest ON TRUE"
+                " LEFT JOIN quantlab_goal_result_poll_attempts attempt"
+                "   ON attempt.fixture_id = p.fixture_id"
+                " WHERE NOT EXISTS ("
+                "  SELECT 1 FROM quantlab_goal_pick_settlements s"
+                "  WHERE s.goal_pick_id = p.goal_pick_id"
+                " )"
+                " AND latest.kickoff_at <= %s - (%s * interval '1 second')"
+                " AND GREATEST(latest.captured_at,"
+                "   COALESCE(attempt.last_attempt_at, latest.captured_at)) <= %s - ("
+                "   CASE WHEN latest.provider_status = 'PST' THEN %s ELSE %s END"
+                "   * interval '1 second')"
+                " ORDER BY p.fixture_id, p.decision_at ASC"
+                ") SELECT fixture_id, provider_fixture_id, kickoff_at,"
+                " provider_status, captured_at"
+                " FROM due ORDER BY last_polled_at ASC, fixture_id ASC LIMIT %s",
                 (
                     now,
                     post_kickoff_delay_seconds,
@@ -929,6 +946,33 @@ class PostgreSQLQuantLabRepository:
                 ),
             )
             return _row_dicts(cursor)
+
+    def record_goal_pick_result_poll_attempt(
+        self,
+        *,
+        fixture_id: str,
+        attempted_at: datetime,
+        outcome: str,
+    ) -> None:
+        """Advance operational retry order even when a provider returns no result."""
+        if outcome not in {"CAPTURED", "NO_MATCH", "ERROR"}:
+            raise ValueError("invalid GoalLab result poll outcome")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO quantlab_goal_result_poll_attempts "
+                "(fixture_id, last_attempt_at, attempt_count, last_outcome) "
+                "VALUES (%s, %s, 1, %s) "
+                "ON CONFLICT (fixture_id) DO UPDATE SET "
+                "last_attempt_at = GREATEST("
+                "quantlab_goal_result_poll_attempts.last_attempt_at, "
+                "EXCLUDED.last_attempt_at), "
+                "attempt_count = quantlab_goal_result_poll_attempts.attempt_count + 1, "
+                "last_outcome = CASE WHEN EXCLUDED.last_attempt_at >= "
+                "quantlab_goal_result_poll_attempts.last_attempt_at "
+                "THEN EXCLUDED.last_outcome "
+                "ELSE quantlab_goal_result_poll_attempts.last_outcome END",
+                (fixture_id, attempted_at, outcome),
+            )
 
     def goal_pick_settlement_candidates(
         self,
@@ -2737,12 +2781,21 @@ class PostgreSQLQuantLabRepository:
             return ()
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "WITH latest AS ("
-                " SELECT DISTINCT ON (fixture_id) fixture_id, home_team_id, away_team_id, "
-                " kickoff_at, provider_status "
-                " FROM quantlab_fixture_observations "
-                " WHERE kickoff_at < %s "
-                " ORDER BY fixture_id, captured_at DESC, fixture_observation_id DESC"
+                # Narrow fixture IDs first, then resolve the latest observation
+                # across ALL identities for each candidate. Filtering team IDs
+                # inside the latest-row lookup would resurrect corrected teams.
+                "WITH candidates AS ("
+                " SELECT fixture_id FROM quantlab_fixture_observations "
+                " WHERE home_team_id = %s AND kickoff_at < %s "
+                " UNION SELECT fixture_id FROM quantlab_fixture_observations "
+                " WHERE away_team_id = %s AND kickoff_at < %s"
+                "), latest AS ("
+                " SELECT o.* FROM candidates c CROSS JOIN LATERAL ("
+                " SELECT fixture_id, home_team_id, away_team_id, kickoff_at, provider_status "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.fixture_id = c.fixture_id AND o.kickoff_at < %s "
+                " ORDER BY captured_at DESC, fixture_observation_id DESC LIMIT 1"
+                ") o"
                 ") "
                 "SELECT CASE WHEN home_team_id = %s THEN away_team_id ELSE home_team_id END "
                 "AS opponent_team_id "
@@ -2752,7 +2805,8 @@ class PostgreSQLQuantLabRepository:
                 "AND home_team_id IS NOT NULL AND away_team_id IS NOT NULL "
                 "AND home_team_id <> away_team_id "
                 "ORDER BY kickoff_at DESC, fixture_id LIMIT %s",
-                (before, team_id, team_id, team_id, limit),
+                (team_id, before, team_id, before, before,
+                 team_id, team_id, team_id, limit),
             )
             return tuple(int(row[0]) for row in cursor.fetchall() if int(row[0]) > 0)
 
@@ -3806,6 +3860,104 @@ class PostgreSQLQuantLabRepository:
             )
             rows = _row_dicts(cursor)
         return tuple(reversed(rows))
+
+    @contextmanager
+    def stream_goal_scoring_history(
+        self, *, before: datetime, limit: int = 30_000, batch_size: int = 128
+    ) -> Iterator[Iterator[dict[str, Any]]]:
+        """Stream precisely the same most recent fixtures in chronological order.
+
+        A named server-side PostgreSQL cursor bounds raw payloads held in Python.
+        The caller must process the iterator before this context manager exits.
+        """
+        if limit <= 0 or batch_size <= 0:
+            raise ValueError("limit and batch_size must be positive")
+        sql = (
+                "WITH fixture_candidates AS ("
+                " SELECT DISTINCT ON (o.fixture_id) "
+                " o.fixture_id, o.fixture_observation_id, o.league_id, o.season, "
+                " o.home_team_id, o.away_team_id, o.kickoff_at, o.captured_at, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'home')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'home')::INTEGER"
+                " ) AS home_goals, "
+                " COALESCE("
+                "  (o.raw_payload->'score'->'fulltime'->>'away')::INTEGER, "
+                "  (o.raw_payload->'goals'->>'away')::INTEGER"
+                " ) AS away_goals "
+                " FROM quantlab_fixture_observations o "
+                " WHERE o.captured_at <= %s AND o.kickoff_at < %s "
+                " AND o.league_id IS NOT NULL AND o.home_team_id IS NOT NULL "
+                " AND o.away_team_id IS NOT NULL "
+                " AND (o.raw_payload->'fixture'->'status'->>'short') IN ('FT', 'AET', 'PEN') "
+                " AND ("
+                "  (jsonb_typeof(o.raw_payload->'score'->'fulltime'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'score'->'fulltime'->'away') = 'number') "
+                "  OR (jsonb_typeof(o.raw_payload->'goals'->'home') = 'number' "
+                "   AND jsonb_typeof(o.raw_payload->'goals'->'away') = 'number')"
+                " ) "
+                " ORDER BY o.fixture_id, o.captured_at DESC, o.fixture_observation_id DESC"
+                "), fixture_rows AS ("
+                " SELECT * FROM fixture_candidates "
+                " ORDER BY kickoff_at DESC, fixture_id DESC LIMIT %s"
+                ") "
+                "SELECT f.fixture_id, f.fixture_observation_id, f.league_id, f.season, "
+                "f.home_team_id, f.away_team_id, f.kickoff_at, "
+                "f.captured_at AS fixture_available_at, f.home_goals, f.away_goals, "
+                "s.statistics_observation_id, s.available_at AS statistics_available_at, "
+                "pc.player_capture_id, pc.available_at AS player_available_at, "
+                "pc.status AS player_status, pc.reason AS player_reason, "
+                "pc.source AS player_source, pc.raw_payload AS player_payload, "
+                "s.home_fouls, s.away_fouls, "
+                "s.home_yellow_cards, s.away_yellow_cards, "
+                "s.home_red_cards, s.away_red_cards, "
+                "s.home_corner_kicks, s.away_corner_kicks, "
+                "s.home_ball_possession, s.away_ball_possession, "
+                "s.home_shots_on_goal, s.away_shots_on_goal, "
+                "s.home_shots_off_goal, s.away_shots_off_goal, "
+                "s.home_total_shots, s.away_total_shots, "
+                "s.home_blocked_shots, s.away_blocked_shots, "
+                "s.home_shots_insidebox, s.away_shots_insidebox, "
+                "s.home_shots_outsidebox, s.away_shots_outsidebox, "
+                "s.home_offsides, s.away_offsides, "
+                "s.home_goalkeeper_saves, s.away_goalkeeper_saves, "
+                "s.home_total_passes, s.away_total_passes, "
+                "s.home_passes_accurate, s.away_passes_accurate, "
+                "s.home_pass_accuracy, s.away_pass_accuracy "
+                "FROM fixture_rows f "
+                "LEFT JOIN LATERAL ("
+                " SELECT s.* FROM quantlab_match_statistics_observations s "
+                " WHERE s.fixture_id = f.fixture_id AND s.available_at <= %s "
+                " ORDER BY s.available_at DESC, s.statistics_observation_id DESC LIMIT 1"
+                ") s ON TRUE "
+                "LEFT JOIN LATERAL ("
+                " SELECT p.player_capture_id, p.available_at, p.status, p.reason, "
+                "        p.source, p.raw_payload "
+                " FROM quantlab_goal_player_captures p "
+                " WHERE p.fixture_id = f.fixture_id AND p.available_at <= %s "
+                " ORDER BY p.available_at DESC, p.player_capture_id DESC LIMIT 1"
+                ") pc ON TRUE "
+                "ORDER BY f.kickoff_at DESC, f.fixture_id DESC"
+        )
+        desc = "ORDER BY f.kickoff_at DESC, f.fixture_id DESC"
+        if sql.count(desc) != 1:
+            raise RuntimeError("GoalLab scoring query ordering contract changed")
+        sql = sql.replace(desc, "ORDER BY f.kickoff_at ASC, f.fixture_id ASC")
+        with self.connect() as connection, connection.cursor(
+            name="quantlab_goal_scoring_history"
+        ) as cursor:
+            cursor.execute(sql, (before, before, limit, before, before))
+            columns = tuple(item.name for item in cursor.description)
+
+            def rows() -> Iterator[dict[str, Any]]:
+                while True:
+                    batch = cursor.fetchmany(batch_size)
+                    if not batch:
+                        return
+                    for row in batch:
+                        yield dict(zip(columns, row, strict=True))
+
+            yield rows()
 
     def goal_model_by_training_fingerprint(
         self,

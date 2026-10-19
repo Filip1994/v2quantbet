@@ -64,6 +64,24 @@ def _odds_payload():
                         "name": "1xBet",
                         "bets": [
                             {
+                                "id": 5,
+                                "name": "Goals Over/Under",
+                                "values": [
+                                    {"value": "Over 2.5", "odd": "1.91"},
+                                    {"value": "Under 2.5", "odd": "1.95"},
+                                ],
+                            },
+                            {
+                                "id": 999,
+                                "name": "Exotic Provider Market",
+                                "values": [
+                                    {
+                                        "value": "Some Raw Selection",
+                                        "odd": "3.40",
+                                    }
+                                ],
+                            },
+                            {
                                 "id": 80,
                                 "name": "Cards Over/Under",
                                 "values": [{"value": "Over 4.5", "odd": 2.05}],
@@ -205,7 +223,7 @@ def test_all_market_parser_keeps_unknown_raw_market_and_only_target_books() -> N
         captured_at=NOW,
     )
 
-    assert {row.bookmaker_id for row in rows} == {8, 11}
+    assert {row.bookmaker_id for row in rows} == {11}
     exotic = next(row for row in rows if row.provider_bet_id == 999)
     assert exotic.lab_owner == "UNCLASSIFIED"
     assert exotic.raw_selection == "Some Raw Selection"
@@ -251,7 +269,7 @@ def test_collector_reuses_one_fixture_response_for_both_books_and_all_markets() 
 
     assert provider.calls == [42]
     assert repo.saved == rows
-    assert {row.bookmaker_id for row in rows} == {8, 11}
+    assert {row.bookmaker_id for row in rows} == {11}
     assert repo.capture["raw_observation_count"] == len(rows)
     assert repo.capture["stored_observation_count"] == len(rows)
 
@@ -449,7 +467,7 @@ def test_collector_persists_cardlab_markets_only_from_1xbet() -> None:
     assert {row.bookmaker_id for row in rows} == {11}
     assert {row.provider_bet_id for row in rows} == {80}
     assert repo.saved == rows
-    assert repo.capture["raw_observation_count"] == 4
+    assert repo.capture["raw_observation_count"] == 2
     assert repo.capture["stored_observation_count"] == 2
 
 
@@ -1371,3 +1389,22 @@ def test_quantlab_fixture_discovery_drops_ecuador_before_persistence() -> None:
 
     assert [row.fixture.provider_fixture_id for row in rows] == ["3003"]
 
+
+
+def test_result_refresh_can_parse_historical_blocked_fixture_without_new_pick_scope() -> None:
+    """Past canonical picks remain settleable after a country/league is retired."""
+    payload = {
+        "response": [
+            _fixture_payload(1492985, 358, "First Division", "Ireland"),
+            _fixture_payload(1496163, 473, "2. Division - Group 1", "Norway"),
+            _fixture_payload(3003, 39, "Premier League", "England"),
+        ]
+    }
+    normal = parse_fixture_discovery_response(payload, captured_at=NOW)
+    historical = parse_fixture_discovery_response(
+        payload, captured_at=NOW, include_blocked=True,
+    )
+    assert [r.fixture.provider_fixture_id for r in normal] == ["3003"]
+    assert [r.fixture.provider_fixture_id for r in historical] == [
+        "1492985", "1496163", "3003",
+    ]
