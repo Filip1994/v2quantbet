@@ -1036,7 +1036,7 @@ def _render_research_analytics_html(snapshot: dict[str, Any], query: str = "") -
                           ('model_version','Model version'),('p_min','Min P %'),('p_max','Max P %'),
                           ('ev_min','Min EV %'),('ev_max','Max EV %'),('odds_min','Min odds'),('odds_max','Max odds'))
     )
-    football_filters = f'<form method="get">{filter_inputs}<button>Apply football filters</button> <a href="/research/analytics">Clear football filters</a></form>'
+    football_filters = f'<form class="analytics-filters" method="get">{filter_inputs}<button>Apply football filters</button> <a href="/research/analytics">Clear football filters</a></form>'
     active_sort_table = params.get("sort_table", [""])[0].strip()
     active_sort_key = params.get("sort", [""])[0].strip()
     active_sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
@@ -1427,6 +1427,7 @@ font-size:11px;color:#7f8992;line-height:1.5}}
 .group-head{{display:block}}.group-head p{{margin-top:4px}}table{{font-size:11px}}.focus-note{{display:block}}
 .focus-note span{{display:block;margin-top:5px}}.legend-grid{{grid-template-columns:1fr}}}}
 .hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
+.analytics-tabs{{display:flex;gap:12px;margin:18px 0;padding:12px 0;border-bottom:1px solid #2a3542}}.analytics-tabs a{{padding:9px 13px;border:1px solid #34475a;border-radius:7px;text-decoration:none}}.analytics-tabs [aria-current=page]{{color:#80dfb0;border-color:#529c78;background:#132a21;font-weight:800}}.analytics-filters{{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px;margin:16px 0}}.analytics-filters label{{display:grid;gap:5px;color:#b7c7d6;font-size:11px}}.analytics-filters input,.analytics-filters button{{width:100%;min-height:34px;background:#172331;color:#e5edf5;border:1px solid #42536a;padding:8px;border-radius:6px}}.analytics-filters a{{align-self:center}}@media(max-width:900px){{.analytics-filters{{grid-template-columns:repeat(3,minmax(100px,1fr))}}}}@media(max-width:520px){{.analytics-filters{{grid-template-columns:repeat(2,minmax(90px,1fr))}}}}
 </style></head><body><main>
 <header><div><small>{ANALYTICS_CONTRACT_VERSION}</small><h1>Research Analytics V2</h1>
 <p>ROI-first evidence dashboard. Every aggregate row drills into its constituent picks.</p></div>
