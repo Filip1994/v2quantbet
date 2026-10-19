@@ -383,7 +383,7 @@ class PostgreSQLProductionFunnelRepository:
         if any(bucket.startswith("CORNER_") for bucket in bucket_ids):
             for row in cls._cornerlab_performance_rows(cursor):
                 # Cube evidence uses the same preserved PAPER history as Research.
-                # Live candidate universe hard gates remain enforced during intake.
+                # Live bookmaker, horizon and exposure gates remain in intake.
                 if str(row.get("outcome") or "") not in {"WIN", "LOSS"}:
                     continue
                 stake = int(row.get("stake_minor") or 0)

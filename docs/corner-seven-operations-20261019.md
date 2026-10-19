@@ -25,7 +25,7 @@ Old C4/C5 definitions remain for historical provenance but are deselected from
 new intake. The live Football allowlist remains BTTS NO odds 2.01–2.50 and OU OVER
 odds 1.81–2.00. All three services use that same explicit environment allowlist.
 Seven Corner cubes share first priority and are ranked by the existing measured
-N/ROI score. Existing kickoff, bookmaker, universe, exposure and stake gates apply.
+N/ROI score. Existing kickoff, bookmaker, exposure and stake gates apply.
 Existing source-identity uniqueness and transaction locking prevent repeated
 cloning. New Operations candidates remain PENDING until a human acts. This change
 does not place bets, alter PLAYED positions, rewrite settlements or change Kelly.
