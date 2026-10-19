@@ -52,6 +52,10 @@ UI is replaced by a database-free HTTP 308 compatibility redirect to Corner
 Analytics. No database, volume, historical record or source implementation is
 deleted.
 
+The scheduled Corner fitter only fits/reuses the original model. Former verbose
+offline historical holdout/audit pipelines remain preserved for manual use;
+Research now supplies ongoing calibration and cohort analytics.
+
 ## Backup and restoration
 
 Local backup directory:
