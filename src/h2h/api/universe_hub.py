@@ -18,10 +18,10 @@ MODULES = (
     ),
     (
         "CornerLab",
-        "https://quantbet-quantlab-production.up.railway.app/quantlab?view=dashboard&lab=corner",
+        "https://quantbet-research-production.up.railway.app/research/analytics/corners",
         "⌜",
         "corner",
-        "QuantLab · korneri",
+        "Corner Analytics · Research",
     ),
     (
         "GoalLab",
@@ -60,6 +60,8 @@ MODULES = (
     ),
 )
 
+RETIRED_LAB_TONES = frozenset({'goal', 'h2h', 'cards'})
+
 
 def manifest_json() -> bytes:
     return json.dumps(
@@ -88,13 +90,15 @@ def render_hub() -> str:
     tournament_paused = os.getenv('QUANTBET_KELLY_TOURNAMENT_PAUSED', '').lower() == 'true'
     def card(name, href, symbol, tone, description):
         paused = tournament_paused and tone == 'tournament'
-        opening = ('<div class="card tournament" aria-disabled="true">' if paused else
+        retired = tone in RETIRED_LAB_TONES
+        disabled = paused or retired
+        opening = ('<div class="card ' + tone + '" aria-disabled="true">' if disabled else
                    '<a class="card ' + tone + '" href="' + escape(href, quote=True) + '">')
         return opening + (
         '<span class="symbol" aria-hidden="true">' + escape(symbol) + '</span>'
         '<span class="copy"><strong>' + escape(name) + '</strong><small>'
-        + escape('PAUZIRANO · fokus na flat uloge' if paused else description)
-        + '</small></span>' + ('</div>' if paused else '<span class="arrow" aria-hidden="true">↗</span></a>'))
+        + escape('ARHIVIRANO · pipeline obustavljen' if retired else 'PAUZIRANO · fokus na flat uloge' if paused else description)
+        + '</small></span>' + ('</div>' if disabled else '<span class="arrow" aria-hidden="true">↗</span></a>'))
     cards = "".join(
         card(name, href, symbol, tone, description)
         for name, href, symbol, tone, description in MODULES
