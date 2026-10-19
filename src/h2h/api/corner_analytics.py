@@ -229,8 +229,13 @@ def fmt(value):
 
 
 def table(title, rows, fields):
+    def cell(row,key):
+        value=row.get(key)
+        if key in {'flat_pnl_minor','pnl_minor','drawdown_minor','cumulative_pnl_minor'} and value is not None:
+            return f'{float(value)/100:,.2f}'
+        return fmt(value)
     headers = ''.join(f'<th>{escape(label)}</th>' for _, label in fields)
-    body = ''.join('<tr>' + ''.join(f'<td>{escape(fmt(r.get(key)))}</td>' for key, _ in fields) + '</tr>' for r in rows)
+    body = ''.join('<tr>' + ''.join(f'<td>{escape(cell(r,key))}</td>' for key, _ in fields) + '</tr>' for r in rows)
     return f'<section><h2>{escape(title)}</h2><div class="scroll"><table><thead><tr>{headers}</tr></thead><tbody>{body or "<tr><td>No matching data</td></tr>"}</tbody></table></div></section>'
 
 
@@ -257,8 +262,8 @@ def render(snapshot, query='') -> str:
         inputs += f'<label>{label}<select name="{key}">{options}</select></label>'
     overview = table('Rolling and lifetime ' + snapshot['selected_disposition'] + ' performance', [{'window': k, **v} for k,v in snapshot['windows'].items()],
                      (('window','Window'),('signals','Signals'),('graded_n','Graded N'),('wins','W'),('losses','L'),('voids','V'),
-                      ('flat_pnl_minor','PnL minor'),('roi_pct','ROI %'),('drawdown_minor','Drawdown minor'),('corner_bias','Actual − expected'),('corner_mae','MAE')))
-    common = (('graded_n','Graded N'),('wins','W'),('losses','L'),('roi_pct','ROI %'),('flat_pnl_minor','PnL minor'),
+                      ('flat_pnl_minor','PnL RSD'),('roi_pct','ROI %'),('drawdown_minor','Drawdown RSD'),('corner_bias','Actual − expected'),('corner_mae','MAE')))
+    common = (('graded_n','Graded N'),('wins','W'),('losses','L'),('roi_pct','ROI %'),('flat_pnl_minor','PnL RSD'),
               ('avg_model_probability_pct','Model P %'),('avg_ev_pct','EV %'),('calibration_gap_pp','Calibration pp'))
     body = ''
     for key, fields in (
@@ -275,10 +280,10 @@ def render(snapshot, query='') -> str:
         ('decision_at','Decision UTC'),('home_team','Home'),('away_team','Away'),('market','Market'),('selection','Selection'),('line','Line'),
         ('expected_total_corners','Expected'),('actual_total_corners','Actual'),('actual_home_corners','Home corners'),('actual_away_corners','Away corners'),
         ('line_gap','Line gap'),('home_corners_for','Home L5 corners'),('away_corners_for','Away L5 corners'),
-        ('bookmaker','Bookmaker'),('odds','Odds'),('model_probability','Model P'),('expected_value','EV'),('outcome','Outcome'),('pnl_minor','PAPER PnL minor'),
+        ('bookmaker','Bookmaker'),('odds','Odds'),('model_probability','Model P'),('expected_value','EV'),('outcome','Outcome'),('pnl_minor','PAPER PnL RSD'),
         ('cohort','Cohort'),('disposition','Position'),('model_version','Model'),('shadow_bet_id','Source ID')))
     curve = table('Cumulative ' + snapshot['selected_disposition'] + ' PnL', snapshot['windows']['lifetime']['cumulative_pnl'],
-                  (('at','Settled UTC'),('pnl_minor','Change minor'),('cumulative_pnl_minor','Cumulative minor'),('source_id','Source ID')))
+                  (('at','Settled UTC'),('pnl_minor','Change RSD'),('cumulative_pnl_minor','Cumulative RSD'),('source_id','Source ID')))
     distributions = ''.join(table(f'Actual {side} corner distribution', [{'corners': k,'count':v} for k,v in counts.items()], (('corners','Corners'),('count','Count')))
                             for side,counts in snapshot['actual_corner_distributions'].items())
     distributions += table('Model total corner distribution · mixture of preserved Poisson projections',
@@ -286,7 +291,7 @@ def render(snapshot, query='') -> str:
     prices = table('Corner totals, team totals and handicap bookmaker prices · stored observations', snapshot['observed_corner_prices'],
                    (('fixture_id','Fixture'),('provider_bet_name','Market'),('raw_selection','Selection'),('parsed_line','Line'),('bookmaker_name','Bookmaker'),('odds','Odds'),('captured_at','Captured UTC'),('market_observation_id','Provenance')))
     separation = table('PLAYED / PAPER separation', [{'position':k,**v} for k,v in snapshot['disposition'].items()],
-                       (('position','Position'),('signals','Signals'),('graded_n','Graded N'),('flat_pnl_minor','PnL minor')))
+                       (('position','Position'),('signals','Signals'),('graded_n','Graded N'),('flat_pnl_minor','PnL RSD')))
     nav = f'<p>Page {snapshot["page"]} / {snapshot["pages"]} · {snapshot["filtered_count"]} signals · <a href="{escape(link(page=max(1,snapshot["page"]-1)),quote=True)}">Previous</a> · <a href="{escape(link(page=min(snapshot["pages"],snapshot["page"]+1)),quote=True)}">Next</a></p>'
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Corner Analytics · Research</title>
 <style>body{{font:14px system-ui;background:#0d1117;color:#dbe5ee;margin:0}}main{{max-width:1600px;margin:auto;padding:24px}}a{{color:#9ecbff}}.analytics-tabs{{display:flex;gap:20px;padding:20px 0}}[aria-current=page]{{font-weight:bold;color:#7ee7b5}}form{{display:flex;flex-wrap:wrap;gap:10px}}label{{display:grid;font-size:12px;gap:4px}}input,select,button{{background:#172331;color:#eef;border:1px solid #42536a;padding:8px;border-radius:5px}}section{{margin:24px 0;border:1px solid #26394c;padding:14px;border-radius:9px}}h2{{font-size:17px}}.scroll{{overflow:auto;max-height:600px}}table{{border-collapse:collapse;width:100%;white-space:nowrap;font-size:12px}}th,td{{padding:9px;border-bottom:1px solid #26394c;text-align:left}}th{{position:sticky;top:0;background:#172331}}.note{{color:#aac0d2;line-height:1.7}}</style></head><body><main>
