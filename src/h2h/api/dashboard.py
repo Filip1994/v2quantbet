@@ -141,10 +141,6 @@ def _production_bucket_links_html(bucket_ids: Any) -> str:
         "QUANTBET_RESEARCH_DASHBOARD_BASE_URL",
         "https://quantbet-research-production.up.railway.app",
     ).rstrip("/")
-    quantlab_base = os.environ.get(
-        "QUANTBET_QUANTLAB_DASHBOARD_BASE_URL",
-        "https://quantbet-quantlab-production.up.railway.app",
-    ).rstrip("/")
     links: list[str] = []
     for raw in bucket_ids or ():
         bucket_id = str(raw)
@@ -152,8 +148,13 @@ def _production_bucket_links_html(bucket_ids: Any) -> str:
         if spec is None:
             links.append(f'<span class="production-bucket-link unknown">{escape(bucket_id)}</span>')
             continue
-        base = research_base if spec.analytics_path.startswith('/research') else quantlab_base
-        href = base + spec.analytics_path
+        if spec.source_universe == 'GOALLAB':
+            links.append(f'<span class="production-bucket-link retired" title="Archived GoalLab bucket">{escape(spec.label)}</span>')
+            continue
+        # Old Corner identities stay readable after the standalone redirect retires.
+        path = (spec.analytics_path if spec.analytics_path.startswith('/research') else
+                '/research/analytics/corners?market=TOTAL_CORNERS&selection=OVER')
+        href = research_base + path
         links.append(
             f'<a class="production-bucket-link" href="{escape(href, quote=True)}" '
             'target="_blank" rel="noopener noreferrer" '

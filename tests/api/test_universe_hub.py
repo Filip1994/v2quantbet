@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from h2h.api.dashboard import DashboardHTTPService
-from h2h.api.universe_hub import MODULES
+from h2h.api.universe_hub import MODULES, RETIRED_LAB_TONES
 
 
 def test_paused_tournament_has_no_live_link(monkeypatch):
@@ -65,7 +65,7 @@ def _authenticated(url: str) -> Request:
     return Request(url, headers={"Authorization": f"Basic {token}"})
 
 
-def test_hub_has_all_eight_same_tab_links_and_does_not_render_dashboard(server) -> None:
+def test_hub_keeps_archived_cards_without_running_service_links(server) -> None:
     service, dashboard = server
     with urlopen(_authenticated(_url(service, "/hub"))) as response:
         html = response.read().decode("utf-8")
@@ -75,8 +75,10 @@ def test_hub_has_all_eight_same_tab_links_and_does_not_render_dashboard(server) 
         assert "script-src" not in response.headers["Content-Security-Policy"]
     parser = Links()
     parser.feed(html)
-    assert [link["href"] for link in parser.links] == [module[1] for module in MODULES]
-    assert len(parser.links) == 8
+    assert [link["href"] for link in parser.links] == [module[1] for module in MODULES if module[3] not in RETIRED_LAB_TONES]
+    assert len(parser.links) == 5
+    assert html.count('ARHIVIRANO') == 3
+    assert 'href="https://quantbet-quantlab-production' not in html
     assert all("target" not in link for link in parser.links)
     assert "<iframe" not in html.lower()
     assert "<script" not in html.lower()
