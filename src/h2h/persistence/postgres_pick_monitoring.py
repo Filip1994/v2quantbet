@@ -359,6 +359,28 @@ class PostgreSQLPickMonitoringRepository:
             )
             return tuple(row[0] for row in cursor.fetchall())
 
+    def closing_candidate_pick_ids(self, *, as_of: datetime) -> tuple[str, ...]:
+        """Batch the cheap cutoff check; finalize still validates under its lock.
+
+        Use the same observed/persisted cutoff as finalize, including missing
+        observations so data errors keep surfacing instead of being hidden.
+        """
+        current = _utc(as_of, "as_of")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT m.pick_id FROM pick_monitoring_states m "
+                "JOIN registered_picks r ON r.pick_id = m.pick_id "
+                "LEFT JOIN LATERAL (SELECT o.kickoff_at FROM fixture_observations o "
+                "WHERE o.fixture_id = r.fixture_id AND o.observed_at <= %s "
+                "AND o.persisted_at <= %s "
+                "ORDER BY o.observed_at DESC, o.fixture_observation_id DESC LIMIT 1) f ON TRUE "
+                "WHERE m.state = 'MONITORING' "
+                "AND (f.kickoff_at IS NULL OR f.kickoff_at <= %s) "
+                "ORDER BY m.started_at, m.pick_id",
+                (current, current, current),
+            )
+            return tuple(row[0] for row in cursor.fetchall())
+
     def fixture_identities_for_picks(
         self, pick_ids: tuple[str, ...]
     ) -> tuple[ResolvedFixtureIdentity, ...]:
