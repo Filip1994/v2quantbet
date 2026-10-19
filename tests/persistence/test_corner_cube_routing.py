@@ -67,3 +67,29 @@ def test_performance_preserves_separate_source_picks_from_same_fixture():
         def fetchall(self):
             return []
     assert PostgreSQLProductionFunnelRepository._cornerlab_performance_rows(Cursor()) == ()
+
+
+@pytest.mark.parametrize('graded_n,matched', [(10,0), (11,1)])
+def test_intake_requires_graded_n_above_ten_and_keeps_exposure_gate(monkeypatch, graded_n, matched):
+    from contextlib import nullcontext
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+    from h2h.persistence.postgres_production_funnel import PostgreSQLProductionFunnelRepository
+
+    bucket = CORNER_OPERATIONS_BUCKETS[1]
+    row = {**candidate(bucket), 'source_universe':'CORNERLAB', 'source_pick_id':'under-source',
+           'bookmaker_id':11, 'bookmaker_name':'1xBet', 'kickoff_at':datetime(2026,10,19,20,tzinfo=UTC),
+           'source_decision_at':datetime(2026,10,19,12,tzinfo=UTC), 'edge':.1}
+    connection = MagicMock()
+    repository = PostgreSQLProductionFunnelRepository(connect=lambda:nullcontext(connection))
+    monkeypatch.setattr(repository, '_open_exposure', lambda cursor:30000)
+    monkeypatch.setattr(repository, '_research_candidates', lambda *a,**kw:[])
+    monkeypatch.setattr(repository, '_goallab_candidates', lambda *a,**kw:[])
+    monkeypatch.setattr(repository, '_cornerlab_candidates', lambda *a,**kw:[row])
+    monkeypatch.setattr(repository, '_bucket_performance', lambda *a,**kw:{bucket.bucket_id:{'graded_n':graded_n,'roi_pct':40,'priority_score':4}})
+    result = repository.sync(now=datetime(2026,10,19,13,tzinfo=UTC),max_open_exposure_minor=30000,
+                             currency='RSD',fallback_stake_minor=30000,bucket_ids=(bucket.bucket_id,))
+    assert result.matched_candidates == matched
+    assert result.exposure_blocked == matched
+    assert result.cloned_picks == 0
+    assert result.open_exposure_minor == 30000
