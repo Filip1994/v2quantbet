@@ -84,6 +84,7 @@ def manifest_json() -> bytes:
 
 
 def render_hub() -> str:
+    # Static pause card never contacts or wakes the suspended Tournament service.
     tournament_paused = os.getenv('QUANTBET_KELLY_TOURNAMENT_PAUSED', '').lower() == 'true'
     def card(name, href, symbol, tone, description):
         paused = tournament_paused and tone == 'tournament'
