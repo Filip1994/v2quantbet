@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from h2h.corner_buckets import CORNER_OPERATIONS_IDS
 from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
     CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
@@ -33,7 +34,7 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 6
+    assert len(DEFAULT_BUCKET_IDS) == 11
     assert RESEARCH_OU_UNDER_EDGE_20_30 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
@@ -63,7 +64,6 @@ def test_deselected_b5_is_ignored_even_when_old_railway_env_lists_it() -> None:
     }
     assert active_bucket_ids(candidate) == (
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
     )
     # Historical matching and data remain intact; only Operations intake is de-selected.
     assert bucket_matches({
@@ -368,8 +368,7 @@ def test_default_bucket_order_is_stable_contract_order() -> None:
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
         RESEARCH_OU_UNDER_EDGE_10_15,
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
-        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+        *CORNER_OPERATIONS_IDS,
     )
 
 
@@ -404,13 +403,13 @@ def test_candidate_ranking_prefers_bucket_roi_before_pick_ev() -> None:
     ]
 
 
-def test_corner_c5_precedes_c4_and_research_despite_lower_roi_score() -> None:
+def test_selected_cubes_share_corner_priority_then_rank_by_evidence() -> None:
     # Explicit production preference dominates dynamically measured bucket performance.
     stats = {
-        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00: {
+        CORNER_OPERATIONS_IDS[0]: {
             "graded_n": 26, "roi_pct": 29.81, "priority_score": 7.75,
         },
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80: {
+        CORNER_OPERATIONS_IDS[5]: {
             "graded_n": 29, "roi_pct": 31.90, "priority_score": 9.25,
         },
         RESEARCH_BTTS_NO_ODDS_2_01_2_50: {
@@ -425,8 +424,8 @@ def test_corner_c5_precedes_c4_and_research_despite_lower_roi_score() -> None:
         reverse=True,
     )
     assert ranked == [
-        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+        CORNER_OPERATIONS_IDS[5],
+        CORNER_OPERATIONS_IDS[0],
         RESEARCH_BTTS_NO_ODDS_2_01_2_50,
     ]
 
