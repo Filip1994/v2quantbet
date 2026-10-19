@@ -13,8 +13,8 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
+from h2h.persistence.postgres_production_funnel import active_bucket_ids
 from h2h.production_buckets import (
-    DEFAULT_BUCKET_IDS,
     PRODUCTION_BUCKET_SPECS,
     RESEARCH_BTTS_NO_ODDS_2_01_2_50,
     RESEARCH_OU_UNDER_EDGE_10_15,
@@ -880,10 +880,11 @@ def _selected_research_production_buckets(
     snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Resolve active Research intake buckets to their current analytics rows."""
+    active_ids = set(active_bucket_ids())
     specs = {
         spec.bucket_id: spec
         for spec in PRODUCTION_BUCKET_SPECS
-        if spec.bucket_id in DEFAULT_BUCKET_IDS
+        if spec.bucket_id in active_ids and spec.source_universe == "RESEARCH"
     }
 
     def find(rows: Sequence[dict[str, Any]], **expected: str) -> dict[str, Any] | None:
