@@ -14,6 +14,16 @@ from h2h.api.dashboard import DashboardHTTPService
 from h2h.api.universe_hub import MODULES
 
 
+def test_paused_tournament_has_no_live_link(monkeypatch):
+    from h2h.api.universe_hub import render_hub
+    monkeypatch.setenv('QUANTBET_KELLY_TOURNAMENT_PAUSED','true')
+    html = render_hub()
+    assert 'PAUZIRANO · fokus na flat uloge' in html
+    assert 'aria-disabled="true"' in html
+    assert 'href="https://quantbet-kelly-tournament-production' not in html
+    assert 'href="https://quantbet-kellylab-production' in html
+
+
 class Links(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
