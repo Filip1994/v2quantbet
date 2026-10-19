@@ -1,4 +1,4 @@
-"""All-market Bet365/1xBet parser and persistence handoff for QuantLab."""
+"""All-market 1xBet-only active parsing; historical bookmaker rows remain untouched."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from h2h.quantlab.market_classifier import CLASSIFIER_VERSION, classify_market
 LOGGER = logging.getLogger("quantbet.quantlab.market_collector")
 RAW_ODDS_ARCHIVE_DATASET = "provider/odds-captures"
 
-BOOKMAKERS = {8: "Bet365", 11: "1xBet"}
+BOOKMAKERS = {11: "1xBet"}
 LAB_OWNERS = frozenset({"GOAL", "CORNER", "CARD", "UNCLASSIFIED"})
 _LINE_PATTERNS = (
     re.compile(r"^(?:over|under)\s+([+-]?\d+(?:\.\d+)?)$", re.IGNORECASE),
@@ -102,7 +102,7 @@ def parse_market_response(
     provider_fixture_id: int,
     captured_at: datetime,
 ) -> tuple[MarketObservation, ...]:
-    """Retain every returned market/selection for Bet365 and 1xBet, including unknown markets."""
+    """Retain only 1xBet market/selection observations, including unknown markets."""
     captured = _aware_utc(captured_at, "captured_at")
     if not isinstance(response, Mapping):
         raise TypeError("response must be a mapping")

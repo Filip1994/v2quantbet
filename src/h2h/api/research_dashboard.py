@@ -393,8 +393,13 @@ class ResearchDashboardService:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         signal_cache_ttl_seconds: int = 0,
         health_cache_ttl_seconds: int = 0,
+        corner_repository: Any | None = None,
     ) -> None:
         self._repository = repository
+        self._corner_repository = corner_repository
+        self._corner_cache = None
+        self._corner_cache_at = 0.0
+        self._corner_cache_lock = Lock()
         self._stake = fixed_stake_minor
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
@@ -874,11 +879,22 @@ class ResearchDashboardService:
             )
         )
 
-    def analytics_snapshot(self) -> dict[str, Any]:
+    def analytics_snapshot(self, query: str = "") -> dict[str, Any]:
         return build_research_analytics_snapshot(
-            self._analytics_signal_rows(),
+            self.signals(parse_qs(query, keep_blank_values=True)) if query else self._analytics_signal_rows(),
             fixed_stake_minor=self._stake,
         )
+
+    def corner_snapshot(self, query: str = "") -> dict[str, Any]:
+        from h2h.api.corner_analytics import build_snapshot
+        if self._corner_repository is None:
+            raise RuntimeError('Corner Research repository is unavailable')
+        with self._corner_cache_lock:
+            if self._corner_cache is None or monotonic() - self._corner_cache_at >= 60:
+                self._corner_cache = self._corner_repository.snapshot()
+                self._corner_cache_at = monotonic()
+            activation, rows, observations = self._corner_cache
+        return build_snapshot(rows, activation, query, now=self._clock(), observations=observations)
 
     def diagnostic_details(self, bucket: str = "OTHER_EXTREME") -> dict[str, Any]:
         """Return exact settled Research rows behind one analytics diagnostic bucket."""
@@ -1468,12 +1484,13 @@ font-size:10px}}.result-win{{color:var(--win)}}.result-loss{{color:var(--loss)}}
 .row-loss{{box-shadow:inset 3px 0 var(--loss)}}.row-void{{box-shadow:inset 3px 0 var(--void)}}
 .empty{{text-align:center;color:var(--muted);padding:36px!important}}@media(max-width:900px){{
 .cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}header{{display:block}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>RESEARCH_LEAGUE_DRILLDOWN_V1</small>
 <h1>{competition_name} · {season}</h1>
 <div class="meta">{country} · League ID {league_id} · all DC retrains combined</div>
 <p>League performance first; model versions remain available as the audit layer.</p></div>
-<div><a href="/research/analytics">← Analytics V2</a> ·
+<div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research/analytics">← Analytics V2</a> ·
 <a href="/research/analytics/league.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
 <section id="models" class="panel"><h2>Model versions · retrain history</h2>
@@ -1685,11 +1702,12 @@ margin-top:4px}}.result{{display:inline-block;padding:4px 7px;border-radius:999p
 .row-void{{box-shadow:inset 3px 0 var(--void)}}.empty{{text-align:center;color:var(--muted);
 padding:36px!important}}@media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}
 main{{padding:14px}}header{{display:block}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>RESEARCH_MODEL_VERSION_DRILLDOWN_V1</small>
 <h1>Model version picks</h1><span class="model-id">{model_label}</span>
 <p>Exact settled Research rows behind this Analytics V2 model cohort.</p></div>
-<div><a href="/research/analytics">← Analytics V2</a> ·
+<div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research/analytics">← Analytics V2</a> ·
 <a href="/research/analytics/model.json?{escape(json_query, quote=True)}">JSON</a></div></header>
 <section class="cards">{cards}</section>
 <section id="picks" class="panel"><div class="scroll"><table><thead><tr>{headers}</tr></thead>
@@ -1697,7 +1715,7 @@ main{{padding:14px}}header{{display:block}}}}
 </main></body></html>"""
 
     def render_analytics_html(self, query: str = "") -> str:
-        return render_research_analytics_html(self.analytics_snapshot(), query)
+        return render_research_analytics_html(self.analytics_snapshot(query), query)
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
@@ -2142,9 +2160,11 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 .empty{{text-align:center!important;color:var(--muted);padding:40px!important}}footer{{display:flex;justify-content:space-between;gap:15px;color:#7f878e;margin-top:12px;font-size:11px}}
 @media(max-width:1200px){{.cards{{grid-template-columns:repeat(3,1fr)}}.toolbar{{align-items:flex-start}}}}
 @media(max-width:720px){{main{{padding:14px}}.topbar{{align-items:flex-start;flex-direction:column}}.health-strip{{align-items:stretch}}.health-label{{width:100%;margin-bottom:1px}}.health-item{{min-width:calc(50% - 4px);flex:1}}.cards{{grid-template-columns:repeat(2,1fr)}}.toolbar{{display:block}}form{{margin-bottom:7px}}input,input[name="league"],select{{width:calc(50% - 4px)}}footer{{display:block;line-height:1.6}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header class="topbar">
 <div class="brand"><div class="sportsbook-logo" aria-label="QuantBet"><span class="logo-q">Q</span><span class="logo-word">QUANT</span><span class="logo-bet">BET</span></div><div><div class="eyebrow">Research universe</div><h1>Research Board</h1><p class="subtitle">All final-gate candidates · production + exposure blocked · one canonical pick per fixture</p></div></div>
+<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
 <section class="health-strip" aria-label="System status"><span class="health-label">System status</span>{health_html}</section>
@@ -2210,6 +2230,8 @@ class ResearchDashboardHTTPService:
                     "/research",
                     "/research/analytics",
                     "/research/analytics.json",
+                    "/research/analytics/corners",
+                    "/research/analytics/corners.json",
                     "/research/analytics/diagnostic.json",
                     "/research/analytics/model",
                     "/research/analytics/model.json",
@@ -2221,7 +2243,16 @@ class ResearchDashboardHTTPService:
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/research/analytics/league.json":
+                    if parsed.path in {"/research/analytics/corners", "/research/analytics/corners.json"}:
+                        snapshot = dashboard.corner_snapshot(parsed.query)
+                        if parsed.path.endswith('.json'):
+                            body = json.dumps(snapshot, default=str, ensure_ascii=False)
+                            content_type = "application/json; charset=utf-8"
+                        else:
+                            from h2h.api.corner_analytics import render
+                            body = render(snapshot, parsed.query)
+                            content_type = "text/html; charset=utf-8"
+                    elif parsed.path == "/research/analytics/league.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         league_id = int(params.get("league_id", ["0"])[0])
                         season = int(params.get("season", ["0"])[0])
@@ -2262,7 +2293,7 @@ class ResearchDashboardHTTPService:
                         content_type = "application/json; charset=utf-8"
                     elif parsed.path == "/research/analytics.json":
                         body = json.dumps(
-                            dashboard.analytics_snapshot(),
+                            dashboard.analytics_snapshot(parsed.query) if parsed.query else dashboard.analytics_snapshot(),
                             ensure_ascii=False,
                             indent=2,
                         )

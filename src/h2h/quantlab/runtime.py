@@ -644,9 +644,10 @@ class QuantLabRuntime:
                 break
             fixture_id = str(fixture.get("fixture_id") or "")
             scope = self._scope_kwargs(fixture)
-            if (
-                not goal_scope(**scope).allowed
-                and not card_corner_scope(**scope).allowed
+            if not (
+                (self._settings.goal_enabled and goal_scope(**scope).allowed)
+                or ((self._settings.corner_enabled or self._settings.card_enabled)
+                    and card_corner_scope(**scope).allowed)
             ):
                 continue
             try:
@@ -1595,7 +1596,7 @@ class QuantLabRuntime:
         return decisions, picks
 
     def _refresh_goal_pick_results(self, now: datetime) -> int:
-        """Refresh post-match result evidence for unsettled GoalLab canonical picks."""
+        """Refresh GoalLab results without allowing one stale fixture to block the batch."""
         rows = self._repository.goal_pick_result_refresh_candidates(
             now=now,
             post_kickoff_delay_seconds=GOAL_RESULT_INITIAL_DELAY_SECONDS,
@@ -1607,18 +1608,45 @@ class QuantLabRuntime:
         for fixture in rows:
             fixture_id = str(fixture["fixture_id"])
             provider_fixture_id = int(fixture["provider_fixture_id"])
-            payload = self._provider.fetch_fixture(provider_fixture_id)
-            observations = parse_fixture_discovery_response(payload, captured_at=now)
-            matching = tuple(
-                item for item in observations if str(item.fixture.fixture_id) == fixture_id
-            )
-            if not matching:
-                LOGGER.warning(
-                    "QuantLab GoalLab result refresh returned no matching fixture fixture=%s",
-                    fixture_id,
+            try:
+                payload = self._provider.fetch_fixture(provider_fixture_id)
+                # Scope gates govern NEW picks, not settlement of previously
+                # persisted canonical picks from now-retired competitions.
+                observations = parse_fixture_discovery_response(
+                    payload, captured_at=now, include_blocked=True,
                 )
-                continue
-            refreshed += int(self._repository.save_fixture_observations(matching))
+                matching = tuple(
+                    item for item in observations if str(item.fixture.fixture_id) == fixture_id
+                )
+                if not matching:
+                    LOGGER.warning(
+                        "QuantLab GoalLab result refresh returned no matching fixture fixture=%s",
+                        fixture_id,
+                    )
+                    self._repository.record_goal_pick_result_poll_attempt(
+                        fixture_id=fixture_id, attempted_at=now, outcome="NO_MATCH",
+                    )
+                    continue
+                refreshed += int(self._repository.save_fixture_observations(matching))
+                self._repository.record_goal_pick_result_poll_attempt(
+                    fixture_id=fixture_id, attempted_at=now, outcome="CAPTURED",
+                )
+            except ApiBudgetExceededError:
+                raise
+            except Exception as exc:
+                LOGGER.exception(
+                    "GoalLab result refresh failed fixture=%s error_class=%s",
+                    fixture_id,
+                    type(exc).__name__,
+                )
+                try:
+                    self._repository.record_goal_pick_result_poll_attempt(
+                        fixture_id=fixture_id, attempted_at=now, outcome="ERROR",
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "GoalLab failed to record polling error fixture=%s", fixture_id,
+                    )
         return refreshed
 
     def _settle_goal_picks(self, now: datetime) -> int:
