@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
+from h2h.corner_buckets import CORNER_OPERATIONS_BUCKETS, CORNER_OPERATIONS_IDS, corner_bucket_matches
 
 
 RESEARCH_LOW_SCORING_NON_EXTREME = "RESEARCH_LOW_SCORING_NON_EXTREME"
@@ -144,15 +145,22 @@ PRODUCTION_BUCKET_SPECS = (
 # Production selection is independent from GoalLab research/discovery status.
 # Keep historical bucket definitions for audits even when no longer approved for intake.
 # B5 is removed from Operations routing, including stale explicit env selections.
-PRODUCTION_DESELECTED_BUCKET_IDS = frozenset({RESEARCH_OU_UNDER_EDGE_20_30})
+PRODUCTION_DESELECTED_BUCKET_IDS = frozenset({
+    RESEARCH_OU_UNDER_EDGE_20_30,
+    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
+    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+})
 # Keep the two GoalLab specs available without selecting them for Production by default.
 DEFAULT_BUCKET_IDS = (
     RESEARCH_BTTS_NO_ODDS_2_01_2_50,
     RESEARCH_OU_UNDER_ODDS_2_01_2_50,
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
     RESEARCH_OU_UNDER_EDGE_10_15,
-    CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
-    CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+    *CORNER_OPERATIONS_IDS,
+)
+PRODUCTION_BUCKET_SPECS += tuple(
+    ProductionBucketSpec(b.bucket_id,b.label,'CORNERLAB',b.analytics_path,0.0)
+    for b in CORNER_OPERATIONS_BUCKETS
 )
 KNOWN_BUCKET_IDS = frozenset(spec.bucket_id for spec in PRODUCTION_BUCKET_SPECS)
 BUCKET_PRIORITY = {
@@ -181,6 +189,8 @@ def is_retired_research_segment(row: dict[str, Any]) -> bool:
 
 def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
     """Exact shared predicate for analytics, historical scoring and live intake."""
+    if bucket_id in CORNER_OPERATIONS_IDS:
+        return corner_bucket_matches(row,bucket_id)
     market = str(row.get("market_key") or row.get("market") or "").upper()
     selection = str(row.get("selection") or "").upper()
     odds = float(row.get("odds") or 0)

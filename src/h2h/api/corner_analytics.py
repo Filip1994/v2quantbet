@@ -8,9 +8,11 @@ from html import escape
 from math import exp, factorial
 from statistics import mean
 from typing import Any
+import os
 from urllib.parse import parse_qs, urlencode
 
 from h2h.api.research_analytics import cohort_metrics
+from h2h.corner_buckets import CORNER_OPERATIONS_BUCKETS, CORNER_BUCKET_BY_ID
 
 PATH = '/research/analytics/corners'
 
@@ -118,6 +120,11 @@ def groups(rows: list[dict[str, Any]], dimensions: tuple[str, ...], *, ranked=Fa
 
 
 def filter_rows(rows: list[dict[str, Any]], params: dict[str, list[str]]) -> list[dict[str, Any]]:
+    bucket_id = params.get('bucket_id',[''])[0]
+    if bucket_id:
+        if bucket_id not in CORNER_BUCKET_BY_ID:
+            raise ValueError('Unknown Corner bucket')
+        rows = [r for r in rows if CORNER_BUCKET_BY_ID[bucket_id].matches(r)]
     exact = {'market': 'market', 'selection': 'selection', 'cohort': 'cohort',
              'disposition': 'disposition', 'outcome': 'outcome', 'model_version': 'model_version_id'}
     for param, field in exact.items():
@@ -152,6 +159,20 @@ def build_snapshot(source_rows, activation, query='', *, now=None, observations=
     unique = {r['shadow_bet_id']: derive(r) for r in source_rows if r.get('lab') == 'CORNER'}
     params = parse_qs(query, keep_blank_values=True)
     paper = list(unique.values())
+    from h2h.production_buckets import DEFAULT_BUCKET_IDS
+    raw_active = os.getenv('QUANTBET_PRODUCTION_INTAKE_BUCKETS','').strip()
+    active_ids = set(raw_active.split(',')) if raw_active else set(DEFAULT_BUCKET_IDS)
+    operations_buckets = []
+    for b in CORNER_OPERATIONS_BUCKETS:
+        m = metrics([r for r in paper if b.matches(r)])
+        m.pop('cumulative_pnl')
+        operations_buckets.append({
+            **m, 'bucket_id':b.bucket_id, 'selection':b.selection, 'market':'TOTAL_CORNERS',
+            'odds_bucket':'–'.join(b.odds), 'probability_bucket':'–'.join(b.probability),
+            'ev_bucket':'–'.join(b.ev), 'line_gap_bucket':'–'.join(b.gap),
+            'status':'ACTIVE' if b.bucket_id in active_ids and m['graded_n']>10 else 'NOT ELIGIBLE',
+            'analytics_path':b.analytics_path,
+        })
     played = []
     for r in paper:
         if not r.get('production_pick_id'):
@@ -204,6 +225,7 @@ def build_snapshot(source_rows, activation, query='', *, now=None, observations=
         'contract_version': 'CORNER_RESEARCH_V1', 'activation_at': activation,
         'generated_at': now, 'source_count': len(unique), 'filtered_count': len(rows),
         'execution_enabled': False, 'selected_disposition': selected_disposition,
+        'operations_buckets': operations_buckets,
         'accounting': 'PAPER counterfactual source ledger and existing PLAYED production overlay are separate views. Never sum them. No bankroll entries.',
         'strategy_framework': 'Research cohort_metrics; PAPER evaluation only',
         'ranking_rule': 'graded_n > 10', 'windows': windows,
@@ -229,15 +251,52 @@ def fmt(value):
     return str(value)
 
 
-def table(title, rows, fields):
+def sorted_bucket_rows(rows, key, direction):
+    present=[r for r in rows if r.get(key) is not None]
+    missing=[r for r in rows if r.get(key) is None]
+    def value(r):
+        v=r[key]
+        if isinstance(v,(int,float,Decimal)):
+            return (0,float(v))
+        try:
+            return (0,float(str(v).split('–')[0]))
+        except ValueError:
+            return (1,str(v).casefold())
+    return sorted(present,key=value,reverse=direction!='asc')+missing
+
+
+def table(title, rows, fields, *, table_id='', query='', highlighted=False):
     def cell(row,key):
         value=row.get(key)
         if key in {'flat_pnl_minor','pnl_minor','drawdown_minor','cumulative_pnl_minor'} and value is not None:
             return f'{float(value)/100:,.2f}'
         return fmt(value)
-    headers = ''.join(f'<th>{escape(label)}</th>' for _, label in fields)
-    body = ''.join('<tr>' + ''.join(f'<td>{escape(cell(r,key))}</td>' for key, _ in fields) + '</tr>' for r in rows)
-    return f'<section><h2>{escape(title)}</h2><div class="scroll"><table><thead><tr>{headers}</tr></thead><tbody>{body or "<tr><td>No matching data</td></tr>"}</tbody></table></div></section>'
+    params={k:v[0] for k,v in parse_qs(query,keep_blank_values=True).items()}
+    sort_key = table_id + '_sort'
+    direction_key = table_id + '_dir'
+    if table_id and (sort_key in params or params.get('bucket_sort_table')==table_id):
+        key=params.get(sort_key,params.get('bucket_sort','roi_pct'))
+        if key in {k for k,_ in fields}:
+            rows=sorted_bucket_rows(rows,key,params.get(direction_key,params.get('bucket_dir','desc')))
+    def header(key,label):
+        if not table_id:
+            return f'<th>{escape(label)}</th>'
+        links=''
+        for direction,arrow in (('asc','↑'),('desc','↓')):
+            href=PATH+'?'+urlencode({**params,'bucket_sort_table':table_id,'bucket_sort':key,'bucket_dir':direction,sort_key:key,direction_key:direction})+'#'+table_id
+            links+=f' <a href="{escape(href,quote=True)}" aria-label="Sort {escape(label,quote=True)} {direction}">{arrow}</a>'
+        return f'<th>{escape(label)}{links}</th>'
+    headers = ''.join(header(key,label) for key,label in fields)
+    def row_html(r):
+        cells=''
+        for key,_ in fields:
+            content=escape(cell(r,key))
+            if highlighted and key=='selection':
+                content=f'<a href="{escape(r["analytics_path"],quote=True)}">{content}</a>'
+            cells+=f'<td>{content}</td>'
+        return f'<tr class="{"selected-bucket" if highlighted else ""}">{cells}</tr>'
+    body = ''.join(row_html(r) for r in rows)
+    return f'<section id="{escape(table_id,quote=True)}" class="{"operations-highlight" if highlighted else ""}"><h2>{escape(title)}</h2><div class="scroll"><table><thead><tr>{headers}</tr></thead><tbody>{body or "<tr><td>No matching data</td></tr>"}</tbody></table></div></section>'
 
 
 def render(snapshot, query='') -> str:
@@ -261,11 +320,21 @@ def render(snapshot, query='') -> str:
         options = '<option value="">All</option>' if key not in {'sort','dir','disposition'} else ''
         options += ''.join(f'<option {"selected" if params.get(key,["PAPER" if key=="disposition" else ""])[0] == v else ""}>{v}</option>' for v in values)
         inputs += f'<label>{label}<select name="{key}">{options}</select></label>'
+    for key in params:
+        if key in {'bucket_id', 'bucket_sort_table', 'bucket_sort', 'bucket_dir'} or (
+            key.startswith(('buckets-', 'operations-corner-buckets_')) and key.endswith(('_sort', '_dir'))
+        ):
+            inputs += f'<input type="hidden" name="{escape(key, quote=True)}" value="{escape(params[key][0], quote=True)}">'
     overview = table('Rolling and lifetime ' + snapshot['selected_disposition'] + ' performance', [{'window': k, **v} for k,v in snapshot['windows'].items()],
                      (('window','Window'),('signals','Signals'),('graded_n','Graded N'),('wins','W'),('losses','L'),('voids','V'),
                       ('flat_pnl_minor','PnL RSD'),('roi_pct','ROI %'),('drawdown_minor','Drawdown RSD'),('corner_bias','Actual − expected'),('corner_mae','MAE')))
     common = (('graded_n','Graded N'),('wins','W'),('losses','L'),('roi_pct','ROI %'),('flat_pnl_minor','PnL RSD'),
               ('avg_model_probability_pct','Model P %'),('avg_ev_pct','EV %'),('calibration_gap_pp','Calibration pp'))
+    selected = table('Operations intake · selected Corner buckets · lifetime PAPER',snapshot['operations_buckets'],
+                     (('market','Market'),('selection','Selection'),('odds_bucket','Odds'),('probability_bucket','P'),
+                      ('ev_bucket','EV'),('line_gap_bucket','Gap'),('graded_n','Graded N'),('wins','W'),('losses','L'),
+                      ('roi_pct','ROI %'),('flat_pnl_minor','PnL RSD'),('status','Operations')),
+                     table_id='operations-corner-buckets',query=query,highlighted=True)
     body = ''
     for key, fields in (
         ('markets',(('market','Market'),('selection','Selection'))),
@@ -276,7 +345,7 @@ def render(snapshot, query='') -> str:
         ('multidimensional',(('market','Market'),('selection','Selection'),('odds_bucket','Odds'),('probability_bucket','P'),('ev_bucket','EV'),('line_gap_bucket','Gap'))),
         ('league_multidimensional',(('competition_name','League'),('market','Market'),('selection','Selection'),('line_gap_bucket','Gap'))),
     ):
-        body += table(key.replace('_',' ').title() + (' · ranked only with graded N > 10' if 'multidimensional' in key else ''), snapshot['cohorts'][key], fields + common)
+        body += table(key.replace('_',' ').title() + (' · ranked only with graded N > 10' if 'multidimensional' in key else ''), snapshot['cohorts'][key], fields + common,table_id='buckets-'+key,query=query)
     items = table('Signal history and provenance', snapshot['items'], (
         ('decision_at','Decision UTC'),('home_team','Home'),('away_team','Away'),('market','Market'),('selection','Selection'),('line','Line'),
         ('expected_total_corners','Expected'),('actual_total_corners','Actual'),('actual_home_corners','Home corners'),('actual_away_corners','Away corners'),
@@ -299,5 +368,6 @@ def render(snapshot, query='') -> str:
 <header><a href="https://quantbet-dashboard-production.up.railway.app/hub">🏠 HUB</a> · <a href="/research">Research Board</a><h1>Research Analytics</h1></header>{analytics_tabs('corner')}
 <p class="note">CornerLab → Research → <a href="https://quantbet-kellylab-production.up.railway.app">KellyLab</a> review. New signals remain PAPER; execution disabled. Existing PLAYED positions are a separate read-only production overlay using frozen stakes and prices. PAPER and PLAYED totals must never be added together. Forward activation: {escape(str(snapshot['activation_at']))}. Historical cohorts keep original decision times. PnL uses one latest authoritative settlement per source ID; no bankroll postings. Model P/EV remain original. Corner handicaps have no graded model signals in the preserved model; unsupported projections remain unavailable.</p>
 <form method="get">{inputs}<button>Apply corner filters</button><a href="{PATH}">Clear corner filters</a></form>
-{overview}{separation}{body}{nav}{items}{nav}{prices}{distributions}{curve}
+<style>.operations-highlight{{border:1px solid #49a9ff;box-shadow:0 0 18px #1685ff22}}.selected-bucket{{background:#0d2942;color:#c7eaff}}.selected-bucket td{{border-bottom:1px solid #246399}}.selected-bucket a{{color:#7dd4ff;font-weight:800}}th a{{text-decoration:none;color:#9eb9cf;font-size:13px}}</style>
+{selected}{overview}{separation}{body}{nav}{items}{nav}{prices}{distributions}{curve}
 <p><a href="{PATH}.json?{escape(query,quote=True)}">Filtered JSON and complete cohort evidence</a></p></main></body></html>'''
