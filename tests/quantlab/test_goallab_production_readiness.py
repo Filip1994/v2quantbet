@@ -171,7 +171,6 @@ def test_retrain_pauses_authority_when_only_old_model_is_approved() -> None:
     (
         ("api-football:9101", 39, "Premier League", "England"),
         ("api-football:9102", 140, "La Liga", "Spain"),
-        ("api-football:9103", 135, "Serie A", "Italy"),
     ),
 )
 def test_real_league_fixture_flows_to_one_canonical_pick(
@@ -205,6 +204,43 @@ def test_real_league_fixture_flows_to_one_canonical_pick(
     assert repo.picks[0].fixture_id == fixture_id
     assert repo.picks[0].model_version == NEW_MODEL
     assert repo.picks[0].pick_policy_version == "GOALLAB_DC_PLUS_PICK_POLICY_V4"
+
+
+
+@pytest.mark.parametrize(
+    ("fixture_id", "league_id", "competition_name", "country"),
+    [
+        ("api-football:9103", 135, "Serie A", "Italy"),
+        ("api-football:9104", 382, "Ligat HaAl", "Israel"),
+    ],
+)
+def test_globally_banned_football_cannot_generate_goallab_picks(
+    fixture_id, league_id, competition_name, country,
+) -> None:
+    repo = EngineRepo()
+    engine = GoalLabStructuralShadowEngine(
+        repo,
+        policy=StructuralGoalPolicy(
+            pick_authority=True,
+            approved_model_version=NEW_MODEL,
+        ),
+    )
+    engine._model = ReadyModel()
+
+    result = engine.run_fixture(
+        _fixture(
+            fixture_id,
+            league_id=league_id,
+            competition_name=competition_name,
+            country=country,
+        ),
+        decision_at=NOW,
+    )
+
+    assert result.picks_inserted == 0
+    assert repo.picks == []
+    assert len(repo.decisions) == 1
+    assert repo.decisions[0].reason == "OUTSIDE_GOAL_SCOPE"
 
 
 def test_runtime_isolates_one_goal_fixture_failure_and_continues(caplog) -> None:
