@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from html import escape
 from math import exp, factorial
 from statistics import mean
@@ -32,7 +32,8 @@ def number(value: Any) -> float | None:
 def band(value: Any, width: float) -> str:
     if value is None:
         return 'UNRECORDED'
-    low = (float(value) // width) * width
+    step = Decimal(str(width))
+    low = float((Decimal(str(value)) / step).to_integral_value(rounding=ROUND_FLOOR) * step)
     return f'{low:g}–{low + width:g}'
 
 

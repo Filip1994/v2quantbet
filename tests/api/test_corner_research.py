@@ -2,10 +2,16 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from h2h.api.corner_analytics import analytics_tabs, build_snapshot, render
+from h2h.api.corner_analytics import analytics_tabs, band, build_snapshot, render
 from h2h.cornerlab_entrypoint import configure_corner_only
 
 NOW = datetime(2026, 10, 19, 12, tzinfo=UTC)
+
+
+def test_bucket_boundaries_are_decimal_and_do_not_round_into_adjacent_buckets():
+    assert band(.6,.05) == '0.6–0.65'
+    assert band(.3,.05) == '0.3–0.35'
+    assert band(-.1,.05) == '-0.1–-0.05'
 
 
 def source(index=0, **changes):
