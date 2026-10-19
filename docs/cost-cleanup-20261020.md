@@ -14,10 +14,13 @@ selected candidates/order matched exactly. Floating ROI/score values matched to
 Measured score-read round trip: 1,969 ms / 3 queries -> 750 ms / 2 queries. This is
 a bounded query measurement, not a claim about total cloud savings.
 
-Deployment is based on the currently live pinned source `72b781e`. Later universe
-policy commits on the original service branch remain untouched and are not
-silently activated by this cost deployment. They had an unrelated classification
-reason test failure in the initial audit; the isolated live-code suites pass.
+Deployment preserves the actual live Engine source `a8a6044` and Dashboard
+`bda84fc`, including their Serie A/Israel bans. Railway's service source pin
+still showed older commits; deployment history revealed that the actual running
+builds were newer. An initial build from the stale pin was replaced after this
+was identified. Read-only audit found no newly cloned production picks during
+that interval. The final branch merges preserve the existing policy; only a
+pre-existing rejection-reason test was aligned to its blacklist precedence.
 
 Backup/evidence directory:
 `C:/Users/User/Documents/ChatGPT/fudbal/cost-cleanup-20261020`.
@@ -39,8 +42,8 @@ cache; shared/anonymous memory was below 250 MB. A 750 MB limit may reduce cache
 cost, but must be reverted to 1 GB on OOM/restart, failed functional checks or
 unacceptable query latency. Do not claim invoice savings before billing arrives.
 
-Rollback: reconnect Engine to `72b781e095ef1cbd03ace6a8c925514783bcff73` on its
-original branch; Dashboard to `3d1d12d56cfaaa0ef99708a1d31ca487e79d8d91`.
+Rollback: reconnect Engine to `a8a60445b3641c8cff538c21cc1640b22a816580` on its
+original branch; Dashboard to `bda84fcc7a7b2fb083e6c94010118cd1bd0d24db`.
 Use previous successful deployment IDs in `services-before.json`. Restore
 Postgres memory to 1 GB if tuning fails. Restart the retained redirect service
 only if legacy navigation is restored. Never rerun financial repair scripts or
