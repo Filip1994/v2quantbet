@@ -209,9 +209,11 @@ font-size:9px;letter-spacing:.05em}}td.match{{min-width:230px}}td small{{display
 .row-pending{{box-shadow:inset 3px 0 #d6aa55}}.empty{{text-align:center;padding:34px!important;
 color:var(--muted)}}footer{{color:#7f878e;font-size:11px;margin-top:12px;line-height:1.6}}
 @media(max-width:1100px){{.cards{{grid-template-columns:repeat(2,1fr)}}main{{padding:14px}}}}
+.hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main>
 <header><div><small>KELLYLAB_RESEARCH_V1 · SHADOW ONLY</small><h1>KellyLab</h1>
 <p>Research clones · point-in-time bucket calibration · Quarter Kelly · 1% hard cap</p></div>
+<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="badge">Started {started}</div></header>
 <section class="cards">{cards_html}</section>
 <nav><a class="{active_class}" href="/kellylab?tab=active">Active ({portfolio["active_count"]})</a>
