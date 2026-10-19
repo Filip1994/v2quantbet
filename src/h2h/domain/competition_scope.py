@@ -59,10 +59,11 @@ def _contains_phrase(value: str, phrases: tuple[str, ...]) -> bool:
 # Global hard ban: same contract used by Research, Production, QuantLab and Kelly.
 # League 40 is England's Championship (not all English or Scottish tiers).
 # League 365 is Latvia's Virslīga (not a country-wide Latvia block).
-BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({40, 72, 75, 236, 365, 595})
+# League 135 is Italy's Serie A; Israel is blocked country-wide.
+BLACKLISTED_API_FOOTBALL_LEAGUE_IDS = frozenset({40, 72, 75, 135, 236, 365, 595})
 # Guard against inconsistent/missing league_id in downstream metadata.
-BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("england", "championship"), ("latvia", "virsliga")})
-BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland"})
+BLACKLISTED_COMPETITIONS_BY_NAME = frozenset({("england", "championship"), ("latvia", "virsliga"), ("italy", "serie a")})
+BLOCKED_COUNTRIES = frozenset({"bolivia", "ecuador", "ireland", "republic of ireland", "israel", "state of israel", "isr"})
 BLOCKED_TEAMS = frozenset({"klubi 04", "klubi04"})
 FRIENDLY_API_FOOTBALL_LEAGUE_IDS = frozenset({10})
 NATIONAL_TEAM_API_FOOTBALL_LEAGUE_IDS = frozenset({1, 4, 5, 6, 7, 8, 9})
@@ -79,10 +80,16 @@ def is_blacklisted_team(team: object) -> bool:
 
 
 def is_blacklisted_competition_name(country: object, competition_name: object) -> bool:
-    """Hard-block exact named competitions and every Dutch Derde Divisie variant."""
+    """Hard-block named competitions, Italy Serie A and Dutch Derde Divisie variants."""
     country_key = _normalise(str(country or ""))
     name_key = _normalise(str(competition_name or ""))
     if (country_key, name_key) in BLACKLISTED_COMPETITIONS_BY_NAME:
+        return True
+
+    # Include Serie A championship/playoff suffixes, not Serie B/C or other countries.
+    if country_key in {"italy", "italia"} and (
+        name_key == "serie a" or name_key.startswith("serie a ")
+    ):
         return True
 
     # All Dutch Derde Divisie branches (including Sunday and relegation rounds).

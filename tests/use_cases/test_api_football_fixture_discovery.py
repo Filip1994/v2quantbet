@@ -73,6 +73,7 @@ def test_phase_i_policy_is_authoritative_for_multi_league_provider_payload() -> 
         _payload(1, 39, "Premier League", "England"),
         _payload(2, 140, "La Liga", "Spain"),
         _payload(3, 135, "Serie A", "Italy"),
+        _payload(16, 382, "Ligat HaAl", "Israel"),
         _payload(4, 98, "J1 League", "Japan"),
         _payload(10, 78, "Bundesliga", "Germany"),
         _payload(11, 253, "Major League Soccer", "USA"),
@@ -96,7 +97,6 @@ def test_phase_i_policy_is_authoritative_for_multi_league_provider_payload() -> 
     assert {fixture.competition_name for fixture in fixtures} == {
         "Premier League",
         "La Liga",
-        "Serie A",
         "Bundesliga",
         "Major League Soccer",
     }
