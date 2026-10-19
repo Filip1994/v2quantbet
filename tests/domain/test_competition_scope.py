@@ -12,7 +12,7 @@ from h2h.domain.competition_scope import (
     [
         CompetitionMetadata("England", "Premier League", "league", 1),
         CompetitionMetadata("Spain", "La Liga", "league", 1),
-        CompetitionMetadata("Italy", "Serie A", "league", 1),
+        CompetitionMetadata("Italy", "Serie B", "league", 2),
         CompetitionMetadata("Germany", "Bundesliga", "league", 1),
         CompetitionMetadata("Germany", "2. Bundesliga", "league", 2),
         CompetitionMetadata("England", "League One", "league", 3),
@@ -289,3 +289,57 @@ def test_rejects_klubi_04_across_entire_universe(metadata: CompetitionMetadata) 
 
     assert decision.eligible is False
     assert decision.rejection_reason == RejectionReason.BLOCKED_TEAM
+
+
+@pytest.mark.parametrize(
+    ("country", "name", "league_id"),
+    [
+        ("Italy", "Serie A", 135),
+        ("ITALY", "SERIE A", None),
+        ("Italia", "Serie A - Championship Round", None),
+        ("Italy", "Serie A - Relegation Round", None),
+        ("Other Country", "Other League", "135"),
+    ],
+)
+def test_italy_serie_a_globally_blocked_by_id_or_competition_family(
+    country: str, name: str, league_id: object,
+) -> None:
+    from h2h.domain.competition_scope import is_universe_blocked_competition, universe_block_reason
+
+    kwargs = {"country": country, "competition_name": name, "league_id": league_id}
+    assert universe_block_reason(**kwargs) == RejectionReason.BLACKLISTED_LEAGUE
+    assert is_universe_blocked_competition(**kwargs)
+    assert not classify_phase_i(CompetitionMetadata(country, name, "league", league_id=league_id)).eligible
+
+
+@pytest.mark.parametrize(
+    ("country", "name"),
+    [
+        ("Israel", "Ligat HaAl"),
+        ("ISRAËL", "Liga Leumit"),
+        ("State of Israel", "Liga Alef North"),
+        ("ISR", "State Cup"),
+    ],
+)
+def test_entire_israeli_domestic_football_is_globally_blocked(country: str, name: str) -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(country=country, competition_name=name) == RejectionReason.BLOCKED_COUNTRY
+    assert classify_phase_i(CompetitionMetadata(country, name, "league")).rejection_reason == RejectionReason.BLOCKED_COUNTRY
+
+
+@pytest.mark.parametrize(
+    ("country", "name", "league_id"),
+    [
+        ("Italy", "Serie B", 136),
+        ("Italy", "Serie C", 137),
+        ("Brazil", "Serie A", 71),
+        ("Spain", "La Liga", 140),
+    ],
+)
+def test_ban_does_not_expand_to_other_italian_leagues_or_countries(
+    country: str, name: str, league_id: int,
+) -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(country=country, competition_name=name, league_id=league_id) is None
