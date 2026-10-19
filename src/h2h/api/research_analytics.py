@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextvars import ContextVar
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from html import escape
 from math import sqrt
 from statistics import mean, median, stdev
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
@@ -26,6 +28,7 @@ from h2h.production_buckets import (
 
 
 ANALYTICS_CONTRACT_VERSION = "RESEARCH_ANALYTICS_V2"
+_VIEW_PARAMS: ContextVar = ContextVar('football_analytics_params', default=MappingProxyType({}))
 
 DIAGNOSTIC_BUCKETS = (
     "LOW_SCORING_EXTREME",
@@ -296,12 +299,14 @@ def _cohort_rows(
     for key, cohort in grouped.items():
         item = {dimension: value for dimension, value in zip(dimensions, key, strict=True)}
         item.update(cohort_metrics(cohort, fixed_stake_minor=fixed_stake_minor))
+        item['ranking_eligible'] = len(dimensions) == 1 or item['graded_n'] > 10
         result.append(item)
 
     return sorted(
         result,
         key=lambda item: (
-            -int(item["graded_n"]),
+            not item['ranking_eligible'],
+            -int(item["graded_n"]) if item['ranking_eligible'] else 0,
             *(str(item[dimension]) for dimension in dimensions),
         ),
     )
@@ -434,6 +439,7 @@ def build_research_analytics_snapshot(
         "windows": {
             "lifetime": cohort_metrics(settled_active, fixed_stake_minor=fixed_stake_minor),
             "last_30d": cohort_metrics(since(30), fixed_stake_minor=fixed_stake_minor),
+            "last_14d": cohort_metrics(since(14), fixed_stake_minor=fixed_stake_minor),
             "last_7d": cohort_metrics(since(7), fixed_stake_minor=fixed_stake_minor),
         },
         "weekly": [
@@ -598,6 +604,7 @@ def _sort_header(
     def href(direction: str) -> str:
         query = urlencode(
             {
+                **{k: v for k, v in _VIEW_PARAMS.get().items() if not k.startswith('page_')},
                 "sort_table": table_id,
                 "sort": key,
                 "dir": direction,
@@ -637,12 +644,35 @@ def _metrics_table(
     compact_roi: bool = False,
 ) -> str:
     visible_rows = list(rows)
+    # Low-N multidimensional evidence stays available in the JSON cohort audit,
+    # but cannot appear in a ranking or ordered decision table.
+    unranked = []
+    if len(dimensions) > 1:
+        unranked = sorted(
+            (r for r in visible_rows if r.get('graded_n', 0) <= 10),
+            key=lambda r: tuple(str(r.get(d, '')) for d in dimensions),
+        )
+        visible_rows = [r for r in visible_rows if r.get('graded_n', 0) > 10]
     if active_sort_table == table_id and active_sort_key:
         visible_rows = _sorted_analytics_rows(
             visible_rows,
             key=active_sort_key,
             direction=active_sort_dir,
         )
+    visible_rows.extend(unranked)
+
+    params = _VIEW_PARAMS.get()
+    page_size = max(1, min(200, int(params.get('page_size', '50') or '50')))
+    pages = max(1, (len(visible_rows) + page_size - 1) // page_size)
+    page_key = 'page_' + table_id
+    page = max(1, min(pages, int(params.get(page_key, '1') or '1')))
+    count = len(visible_rows)
+    visible_rows = visible_rows[(page - 1) * page_size:page * page_size]
+    def page_link(value: int) -> str:
+        return '/research/analytics?' + urlencode({**params, page_key: value}) + '#table-' + table_id
+    pagination = (f'<p>Page {page}/{pages} · {count} buckets · '
+                  f'<a href="{escape(page_link(max(1,page-1)), quote=True)}">Previous</a> · '
+                  f'<a href="{escape(page_link(min(pages,page+1)), quote=True)}">Next</a></p>')
 
     dimension_headers = "".join(
         _sort_header(
@@ -738,6 +768,8 @@ def _metrics_table(
         )
         evidence = escape(str(row["sample_band"]))
         evidence_class = evidence.casefold().replace("_", "-")
+        if len(dimensions) > 1 and row.get('graded_n', 0) <= 10:
+            evidence = 'UNRANKED · graded N ≤ 10'
         decision_ready = (
             compact_roi
             and int(row.get("graded_n") or 0) >= 500
@@ -840,7 +872,7 @@ def _metrics_table(
         + action_header
         + "</tr></thead><tbody>"
         + "".join(body)
-        + "</tbody></table></div></section>"
+        + "</tbody></table></div>" + pagination + "</section>"
     )
 
 
@@ -986,6 +1018,24 @@ def _selected_research_bucket_table(snapshot: dict[str, Any]) -> str:
 
 def render_research_analytics_html(snapshot: dict[str, Any], query: str = "") -> str:
     params = parse_qs(query, keep_blank_values=True)
+    token = _VIEW_PARAMS.set({k:v[0] for k,v in params.items()})
+    try:
+        return _render_research_analytics_html(snapshot, query)
+    finally:
+        _VIEW_PARAMS.reset(token)
+
+
+def _render_research_analytics_html(snapshot: dict[str, Any], query: str = "") -> str:
+    from h2h.api.corner_analytics import analytics_tabs
+    params = parse_qs(query, keep_blank_values=True)
+    filter_inputs = ''.join(
+        f'<label>{escape(label)} <input name="{key}" value="{escape(params.get(key,[""])[0],quote=True)}"></label> '
+        for key,label in (('market','Market'),('selection','Selection'),('league','League'),
+                          ('disposition','Route'),('bookmaker','Bookmaker'),('result','Result'),
+                          ('model_version','Model version'),('p_min','Min P %'),('p_max','Max P %'),
+                          ('ev_min','Min EV %'),('ev_max','Max EV %'),('odds_min','Min odds'),('odds_max','Max odds'))
+    )
+    football_filters = f'<form method="get">{filter_inputs}<button>Apply football filters</button> <a href="/research/analytics">Clear football filters</a></form>'
     active_sort_table = params.get("sort_table", [""])[0].strip()
     active_sort_key = params.get("sort", [""])[0].strip()
     active_sort_dir = params.get("dir", ["desc"])[0].strip().casefold()
@@ -1381,6 +1431,8 @@ font-size:11px;color:#7f8992;line-height:1.5}}
 <p>ROI-first evidence dashboard. Every aggregate row drills into its constituent picks.</p></div>
 <div><a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a> · <a href="/research">← Research Board</a> ·
 <a href="/research/analytics.json">JSON</a></div></header>
+{analytics_tabs('football')}
+{football_filters}
 <nav class="section-nav">
 <a href="#overview">Overview</a><a href="#decision">ROI decision lab</a>
 <a href="#calibration">Calibration & CLV</a><a href="#audit">Audit</a>

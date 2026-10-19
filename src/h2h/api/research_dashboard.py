@@ -393,8 +393,13 @@ class ResearchDashboardService:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         signal_cache_ttl_seconds: int = 0,
         health_cache_ttl_seconds: int = 0,
+        corner_repository: Any | None = None,
     ) -> None:
         self._repository = repository
+        self._corner_repository = corner_repository
+        self._corner_cache = None
+        self._corner_cache_at = 0.0
+        self._corner_cache_lock = Lock()
         self._stake = fixed_stake_minor
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
@@ -874,11 +879,22 @@ class ResearchDashboardService:
             )
         )
 
-    def analytics_snapshot(self) -> dict[str, Any]:
+    def analytics_snapshot(self, query: str = "") -> dict[str, Any]:
         return build_research_analytics_snapshot(
-            self._analytics_signal_rows(),
+            self.signals(parse_qs(query, keep_blank_values=True)) if query else self._analytics_signal_rows(),
             fixed_stake_minor=self._stake,
         )
+
+    def corner_snapshot(self, query: str = "") -> dict[str, Any]:
+        from h2h.api.corner_analytics import build_snapshot
+        if self._corner_repository is None:
+            raise RuntimeError('Corner Research repository is unavailable')
+        with self._corner_cache_lock:
+            if self._corner_cache is None or monotonic() - self._corner_cache_at >= 60:
+                self._corner_cache = self._corner_repository.snapshot()
+                self._corner_cache_at = monotonic()
+            activation, rows, observations = self._corner_cache
+        return build_snapshot(rows, activation, query, now=self._clock(), observations=observations)
 
     def diagnostic_details(self, bucket: str = "OTHER_EXTREME") -> dict[str, Any]:
         """Return exact settled Research rows behind one analytics diagnostic bucket."""
@@ -1699,7 +1715,7 @@ main{{padding:14px}}header{{display:block}}}}
 </main></body></html>"""
 
     def render_analytics_html(self, query: str = "") -> str:
-        return render_research_analytics_html(self.analytics_snapshot(), query)
+        return render_research_analytics_html(self.analytics_snapshot(query), query)
 
     def render_html(self, query: str = "") -> str:
         params = parse_qs(query, keep_blank_values=True)
@@ -2214,6 +2230,8 @@ class ResearchDashboardHTTPService:
                     "/research",
                     "/research/analytics",
                     "/research/analytics.json",
+                    "/research/analytics/corners",
+                    "/research/analytics/corners.json",
                     "/research/analytics/diagnostic.json",
                     "/research/analytics/model",
                     "/research/analytics/model.json",
@@ -2225,7 +2243,16 @@ class ResearchDashboardHTTPService:
                 if not service._authorize(self):
                     return
                 try:
-                    if parsed.path == "/research/analytics/league.json":
+                    if parsed.path in {"/research/analytics/corners", "/research/analytics/corners.json"}:
+                        snapshot = dashboard.corner_snapshot(parsed.query)
+                        if parsed.path.endswith('.json'):
+                            body = json.dumps(snapshot, default=str, ensure_ascii=False)
+                            content_type = "application/json; charset=utf-8"
+                        else:
+                            from h2h.api.corner_analytics import render
+                            body = render(snapshot, parsed.query)
+                            content_type = "text/html; charset=utf-8"
+                    elif parsed.path == "/research/analytics/league.json":
                         params = parse_qs(parsed.query, keep_blank_values=True)
                         league_id = int(params.get("league_id", ["0"])[0])
                         season = int(params.get("season", ["0"])[0])
@@ -2266,7 +2293,7 @@ class ResearchDashboardHTTPService:
                         content_type = "application/json; charset=utf-8"
                     elif parsed.path == "/research/analytics.json":
                         body = json.dumps(
-                            dashboard.analytics_snapshot(),
+                            dashboard.analytics_snapshot(parsed.query) if parsed.query else dashboard.analytics_snapshot(),
                             ensure_ascii=False,
                             indent=2,
                         )
