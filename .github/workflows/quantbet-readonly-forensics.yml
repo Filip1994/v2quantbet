@@ -1,0 +1,30 @@
+name: QuantBet Read-only Research Forensics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/quantbet-readonly-forensics.yml
+      - scripts/quantbet_forensics_live.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout audit
+        uses: actions/checkout@v4
+      - name: Read public Research and perform chronological replay
+        run: python3 scripts/quantbet_forensics_live.py
+      - name: Preserve aggregated forensic results only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantbet-forensics-aggregates
+          path: /tmp/quantbet-forensics-report.json
+          if-no-files-found: warn
+          retention-days: 14
