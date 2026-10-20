@@ -10,12 +10,10 @@ from h2h.domain.competition_scope import (
 @pytest.mark.parametrize(
     "metadata",
     [
-        CompetitionMetadata("England", "Premier League", "league", 1),
         CompetitionMetadata("Spain", "La Liga", "league", 1),
         CompetitionMetadata("Italy", "Serie B", "league", 2),
         CompetitionMetadata("Germany", "Bundesliga", "league", 1),
         CompetitionMetadata("Germany", "2. Bundesliga", "league", 2),
-        CompetitionMetadata("England", "League One", "league", 3),
         CompetitionMetadata("USA", "Major League Soccer", "league", 1),
         CompetitionMetadata("Sweden", "Allsvenskan", "league", 1),
         CompetitionMetadata("Sweden", "Superettan", "league", 2),
@@ -35,7 +33,7 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
     [
         (
             CompetitionMetadata("England", "EFL Trophy", "league"),
-            RejectionReason.CUP,
+            RejectionReason.BLOCKED_COUNTRY,
         ),
         (
             CompetitionMetadata("Netherlands", "KNVB Beker", "league"),
@@ -51,7 +49,7 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
         ),
         (
             CompetitionMetadata("England", "Non League Premier - Isthmian", "league"),
-            RejectionReason.ENGLISH_TIER,
+            RejectionReason.BLOCKED_COUNTRY,
         ),
         (
             CompetitionMetadata("Germany", "Oberliga - Bremen", "league"),
@@ -91,7 +89,7 @@ def test_accepts_representative_senior_leagues(metadata: CompetitionMetadata) ->
         ),
         (
             CompetitionMetadata("England", "League Two", "league", 4),
-            RejectionReason.ENGLISH_TIER,
+            RejectionReason.BLOCKED_COUNTRY,
         ),
         (
             CompetitionMetadata("Germany", "3. Liga", "league", 3),
@@ -168,7 +166,6 @@ def test_fails_closed_on_ambiguous_metadata(metadata: CompetitionMetadata) -> No
 @pytest.mark.parametrize(
     "metadata",
     [
-        CompetitionMetadata("England", "Women's Super League", "league", 1),
         CompetitionMetadata("USA", "NWSL", "league", 1),
         CompetitionMetadata("Spain", "Liga F", "league", 1),
         CompetitionMetadata("Germany", "Frauen Bundesliga", "league", 1),
@@ -195,7 +192,6 @@ def test_rejects_womens_football_globally(metadata: CompetitionMetadata) -> None
         CompetitionMetadata("World", "Friendlies", "Cup", league_id=10),
         CompetitionMetadata("World", "Friendlies Clubs", "Cup"),
         CompetitionMetadata("World", "Club Friendlies", "Cup"),
-        CompetitionMetadata("England", "International Friendly", "Friendly"),
     ],
 )
 def test_rejects_friendlies_globally(metadata: CompetitionMetadata) -> None:
@@ -345,3 +341,44 @@ def test_ban_does_not_expand_to_other_italian_leagues_or_countries(
     from h2h.domain.competition_scope import universe_block_reason
 
     assert universe_block_reason(country=country, competition_name=name, league_id=league_id) is None
+
+
+@pytest.mark.parametrize(
+    ("country", "league"),
+    [
+        ("England", "Premier League"),
+        ("ENGLAND", "Championship"),
+        ("Eng", "League One"),
+        ("England", "League Two"),
+        ("England", "FA Cup"),
+        ("England", "National League"),
+    ],
+)
+def test_all_english_football_is_blocked_at_universe_gate(
+    country: str, league: str
+) -> None:
+    from h2h.domain.competition_scope import (
+        is_universe_blocked_competition,
+        universe_block_reason,
+    )
+
+    assert (
+        universe_block_reason(country=country, competition_name=league)
+        == RejectionReason.BLOCKED_COUNTRY
+    )
+    assert is_universe_blocked_competition(country=country, competition_name=league)
+    assert (
+        classify_phase_i(CompetitionMetadata(country, league, "league")).rejection_reason
+        == RejectionReason.BLOCKED_COUNTRY
+    )
+
+
+def test_england_ban_does_not_block_scotland_or_wales() -> None:
+    from h2h.domain.competition_scope import universe_block_reason
+
+    assert universe_block_reason(
+        country="Scotland", competition_name="Premiership", league_id=179
+    ) is None
+    assert universe_block_reason(
+        country="Wales", competition_name="Cymru Premier"
+    ) is None
