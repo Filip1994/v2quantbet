@@ -94,6 +94,20 @@ def rule(row: dict) -> tuple:
 
 
 def main() -> None:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from h2h.domain.competition_scope import RejectionReason, universe_block_reason
+    for country, league in (
+        ("England", "Premier League"), ("ENGLAND", "League One"),
+        ("Eng", "Championship"),
+    ):
+        assert universe_block_reason(
+            country=country, competition_name=league
+        ) == RejectionReason.BLOCKED_COUNTRY
+    assert universe_block_reason(
+        country="Scotland", competition_name="Premiership"
+    ) is None
+    print("England universe hard-ban smoke test: PASS", flush=True)
     snap = get_json("/research/analytics.json")
     leagues = {
         (int(r["league_id"]), int(r["season"]))
@@ -201,7 +215,7 @@ def main() -> None:
 
     print("RESULT_JSON_BEGIN")
     compact = {key: result[key] for key in (
-        "league_requests", "all_rows", "decided_rows", "whole",
+        "league_requests", "all_rows", "decided_rows", "whole", "weeks",
         "simple_w39_winrate_baseline_on_w42",
         "frozen_w39_profitable_rules_on_w42",
         "w42_standardized_to_w39_market_selection_odds_mix",
