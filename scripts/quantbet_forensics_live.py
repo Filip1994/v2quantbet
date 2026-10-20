@@ -94,9 +94,16 @@ def rule(row: dict) -> tuple:
 
 
 def main() -> None:
+    import importlib.util
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from h2h.domain.competition_scope import RejectionReason, universe_block_reason
+    policy_path = Path(__file__).resolve().parents[1] / "src/h2h/domain/competition_scope.py"
+    spec = importlib.util.spec_from_file_location("_read_only_universe_policy", policy_path)
+    assert spec is not None and spec.loader is not None
+    policy = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = policy
+    spec.loader.exec_module(policy)
+    RejectionReason = policy.RejectionReason
+    universe_block_reason = policy.universe_block_reason
     for country, league in (
         ("England", "Premier League"), ("ENGLAND", "League One"),
         ("Eng", "Championship"),
