@@ -109,6 +109,17 @@ class TrainApiFootballDixonColesModel:
             )
             error.dataset_sha256 = dataset_sha256
             raise error
+        teams = {record.home_id for record in dataset.records} | {
+            record.away_id for record in dataset.records
+        }
+        if len(dataset) < 2 * len(teams):
+            error = InsufficientTrainingDataError(
+                f"trusted dataset has {len(dataset)} matches for {len(teams)} teams; "
+                "at least two matches per fitted attack/defense pair required",
+                accepted_match_count=len(dataset),
+            )
+            error.dataset_sha256 = dataset_sha256
+            raise error
         if failure_streak >= 3 and dataset_sha256 == failed_dataset_sha256:
             error = UnchangedTrainingDataError("unchanged dataset after three failed fits")
             error.dataset_sha256 = dataset_sha256
@@ -136,6 +147,7 @@ class TrainApiFootballDixonColesModel:
             "optimizer_iterations": model.optimizer_iterations,
             "optimizer_objective": model.objective,
             "optimizer_gradient_norm": model.optimizer_gradient_norm,
+            "optimizer_fallback": model.optimizer_fallback,
         })
         if model.fitted_matches != len(dataset):
             raise InsufficientTrainingDataError(

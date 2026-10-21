@@ -57,6 +57,7 @@ class DixonColesModel:
     objective: float
     optimizer_iterations: int | None = None
     optimizer_gradient_norm: float | None = None
+    optimizer_fallback: str | None = None
 
     def __post_init__(self) -> None:
         self._validate_team_id_namespace(self.team_id_namespace)
@@ -227,29 +228,85 @@ class DixonColesModel:
             + [(-3.0, 3.0)] * (n_teams - 1)
             + [(-2.0, 2.0), (-1.0, 1.0), (-0.10, 0.10)]
         )
-        check_abort()
-        result = minimize(
-            objective,
-            initial,
-            method="L-BFGS-B",
-            bounds=bounds,
-            options={"maxiter": 2_000, "ftol": 1e-10},
-        )
-        check_abort()
-        if not result.success or not np.isfinite(result.fun):
-            error = DixonColesFitError(f"Optimizacija nije konvergirala: {result.message}")
+        def valid_corrections(params: np.ndarray) -> bool:
+            attacks, defenses, intercept, home_advantage, rho = unpack(params)
+            home = np.exp(np.clip(
+                intercept + home_advantage + attacks[:, None] + defenses[None, :],
+                -5.0, 3.0,
+            ))
+            away = np.exp(np.clip(
+                intercept + attacks[None, :] + defenses[:, None],
+                -5.0, 3.0,
+            ))
+            distinct = ~np.eye(n_teams, dtype=bool)
+            return bool(
+                np.all(np.isfinite(params))
+                and np.all((1.0 - home * away * rho)[distinct] > 1e-8)
+                and np.all((1.0 + home * rho)[distinct] > 1e-8)
+                and np.all((1.0 + away * rho)[distinct] > 1e-8)
+                and 1.0 - rho > 1e-8
+            )
+
+        def fit_once(start: np.ndarray, fit_bounds: list[tuple[float, float]]) -> Any:
+            check_abort()
+            fitted = minimize(
+                objective,
+                start,
+                method="L-BFGS-B",
+                bounds=fit_bounds,
+                options={"maxiter": 2_000, "ftol": 1e-10},
+            )
+            check_abort()
+            return fitted
+
+        def failed_fit(result: Any, *, invalid_correction: bool = False) -> DixonColesFitError:
+            message = (
+                "Converged fit has an invalid Dixon-Coles correction"
+                if invalid_correction
+                else f"Optimizacija nije konvergirala: {result.message}"
+            )
+            error = DixonColesFitError(message)
             error.optimizer_status = int(result.status)
             error.optimizer_message = str(result.message)
             error.optimizer_iterations = int(result.nit)
             error.optimizer_objective = float(result.fun)
             error.optimizer_gradient_norm = float(np.linalg.norm(result.jac, ord=np.inf))
-            raise error
+            return error
+
+        def gradient_norm(result: Any, *, fixed_rho: bool) -> float | None:
+            jac = np.asarray(result.jac, dtype=float)
+            if fixed_rho:
+                jac = jac[:-1]
+            if not np.all(np.isfinite(jac)):
+                return None
+            return float(np.linalg.norm(jac, ord=np.inf))
+
+        result = fit_once(initial, bounds)
+        fallback = None
+        if (
+            not result.success
+            or not np.isfinite(result.fun)
+            or not valid_corrections(result.x)
+        ):
+            primary_error = failed_fit(
+                result,
+                invalid_correction=bool(result.success and np.isfinite(result.fun)),
+            )
+            zero_initial = initial.copy()
+            zero_initial[-1] = 0.0
+            zero_bounds = [*bounds[:-1], (0.0, 0.0)]
+            result = fit_once(zero_initial, zero_bounds)
+            if (
+                not result.success
+                or not np.isfinite(result.fun)
+                or not valid_corrections(result.x)
+            ):
+                primary_error.fallback_status = int(result.status)
+                primary_error.fallback_message = str(result.message)
+                raise primary_error
+            fallback = "rho_zero"
 
         attacks, defenses, intercept, home_advantage, rho = unpack(result.x)
-        final_home = np.exp(np.clip(intercept + home_advantage + attacks[home_indices] + defenses[away_indices], -5.0, 3.0))
-        final_away = np.exp(np.clip(intercept + attacks[away_indices] + defenses[home_indices], -5.0, 3.0))
-        if np.any(1.0 - final_home * final_away * rho <= 1e-8) or np.any(1.0 + final_home * rho <= 1e-8) or np.any(1.0 + final_away * rho <= 1e-8) or 1.0 - rho <= 1e-8:
-            raise DixonColesFitError("Converged fit has an invalid Dixon-Coles correction")
 
         return cls(
             team_ids=team_ids,
@@ -263,7 +320,8 @@ class DixonColesModel:
             fitted_matches=len(records),
             objective=float(result.fun),
             optimizer_iterations=int(result.nit),
-            optimizer_gradient_norm=float(np.linalg.norm(result.jac, ord=np.inf)),
+            optimizer_gradient_norm=gradient_norm(result, fixed_rho=fallback is not None),
+            optimizer_fallback=fallback,
         )
 
     def expected_goals(self, home_id: int, away_id: int) -> tuple[float, float]:
