@@ -80,6 +80,10 @@ class GoalLabStructuralShadowEngine:
             ),
         )
 
+    def release_cached_scoring_context(self) -> None:
+        """Discard completed batch context without modifying persisted decisions."""
+        self._model.release_cached_scoring_context()
+
     def readiness(self, *, decision_at: datetime | None = None) -> dict[str, Any]:
         return self._model.readiness(decision_at=decision_at)
 
