@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-02T00:00:00Z",
+  "source": "synthetic test fixture; not production evidence",
+  "services": [
+    {
+      "project": "example-football",
+      "project_id": "project-example",
+      "environment": "production",
+      "environment_id": "environment-example",
+      "service_id": "database-example",
+      "name": "Postgres",
+      "source_repo": null,
+      "source_commit": null,
+      "entrypoint_module": null,
+      "cron_schedule": null,
+      "latest_deployment_at": "2026-09-30T22:00:00Z",
+      "latest_deployment_status": "SUCCESS",
+      "latest_deployment_stopped": false,
+      "running_instances": 1
+    },
+    {
+      "project": "example-football",
+      "project_id": "project-example",
+      "environment": "production",
+      "environment_id": "environment-example",
+      "service_id": "engine-example",
+      "name": "quantbet-engine",
+      "source_repo": "Filip1994/v2quantbet",
+      "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "entrypoint_module": "h2h.entrypoint",
+      "cron_schedule": null,
+      "latest_deployment_at": "2026-10-01T23:00:00Z",
+      "latest_deployment_status": "FAILED",
+      "latest_deployment_stopped": true,
+      "running_instances": 0
+    },
+    {
+      "project": "example-football",
+      "project_id": "project-example",
+      "environment": "production",
+      "environment_id": "environment-example",
+      "service_id": "new-example",
+      "name": "example-new-service",
+      "source_repo": null,
+      "source_commit": null,
+      "entrypoint_module": null,
+      "cron_schedule": null,
+      "latest_deployment_at": null,
+      "latest_deployment_status": null,
+      "latest_deployment_stopped": false,
+      "running_instances": 0
+    }
+  ]
+}
