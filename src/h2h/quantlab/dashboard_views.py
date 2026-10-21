@@ -2028,6 +2028,7 @@ def _sortable_th(
         updates={
             f"{table_key}_sort": key,
             f"{table_key}_dir": next_dir,
+            f"{table_key}_page": "1",
         },
         anchor=anchor,
     )
@@ -2082,7 +2083,10 @@ def _cohort_sort_value(row: dict[str, Any], key: str) -> Any:
         }.get(str(value))
     if key.endswith("_bucket") or key == "line_bucket":
         numeric = _bucket_sort_value(value)
-        return numeric if numeric is not None else str(value).casefold()
+        # Numeric bins and named bins ("UNKNOWN", "Other", etc.) coexist.
+        # Returning a float for one row and a str for another makes
+        # Python's list.sort raise TypeError and the analytics route 503.
+        return (0, numeric) if numeric is not None else (1, str(value).casefold())
     if key == "sample_band":
         return {
             "SIGNAL_ONLY": 0,
@@ -2110,6 +2114,51 @@ def _sort_cohort_rows(
         reverse=direction == "desc",
     )
     return tuple(present + missing + zero_sample)
+
+
+_ANALYTICS_PAGE_SIZE = 40
+
+
+def _analytics_page(
+    rows: tuple[dict[str, Any], ...],
+    *, params: dict[str, list[str]], table_key: str,
+) -> tuple[tuple[dict[str, Any], ...], int, int]:
+    """Page sorted display rows without filtering any ROI constituents."""
+    pages = max(1, (len(rows) + _ANALYTICS_PAGE_SIZE - 1) // _ANALYTICS_PAGE_SIZE)
+    raw = _param(params, f"{table_key}_page", "1")
+    try:
+        requested = int(raw)
+    except ValueError:
+        requested = 1
+    page = max(1, min(requested, pages))
+    start = (page - 1) * _ANALYTICS_PAGE_SIZE
+    return rows[start : start + _ANALYTICS_PAGE_SIZE], page, pages
+
+
+def _analytics_page_links(
+    *, params: dict[str, list[str]], table_key: str,
+    page: int, pages: int, total: int, anchor: str,
+) -> str:
+    if pages <= 1:
+        return ""
+
+    def link(target: int, title: str) -> str:
+        href = _analytics_href(
+            params, updates={f"{table_key}_page": str(target)}, anchor=anchor
+        )
+        return f'<a href="{escape(href, quote=True)}">{title}</a>'
+
+    links = []
+    if page > 1:
+        links.extend((link(1, "First"), link(page - 1, "Previous")))
+    if page < pages:
+        links.extend((link(page + 1, "Next"), link(pages, "Last")))
+    return (
+        '<nav class="analytics-pagination" aria-label="Table pagination">'
+        f'<span>Page {page} of {pages} · {total} total rows</span>'
+        + " · ".join(links)
+        + "</nav>"
+    )
 
 
 def _cohort_table(
@@ -2150,6 +2199,9 @@ def _cohort_table(
     if sort_dir not in {"asc", "desc"}:
         sort_dir = "desc"
     ordered_rows = _sort_cohort_rows(rows, key=sort_key, direction=sort_dir)
+    paged_rows, page, pages = _analytics_page(
+        ordered_rows, params=params, table_key=table_key
+    )
     anchor = f"analytics-{table_key}"
 
     headers = "".join(
@@ -2218,7 +2270,7 @@ def _cohort_table(
     )
 
     rendered = []
-    for row in ordered_rows:
+    for row in paged_rows:
         bucket_updates = {
             "bucket": "1",
             **{
@@ -2279,14 +2331,21 @@ def _cohort_table(
         rendered.append(
             f'<tr><td class="empty" colspan="{len(dimensions) + metric_count}">No settled picks for this breakdown.</td></tr>'
         )
+    pager = _analytics_page_links(
+        params=params, table_key=table_key, page=page,
+        pages=pages, total=len(ordered_rows), anchor=anchor,
+    )
     return (
         f'<section class="panel" id="{anchor}">'
         f'<div class="panel-title"><b>{escape(title)}</b><span>click group name for exact picks · click headers to sort</span></div>'
-        '<div class="table"><table><thead><tr>'
+        + pager
+        + '<div class="table"><table><thead><tr>'
         + headers
         + '</tr></thead><tbody>'
         + "".join(rendered)
-        + "</tbody></table></div></section>"
+        + "</tbody></table></div>"
+        + pager
+        + "</section>"
     )
 
 
@@ -2326,7 +2385,10 @@ def _bucket_detail_rows(
     for key, values in params.items():
         if (
             not key.startswith("bucket_")
-            or key in {"bucket_probability_bin", "bucket_picks_sort", "bucket_picks_dir"}
+            or key in {
+                "bucket_probability_bin", "bucket_picks_sort",
+                "bucket_picks_dir", "bucket_picks_page",
+            }
             or not values
         ):
             continue
@@ -2416,6 +2478,14 @@ def _bucket_pick_table(
     if sort_dir not in {"asc", "desc"}:
         sort_dir = "desc"
     selected = _sort_pick_rows(selected, key=sort_key, direction=sort_dir)
+    total_selected = len(selected)
+    selected, page, pages = _analytics_page(
+        selected, params=params, table_key="bucket_picks"
+    )
+    pager = _analytics_page_links(
+        params=params, table_key="bucket_picks", page=page,
+        pages=pages, total=total_selected, anchor="bucket-picks",
+    )
 
     header_specs = (
         (
@@ -2499,13 +2569,16 @@ def _bucket_pick_table(
     return (
         '<section class="panel" id="bucket-picks">'
         '<div class="panel-title"><b>Bucket picks</b>'
-        f'<span>{len(selected)} exact settled picks · {escape(label)} · '
+        f'<span>{total_selected} exact settled picks · {escape(label)} · '
         f'<a href="{escape(clear_href, quote=True)}">clear</a></span></div>'
-        '<div class="table"><table><thead><tr>'
+        + pager
+        + '<div class="table"><table><thead><tr>'
         + headers
         + '</tr></thead><tbody>'
         + "".join(rendered)
-        + "</tbody></table></div></section>"
+        + "</tbody></table></div>"
+        + pager
+        + "</section>"
     )
 
 def _window_rows(
