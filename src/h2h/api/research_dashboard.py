@@ -2225,6 +2225,18 @@ class ResearchDashboardHTTPService:
                 if parsed.path == "/livez":
                     service._text(self, 200, "ok\n", "text/plain; charset=utf-8")
                     return
+                if parsed.path == "/robots.txt":
+                    service._text(
+                        self, 200, "User-agent: *\nDisallow: /\n",
+                        "text/plain; charset=utf-8",
+                    )
+                    return
+                # An observed external crawler repeatedly invoked heavy analytics
+                # endpoints until this small service became unavailable. Reject it
+                # before authentication, database access or snapshot construction.
+                if "meta-externalagent" in self.headers.get("User-Agent", "").casefold():
+                    service._text(self, 403, "crawler_blocked\n", "text/plain; charset=utf-8")
+                    return
                 if parsed.path not in {
                     "/",
                     "/research",
