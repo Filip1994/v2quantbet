@@ -597,3 +597,36 @@ def test_research_manual_void_is_terminal_for_funnel_exposure_and_operator_gate(
     )
     assert "e.event_kind = 'MANUAL_VOID'" in cursor.queries[0]
     assert "rs.research_signal_id = p.source_pick_id" in cursor.queries[0]
+
+
+def test_corner_top_five_selects_only_positive_roi_with_more_than_30_graded():
+    from h2h.corner_buckets import CORNER_OPERATIONS_IDS
+    from h2h.persistence.postgres_production_funnel import PostgreSQLProductionFunnelRepository
+    from h2h.production_buckets import n_roi_priority_score
+
+    stats = {}
+    for idx, bucket_id in enumerate(CORNER_OPERATIONS_IDS):
+        graded_n = 30 if idx == 0 else 70
+        roi = -10.0 if idx == 1 else float(idx + 5)
+        stats[bucket_id] = {
+            "graded_n": graded_n,
+            "roi_pct": roi,
+            "priority_score": n_roi_priority_score(graded_n=graded_n, roi_pct=roi),
+        }
+    selected = PostgreSQLProductionFunnelRepository._top_five_corner_bucket_ids(stats)
+    assert len(selected) == 5
+    assert CORNER_OPERATIONS_IDS[0] not in selected  # 30 is not >30
+    assert CORNER_OPERATIONS_IDS[1] not in selected  # negative ROI
+    assert all(bucket_id in CORNER_OPERATIONS_IDS for bucket_id in selected)
+
+
+def test_corner_top_five_fails_closed_without_five_qualified_buckets():
+    from h2h.corner_buckets import CORNER_OPERATIONS_IDS
+    from h2h.persistence.postgres_production_funnel import (
+        PostgreSQLProductionFunnelRepository, production_corner_top_five_enabled,
+    )
+    assert production_corner_top_five_enabled({"QUANTBET_PRODUCTION_CORNER_TOP5_ONLY": "true"})
+    assert not production_corner_top_five_enabled({})
+    stats = {bucket_id: {"graded_n": 31, "roi_pct": 10.0, "priority_score": 3.1}
+             for bucket_id in CORNER_OPERATIONS_IDS[:2]}
+    assert PostgreSQLProductionFunnelRepository._top_five_corner_bucket_ids(stats) == tuple(CORNER_OPERATIONS_IDS[:2])
