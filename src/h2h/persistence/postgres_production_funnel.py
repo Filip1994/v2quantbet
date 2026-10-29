@@ -38,6 +38,8 @@ ConnectionFactory = Callable[[], Any]
 # measured evidence-weighted ROI orders them, then the existing Football buckets.
 _CORNER_FIRST_PRIORITY = dict.fromkeys(CORNER_OPERATIONS_IDS, 1)
 _PRIORITY_POLICY_VERSION = "CORNER_SELECTED_CUBES_N_GT_10_THEN_DYNAMIC_ROI_KICKOFF_V3"
+_TOP_FIVE_CORNERS_FLAG = "QUANTBET_PRODUCTION_CORNER_TOP5_ONLY"
+_TOP_FIVE_CORNERS_MIN_N = 31
 _DEFAULT_MAX_LEAD_HOURS = 24
 _MAX_SUPPORTED_LEAD_HOURS = 72
 
@@ -67,6 +69,12 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
     if not approved:
         raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one approved bucket")
     return tuple(sorted(approved, key=_BUCKET_PRIORITY.__getitem__))
+
+
+def production_corner_top_five_enabled(values: dict[str, str] | None = None) -> bool:
+    """Opt-in to corners-only intake ranked by 1xBet settlements."""
+    env = os.environ if values is None else values
+    return env.get(_TOP_FIVE_CORNERS_FLAG, "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def production_intake_max_lead_hours(values: dict[str, str] | None = None) -> int:
@@ -283,6 +291,7 @@ class PostgreSQLProductionFunnelRepository:
             WITH candidates AS (
                 SELECT q.fixture_id, q.market_key, q.selection, q.line, q.odds,
                        q.edge, q.expected_value, q.model_probability, q.market_probability,
+                       q.bookmaker_id, q.bookmaker_name,
                        q.stake_minor, settled.outcome, settled.pnl_minor,
                        snapshot.expected_total_corners,
                        COALESCE(qlatest.home_team, platest.home_team) AS home_team,
@@ -337,6 +346,7 @@ class PostgreSQLProductionFunnelRepository:
         cursor: Any,
         *,
         bucket_ids: tuple[str, ...],
+        production_bookmaker_only: bool = False,
     ) -> dict[str, dict[str, Any]]:
         accumulators = {
             bucket_id: {"graded_n": 0, "unit_pnl": 0.0}
@@ -387,6 +397,11 @@ class PostgreSQLProductionFunnelRepository:
 
         if 'CORNERLAB' in sources:
             for row in cls._cornerlab_performance_rows(cursor):
+                # Money-mode ranks only 1xBet settlement evidence; research retains all data.
+                if production_bookmaker_only and not is_production_bookmaker(
+                    row.get('bookmaker_id'), row.get('bookmaker_name')
+                ):
+                    continue
                 # Cube evidence uses the same preserved PAPER history as Research.
                 # Live bookmaker, horizon and exposure gates remain in intake.
                 if str(row.get("outcome") or "") not in {"WIN", "LOSS"}:
@@ -417,6 +432,27 @@ class PostgreSQLProductionFunnelRepository:
                 ),
             }
         return stats
+
+    @classmethod
+    def _top_five_corner_bucket_ids(
+        cls, stats: dict[str, dict[str, Any]]
+    ) -> tuple[str, ...]:
+        """Use at most five positive-ROI approved corners with >30 1xBet grades.
+
+        Fail closed when fewer than five qualified buckets exist. Historical
+        buckets previously de-selected from Operations stay excluded.
+        """
+        qualified = (
+            bucket_id for bucket_id in CORNER_OPERATIONS_IDS
+            if bucket_id in stats
+            and int(stats[bucket_id]["graded_n"]) >= _TOP_FIVE_CORNERS_MIN_N
+            and stats[bucket_id]["roi_pct"] is not None
+            and float(stats[bucket_id]["roi_pct"]) > 0
+        )
+        return tuple(sorted(
+            qualified, key=lambda bucket_id: cls._bucket_strength_key(bucket_id, stats),
+            reverse=True,
+        )[:5])
 
     @staticmethod
     def _bucket_strength_key(
@@ -827,7 +863,11 @@ class PostgreSQLProductionFunnelRepository:
             raise ValueError("max_open_exposure_minor must be positive")
         if isinstance(fallback_stake_minor, bool) or fallback_stake_minor <= 0:
             raise ValueError("fallback_stake_minor must be positive")
-        requested = active_bucket_ids() if bucket_ids is None else bucket_ids
+        corner_top_five = production_corner_top_five_enabled()
+        requested = (
+            CORNER_OPERATIONS_IDS if corner_top_five
+            else active_bucket_ids() if bucket_ids is None else bucket_ids
+        )
         if not requested or any(item not in _KNOWN_BUCKET_IDS for item in requested):
             raise ValueError("bucket_ids must contain known production intake buckets")
         selected = tuple(
@@ -855,7 +895,17 @@ class PostgreSQLProductionFunnelRepository:
             if 'CORNERLAB' in sources:
                 rows.extend(self._cornerlab_candidates(cursor, now=cloned_at, horizon_end=horizon_end))
 
-            bucket_stats = self._bucket_performance(cursor, bucket_ids=selected)
+            bucket_stats = (
+                self._bucket_performance(
+                    cursor, bucket_ids=selected, production_bookmaker_only=True,
+                ) if corner_top_five
+                else self._bucket_performance(cursor, bucket_ids=selected)
+            )
+            if corner_top_five:
+                # Goals remain in Research and GoalLab but cannot enter Operations.
+                selected = self._top_five_corner_bucket_ids(bucket_stats)
+                allowed = frozenset(selected)
+                contract = intake_contract_version(selected, max_lead_hours=max_lead_hours)
             bucket_order = tuple(
                 sorted(
                     selected,
