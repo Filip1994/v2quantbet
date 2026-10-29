@@ -906,6 +906,17 @@ class PostgreSQLProductionFunnelRepository:
                 selected = self._top_five_corner_bucket_ids(bucket_stats)
                 allowed = frozenset(selected)
                 contract = intake_contract_version(selected, max_lead_hours=max_lead_hours)
+                # Read-only operational evidence for the exact selected five.
+                # No pick/settlement, bankroll, or policy facts are changed here.
+                import logging
+                evidence = "; ".join(
+                    f"{bucket_id} N={bucket_stats[bucket_id]['graded_n']} "
+                    f"ROI={bucket_stats[bucket_id]['roi_pct']:.2f}%"
+                    for bucket_id in selected
+                ) or "none qualified"
+                logging.getLogger("quantbet.production_funnel").info(
+                    "corner top-five selected (1xBet, N>30): %s", evidence
+                )
             bucket_order = tuple(
                 sorted(
                     selected,
