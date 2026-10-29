@@ -112,7 +112,7 @@ def calculate_roi_kelly(
     )
     stake = int(
         (Decimal(bankroll_minor) * Decimal(str(applied))).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
+            Decimal(1), rounding=ROUND_HALF_UP
         )
     )
     if stake == 0 and reason == "PASS":
