@@ -640,6 +640,8 @@ class PostgreSQLProductionFunnelRepository:
                 SELECT
                     p.pick_id,
                     CASE
+                        WHEN EXISTS (SELECT 1 FROM production_funnel_voids v
+                            WHERE v.pick_id = p.pick_id) THEN TRUE
                         WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
                             SELECT 1 FROM quantlab_goal_pick_settlements s
                             WHERE s.goal_pick_id = p.source_pick_id
@@ -691,7 +693,9 @@ class PostgreSQLProductionFunnelRepository:
                     SELECT
                         p.pick_id,
                         CASE
-                            WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
+                            WHEN EXISTS (SELECT 1 FROM production_funnel_voids v
+                            WHERE v.pick_id = p.pick_id) THEN TRUE
+                        WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
                                 SELECT 1 FROM quantlab_goal_pick_settlements s
                                 WHERE s.goal_pick_id = p.source_pick_id
                             )
@@ -954,7 +958,9 @@ class PostgreSQLProductionFunnelStateRepository:
         cursor.execute(
             """
             SELECT CASE
-                WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
+                WHEN EXISTS (SELECT 1 FROM production_funnel_voids v
+                            WHERE v.pick_id = p.pick_id) THEN TRUE
+                        WHEN p.source_universe = 'GOALLAB' THEN EXISTS (
                     SELECT 1 FROM quantlab_goal_pick_settlements s
                     WHERE s.goal_pick_id = p.source_pick_id
                 )

@@ -276,6 +276,7 @@ class DashboardService:
                 SELECT
                     p.*,
                     CASE
+                        WHEN manual_void.pick_id IS NOT NULL THEN 'VOID'
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.outcome
                         WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.outcome
                         WHEN p.source_universe = 'RESEARCH'
@@ -313,6 +314,7 @@ class DashboardService:
                         ELSE NULL
                     END AS source_outcome,
                     CASE
+                        WHEN manual_void.pick_id IS NOT NULL THEN manual_void.occurred_at
                         WHEN p.source_universe = 'GOALLAB' THEN goal_settlement.settled_at
                         WHEN p.source_universe = 'CORNERLAB' THEN corner_settlement.occurred_at
                         WHEN p.source_universe = 'RESEARCH'
@@ -349,6 +351,7 @@ class DashboardService:
                         ELSE NULL
                     END AS source_closing_observed_at
                 FROM production_funnel_picks p
+                LEFT JOIN production_funnel_voids manual_void ON manual_void.pick_id = p.pick_id
                 LEFT JOIN quantlab_shadow_bets corner_pick
                   ON p.source_universe = 'CORNERLAB'
                  AND corner_pick.lab = 'CORNER'
@@ -496,6 +499,15 @@ class DashboardService:
                 p.bucket_priority, p.intake_contract_version
             FROM source_status p
             LEFT JOIN latest_operator operator_state ON operator_state.pick_id = p.pick_id
+            WHERE COALESCE(operator_state.state, 'PENDING') <> 'SKIPPED'
+              AND NOT EXISTS (
+                  SELECT 1 FROM production_funnel_archives a WHERE a.pick_id = p.pick_id
+              )
+              AND (
+                  operator_state.state = 'PLAYED'
+                  OR (p.source_outcome IS NULL
+                      AND p.provider_status NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'))
+              )
             ORDER BY p.cloned_at DESC, p.pick_id DESC
         """
         with self._application.runtime.connect() as connection, connection.cursor() as cursor:
@@ -734,7 +746,11 @@ class DashboardService:
 
     @staticmethod
     def _is_history_pick(pick: dict[str, Any]) -> bool:
-        return str(pick.get("dashboard_phase") or "").upper() in {
+        return pick.get("operator_state") == "PLAYED" and DashboardService._is_finished_pick(pick)
+
+    @staticmethod
+    def _is_finished_pick(pick: dict[str, Any]) -> bool:
+        return pick.get("settlement_outcome") is not None or str(pick.get("dashboard_phase") or "").upper() in {
             "FINISHED",
             "CLOSED",
             "SETTLED",
@@ -990,7 +1006,8 @@ class DashboardService:
             pick for pick in data["picks"] if self._is_history_pick(pick)
         ]
         active_picks = [
-            pick for pick in data["picks"] if not self._is_history_pick(pick)
+            pick for pick in data["picks"]
+            if pick.get("operator_state") != "SKIPPED" and not self._is_finished_pick(pick)
         ]
         active_rows = "".join(
             self._render_pick_row(pick, currency, generated_at=data["generated_at"])
@@ -1007,7 +1024,7 @@ class DashboardService:
         if not history_rows:
             history_rows = (
                 '<tr><td class="empty" colspan="7"><strong>No finished picks yet.</strong>'
-                "<br>Finished and settled picks will move here automatically.</td></tr>"
+                "<br>Only picks marked Played move here when finished or settled.</td></tr>"
             )
         worker_rows = (
             "".join(

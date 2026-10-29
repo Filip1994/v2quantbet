@@ -178,6 +178,36 @@ def test_settled_pick_moves_to_compact_history_with_clear_positive_clv() -> None
     assert "Market close" not in html
 
 
+@pytest.mark.parametrize('phase', ['PREMATCH', 'LIVE', 'SETTLED', 'FINISHED', 'CLOSED'])
+def test_skipped_pick_is_absent_from_production_tables(phase: str) -> None:
+    html = RenderingDashboard(_snapshot([_pick(
+        operator_state='SKIPPED', dashboard_phase=phase, home_team='Skipped fixture',
+        settlement_outcome='WIN' if phase == 'SETTLED' else None,
+    )])).render_html()
+    assert 'Skipped fixture' not in html
+    assert 'No active picks.' in html
+    assert '0 finished' in html
+
+
+@pytest.mark.parametrize('phase', ['SETTLED', 'FINISHED', 'CLOSED'])
+def test_finished_unplayed_pick_never_enters_production_history(phase: str) -> None:
+    html = RenderingDashboard(_snapshot([_pick(
+        operator_state='PENDING', dashboard_phase=phase, home_team='Unplayed fixture',
+    )])).render_html()
+    assert 'Unplayed fixture' not in html
+    assert '0 finished' in html
+
+
+def test_played_void_is_history_with_zero_pnl() -> None:
+    html = RenderingDashboard(_snapshot([_pick(
+        settlement_outcome='VOID', realized_pnl_minor=0, home_team='Voided fixture',
+    )])).render_html()
+    assert 'Voided fixture' in html
+    assert '1 finished' in html
+    assert '<span class="outcome-state">VOID</span>' in html
+    assert 'No active picks.' in html
+
+
 @pytest.mark.parametrize(
     ("realized_pnl_minor", "expected_css", "expected_value"),
     [
@@ -423,7 +453,7 @@ def test_loss_is_red_in_history_and_operator_toggle_remains_available() -> None:
         _snapshot(
             [
                 _pick(
-                    operator_state="SKIPPED",
+                    operator_state="PLAYED",
                     settlement_outcome="LOSS",
                     realized_pnl_minor=-100_000,
                 )
