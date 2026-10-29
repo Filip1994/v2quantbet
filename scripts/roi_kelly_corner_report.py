@@ -125,17 +125,16 @@ def main() -> int:
     if not bankroll.is_finite() or bankroll <= 0:
         parser.error("bankroll must be positive and finite")
     bankroll_minor = int((bankroll * 100).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP
+        Decimal(1), rounding=ROUND_HALF_UP
     ))
     url = os.environ.get("DATABASE_URL")
     if not url:
         parser.error("DATABASE_URL must be provided by the Railway environment")
-    with psycopg.connect(url) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION READ ONLY")
-            # Reuse the same historical source that Production uses to rank.
-            rows = PostgreSQLProductionFunnelRepository._cornerlab_performance_rows(cursor)
-            report = make_report(rows, bankroll_minor=bankroll_minor)
+    with psycopg.connect(url) as connection, connection.cursor() as cursor:
+        cursor.execute("SET TRANSACTION READ ONLY")
+        # Reuse the same historical source that Production uses to rank.
+        rows = PostgreSQLProductionFunnelRepository._cornerlab_performance_rows(cursor)
+        report = make_report(rows, bankroll_minor=bankroll_minor)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
