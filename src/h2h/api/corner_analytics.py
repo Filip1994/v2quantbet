@@ -13,9 +13,18 @@ from urllib.parse import parse_qs, urlencode
 
 from h2h.api.research_analytics import cohort_metrics
 from h2h.corner_buckets import CORNER_OPERATIONS_BUCKETS, CORNER_BUCKET_BY_ID
-from h2h.domain.bookmaker_policy import is_production_bookmaker
 
 PATH = '/research/analytics/corners'
+
+
+def is_1xbet_paper_source(row: dict[str, Any]) -> bool:
+    """Mirror the Engine 1xBet ID/name gate without importing a newer Engine branch."""
+    return (
+        type(row.get('bookmaker_id')) is int
+        and row['bookmaker_id'] == 11
+        and isinstance(row.get('bookmaker_name'), str)
+        and row['bookmaker_name'].strip().casefold() == '1xbet'
+    )
 
 
 def analytics_tabs(active: str) -> str:
@@ -219,9 +228,7 @@ def build_snapshot(source_rows, activation, query='', *, now=None, observations=
             evidence = (
                 bucket_paper if scope == 'all' else [
                     r for r in bucket_paper
-                    if is_production_bookmaker(
-                        r.get('bookmaker_id'), r.get('bookmaker_name')
-                    )
+                    if is_1xbet_paper_source(r)
                 ]
             )
             operations_tracking[scope][b.bucket_id] = {
