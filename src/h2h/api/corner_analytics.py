@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode
 
 from h2h.api.research_analytics import cohort_metrics
 from h2h.corner_buckets import CORNER_OPERATIONS_BUCKETS, CORNER_BUCKET_BY_ID
+from h2h.domain.bookmaker_policy import is_production_bookmaker
 
 PATH = '/research/analytics/corners'
 
@@ -119,6 +120,38 @@ def groups(rows: list[dict[str, Any]], dimensions: tuple[str, ...], *, ranked=Fa
     return result
 
 
+
+def tracking_window(rows: list[dict[str, Any]], *, limit: int | None) -> dict[str, Any]:
+    """Last N authoritative WIN/LOSS settlements, independent of calendar windows.
+
+    VOID and PENDING records are excluded, and incomplete windows retain their
+    true sample count rather than being padded or misrepresented as full N.
+    """
+    graded = sorted(
+        (r for r in rows if r.get('outcome') in {'WIN', 'LOSS'}),
+        key=lambda r: (
+            r.get('settled_at') or r['decision_at'],
+            r['decision_at'],
+            r['shadow_bet_id'],
+        ),
+        reverse=True,
+    )
+    sample = graded if limit is None else graded[:limit]
+    n = len(sample)
+    wins = sum(r['outcome'] == 'WIN' for r in sample)
+    losses = n - wins
+    profit = sum(int(r.get('pnl_minor') or 0) for r in sample)
+    wagered = sum(int(r['stake_minor']) for r in sample)
+    return {
+        'graded_n': n, 'wins': wins, 'losses': losses,
+        'window_label': 'lifetime' if limit is None else f'{n}/{limit}',
+        'complete': limit is None or len(graded) >= limit,
+        'win_rate_pct': (100 * wins / n) if n else None,
+        'roi_pct': (100 * profit / wagered) if wagered else None,
+        'flat_pnl_minor': profit,
+    }
+
+
 def filter_rows(rows: list[dict[str, Any]], params: dict[str, list[str]]) -> list[dict[str, Any]]:
     bucket_id = params.get('bucket_id',[''])[0]
     if bucket_id:
@@ -159,20 +192,45 @@ def build_snapshot(source_rows, activation, query='', *, now=None, observations=
     unique = {r['shadow_bet_id']: derive(r) for r in source_rows if r.get('lab') == 'CORNER'}
     params = parse_qs(query, keep_blank_values=True)
     paper = list(unique.values())
-    from h2h.production_buckets import DEFAULT_BUCKET_IDS
-    raw_active = os.getenv('QUANTBET_PRODUCTION_INTAKE_BUCKETS','').strip()
-    active_ids = set(raw_active.split(',')) if raw_active else set(DEFAULT_BUCKET_IDS)
+    # Research has its own service variables, so fail closed when its
+    # mirrored Engine allowlist is absent instead of highlighting defaults.
+    raw_active = os.getenv('QUANTBET_PRODUCTION_INTAKE_BUCKETS', '').strip()
+    active_ids = {item.strip() for item in raw_active.split(',') if item.strip()}
     operations_buckets = []
+    operations_tracking = {'all': {}, '1xbet': {}}
     for b in CORNER_OPERATIONS_BUCKETS:
-        m = metrics([r for r in paper if b.matches(r)])
+        bucket_paper = [r for r in paper if b.matches(r)]
+        m = metrics(bucket_paper)
         m.pop('cumulative_pnl')
-        operations_buckets.append({
-            **m, 'bucket_id':b.bucket_id, 'selection':b.selection, 'market':'TOTAL_CORNERS',
-            'odds_bucket':'–'.join(b.odds), 'probability_bucket':'–'.join(b.probability),
-            'ev_bucket':'–'.join(b.ev), 'line_gap_bucket':'–'.join(b.gap),
-            'status':'ACTIVE' if b.bucket_id in active_ids and m['graded_n']>10 else 'NOT ELIGIBLE',
-            'analytics_path':b.analytics_path,
-        })
+        status = (
+            'ACTIVE' if b.bucket_id in active_ids and m['graded_n'] > 10
+            else 'LOW N' if b.bucket_id in active_ids else 'OFF'
+        )
+        common = {
+            'bucket_id': b.bucket_id, 'selection': b.selection,
+            'market': 'TOTAL_CORNERS',
+            'odds_bucket': '–'.join(b.odds),
+            'probability_bucket': '–'.join(b.probability),
+            'ev_bucket': '–'.join(b.ev), 'line_gap_bucket': '–'.join(b.gap),
+            'status': status, 'analytics_path': b.analytics_path,
+        }
+        operations_buckets.append({**m, **common})
+        for scope in ('all', '1xbet'):
+            evidence = (
+                bucket_paper if scope == 'all' else [
+                    r for r in bucket_paper
+                    if is_production_bookmaker(
+                        r.get('bookmaker_id'), r.get('bookmaker_name')
+                    )
+                ]
+            )
+            operations_tracking[scope][b.bucket_id] = {
+                'bucket': common,
+                'lifetime': tracking_window(evidence, limit=None),
+                'last_10': tracking_window(evidence, limit=10),
+                'last_20': tracking_window(evidence, limit=20),
+                'last_30': tracking_window(evidence, limit=30),
+            }
     played = []
     for r in paper:
         if not r.get('production_pick_id'):
@@ -226,6 +284,8 @@ def build_snapshot(source_rows, activation, query='', *, now=None, observations=
         'generated_at': now, 'source_count': len(unique), 'filtered_count': len(rows),
         'execution_enabled': False, 'selected_disposition': selected_disposition,
         'operations_buckets': operations_buckets,
+        'operations_tracking': operations_tracking,
+        'operations_allowlist_verified': bool(raw_active),
         'accounting': 'PAPER counterfactual source ledger and existing PLAYED production overlay are separate views. Never sum them. No bankroll entries.',
         'strategy_framework': 'Research cohort_metrics; PAPER evaluation only',
         'ranking_rule': 'graded_n > 10', 'windows': windows,
@@ -294,7 +354,8 @@ def table(title, rows, fields, *, table_id='', query='', highlighted=False):
             if highlighted and key=='selection':
                 content=f'<a href="{escape(r["analytics_path"],quote=True)}">{content}</a>'
             cells+=f'<td>{content}</td>'
-        return f'<tr class="{"selected-bucket" if highlighted else ""}">{cells}</tr>'
+        active_row = highlighted and r.get('status') == 'ACTIVE'
+        return f'<tr class="{"selected-bucket" if active_row else ""}">{cells}</tr>'
     body = ''.join(row_html(r) for r in rows)
     return f'<section id="{escape(table_id,quote=True)}" class="{"operations-highlight" if highlighted else ""}"><h2>{escape(title)}</h2><div class="scroll"><table><thead><tr>{headers}</tr></thead><tbody>{body or "<tr><td>No matching data</td></tr>"}</tbody></table></div></section>'
 
@@ -321,7 +382,7 @@ def render(snapshot, query='') -> str:
         options += ''.join(f'<option {"selected" if params.get(key,["PAPER" if key=="disposition" else ""])[0] == v else ""}>{v}</option>' for v in values)
         inputs += f'<label>{label}<select name="{key}">{options}</select></label>'
     for key in params:
-        if key in {'bucket_id', 'bucket_sort_table', 'bucket_sort', 'bucket_dir'} or (
+        if key in {'bucket_id', 'bucket_sort_table', 'bucket_sort', 'bucket_dir', 'tracking_scope'} or (
             key.startswith(('buckets-', 'operations-corner-buckets_')) and key.endswith(('_sort', '_dir'))
         ):
             inputs += f'<input type="hidden" name="{escape(key, quote=True)}" value="{escape(params[key][0], quote=True)}">'
@@ -335,6 +396,48 @@ def render(snapshot, query='') -> str:
                       ('ev_bucket','EV'),('line_gap_bucket','Gap'),('graded_n','Graded N'),('wins','W'),('losses','L'),
                       ('roi_pct','ROI %'),('flat_pnl_minor','PnL RSD'),('status','Operations')),
                      table_id='operations-corner-buckets',query=query,highlighted=True)
+    # The same 7 fixed bucket IDs are tracked on both complete PAPER history
+    # and bookmaker-specific evidence, without altering Production decisions.
+    tracking_scope = params.get('tracking_scope', ['1xbet'])[0]
+    if tracking_scope not in {'all', '1xbet'}:
+        tracking_scope = '1xbet'
+    scope_caption = '1xBet PAPER' if tracking_scope == '1xbet' else 'All bookmakers PAPER'
+    track = snapshot['operations_tracking'][tracking_scope]
+    tracker_fields = (
+        ('selection', 'Pick'), ('odds_bucket', 'Odds'), ('ev_bucket', 'EV'),
+        ('window_label', 'N / window'), ('wins', 'W'), ('losses', 'L'),
+        ('win_rate_pct', 'Win %'), ('roi_pct', 'ROI %'),
+        ('flat_pnl_minor', 'PnL RSD'), ('status', 'Operations'),
+    )
+    tracking_tables = ''
+    for n in (10, 20, 30):
+        tracking_tables += table(
+            f'Last {n} graded · {scope_caption}',
+            [
+                {**data['bucket'], **data[f'last_{n}']}
+                for data in track.values()
+            ],
+            tracker_fields,
+            table_id=f'operations-last-{n}', query=query, highlighted=True,
+        )
+    scope_links = (
+        '<p class="note"><strong>Bucket tracking:</strong> '
+        f'<a href="{escape(link(tracking_scope="1xbet"), quote=True)}">'
+        '1xBet only</a> · '
+        f'<a href="{escape(link(tracking_scope="all"), quote=True)}">'
+        'All bookmakers</a>. Last 10/20/30 means the most recent graded '
+        'WIN/LOSS picks per bucket, sorted by settlement time; VOID/PENDING '
+        'do not consume a slot. An incomplete sample is displayed as N/target. '
+        'These are PAPER results, not Operations profit.</p>'
+    )
+    bucket_note = (
+        '<p class="note">Blue rows = mirrored Production allowlist; '
+        'OFF = Research-only. This view mirrors Engine configuration and '
+        'does not itself control intake.</p>'
+        if snapshot['operations_allowlist_verified'] else
+        '<p class="note">Production allowlist not configured in Research; '
+        'active highlighting is unavailable, rather than guessed.</p>'
+    )
     body = ''
     for key, fields in (
         ('markets',(('market','Market'),('selection','Selection'))),
@@ -368,6 +471,6 @@ def render(snapshot, query='') -> str:
 <header><a href="https://quantbet-dashboard-production.up.railway.app/hub">🏠 HUB</a> · <a href="/research">Research Board</a><h1>Research Analytics</h1></header>{analytics_tabs('corner')}
 <p class="note">CornerLab → Research → <a href="https://quantbet-kellylab-production.up.railway.app">KellyLab</a> review. New signals remain PAPER; execution disabled. Existing PLAYED positions are a separate read-only production overlay using frozen stakes and prices. PAPER and PLAYED totals must never be added together. Forward activation: {escape(str(snapshot['activation_at']))}. Historical cohorts keep original decision times. PnL uses one latest authoritative settlement per source ID; no bankroll postings. Model P/EV remain original. Corner handicaps have no graded model signals in the preserved model; unsupported projections remain unavailable.</p>
 <form method="get">{inputs}<button>Apply corner filters</button><a href="{PATH}">Clear corner filters</a></form>
-<style>.operations-highlight{{border:1px solid #49a9ff;box-shadow:0 0 18px #1685ff22}}.selected-bucket{{background:#0d2942;color:#c7eaff}}.selected-bucket td{{border-bottom:1px solid #246399}}.selected-bucket a{{color:#7dd4ff;font-weight:800}}th a{{text-decoration:none;color:#9eb9cf;font-size:13px}}</style>
-{selected}{overview}{separation}{body}{nav}{items}{nav}{prices}{distributions}{curve}
+<style>.operations-highlight{{border:1px solid #26394c}}.selected-bucket{{background:#0d2942;color:#c7eaff}}.selected-bucket td{{border-bottom:1px solid #246399}}.selected-bucket a{{color:#7dd4ff;font-weight:800}}th a{{text-decoration:none;color:#9eb9cf;font-size:13px}}</style>
+{bucket_note}{selected}{scope_links}{tracking_tables}{overview}{separation}{body}{nav}{items}{nav}{prices}{distributions}{curve}
 <p><a href="{PATH}.json?{escape(query,quote=True)}">Filtered JSON and complete cohort evidence</a></p></main></body></html>'''
