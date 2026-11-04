@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from h2h.persistence.result_settlement import (
     FixtureResultIdentityConflictError,
     ResultIdentityQuarantine,
@@ -124,7 +126,8 @@ def test_fixture_identity_conflict_does_not_stop_other_results() -> None:
     assert not cycle.pending_work
 
 
-def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processing() -> None:
+@pytest.mark.parametrize("daily", [False, True])
+def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processing(daily) -> None:
     class Repository:
         quarantined = False
         persisted: list[str]
@@ -136,7 +139,7 @@ def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processin
         def reconcile(self, *, reconciled_at):
             return ()
 
-        def claim_due(self, *, claimed_at, limit=None):
+        def claim_due(self, *, claimed_at, limit=None, fixture_ids=None):
             return ("bad", "good") if not self.quarantined else ()
 
         def provider_contexts(self, fixture_ids):
@@ -163,7 +166,7 @@ def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processin
 
         def fetch(self, contexts):
             self.calls += 1
-            return {contexts[0][0]: {}}
+            return {fixture_id: {} for fixture_id, _ in contexts}
 
     repository, source = Repository(), Source()
     reconcile = ReconcileFixtureResults(
@@ -177,9 +180,10 @@ def test_identity_quarantine_stops_retries_and_preserves_other_fixture_processin
         )
     )
 
-    assert reconcile.execute().claimed_fixture_ids == ("bad", "good")
+    arguments = {"daily_fixture_ids": ("bad", "good")} if daily else {}
+    assert reconcile.execute(**arguments).claimed_fixture_ids == ("bad", "good")
     assert repository.persisted == ["good"]
     assert repository.quarantine_calls == 1
-    assert source.calls == 2
-    assert reconcile.execute().claimed_fixture_ids == ()
-    assert source.calls == 2
+    assert source.calls == (1 if daily else 2)
+    assert reconcile.execute(**arguments).claimed_fixture_ids == ()
+    assert source.calls == (1 if daily else 2)

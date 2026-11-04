@@ -96,7 +96,8 @@ class PostgreSQLResultSettlementRepository:
             return tuple(row[0] for row in cursor.fetchall())
 
     def claim_due(
-        self, *, claimed_at: datetime, limit: int | None = None
+        self, *, claimed_at: datetime, limit: int | None = None,
+        fixture_ids: tuple[str, ...] | None = None,
     ) -> tuple[str, ...]:
         now = _utc(claimed_at, "claimed_at")
         if limit is not None and (
@@ -105,13 +106,16 @@ class PostgreSQLResultSettlementRepository:
             raise ValueError("limit must be a positive integer")
         claim_limit = self.policy.claim_limit if limit is None else min(limit, self.policy.claim_limit)
         lease = now + timedelta(seconds=self.policy.claim_lease_seconds)
+        selection = "" if fixture_ids is None else "AND fixture_id = ANY(%s) "
+        params = (now, now) if fixture_ids is None else (now, now, list(fixture_ids))
         with self.connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT fixture_id FROM fixture_result_acquisition_states "
                 "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED') AND next_check_at <= %s "
                 "AND (lease_expires_at IS NULL OR lease_expires_at <= %s) "
+                + selection +
                 "ORDER BY next_check_at, fixture_id FOR UPDATE SKIP LOCKED LIMIT %s",
-                (now, now, claim_limit),
+                (*params, claim_limit),
             )
             rows = cursor.fetchall()
             if rows:
@@ -121,6 +125,19 @@ class PostgreSQLResultSettlementRepository:
                     (lease, now, [row[0] for row in rows]),
                 )
             return tuple(row[0] for row in rows)
+
+    def due_fixture_ids(self, *, as_of: datetime) -> tuple[str, ...]:
+        """Freeze the daily work set so failures cannot be retried in the same run."""
+        now = _utc(as_of, "as_of")
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT fixture_id FROM fixture_result_acquisition_states "
+                "WHERE phase NOT IN ('COMPLETE', 'QUARANTINED') AND next_check_at <= %s "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= %s) "
+                "ORDER BY next_check_at, fixture_id",
+                (now, now),
+            )
+            return tuple(row[0] for row in cursor.fetchall())
 
     def has_due_results(self, *, as_of: datetime) -> bool:
         now = _utc(as_of, "as_of")

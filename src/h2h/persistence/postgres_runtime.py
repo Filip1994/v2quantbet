@@ -653,6 +653,18 @@ class PostgreSQLRuntimeRepository:
                 (worker, item_id),
             )
 
+    def worker_scheduled(
+        self, worker: str, instance_id: str, *, at: datetime, next_due_at: datetime
+    ) -> None:
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO production_worker_status "
+                "(worker_name, next_due_at, instance_id, updated_at) VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (worker_name) DO UPDATE SET next_due_at = EXCLUDED.next_due_at, "
+                "instance_id = EXCLUDED.instance_id, updated_at = EXCLUDED.updated_at",
+                (worker, _utc(next_due_at), instance_id, _utc(at)),
+            )
+
     def worker_started(self, worker: str, instance_id: str, *, at: datetime) -> None:
         current = _utc(at)
         with self.connect() as connection, connection.cursor() as cursor:

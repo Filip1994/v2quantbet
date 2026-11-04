@@ -15,3 +15,6 @@ class ResultSettlementWorker:
 
     def run_once(self) -> ResultCycle:
         return self.reconcile.execute()
+
+    def run_daily_once(self) -> ResultCycle:
+        return self.reconcile.execute_daily()

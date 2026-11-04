@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Event
+from zoneinfo import ZoneInfo
 
 from h2h.odds import ApiBudgetExceededError
 from h2h.odds.http import TransportError
@@ -47,12 +48,31 @@ class ScheduledJob:
     run: Callable[[], object]
     has_pending_work: Callable[[], bool] = lambda: False
     pending_delay_seconds: float = 0.0
+    daily_at_hour: int | None = None
+    daily_timezone: str = "Europe/Belgrade"
 
     def __post_init__(self) -> None:
         if not self.name.strip() or self.interval_seconds <= 0:
             raise ValueError("scheduled job requires a name and positive interval")
         if self.pending_delay_seconds < 0:
             raise ValueError("scheduled job pending delay must be non-negative")
+        if self.daily_at_hour is not None:
+            if (
+                isinstance(self.daily_at_hour, bool)
+                or not isinstance(self.daily_at_hour, int)
+                or not 0 <= self.daily_at_hour <= 23
+            ):
+                raise ValueError("daily hour must be between 0 and 23")
+            ZoneInfo(self.daily_timezone)
+
+    def next_daily_run(
+        self, now: datetime, *, previous_start: datetime | None = None
+    ) -> datetime:
+        local = now.astimezone(ZoneInfo(self.daily_timezone))
+        due = local.replace(hour=self.daily_at_hour, minute=0, second=0, microsecond=0)
+        if previous_start is not None and previous_start >= due:
+            due += timedelta(days=1)
+        return max(now, due.astimezone(UTC))
 
 
 class ProductionOrchestrator:
@@ -79,6 +99,19 @@ class ProductionOrchestrator:
         self._on_recovered = on_recovered
         self._clock = clock
         self._next_due = {job.name: self._clock() for job in jobs}
+        if any(job.daily_at_hour is not None for job in jobs):
+            statuses = {item.worker_name: item for item in runtime.worker_statuses()}
+            for job in jobs:
+                if job.daily_at_hour is None:
+                    continue
+                previous = statuses.get(job.name)
+                now = self._clock().astimezone(UTC)
+                self._next_due[job.name] = job.next_daily_run(
+                    now, previous_start=previous.last_started_at if previous else None
+                )
+                runtime.worker_scheduled(
+                    job.name, instance_id, at=now, next_due_at=self._next_due[job.name]
+                )
 
     def run_forever(self) -> bool:
         """Return False when leadership is lost, True on requested shutdown."""
@@ -106,6 +139,8 @@ class ProductionOrchestrator:
                             else job.interval_seconds
                         )
                     )
+                    if job.daily_at_hour is not None:
+                        next_due = job.next_daily_run(finished, previous_start=cycle_start)
                     self._runtime.worker_succeeded(
                         job.name, self._instance_id, at=finished, next_due_at=next_due
                     )
@@ -130,6 +165,8 @@ class ProductionOrchestrator:
                     if isinstance(exc, ApiBudgetExceededError):
                         tomorrow = failed_at.date() + timedelta(days=1)
                         next_due = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+                    if job.daily_at_hour is not None:
+                        next_due = job.next_daily_run(failed_at, previous_start=cycle_start)
                     try:
                         self._runtime.worker_failed(
                             job.name,

@@ -21,10 +21,23 @@ operations. Training can use at most 500 and stops once shared usage reaches
 CornerLab's offline modeler and Research dashboard do not make provider requests.
 
 Backlog processing observes a cooldown: opportunities retain their configured
-normal interval (300 seconds in production), while monitoring and results wait
-at least 60 seconds after a slice completes. A nonempty backlog therefore cannot
-re-run these workers every five-second scheduler tick. Results remain bounded to
-two fixtures per slice. Settlement rules and fixture identity checks are intact.
+normal interval (300 seconds in production), while monitoring waits at least
+60 seconds after a slice completes.
+
+Engine result acquisition runs once daily at 08:00 Europe/Belgrade (configured
+with `QUANTBET_RESULT_COLLECTION_HOUR` and the bulletin timezone). It takes a
+snapshot of all due fixtures and processes groups of up to 20 in one provider
+request. Each fixture is attempted once in that run; failed or incomplete
+results wait for the next daily cycle. The durable worker start timestamp
+prevents a restart from repeating that day's cycle, including a failed cycle.
+A missed cycle is caught up once when the service returns after its scheduled
+hour. The local schedule follows daylight-saving changes.
+
+Settlement rules and fixture identity checks are intact. In particular, a new
+terminal result still needs a later matching confirmation: settlement can wait
+until the following daily cycle. The CornerLab collector keeps its separate
+six-hour collection and statistics/settlement refresh schedule. Its calls share
+the same 7,500 total, and reducing engine polling leaves more of it available.
 
 The API provider's already-used daily allowance cannot be restored by this
 change. At the November 5 rollout (Belgrade), November 4 UTC usage was already

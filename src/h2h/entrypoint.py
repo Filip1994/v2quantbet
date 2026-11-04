@@ -160,10 +160,10 @@ def _run_active_leader(
         ),
         ScheduledJob(
             "results",
-            float(application.settings.application.result_settlement_policy.poll_interval_seconds),
-            application.results.worker.run_once,
-            has_pending_work=lambda: application.results.worker.has_pending,
-            pending_delay_seconds=60.0,
+            86400.0,
+            application.results.worker.run_daily_once,
+            daily_at_hour=int(os.getenv("QUANTBET_RESULT_COLLECTION_HOUR", "8")),
+            daily_timezone=application.settings.application.bulletin_timezone.key,
         ),
     )
 

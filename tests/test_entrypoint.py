@@ -103,7 +103,9 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
         ),
         results=SimpleNamespace(
             repository=SimpleNamespace(reconcile=lambda **_kwargs: None),
-            worker=SimpleNamespace(run_once=lambda: None, has_pending=False),
+            worker=SimpleNamespace(
+                run_once=lambda: None, run_daily_once=lambda: None, has_pending=False
+            ),
         ),
         prediction=SimpleNamespace(
             durable_discovery=SimpleNamespace(has_pending=False, discover=lambda *_args: ())
@@ -137,4 +139,6 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
     jobs = {job.name: job for job in scheduled_jobs}
     assert jobs["opportunity"].pending_delay_seconds == 300
     assert jobs["monitoring"].pending_delay_seconds == 60
-    assert jobs["results"].pending_delay_seconds == 60
+    assert jobs["results"].daily_at_hour == 8
+    assert jobs["results"].daily_timezone == "Europe/Belgrade"
+    assert jobs["results"].run is application.results.worker.run_daily_once

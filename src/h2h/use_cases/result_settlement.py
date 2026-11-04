@@ -118,21 +118,55 @@ class ReconcileFixtureResults:
     def has_pending(self) -> bool:
         return self._has_pending
 
-    def execute(self) -> ResultCycle:
+    def execute_daily(self) -> ResultCycle:
         now = _now(self._clock)
         initialized = self._repository.reconcile(reconciled_at=now)
-        claimed = self._repository.claim_due(claimed_at=now, limit=self._max_items)
+        fixture_ids = self._repository.due_fixture_ids(as_of=now)
+        claimed: list[str] = []
+        settled: list[str] = []
+        clv: list[str] = []
+        persisted = 0
+        # Each fixture from this snapshot gets one attempt, including failures.
+        batch_size = min(20, self._repository.policy.claim_limit)
+        for offset in range(0, len(fixture_ids), batch_size):
+            if self._should_stop():
+                break
+            cycle = self.execute(daily_fixture_ids=fixture_ids[offset:offset + batch_size])
+            claimed.extend(cycle.claimed_fixture_ids)
+            settled.extend(cycle.settled_pick_ids)
+            clv.extend(cycle.clv_finalized_pick_ids)
+            persisted += cycle.persisted_result_count
+        self._has_pending = False
+        LOGGER.info(
+            "daily result collection completed fixtures=%d claimed=%d persisted=%d settled=%d",
+            len(fixture_ids), len(claimed), persisted, len(settled),
+        )
+        return ResultCycle(initialized, tuple(claimed), persisted, tuple(settled), tuple(clv))
+
+    def execute(self, *, daily_fixture_ids: tuple[str, ...] | None = None) -> ResultCycle:
+        now = _now(self._clock)
+        if daily_fixture_ids is None:
+            initialized = self._repository.reconcile(reconciled_at=now)
+            claimed = self._repository.claim_due(claimed_at=now, limit=self._max_items)
+        else:
+            initialized = ()
+            claimed = self._repository.claim_due(
+                claimed_at=now, limit=len(daily_fixture_ids), fixture_ids=daily_fixture_ids
+            )
         contexts = self._repository.provider_contexts(claimed)
         records: dict[str, Mapping[str, Any]] = {}
-        for context in contexts:
+        batch_size = 1 if daily_fixture_ids is None else 20
+        for offset in range(0, len(contexts), batch_size):
+            chunk = contexts[offset:offset + batch_size]
             if self._should_stop():
                 break
             try:
-                records.update(self._source.fetch((context,)))
+                records.update(self._source.fetch(chunk))
             except ApiBudgetExceededError:
                 raise
             except (TransportError, TypeError, ValueError, RuntimeError) as exc:
-                self._on_item_failure(context[0], exc, now)
+                for fixture_id, _provider_id in chunk:
+                    self._on_item_failure(fixture_id, exc, now)
                 continue
         settled: list[str] = []
         clv: list[str] = []
