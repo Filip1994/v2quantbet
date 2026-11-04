@@ -112,7 +112,7 @@ def build_api_football_client(
     transport: JsonTransport,
     settings: ApplicationSettings,
     *,
-    daily_limit: int = 75_000,
+    daily_limit: int = 7_500,
     reserve: int = 0,
     budget: DailyApiBudget | PostgreSQLApiBudget | None = None,
     timeout: float = 10.0,

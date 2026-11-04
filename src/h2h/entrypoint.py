@@ -138,6 +138,7 @@ def _run_active_leader(
             application.settings.opportunity_interval_seconds,
             application.opportunity.run_once,
             has_pending_work=lambda: application.opportunity.has_pending,
+            pending_delay_seconds=application.settings.opportunity_interval_seconds,
         ),
         ScheduledJob(
             "production_intake",
@@ -155,12 +156,14 @@ def _run_active_leader(
             float(lifecycle.monitoring_interval_seconds),
             application.monitoring.worker.run_once,
             has_pending_work=lambda: application.monitoring.worker.has_pending,
+            pending_delay_seconds=60.0,
         ),
         ScheduledJob(
             "results",
             float(application.settings.application.result_settlement_policy.poll_interval_seconds),
             application.results.worker.run_once,
             has_pending_work=lambda: application.results.worker.has_pending,
+            pending_delay_seconds=60.0,
         ),
     )
 

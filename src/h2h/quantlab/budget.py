@@ -10,7 +10,7 @@ from typing import Any
 from h2h.odds.budget import ApiBudgetExceededError
 
 
-DEFAULT_PROVIDER_DAILY_LIMIT = 75_000
+DEFAULT_PROVIDER_DAILY_LIMIT = 7_500
 
 
 class QuantLabRequestBudget:

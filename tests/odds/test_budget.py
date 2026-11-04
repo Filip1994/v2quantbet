@@ -22,6 +22,20 @@ def test_budget_keeps_operational_reserve() -> None:
         budget.acquire()
 
 
+def test_default_budget_blocks_request_7501_before_transport() -> None:
+    transport = Mock()
+    transport.get_json.return_value = {"response": []}
+    budget = DailyApiBudget()
+    guarded = BudgetedJsonTransport(transport, budget)
+
+    for _ in range(7500):
+        guarded.get_json("https://example.test")
+
+    with pytest.raises(ApiBudgetExceededError):
+        guarded.get_json("https://example.test")
+    assert budget.remaining == 0
+    assert transport.get_json.call_count == 7500
+
 def test_budget_resets_on_next_utc_day() -> None:
     now = [datetime(2026, 9, 14, tzinfo=UTC)]
     budget = DailyApiBudget(daily_limit=2, reserve=0, clock=lambda: now[0])

@@ -51,7 +51,7 @@ def build_dashboard_application() -> DashboardApplication:
     fixed_stake_minor = _integer("QUANTBET_FIXED_STAKE_MINOR", "30000")
     max_open_exposure_minor = _integer("QUANTBET_MAX_OPEN_EXPOSURE_MINOR", "300000")
     currency = os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD"
-    daily_limit = _integer("QUANTBET_API_DAILY_LIMIT", "75000")
+    daily_limit = _integer("QUANTBET_API_DAILY_LIMIT", "7500")
     reserve = _integer("QUANTBET_API_RESERVE", "0")
     effective_limit = daily_limit - reserve
     training_limit = _integer(

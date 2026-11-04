@@ -528,13 +528,13 @@ def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     assert 'provider_request_category("quantlab_context")' in client_source
 
 
-def test_quantlab_budget_uses_shared_75k_provider_envelope_without_local_cap() -> None:
+def test_quantlab_budget_uses_shared_7500_provider_envelope() -> None:
     budget = QuantLabRequestBudget(
         connect=lambda: _BudgetConnection(),
         clock=lambda: NOW,
     )
-    assert budget.daily_limit == DEFAULT_PROVIDER_DAILY_LIMIT == 75_000
-    assert budget.shared_daily_limit == 75_000
+    assert budget.daily_limit == DEFAULT_PROVIDER_DAILY_LIMIT == 7_500
+    assert budget.shared_daily_limit == 7_500
     assert budget.production_reserve == 0
 
 
@@ -790,7 +790,7 @@ def test_cardlab_dashboard_is_operational_only() -> None:
     assert "CardLab" in html
     assert "Active Picks" in html
     assert "Pick History" in html
-    assert "12 / 75,000" in html
+    assert "12 / 7,500" in html
     assert "CardLab v1 context snapshots" not in html
     assert "Ref A" not in html
     assert "MATCH_IMPORTANCE_V1" not in html

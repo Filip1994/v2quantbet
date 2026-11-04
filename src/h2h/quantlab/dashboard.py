@@ -265,7 +265,7 @@ class QuantLabDashboardService:
         self,
         repository: PostgreSQLQuantLabRepository,
         *,
-        api_daily_limit: int = 75_000,
+        api_daily_limit: int = 7_500,
         currency: str = "RSD",
         view_cache_ttl_seconds: int | None = None,
     ) -> None:

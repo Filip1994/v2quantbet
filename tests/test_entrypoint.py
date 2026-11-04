@@ -58,6 +58,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
+    scheduled_jobs = []
     retry_policy = StaleQuoteRetryPolicy(
         timedelta(minutes=2), timedelta(minutes=15), 5, timedelta(hours=1)
     )
@@ -77,7 +78,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
             discovery_interval_seconds=900,
             discovery_lookahead_hours=72,
             model_training_interval_seconds=60,
-            opportunity_interval_seconds=60,
+            opportunity_interval_seconds=300,
             live_close_poll_seconds=60,
             scheduler_tick_seconds=5,
             application=SimpleNamespace(
@@ -114,7 +115,9 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
     )
     monkeypatch.setattr(
         "h2h.entrypoint.ProductionOrchestrator",
-        lambda *_args, **_kwargs: SimpleNamespace(run_forever=lambda: True),
+        lambda jobs, *_args, **_kwargs: (
+            scheduled_jobs.extend(jobs) or SimpleNamespace(run_forever=lambda: True)
+        ),
     )
 
     assert (
@@ -131,3 +134,7 @@ def test_active_leader_preflight_passes_freshness_scheduling_policy(
     assert calls[0]["maximum_quote_age_seconds"] == 300
     assert calls[0]["minimum_time_to_kickoff_seconds"] == 600
     assert calls[0]["stale_retry_policy"] is retry_policy
+    jobs = {job.name: job for job in scheduled_jobs}
+    assert jobs["opportunity"].pending_delay_seconds == 300
+    assert jobs["monitoring"].pending_delay_seconds == 60
+    assert jobs["results"].pending_delay_seconds == 60

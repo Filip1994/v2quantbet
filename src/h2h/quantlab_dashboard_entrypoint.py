@@ -43,7 +43,7 @@ def main() -> None:
 
     dashboard = QuantLabDashboardService(
         repository,
-        api_daily_limit=_positive_integer("QUANTBET_API_DAILY_LIMIT", "75000"),
+        api_daily_limit=_positive_integer("QUANTBET_API_DAILY_LIMIT", "7500"),
         currency=os.getenv("QUANTBET_CURRENCY", "RSD").strip().upper() or "RSD",
     )
     server = QuantLabDashboardHTTPService(

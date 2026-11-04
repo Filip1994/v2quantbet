@@ -172,7 +172,7 @@ def main() -> None:
         goal_contract["validation_method_version"],
     )
 
-    api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "75000")
+    api_daily_limit = _positive_integer("QUANTBET_API_DAILY_LIMIT", "7500")
     api_key = os.getenv("API_FOOTBALL_KEY", "").strip()
     if not api_key:
         raise ValueError("API_FOOTBALL_KEY is required for QuantLab collection")
