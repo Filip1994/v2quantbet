@@ -937,10 +937,16 @@ class ResearchDashboardService:
         )
 
     def analytics_snapshot(self, query: str = "") -> dict[str, Any]:
-        return build_research_analytics_snapshot(
-            self.signals(parse_qs(query, keep_blank_values=True)) if query else self._analytics_signal_rows(),
+        params = parse_qs(query, keep_blank_values=True)
+        snapshot = build_research_analytics_snapshot(
+            self.signals(params) if query else self._analytics_signal_rows(),
             fixed_stake_minor=self._stake,
         )
+        strategy = params.get("strategy", ["reverse" if self._reverse_since else "original"])[0]
+        if strategy == "reverse" and self._reverse_since:
+            snapshot["paper_strategy"] = "DC_REVERSED_PAPER_V1"
+            snapshot["reverse_since"] = self._reverse_since.isoformat()
+        return snapshot
 
     def corner_snapshot(self, query: str = "") -> dict[str, Any]:
         from h2h.api.corner_analytics import build_snapshot
@@ -1944,7 +1950,7 @@ main{{padding:14px}}header{{display:block}}}}
             return f'{market} {row["selection"]}'
 
         def retired_badge(row: dict[str, Any]) -> str:
-            if not is_retired_research_segment(row):
+            if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row):
                 return ""
             return (
                 '<span class="mini-badge status-retired" '
@@ -2293,7 +2299,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="table-title"><b>{("Active research board" if tab == "active" else "Awaiting result" if tab == "awaiting" else "Settled research history")}</b><span>{len(rows)} shown</span></div>
 <div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
 </section>
-<footer><span>Universe = every canonical candidate that reached production eligibility: PLAYED/SKIPPED production picks plus exposure-blocked candidates. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
+<footer><span>REVERSE PAPER: route labels describe the original Production candidate only. Original decisions and Production bets remain unchanged. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
 </main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 
