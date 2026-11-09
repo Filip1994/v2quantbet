@@ -244,7 +244,7 @@ def run_manual_corner_settlement(
             except ApiBudgetExceededError:
                 budget_exhausted = True
                 break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - boundary diagnostics
                 error_class = type(exc).__name__
                 # Never put provider credentials or connection URLs into Railway logs.
                 redacted_message = (
