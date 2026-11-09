@@ -488,7 +488,7 @@ class _BudgetCursor:
         if "SELECT category, request_count" in sql:
             self._all = list(self.connection.usage.items())
         if "SELECT COALESCE(request_count, 0)" in sql:
-            self._one = (self.connection.usage.get("quantlab_context", 0),)
+            self._one = (self.connection.usage.get(params[1], 0),)
 
     def fetchone(self):
         return self._one
@@ -523,7 +523,7 @@ def test_quantlab_budget_and_client_use_quantlab_context_category() -> None:
     budget.acquire()
 
     rendered = "\n".join(connection.sql)
-    assert "VALUES (%s, 'quantlab_context', 1, %s)" in rendered
+    assert "VALUES (%s, %s, 1, %s)" in rendered
     client_source = inspect.getsource(QuantLabApiFootballClient._get)
     assert 'provider_request_category("quantlab_context")' in client_source
 
@@ -550,6 +550,20 @@ def test_quantlab_budget_stops_only_at_shared_provider_capacity() -> None:
     budget.acquire()
     connection.usage["discovery"] = 75_000
     with pytest.raises(ApiBudgetExceededError, match="shared football API budget"):
+        budget.acquire()
+
+
+def test_manual_corner_provider_budget_has_durable_category_cap() -> None:
+    connection = _BudgetConnection({"manual_corner_settlement": 30})
+    budget = QuantLabRequestBudget(
+        shared_daily_limit=7500,
+        production_reserve=0,
+        request_category="manual_corner_settlement",
+        category_daily_limit=30,
+        connect=lambda: connection,
+        clock=lambda: NOW,
+    )
+    with pytest.raises(ApiBudgetExceededError, match="manual settlement API request cap"):
         budget.acquire()
 
 

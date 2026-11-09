@@ -117,6 +117,7 @@ def _snapshot(picks: list[dict[str, object]]) -> dict[str, object]:
 
 class RenderingDashboard(DashboardService):
     def __init__(self, snapshot: dict[str, object]) -> None:
+        super().__init__(SimpleNamespace())
         self._snapshot = snapshot
 
     def snapshot(self) -> dict[str, object]:

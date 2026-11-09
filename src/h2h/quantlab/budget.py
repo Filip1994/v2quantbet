@@ -22,6 +22,8 @@ class QuantLabRequestBudget:
         shared_daily_limit: int = DEFAULT_PROVIDER_DAILY_LIMIT,
         production_reserve: int = 0,
         database_url: str | None = None,
+        request_category: str = "quantlab_context",
+        category_daily_limit: int | None = None,
         connect: Callable[[], Any] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -39,6 +41,12 @@ class QuantLabRequestBudget:
         ):
             raise ValueError("production_reserve must fit inside shared_daily_limit")
 
+        if request_category not in {"quantlab_context", "manual_corner_settlement"}:
+            raise ValueError("unsupported QuantLab provider request category")
+        if category_daily_limit is not None and (category_daily_limit < 1 or isinstance(category_daily_limit, bool)):
+            raise ValueError("category_daily_limit must be positive")
+        self.request_category = request_category
+        self.category_daily_limit = category_daily_limit
         self.daily_limit = shared_daily_limit
         self.shared_daily_limit = shared_daily_limit
         self.production_reserve = production_reserve
@@ -75,6 +83,9 @@ class QuantLabRequestBudget:
             usage = {row[0]: int(row[1]) for row in cursor.fetchall()}
             total = sum(usage.values())
 
+            if self.category_daily_limit is not None and usage.get(self.request_category, 0) >= self.category_daily_limit:
+                raise ApiBudgetExceededError("manual settlement API request cap reached")
+
             shared_stop = self.shared_daily_limit - self.production_reserve
             if total >= shared_stop:
                 raise ApiBudgetExceededError(
@@ -84,11 +95,11 @@ class QuantLabRequestBudget:
             cursor.execute(
                 "INSERT INTO provider_request_usage "
                 "(request_day, category, request_count, updated_at) "
-                "VALUES (%s, 'quantlab_context', 1, %s) "
+                "VALUES (%s, %s, 1, %s) "
                 "ON CONFLICT (request_day, category) DO UPDATE SET "
                 "request_count = provider_request_usage.request_count + 1, "
                 "updated_at = EXCLUDED.updated_at",
-                (day, now),
+                (day, self.request_category, now),
             )
 
     @property
@@ -96,8 +107,8 @@ class QuantLabRequestBudget:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT COALESCE(request_count, 0) FROM provider_request_usage "
-                "WHERE request_day = %s AND category = 'quantlab_context'",
-                (self.day,),
+                "WHERE request_day = %s AND category = %s",
+                (self.day, self.request_category),
             )
             row = cursor.fetchone()
             return 0 if row is None else int(row[0])

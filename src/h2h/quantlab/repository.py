@@ -1645,6 +1645,7 @@ class PostgreSQLQuantLabRepository:
         self,
         *,
         limit: int = 500,
+        production_only: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         """Return pending CornerLab bets from QuantLab-owned terminal result evidence."""
         if limit <= 0:
@@ -1685,7 +1686,10 @@ class PostgreSQLQuantLabRepository:
                 ") latest_settlement ON TRUE "
                 "WHERE q.lab = 'CORNER' "
                 "AND latest_settlement.event_kind IS NULL "
-                "AND result.provider_status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
+                + ("AND EXISTS (SELECT 1 FROM production_funnel_picks p "
+                   "WHERE p.source_universe = 'CORNERLAB' "
+                   "AND p.source_pick_id = q.shadow_bet_id) " if production_only else "")
+                + "AND result.provider_status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO') "
                 "AND (result.provider_status IN ('CANC', 'ABD', 'AWD', 'WO') "
                 " OR stats.statistics_observation_id IS NOT NULL) "
                 "ORDER BY q.decision_at ASC, q.shadow_bet_id ASC LIMIT %s",
