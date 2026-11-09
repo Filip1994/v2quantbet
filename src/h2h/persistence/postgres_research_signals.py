@@ -249,7 +249,10 @@ class PostgreSQLResearchSignalRepository:
                 "(settlement.event_kind = 'MANUAL_VOID' AND settlement.outcome = 'VOID') "
                 "AS production_manual_void, "
                 "CASE WHEN settlement.event_kind = 'CORRECTION' "
-                "THEN settlement.outcome ELSE NULL END AS manual_correction_outcome "
+                "THEN settlement.outcome ELSE NULL END AS manual_correction_outcome, "
+                "e.companion_selection, e.companion_odd, "
+                "companion_closing.odd, companion_closing.observed_at, "
+                "companion_closing.captured_at "
                 "FROM research_signals rs "
                 "JOIN value_evaluations e ON e.evaluation_id = rs.evaluation_id "
                 "JOIN fixture_predictions prediction ON prediction.prediction_id = e.prediction_id "
@@ -264,6 +267,11 @@ class PostgreSQLResearchSignalRepository:
                 "AND q.source = e.source AND q.observed_at < latest.kickoff_at "
                 "ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC LIMIT 1) "
                 "closing ON TRUE "
+                "LEFT JOIN LATERAL (SELECT q.odd, q.observed_at, q.captured_at "
+                "FROM quote_snapshots q WHERE q.series_id = e.companion_series_id "
+                "AND q.source = e.source AND q.observed_at < latest.kickoff_at "
+                "ORDER BY q.observed_at DESC, q.captured_at DESC, q.snapshot_id DESC LIMIT 1) "
+                "companion_closing ON TRUE "
                 "LEFT JOIN LATERAL (SELECT op.state FROM pick_operator_state_events op "
                 "WHERE op.pick_id = rs.production_pick_id "
                 "ORDER BY op.occurred_at DESC, op.persisted_at DESC, op.event_id DESC LIMIT 1) "
@@ -296,6 +304,9 @@ class PostgreSQLResearchSignalRepository:
                 "result_phase", "result_classification", "result_provider_status",
                 "regulation_home_goals", "regulation_away_goals", "production_manual_void",
                 "manual_correction_outcome",
+                "companion_selection", "companion_odd",
+                "companion_closing_odds", "companion_closing_observed_at",
+                "companion_closing_captured_at",
             )
             return tuple(dict(zip(columns, row, strict=True)) for row in cursor.fetchall())
 
