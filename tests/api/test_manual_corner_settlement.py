@@ -247,7 +247,7 @@ def test_provider_api_key_is_stripped_before_client_initialization(monkeypatch):
     monkeypatch.setattr(module, "QuantLabApiFootballClient", make_client)
     result = run_manual_corner_settlement(
         database_url="postgresql://fake/test",
-        api_key="test-only-key\\n",
+        api_key="test-only-key\n",
         daily_limit=7500,
         reserve=0,
         now=NOW,
@@ -266,7 +266,7 @@ def test_provider_exception_never_logs_header_value(monkeypatch, caplog):
     class BadHeaderProvider:
         def fetch_fixture(self, _fixture_id):
             used.used += 1
-            raise ValueError("Invalid header value b'secret-key\\\\n'")
+            raise ValueError("Invalid header value b'secret-key\\n'")
 
     monkeypatch.setattr("psycopg.connect", lambda *args, **kwargs: conn)
     monkeypatch.setattr(module, "PostgreSQLQuantLabRepository", lambda *args: _Repo())
@@ -280,7 +280,7 @@ def test_provider_exception_never_logs_header_value(monkeypatch, caplog):
     },))
     result = run_manual_corner_settlement(
         database_url="postgresql://fake/test",
-        api_key="secret-key\\n",
+        api_key="secret-key\n",
         daily_limit=7500,
         reserve=0,
         now=NOW,
