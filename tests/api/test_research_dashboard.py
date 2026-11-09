@@ -7,6 +7,7 @@ from h2h.api.research_dashboard import (
     counterfactual_outcome,
     counterfactual_pnl_minor,
     research_clv_ppm,
+    reversed_dc_paper_signal,
 )
 
 
@@ -67,6 +68,84 @@ def signal_row():
         "regulation_away_goals": 1,
         "production_manual_void": False,
     }
+
+
+
+def test_reverse_dc_paper_uses_recorded_opposite_odds_not_original_odds() -> None:
+    original = signal_row()
+    original.update({
+        "companion_selection": "NO",
+        "companion_odd": 1.71,
+        "companion_closing_odds": 1.76,
+        "companion_closing_observed_at": NOW + timedelta(hours=1),
+        "companion_closing_captured_at": NOW + timedelta(hours=1, seconds=5),
+    })
+    reverse = reversed_dc_paper_signal(original)
+    assert reverse is not None
+    assert reverse["paper_strategy"] == "DC_REVERSED_PAPER_V1"
+    assert reverse["selection"] == "NO"
+    assert reverse["original_selection"] == "YES"
+    assert reverse["original_odds"] == 2.20
+    assert reverse["odds"] == 1.71
+    assert reverse["model_probability"] == 0.38
+    assert reverse["closing_odds"] == 1.76
+    assert counterfactual_outcome(original) == "WIN"
+    assert counterfactual_outcome(reverse) == "LOSS"
+    assert counterfactual_pnl_minor(reverse, 30_000) == -30_000
+    assert original["selection"] == "YES"
+
+
+def test_reverse_paper_win_uses_opposite_price_and_original_history_unchanged() -> None:
+    original = signal_row()
+    original["regulation_home_goals"] = 0
+    original["regulation_away_goals"] = 0
+    original["companion_selection"] = "NO"
+    original["companion_odd"] = 1.71
+    reverse = reversed_dc_paper_signal(original)
+    assert reverse is not None
+    assert counterfactual_outcome(original) == "LOSS"
+    assert counterfactual_outcome(reverse) == "WIN"
+    assert counterfactual_pnl_minor(reverse, 30_000) == 21_300
+    assert counterfactual_pnl_minor(original, 30_000) == 36_000
+
+
+def test_reverse_paper_preserves_manual_void_and_inverts_manual_wins() -> None:
+    original = signal_row()
+    original["companion_selection"] = "NO"
+    original["companion_odd"] = 1.71
+    original["manual_correction_outcome"] = "WIN"
+    paper = reversed_dc_paper_signal(original)
+    assert paper is not None
+    assert counterfactual_outcome(paper) == "LOSS"
+    original["manual_correction_outcome"] = "VOID"
+    paper = reversed_dc_paper_signal(original)
+    assert paper is not None
+    assert counterfactual_outcome(paper) == "VOID"
+
+
+def test_reverse_requires_real_companion_quote_not_estimated_price() -> None:
+    original = signal_row()
+    assert reversed_dc_paper_signal(original) is None
+
+
+def test_reverse_only_counts_post_cutover_decisions() -> None:
+    class PaperRepo:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            row = signal_row()
+            row.update(companion_selection="NO", companion_odd=1.71)
+            return (row,)
+
+    dashboard = ResearchDashboardService(PaperRepo(), reverse_since=NOW + timedelta(seconds=1))
+    assert dashboard.signals({}) == ()
+    assert dashboard.signals({"strategy": ["original"]})[0]["selection"] == "YES"
+
+    eligible = ResearchDashboardService(PaperRepo(), reverse_since=NOW)
+    paper = eligible.signals({})
+    assert len(paper) == 1
+    assert paper[0]["selection"] == "NO"
+    assert eligible.signals({"strategy": ["original"]})[0]["selection"] == "YES"
+
 
 
 def test_production_manual_void_is_reflected_in_research():
