@@ -340,7 +340,7 @@ def build_research_analytics_snapshot(
 
     settled_all = tuple(row for row in rows if row.get("outcome") != "PENDING")
     settled_active = tuple(
-        row for row in settled_all if not is_retired_research_segment(row)
+        row for row in settled_all if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row)
     )
     dated = tuple((row, _event_time(row)) for row in settled_active)
 
@@ -399,6 +399,7 @@ def build_research_analytics_snapshot(
 
     return {
         "contract_version": ANALYTICS_CONTRACT_VERSION,
+        "paper_strategy": "DC_REVERSED_PAPER_V1" if any(row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" for row in rows) else "ORIGINAL",
         "generated_at": now.isoformat(),
         "definitions": {
             "universe": (
@@ -880,6 +881,8 @@ def _selected_research_production_buckets(
     snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Resolve active Research intake buckets to their current analytics rows."""
+    if snapshot.get("paper_strategy") == "DC_REVERSED_PAPER_V1":
+        return []  # paper inversion must never be displayed as approved Production intake
     active_ids = set(active_bucket_ids())
     specs = {
         spec.bucket_id: spec
