@@ -227,3 +227,64 @@ def test_repeated_provider_errors_stop_before_consuming_five_calls(monkeypatch, 
     ]
     assert conn.closed
     assert "secret-key-only-in-tests" not in caplog.text
+
+
+def test_provider_api_key_is_stripped_before_client_initialization(monkeypatch):
+    """Railway reference values can contain a trailing newline."""
+    from h2h import manual_corner_settlement as module
+
+    conn = _LockConnection()
+    captured_keys = []
+    monkeypatch.setattr("psycopg.connect", lambda *args, **kwargs: conn)
+    monkeypatch.setattr(module, "PostgreSQLQuantLabRepository", lambda *args: _Repo())
+    monkeypatch.setattr(module, "_pending_production_corners", lambda repository, now: ())
+    monkeypatch.setattr(module, "QuantLabRequestBudget", lambda **kwargs: SimpleNamespace(used=0))
+
+    def make_client(**kwargs):
+        captured_keys.append(kwargs["api_key"])
+        return SimpleNamespace()
+
+    monkeypatch.setattr(module, "QuantLabApiFootballClient", make_client)
+    result = run_manual_corner_settlement(
+        database_url="postgresql://fake/test",
+        api_key="test-only-key\n",
+        daily_limit=7500,
+        reserve=0,
+        now=NOW,
+    )
+    assert captured_keys == ["test-only-key"]
+    assert result["api_calls"] == 0
+    assert conn.closed
+
+
+def test_provider_exception_never_logs_header_value(monkeypatch, caplog):
+    from h2h import manual_corner_settlement as module
+
+    conn = _LockConnection()
+    used = SimpleNamespace(used=0)
+
+    class BadHeaderProvider:
+        def fetch_fixture(self, _fixture_id):
+            used.used += 1
+            raise ValueError("Invalid header value b'secret-key\\n'")
+
+    monkeypatch.setattr("psycopg.connect", lambda *args, **kwargs: conn)
+    monkeypatch.setattr(module, "PostgreSQLQuantLabRepository", lambda *args: _Repo())
+    monkeypatch.setattr(module, "QuantLabRequestBudget", lambda **kwargs: used)
+    monkeypatch.setattr(module, "QuantLabApiFootballClient", lambda **kwargs: BadHeaderProvider())
+    monkeypatch.setattr(module, "_pending_production_corners", lambda repository, now: ({
+        "fixture_id": "api-football:101",
+        "provider_fixture_id": 101,
+        "provider_status": "NS",
+        "result_captured_at": NOW - timedelta(hours=3),
+    },))
+    result = run_manual_corner_settlement(
+        database_url="postgresql://fake/test",
+        api_key="secret-key\n",
+        daily_limit=7500,
+        reserve=0,
+        now=NOW,
+    )
+    assert result["failure_codes"][0]["stage"] == "fixture_request"
+    assert "secret-key" not in caplog.text
+    assert conn.closed

@@ -117,6 +117,8 @@ def run_manual_corner_settlement(
     """
     import psycopg
 
+    database_url = database_url.strip()
+    api_key = api_key.strip()
     if not database_url or not api_key:
         raise ValueError("manual corner settlement requires DATABASE_URL and API_FOOTBALL_KEY")
     current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -247,13 +249,16 @@ def run_manual_corner_settlement(
             except Exception as exc:  # noqa: BLE001 - boundary diagnostics
                 error_class = type(exc).__name__
                 # Never put provider credentials or connection URLs into Railway logs.
+                # Transport errors may render the API key inside bytes repr,
+                # escaping its trailing newline; never emit request exception
+                # messages, even if raw-string redaction appears to succeed.
                 redacted_message = (
-                    str(exc)
-                    .replace(api_key, "[provider credential]")
+                    "[redacted request failure]"
+                    if stage.endswith("_request") else
+                    str(exc).replace(api_key, "[provider credential]")
                     .replace(database_url, "[database URL]")
-                    .replace("\\n", " ")
-                    .replace("\\r", " ")
-                )[:220]
+                    .replace("\\n", " ").replace("\\r", " ")[:220]
+                )
                 LOGGER.error(
                     "Manual corner settlement refresh failed fixture=%s stage=%s error=%s: %s",
                     fixture_id, stage, error_class, redacted_message,
