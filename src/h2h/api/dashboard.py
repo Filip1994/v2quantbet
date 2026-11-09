@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -32,6 +33,7 @@ from h2h.production_buckets import bucket_spec
 
 WORKER_FRESHNESS_SECONDS = 600
 DASHBOARD_CACHE_SECONDS = 10
+LOGGER = logging.getLogger("quantbet.operations.dashboard")
 
 _COUNTRY_FLAG_CODES = {
     "albania": "AL",
@@ -171,6 +173,57 @@ class DashboardService:
         self._snapshot_lock = Lock()
         self._cached_snapshot: dict[str, Any] | None = None
         self._cached_at = 0.0
+        self._manual_settlement_lock = Lock()
+        self._manual_settlement_started_at = 0.0
+        self._manual_settlement_status: dict[str, Any] = {"state": "idle"}
+
+    def manual_settlement_status(self) -> dict[str, Any]:
+        with self._manual_settlement_lock:
+            return dict(self._manual_settlement_status)
+
+    def trigger_manual_settlement(self) -> dict[str, Any]:
+        """Start one bounded run without turning the dashboard into a scheduled worker."""
+        if not os.getenv("API_FOOTBALL_KEY", "").strip():
+            raise RuntimeError("API_FOOTBALL_KEY missing on dashboard service")
+        with self._manual_settlement_lock:
+            if self._manual_settlement_status["state"] == "running":
+                return dict(self._manual_settlement_status)
+            # Avoid repeated clicks on this same live instance.
+            if monotonic() - self._manual_settlement_started_at < 60:
+                return dict(self._manual_settlement_status)
+            self._manual_settlement_started_at = monotonic()
+            self._manual_settlement_status = {
+                "state": "running",
+                "started_at": datetime.now(UTC).isoformat(),
+            }
+
+        def work() -> None:
+            try:
+                from h2h.manual_corner_settlement import (
+                    ManualSettlementBusy,
+                    run_manual_corner_settlement,
+                )
+
+                try:
+                    result = run_manual_corner_settlement(
+                        database_url=os.environ["DATABASE_URL"],
+                        api_key=os.environ["API_FOOTBALL_KEY"],
+                        daily_limit=int(os.getenv("QUANTBET_API_DAILY_LIMIT", "7500")),
+                        reserve=int(os.getenv("QUANTBET_API_RESERVE", "0")),
+                    )
+                    status: dict[str, Any] = {"state": "completed", "result": result}
+                except ManualSettlementBusy:
+                    status = {"state": "busy"}
+            except Exception:
+                LOGGER.exception("Manual CornerLab settlement failed")
+                status = {"state": "failed", "error": "settlement_failed"}
+            status["finished_at"] = datetime.now(UTC).isoformat()
+            with self._manual_settlement_lock:
+                self._manual_settlement_status = status
+            self._invalidate_snapshot()
+
+        Thread(target=work, name="manual-corner-settlement", daemon=True).start()
+        return self.manual_settlement_status()
 
     def snapshot(self) -> dict[str, Any]:
         with self._snapshot_lock:
@@ -1088,10 +1141,43 @@ class DashboardService:
             for label, value, css in cards
         )
         stale = ", ".join(ops["stale_workers"]) or "None"
+        manual = self.manual_settlement_status()
+        manual_state = manual["state"]
+        enabled = bool(os.getenv("API_FOOTBALL_KEY", "").strip())
+        running = manual_state == "running"
+        if running:
+            manual_message = "Processing up to 5 overdue Production corner fixtures. Page refreshes automatically."
+        elif manual_state == "completed":
+            result = manual.get("result") or {}
+            manual_message = (
+                f"Finished: {result.get('settled_picks', 0)} picks settled, "
+                f"{result.get('fixtures_checked', 0)} fixtures checked, "
+                f"{result.get('api_calls', 0)} API calls. "
+                + ("Provider quota exhausted. " if result.get("budget_exhausted") else "")
+                + (f"{len(result.get('failed_fixtures', []))} fixture errors. " if result.get("failed_fixtures") else "")
+            )
+        elif manual_state == "failed":
+            manual_message = "Manual settlement failed. Inspect Railway dashboard logs."
+        elif manual_state == "busy":
+            manual_message = "CornerLab collector is currently running. Try again after its cycle."
+        else:
+            manual_message = "Check up to 5 overdue CornerLab fixtures. Does not run the full collector."
+        if not enabled:
+            manual_message = "Unavailable until API_FOOTBALL_KEY is configured on Operations."
+        manual_button_disabled = " disabled" if running or not enabled else ""
+        manual_panel = (
+            '<section class="manual-settlement"><div>'
+            '<strong>CornerLab result cleanup</strong>'
+            f'<p role="status">{escape(manual_message)}</p></div>'
+            '<form method="post" action="/api/settlement/run">'
+            f'<button type="submit"{manual_button_disabled}>'
+            f'{"Settling…" if running else "Settle now"}</button></form></section>'
+        )
+        manual_refresh = '<meta http-equiv="refresh" content="5">' if running else ""
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>QuantBet · Operations</title>
+<meta name="robots" content="noindex,nofollow"><title>QuantBet · Operations</title>{manual_refresh}
 <style>
 :root{{--bg:#07121d;--panel:#0d1a28;--panel2:#13263a;--line:#25445d;--text:#f3f8fb;
 --muted:#8fa7b8;--blue:#55b8ff;--cyan:#71cfff;--yellow:#ffd31a;--green:#45d58b;--red:#fb7185;--amber:#ffd05a}}
@@ -1172,12 +1258,18 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 @media(max-width:650px){{.shell{{padding:14px}}header{{align-items:start;flex-direction:column}}.kpis{{grid-template-columns:repeat(2,1fr)}}
 .scoreboard{{grid-template-columns:repeat(2,1fr);gap:14px}}.score{{border:0;padding:0}}footer{{flex-direction:column}}
 .odds-grid{{grid-template-columns:repeat(4,minmax(100px,1fr));min-width:430px}}.odds-grid>span{{min-height:68px;padding:8px 6px}}.pick-book{{margin-top:7px}}}}
+.manual-settlement{{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:12px;padding:14px 16px;border:1px solid #356184;border-radius:12px;background:#0b2237}}
+.manual-settlement strong{{color:#d9f4ff;font-size:13px}}.manual-settlement p{{color:#a2c6d9;margin:4px 0 0;font-size:12px}}
+.manual-settlement form{{margin:0;flex-shrink:0}}.manual-settlement button{{border:1px solid #69ccff;color:#051624;background:#73d8ff;border-radius:8px;font-weight:900;cursor:pointer;padding:11px 18px;min-height:42px}}
+.manual-settlement button:disabled{{opacity:.45;cursor:default}}
+@media(max-width:650px){{.manual-settlement{{align-items:stretch;flex-direction:column;gap:10px}}.manual-settlement button{{width:100%}}}}
 .hub-return{{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;box-sizing:border-box;padding:8px 12px;background:#12253a;border:1px solid #5589b2;border-radius:9px;color:#cfeaff!important;font:800 12px/1.2 Inter,system-ui,sans-serif;text-decoration:none!important;white-space:nowrap}}.hub-return:hover{{background:#1e3b58}}.hub-return:focus-visible{{outline:3px solid #f6d365;outline-offset:2px}}
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
-<div class="subtitle">Read-only view of durable PostgreSQL state</div></div>
+<div class="subtitle">Durable PostgreSQL state and operator controls</div></div>
 <a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="live"><span class="dot"></span>Database Connected · Generated {escape(self._dt(context["generated_at"]))}</div></header>
+{manual_panel}
 <section class="kpis">{cards_html}</section>
 <section class="overview"><article class="panel"><div class="panel-head"><h2>Pick performance</h2><span class="section-label">All time</span></div>
 <div class="scoreboard"><div class="score"><span>System picks</span><strong>{counts["all"]}</strong></div>
@@ -1238,6 +1330,9 @@ class DashboardHTTPService:
                                 service._json(self, 503, {"error": type(exc).__name__})
                             except (BrokenPipeError, ConnectionResetError):
                                 return
+                elif path == "/api/settlement/status":
+                    if service._authorize(self):
+                        service._json(self, 200, dashboard.manual_settlement_status())
                 elif path == "/hub":
                     if service._authorize(self):
                         try:
@@ -1255,13 +1350,31 @@ class DashboardHTTPService:
             def do_POST(self) -> None:
                 path = self.path.split("?", 1)[0]
                 prefix, suffix = "/api/picks/", "/operator-state"
-                if not path.startswith(prefix) or not path.endswith(suffix):
+                if path != "/api/settlement/run" and (
+                    not path.startswith(prefix) or not path.endswith(suffix)
+                ):
                     service._json(self, 404, {"error": "not_found"})
                     return
                 if not service._same_origin(self):
                     service._json(self, 403, {"error": "origin_forbidden"})
                     return
                 if not service._authorize(self):
+                    return
+                if path == "/api/settlement/run":
+                    try:
+                        if int(self.headers.get("Content-Length", "0")) != 0:
+                            raise ValueError("unexpected request body")
+                        result = dashboard.trigger_manual_settlement()
+                    except (ValueError, RuntimeError) as exc:
+                        service._json(self, 503, {"error": type(exc).__name__})
+                        return
+                    if "application/json" in self.headers.get("Accept", ""):
+                        service._json(self, 202, result)
+                    else:
+                        self.send_response(303)
+                        self.send_header("Location", "/dashboard")
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
@@ -1375,6 +1488,8 @@ class DashboardHTTPService:
 
     @staticmethod
     def _same_origin(handler: BaseHTTPRequestHandler) -> bool:
+        if handler.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+            return False
         origin = handler.headers.get("Origin")
         if not origin:
             return True
