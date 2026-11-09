@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from threading import Event
 
 from h2h.api.research_dashboard import ResearchDashboardHTTPService, ResearchDashboardService
@@ -29,6 +30,16 @@ def _integer(name: str, default: str) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
+def _reverse_since() -> datetime | None:
+    raw = os.getenv("QUANTBET_RESEARCH_REVERSE_SINCE", "").strip()
+    if not raw:
+        return None
+    value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("QUANTBET_RESEARCH_REVERSE_SINCE must have a UTC offset")
+    return value
+
+
 def main() -> None:
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
     stop = Event()
@@ -40,6 +51,7 @@ def main() -> None:
         repository,
         corner_repository=PostgreSQLCornerResearchRepository(_database_url()),
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
+        reverse_since=_reverse_since(),
         strict_quote_age_seconds=_integer("QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS", "300"),
         provider_snapshot_max_age_seconds=_integer(
             "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "36000"
