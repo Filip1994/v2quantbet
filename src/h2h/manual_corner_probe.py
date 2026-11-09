@@ -15,7 +15,7 @@ from h2h.quantlab.provider import QuantLabApiFootballClient
 
 
 def main() -> None:
-    api_key = os.environ["API_FOOTBALL_KEY"]
+    api_key = os.environ["API_FOOTBALL_KEY"].strip()
     database_url = os.environ["DATABASE_URL"]
     budget = QuantLabRequestBudget(
         shared_daily_limit=int(os.getenv("QUANTBET_API_DAILY_LIMIT", "7500")),
@@ -41,13 +41,13 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001 - boundary diagnostics
             print(
                 "CORNER_PROBE_PARSE_ERROR", type(exc).__name__,
-                str(exc).replace(api_key, "[key]").replace(database_url, "[database]")[:220],
+                "[redacted provider/parse failure]",
                 flush=True,
             )
     except Exception as exc:  # noqa: BLE001 - boundary diagnostics
         print(
             "CORNER_PROBE_FETCH_ERROR", type(exc).__name__,
-            str(exc).replace(api_key, "[key]").replace(database_url, "[database]")[:220],
+            "[redacted provider/parse failure]",
             flush=True,
         )
 
