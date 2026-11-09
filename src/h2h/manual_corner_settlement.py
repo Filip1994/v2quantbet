@@ -147,6 +147,10 @@ def run_manual_corner_settlement(
         deferred = 0
         budget_exhausted = False
         failed_fixtures: list[str] = []
+        failure_codes: list[dict[str, str]] = []
+        repeated_failure_key: tuple[str, str] | None = None
+        repeated_failure_count = 0
+        aborted_repeated_failure = False
         before_calls = budget.used
 
         for row in candidates:
@@ -167,9 +171,11 @@ def run_manual_corner_settlement(
 
             selected.append(fixture_id)
             provider_fixture_id = int(row["provider_fixture_id"])
+            stage = "fixture_request" if needs_result else "statistics_request"
             try:
                 if needs_result:
                     payload = provider.fetch_fixture(provider_fixture_id)
+                    stage = "fixture_parse"
                     observed = parse_fixture_discovery_response(payload, captured_at=current)
                     matching = tuple(
                         item for item in observed
@@ -179,6 +185,7 @@ def run_manual_corner_settlement(
                         LOGGER.warning("Manual corner fixture identity mismatch fixture=%s", fixture_id)
                         failed_fixtures.append(fixture_id)
                         continue
+                    stage = "fixture_persist"
                     repository.save_fixture_observations(matching)
                     results_refreshed += 1
                     status = str(matching[-1].fixture.status)
@@ -190,7 +197,9 @@ def run_manual_corner_settlement(
                     if not row["home_team_id"] or not row["away_team_id"]:
                         failed_fixtures.append(fixture_id)
                         continue
+                    stage = "statistics_request"
                     payload = provider.fetch_statistics(provider_fixture_id)
+                    stage = "statistics_parse"
                     response = payload.get("response") if isinstance(payload, dict) else None
                     try:
                         statistics = parse_fixture_statistics(
@@ -213,6 +222,7 @@ def run_manual_corner_settlement(
                         )
                         deferred += 1
                         continue
+                    stage = "statistics_persist"
                     repository.save_match_statistics(statistics)
                     has_corners = (
                         statistics.home_corner_kicks is not None
@@ -234,9 +244,41 @@ def run_manual_corner_settlement(
             except ApiBudgetExceededError:
                 budget_exhausted = True
                 break
-            except Exception:
-                LOGGER.exception("Manual corner settlement refresh failed fixture=%s", fixture_id)
+            except Exception as exc:
+                error_class = type(exc).__name__
+                # Never put provider credentials or connection URLs into Railway logs.
+                redacted_message = (
+                    str(exc)
+                    .replace(api_key, "[provider credential]")
+                    .replace(database_url, "[database URL]")
+                    .replace("\\n", " ")
+                    .replace("\\r", " ")
+                )[:220]
+                LOGGER.error(
+                    "Manual corner settlement refresh failed fixture=%s stage=%s error=%s: %s",
+                    fixture_id, stage, error_class, redacted_message,
+                )
                 failed_fixtures.append(fixture_id)
+                failure_codes.append({
+                    "fixture_id": fixture_id,
+                    "stage": stage,
+                    "error_class": error_class,
+                })
+                failure_key = (stage, error_class)
+                if failure_key == repeated_failure_key:
+                    repeated_failure_count += 1
+                else:
+                    repeated_failure_key = failure_key
+                    repeated_failure_count = 1
+                if repeated_failure_count >= 2 and stage.endswith("_request"):
+                    # Likely shared integration/configuration fault. Do not spend
+                    # the remaining manual API budget on the same failure.
+                    aborted_repeated_failure = True
+                    LOGGER.error(
+                        "Manual corner settlement halted after repeated provider errors stage=%s class=%s",
+                        stage, error_class,
+                    )
+                    break
 
         settled = 0
         if selected:
@@ -265,6 +307,8 @@ def run_manual_corner_settlement(
             "api_calls": budget.used - before_calls,
             "budget_exhausted": budget_exhausted,
             "failed_fixtures": failed_fixtures[:5],
+            "failure_codes": failure_codes[:5],
+            "aborted_repeated_failure": aborted_repeated_failure,
         }
         LOGGER.info("Manual Production corner settlement completed: %s", result)
         return result
