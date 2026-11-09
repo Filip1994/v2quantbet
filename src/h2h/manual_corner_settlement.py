@@ -142,6 +142,7 @@ def run_manual_corner_settlement(
         provider = QuantLabApiFootballClient(api_key=api_key, budget=budget, timeout=6.0)
         candidates = _pending_production_corners(repository, now=current)
         selected: list[str] = []
+        terminal_at_by_fixture: dict[str, datetime] = {}
         stats_refreshed = results_refreshed = 0
         deferred = 0
         budget_exhausted = False
@@ -183,6 +184,8 @@ def run_manual_corner_settlement(
                     status = str(matching[-1].fixture.status)
                     observed_at = current
 
+                if status in TERMINAL_PLAYED:
+                    terminal_at_by_fixture[fixture_id] = observed_at
                 if status in TERMINAL_PLAYED and _needs_statistics(row, terminal_at=observed_at):
                     if not row["home_team_id"] or not row["away_team_id"]:
                         failed_fixtures.append(fixture_id)
@@ -241,8 +244,15 @@ def run_manual_corner_settlement(
             for candidate in repository.corner_shadow_settlement_candidates(
                 limit=5000, production_only=True
             ):
-                if str(candidate["fixture_id"]) not in selected_ids:
+                fixture_id = str(candidate["fixture_id"])
+                if fixture_id not in selected_ids:
                     continue
+                if candidate["result_classification"] == "PLAYED_SETTLEABLE":
+                    stats_at = candidate["statistics_available_at"]
+                    terminal_at = terminal_at_by_fixture.get(fixture_id)
+                    if terminal_at is None or stats_at is None or stats_at < terminal_at:
+                        # Never settle from an earlier, potentially live corner count.
+                        continue
                 settlement = settle_corner_shadow_bet(candidate, settled_at=current)
                 if settlement is not None:
                     settled += int(bool(repository.save_corner_settlement_event(settlement)))
