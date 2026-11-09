@@ -218,11 +218,45 @@ def _time_to_kickoff_bucket(qualified_at: Any, kickoff_at: Any) -> str:
     return "24h+"
 
 
+def reversed_dc_paper_signal(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Isolated paper projection at the exact paired historical bookmaker quote."""
+    market = str(row.get("market") or "").upper()
+    original = str(row.get("selection") or "").upper()
+    opposite = str(row.get("companion_selection") or "").upper()
+    allowed = {"OU_25": {"OVER", "UNDER"}, "BTTS": {"YES", "NO"}}
+    if market not in allowed or {original, opposite} != allowed[market]:
+        return None
+    opposite_odd = row.get("companion_odd")
+    original_p = row.get("model_probability")
+    original_fair = row.get("market_fair_probability")
+    if opposite_odd is None or original_p is None or original_fair is None:
+        return None
+    if float(opposite_odd) <= 1.0:
+        return None
+
+    paper = dict(row)
+    paper["paper_strategy"] = "DC_REVERSED_PAPER_V1"
+    paper["original_selection"] = original
+    paper["original_odds"] = row["odds"]
+    paper["selection"] = opposite
+    paper["odds"] = opposite_odd
+    paper["model_probability"] = 1.0 - float(original_p)
+    paper["market_fair_probability"] = 1.0 - float(original_fair)
+    paper["edge"] = paper["model_probability"] - paper["market_fair_probability"]
+    paper["expected_value"] = paper["model_probability"] * float(opposite_odd) - 1.0
+    paper["closing_odds"] = row.get("companion_closing_odds")
+    paper["closing_observed_at"] = row.get("companion_closing_observed_at")
+    paper["closing_captured_at"] = row.get("companion_closing_captured_at")
+    return paper
+
+
 def counterfactual_outcome(row: dict[str, Any]) -> str:
     # The most recent append-only manual correction supersedes a prior VOID.
     # Do not claim a provider-final score: source result status remains unchanged.
     manual_outcome = row.get("manual_correction_outcome")
     if manual_outcome in ("WIN", "LOSS", "VOID"):
+        if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1":
+            return {"WIN": "LOSS", "LOSS": "WIN", "VOID": "VOID"}[manual_outcome]
         return str(manual_outcome)
     if row.get("production_manual_void"):
         return "VOID"
@@ -388,6 +422,7 @@ class ResearchDashboardService:
         repository: PostgreSQLResearchSignalRepository,
         *,
         fixed_stake_minor: int = 30_000,
+        reverse_since: datetime | None = None,
         strict_quote_age_seconds: int = 300,
         provider_snapshot_max_age_seconds: int = 36_000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -401,6 +436,11 @@ class ResearchDashboardService:
         self._corner_cache_at = 0.0
         self._corner_cache_lock = Lock()
         self._stake = fixed_stake_minor
+        if reverse_since is not None and (
+            reverse_since.tzinfo is None or reverse_since.utcoffset() is None
+        ):
+            raise ValueError("reverse_since must be timezone-aware")
+        self._reverse_since = reverse_since.astimezone(UTC) if reverse_since else None
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
         self._clock = clock
@@ -756,7 +796,24 @@ class ResearchDashboardService:
                 away_team=row.get("away_team"),
             )
         )
-        rows = tuple(self._derived(row) for row in canonical)
+        strategy = params.get(
+            "strategy", ["reverse" if self._reverse_since else "original"]
+        )[0].strip().casefold()
+        if strategy not in {"reverse", "original"}:
+            raise ValueError("unknown research strategy")
+        if strategy == "reverse":
+            if self._reverse_since is None:
+                rows = ()
+            else:
+                projected = (
+                    reversed_dc_paper_signal(row)
+                    for row in canonical
+                    if isinstance(row.get("qualified_at"), datetime)
+                    and row["qualified_at"].astimezone(UTC) >= self._reverse_since
+                )
+                rows = tuple(self._derived(row) for row in projected if row is not None)
+        else:
+            rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
         selection = params.get("selection", [""])[0].strip().upper()
         league = params.get("league", [""])[0].strip().casefold()
@@ -1747,7 +1804,7 @@ main{{padding:14px}}header{{display:block}}}}
                 (
                     row
                     for row in pending_rows
-                    if not is_retired_research_segment(row)
+                    if (row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row))
                     and (
                         not isinstance(row.get("kickoff_at"), datetime)
                         or row["kickoff_at"].astimezone(UTC) > now
@@ -1852,7 +1909,7 @@ main{{padding:14px}}header{{display:block}}}}
         sort_base_params["tab"] = tab
 
         # Preserve retired rows in History while excluding them from headline performance.
-        settled = tuple(row for row in history_rows if not is_retired_research_segment(row))
+        settled = tuple(row for row in history_rows if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row))
         wins = sum(row["outcome"] == "WIN" for row in settled)
         clvs = [row["clv_ppm"] for row in settled if row["clv_ppm"] is not None]
         pnl = sum(row["pnl_minor"] or 0 for row in settled)
@@ -2106,13 +2163,37 @@ main{{padding:14px}}header{{display:block}}}}
         active_href = escape(tab_href("active"), quote=True)
         awaiting_href = escape(tab_href("awaiting"), quote=True)
         history_href = escape(tab_href("history"), quote=True)
-        clear_href = f"/research?tab={tab}"
+        strategy = params.get("strategy", ["reverse" if self._reverse_since else "original"])[0].strip().casefold()
+        clear_href = f"/research?tab={tab}&strategy={strategy}"
         sort_hidden = ""
         if sort_key:
             sort_hidden = (
                 f'<input type="hidden" name="sort" value="{escape(sort_key, quote=True)}">'
                 f'<input type="hidden" name="dir" value="{escape(sort_dir, quote=True)}">'
             )
+
+        mode_banner = (
+            '<div role="status" style="padding:12px;margin-bottom:12px;border:1px solid #a27e3d;'
+            'border-radius:9px;background:#272219;color:#f4d49c">'
+            '<b>REVERSED DC PAPER V1</b> · Only picks qualified since '
+            + escape(_time(self._reverse_since))
+            + ' · Opposite selection at its recorded companion quote. '
+            'Starting P/L is zero. Historical Research and Production unchanged. '
+            '<a style="color:#f4d49c" href="/research?strategy=original">Original history</a>'
+            '</div>'
+            if self._reverse_since is not None and strategy == "reverse"
+            else (
+                '<div role="status" style="padding:10px;margin-bottom:12px;border:1px solid #3c444c;'
+                'border-radius:9px">ORIGINAL RESEARCH · '
+                '<a href="/research?strategy=reverse">Reverse paper experiment</a></div>'
+                if self._reverse_since is not None else ""
+            )
+        )
+        performance_label = (
+            "Reverse paper flat P/L" if strategy == "reverse" and self._reverse_since
+            else "Non-retired flat P/L"
+        )
+        analytics_href = "/research/analytics?strategy=" + strategy
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -2168,11 +2249,12 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="readonly">● READ-ONLY RESEARCH</div>
 </header>
 <section class="health-strip" aria-label="System status"><span class="health-label">System status</span>{health_html}</section>
+{mode_banner}
 <nav class="tabs" aria-label="Research sections">
 <a class="{active_class}" href="{active_href}">Active <span>({len(active_rows)})</span></a>
 <a class="{awaiting_class}" href="{awaiting_href}">Awaiting result <span>({len(awaiting_rows)})</span></a>
 <a class="{history_class}" href="{history_href}">History <span>({len(history_rows)})</span></a>
-<a href="/research/analytics">Analytics V2</a>
+<a href="{analytics_href}">Analytics V2</a>
 </nav>
 <section class="cards">
 <div class="card"><small>Active</small><b>{len(active_rows)}</b></div>
@@ -2182,7 +2264,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="card"><small>Skipped</small><b>{skipped_count}</b></div>
 <div class="card"><small>Exposure blocked</small><b>{blocked_count}</b></div>
 <div class="card"><small>Non-retired win rate</small><b>{win_rate_text}</b></div>
-<div class="card"><small>Non-retired flat P/L</small><b class="{pnl_class}">{pnl_text}</b></div>
+<div class="card"><small>{performance_label}</small><b class="{pnl_class}">{pnl_text}</b></div>
 <div class="card"><small>Non-retired Avg CLV</small><b class="{avg_clv_class}">{avg_clv_text}</b></div>
 </section>
 <div class="toolbar">
