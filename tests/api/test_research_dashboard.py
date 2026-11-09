@@ -106,7 +106,7 @@ def test_reverse_paper_win_uses_opposite_price_and_original_history_unchanged() 
     assert counterfactual_outcome(original) == "LOSS"
     assert counterfactual_outcome(reverse) == "WIN"
     assert counterfactual_pnl_minor(reverse, 30_000) == 21_300
-    assert counterfactual_pnl_minor(original, 30_000) == 36_000
+    assert counterfactual_pnl_minor(original, 30_000) == -30_000
 
 
 def test_reverse_paper_preserves_manual_void_and_inverts_manual_wins() -> None:
