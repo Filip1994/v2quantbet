@@ -38,13 +38,13 @@ def main() -> None:
                 payload, captured_at=datetime.now(UTC)
             )
             print("CORNER_PROBE_PARSE_OK", len(observations), flush=True)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - boundary diagnostics
             print(
                 "CORNER_PROBE_PARSE_ERROR", type(exc).__name__,
                 str(exc).replace(api_key, "[key]").replace(database_url, "[database]")[:220],
                 flush=True,
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - boundary diagnostics
         print(
             "CORNER_PROBE_FETCH_ERROR", type(exc).__name__,
             str(exc).replace(api_key, "[key]").replace(database_url, "[database]")[:220],
