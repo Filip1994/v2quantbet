@@ -207,7 +207,7 @@ class DashboardService:
                 try:
                     result = run_manual_corner_settlement(
                         database_url=os.environ["DATABASE_URL"],
-                        api_key=os.environ["API_FOOTBALL_KEY"],
+                        api_key=os.environ["API_FOOTBALL_KEY"].strip(),
                         daily_limit=int(os.getenv("QUANTBET_API_DAILY_LIMIT", "7500")),
                         reserve=int(os.getenv("QUANTBET_API_RESERVE", "0")),
                     )
