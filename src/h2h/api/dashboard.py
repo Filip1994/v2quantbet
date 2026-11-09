@@ -1155,6 +1155,19 @@ class DashboardService:
                 f"{result.get('api_calls', 0)} API calls. "
                 + ("Provider quota exhausted. " if result.get("budget_exhausted") else "")
                 + (f"{len(result.get('failed_fixtures', []))} fixture errors. " if result.get("failed_fixtures") else "")
+                + (
+                    "Stopped to protect API quota after repeated provider errors. "
+                    if result.get("aborted_repeated_failure") else ""
+                )
+                + (
+                    "Failure stage: "
+                    + ", ".join(sorted({
+                        str(item.get("stage", "unknown")) + " (" + str(item.get("error_class", "Error")) + ")"
+                        for item in result.get("failure_codes", ())
+                    }))
+                    + ". "
+                    if result.get("failure_codes") else ""
+                )
             )
         elif manual_state == "failed":
             manual_message = "Manual settlement failed. Inspect Railway dashboard logs."
