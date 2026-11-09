@@ -180,3 +180,50 @@ def test_public_manual_route_is_post_only_and_rejects_cross_origin(monkeypatch):
         assert dashboard.calls == 1
     finally:
         server.close()
+
+
+def test_repeated_provider_errors_stop_before_consuming_five_calls(monkeypatch, caplog):
+    """System-wide request failures must not burn 5 provider calls per click."""
+    from h2h import manual_corner_settlement as module
+
+    conn = _LockConnection()
+    repo = _Repo()
+    requests = SimpleNamespace(used=0)
+
+    class BrokenProvider:
+        def fetch_fixture(self, fixture_id):
+            requests.used += 1
+            raise ValueError("provider request rejected")
+
+    monkeypatch.setattr("psycopg.connect", lambda *args, **kwargs: conn)
+    monkeypatch.setattr(module, "PostgreSQLQuantLabRepository", lambda *args: repo)
+    monkeypatch.setattr(module, "QuantLabRequestBudget", lambda **kwargs: requests)
+    monkeypatch.setattr(module, "QuantLabApiFootballClient", lambda **kwargs: BrokenProvider())
+    candidates = tuple({
+        "fixture_id": f"api-football:{n}",
+        "provider_fixture_id": n,
+        "provider_status": "NS",
+        "result_captured_at": NOW - timedelta(hours=3),
+        "statistics_at": None,
+        "last_statistics_capture_at": None,
+    } for n in range(101, 106))
+    monkeypatch.setattr(
+        module, "_pending_production_corners",
+        lambda repository, now: candidates,
+    )
+    result = run_manual_corner_settlement(
+        database_url="postgresql://fake/test",
+        api_key="secret-key-only-in-tests",
+        daily_limit=7500,
+        reserve=0,
+        now=NOW,
+    )
+    assert result["fixtures_checked"] == 2
+    assert result["api_calls"] == 2
+    assert result["aborted_repeated_failure"] is True
+    assert result["failure_codes"] == [
+        {"fixture_id": "api-football:101", "stage": "fixture_request", "error_class": "ValueError"},
+        {"fixture_id": "api-football:102", "stage": "fixture_request", "error_class": "ValueError"},
+    ]
+    assert conn.closed
+    assert "secret-key-only-in-tests" not in caplog.text
