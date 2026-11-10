@@ -241,6 +241,7 @@ def reversed_dc_paper_signal(row: dict[str, Any]) -> dict[str, Any] | None:
     # Reverse ONLY final paper selection/odds and derive its result/P&L.
     paper["original_selection"] = original
     paper["original_odds"] = row["odds"]
+    paper["original_research_retired"] = is_retired_research_segment(row)
     paper["selection"] = opposite
     paper["odds"] = opposite_odd
     paper["closing_odds"] = row.get("companion_closing_odds")
@@ -801,17 +802,26 @@ class ResearchDashboardService:
         )[0].strip().casefold()
         if strategy not in {"reverse", "original"}:
             raise ValueError("unknown research strategy")
-        if strategy == "reverse":
-            if self._reverse_since is None:
-                rows = ()
-            else:
-                projected = (
-                    reversed_dc_paper_signal(row)
-                    for row in canonical
-                    if isinstance(row.get("qualified_at"), datetime)
-                    and row["qualified_at"].astimezone(UTC) >= self._reverse_since
-                )
-                rows = tuple(self._derived(row) for row in projected if row is not None)
+        # One continuous paper ledger: historical choices stay unchanged and only
+        # newly qualified decisions are executed on the opposite side.
+        # Both periods belong to the same existing Research P/L and statistics.
+        if strategy == "reverse" and self._reverse_since is not None:
+            def paper_decision(row: dict[str, Any]) -> dict[str, Any]:
+                qualified = row.get("qualified_at") or row.get("first_blocked_at")
+                if (
+                    not isinstance(qualified, datetime)
+                    or qualified.astimezone(UTC) < self._reverse_since
+                    or is_retired_research_segment(row)
+                ):
+                    return row
+                opposite = reversed_dc_paper_signal(row)
+                # This database requires the matching companion quote on every
+                # value evaluation; never manufacture one.
+                if opposite is None:
+                    raise ValueError("qualified paper signal has no companion quote")
+                return opposite
+
+            rows = tuple(self._derived(paper_decision(row)) for row in canonical)
         else:
             rows = tuple(self._derived(row) for row in canonical)
         market = params.get("market", [""])[0].strip().upper()
@@ -1810,7 +1820,7 @@ main{{padding:14px}}header{{display:block}}}}
                 (
                     row
                     for row in pending_rows
-                    if (row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row))
+                    if not row.get("original_research_retired", is_retired_research_segment(row))
                     and (
                         not isinstance(row.get("kickoff_at"), datetime)
                         or row["kickoff_at"].astimezone(UTC) > now
@@ -1915,7 +1925,7 @@ main{{padding:14px}}header{{display:block}}}}
         sort_base_params["tab"] = tab
 
         # Preserve retired rows in History while excluding them from headline performance.
-        settled = tuple(row for row in history_rows if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row))
+        settled = tuple(row for row in history_rows if not row.get("original_research_retired", is_retired_research_segment(row)))
         wins = sum(row["outcome"] == "WIN" for row in settled)
         clvs = [row["clv_ppm"] for row in settled if row["clv_ppm"] is not None]
         pnl = sum(row["pnl_minor"] or 0 for row in settled)
@@ -1950,7 +1960,7 @@ main{{padding:14px}}header{{display:block}}}}
             return f'{market} {row["selection"]}'
 
         def retired_badge(row: dict[str, Any]) -> str:
-            if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row):
+            if not row.get("original_research_retired", is_retired_research_segment(row)):
                 return ""
             return (
                 '<span class="mini-badge status-retired" '
@@ -2194,7 +2204,8 @@ main{{padding:14px}}header{{display:block}}}}
             + ' · Original model qualification, P, edge, EV and buckets stay unchanged. '
             'Only the final paper selection and its real paired quote are reversed. '
             'P/EV/edge describe the ORIGINAL signal, not the opposite outcome. '
-            'Starting P/L is zero. Historical Research and Production unchanged. '
+            'Single continuous Research P/L: historical outcomes preserved, only new decisions reversed. '
+            'Production unchanged. '
             '<a style="color:#f4d49c" href="/research?strategy=original">Original history</a>'
             '</div>'
             if self._reverse_since is not None and strategy == "reverse"
@@ -2206,7 +2217,7 @@ main{{padding:14px}}header{{display:block}}}}
             )
         )
         performance_label = (
-            "Reverse paper flat P/L" if strategy == "reverse" and self._reverse_since
+            "Research flat P/L (original history + reversed new picks)" if strategy == "reverse" and self._reverse_since
             else "Non-retired flat P/L"
         )
         analytics_href = "/research/analytics?strategy=" + strategy
