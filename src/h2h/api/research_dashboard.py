@@ -236,14 +236,13 @@ def reversed_dc_paper_signal(row: dict[str, Any]) -> dict[str, Any] | None:
 
     paper = dict(row)
     paper["paper_strategy"] = "DC_REVERSED_PAPER_V1"
+    # The model already selected the original signal and passed every gate.
+    # Keep original P, edge, EV and bucket inputs intact.
+    # Reverse ONLY final paper selection/odds and derive its result/P&L.
     paper["original_selection"] = original
     paper["original_odds"] = row["odds"]
     paper["selection"] = opposite
     paper["odds"] = opposite_odd
-    paper["model_probability"] = 1.0 - float(original_p)
-    paper["market_fair_probability"] = 1.0 - float(original_fair)
-    paper["edge"] = paper["model_probability"] - paper["market_fair_probability"]
-    paper["expected_value"] = paper["model_probability"] * float(opposite_odd) - 1.0
     paper["closing_odds"] = row.get("companion_closing_odds")
     paper["closing_observed_at"] = row.get("companion_closing_observed_at")
     paper["closing_captured_at"] = row.get("companion_closing_captured_at")
@@ -481,7 +480,8 @@ class ResearchDashboardService:
         )
         item["ev_bucket"] = _ev_bucket(item["expected_value"])
         item["edge_bucket"] = _edge_bucket(item["edge"])
-        item["odds_bucket"] = _odds_bucket(item["odds"])
+        # Original qualification and odds bucket must not change after reversal.
+        item["odds_bucket"] = _odds_bucket(item.get("original_odds", item["odds"]))
         item["time_to_kickoff_bucket"] = _time_to_kickoff_bucket(
             qualified_at, item.get("kickoff_at")
         )
@@ -1998,6 +1998,10 @@ main{{padding:14px}}header{{display:block}}}}
                 for label, key in columns
             )
 
+        reverse_view = bool(self._reverse_since and params.get("strategy", ["reverse"])[0].lower() == "reverse")
+        model_header = "Original model P" if reverse_view else "Model"
+        edge_header = "Original edge" if reverse_view else "Edge"
+        ev_header = "Original EV" if reverse_view else "EV"
         body_rows: list[str] = []
         if tab in {"active", "awaiting"}:
             for row in rows:
@@ -2018,7 +2022,9 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td><b>{_time(row["kickoff_at"])}</b>'
                     f'{kickoff_countdown(row["kickoff_at"]) if tab == "active" else ""}</td>'
-                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}</td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}'
+                    + (f'<small>Model chose: {escape(str(row["original_selection"]))}</small>' if row.get("paper_strategy") else "")
+                    + '</td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])}</small></td>'
@@ -2046,11 +2052,11 @@ main{{padding:14px}}header{{display:block}}}}
                     ("Match", "match"),
                     ("Kickoff", "kickoff"),
                     ("Pick", "pick"),
-                    ("Model", "model"),
+                    (model_header, "model"),
                     ("Odds", "odds"),
                     ("Route", "route"),
-                    ("Edge", "edge"),
-                    ("EV", "ev"),
+                    (edge_header, "edge"),
+                    (ev_header, "ev"),
                     ("Bookmaker", "bookmaker"),
                     ("Qualified", "qualified"),
                     ("Exposure", "exposure"),
@@ -2097,7 +2103,9 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<td class="match"><b>{match}</b>'
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td class="result-cell">{result_panel}</td>'
-                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}</td>'
+                    f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}'
+                    + (f'<small>Model chose: {escape(str(row["original_selection"]))}</small>' if row.get("paper_strategy") else "")
+                    + '</td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
                     f'<td><b>{_odd(row["closing_odds"])}</b><small>{_time(row["closing_observed_at"])}</small></td>'
@@ -2121,8 +2129,8 @@ main{{padding:14px}}header{{display:block}}}}
                     ("Entry", "entry"),
                     ("Research close", "close"),
                     ("CLV", "clv"),
-                    ("Model", "model"),
-                    ("EV", "ev"),
+                    (model_header, "model"),
+                    (ev_header, "ev"),
                     ("Route", "route"),
                     ("P/L", "pnl"),
                     ("Bookmaker", "bookmaker"),
@@ -2183,7 +2191,9 @@ main{{padding:14px}}header{{display:block}}}}
             'border-radius:9px;background:#272219;color:#f4d49c">'
             '<b>REVERSED DC PAPER V1</b> · Only picks qualified since '
             + escape(_time(self._reverse_since))
-            + ' · Opposite selection at its recorded companion quote. '
+            + ' · Original model qualification, P, edge, EV and buckets stay unchanged. '
+            'Only the final paper selection and its real paired quote are reversed. '
+            'P/EV/edge describe the ORIGINAL signal, not the opposite outcome. '
             'Starting P/L is zero. Historical Research and Production unchanged. '
             '<a style="color:#f4d49c" href="/research?strategy=original">Original history</a>'
             '</div>'
