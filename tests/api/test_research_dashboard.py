@@ -87,7 +87,11 @@ def test_reverse_dc_paper_uses_recorded_opposite_odds_not_original_odds() -> Non
     assert reverse["original_selection"] == "YES"
     assert reverse["original_odds"] == 2.20
     assert reverse["odds"] == 1.71
-    assert reverse["model_probability"] == 0.38
+    assert reverse["model_probability"] == original["model_probability"] == 0.62
+    assert reverse["market_fair_probability"] == original["market_fair_probability"] == 0.48
+    assert reverse["edge"] == original["edge"] == 0.14
+    assert reverse["expected_value"] == original["expected_value"] == 0.364
+    assert reverse["original_research_retired"] is False
     assert reverse["closing_odds"] == 1.76
     assert counterfactual_outcome(original) == "WIN"
     assert counterfactual_outcome(reverse) == "LOSS"
@@ -137,15 +141,81 @@ def test_reverse_only_counts_post_cutover_decisions() -> None:
             return (row,)
 
     dashboard = ResearchDashboardService(PaperRepo(), reverse_since=NOW + timedelta(seconds=1))
-    assert dashboard.signals({}) == ()
+    # Old settled picks stay in the SAME Research history and P/L.
+    history = dashboard.signals({})
+    assert len(history) == 1
+    assert history[0]["selection"] == "YES"
+    assert history[0]["expected_value"] == 0.364
     assert dashboard.signals({"strategy": ["original"]})[0]["selection"] == "YES"
 
     eligible = ResearchDashboardService(PaperRepo(), reverse_since=NOW)
     paper = eligible.signals({})
     assert len(paper) == 1
     assert paper[0]["selection"] == "NO"
+    assert paper[0]["model_probability"] == 0.62
+    assert paper[0]["edge"] == 0.14
+    assert paper[0]["expected_value"] == 0.364
+    assert paper[0]["odds_bucket"] == "2.01–2.50"  # original qualified quote
     assert eligible.signals({"strategy": ["original"]})[0]["selection"] == "YES"
 
+
+
+
+def test_one_continuous_paper_research_ledger_old_and_new() -> None:
+    class LedgerRepo:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            old = signal_row()
+            old["qualified_at"] = NOW - timedelta(days=1)
+            old["kickoff_at"] = NOW - timedelta(hours=18)
+            old["regulation_home_goals"] = 1
+            old["regulation_away_goals"] = 1
+            new = signal_row()
+            new.update(
+                research_signal_id="research-signal-v1:" + "b" * 64,
+                evaluation_id="value-evaluation-v1:" + "b" * 64,
+                fixture_id="api-football:124",
+                provider_fixture_id="124",
+                qualified_at=NOW + timedelta(hours=1),
+                kickoff_at=NOW + timedelta(hours=3),
+                regulation_home_goals=0,
+                regulation_away_goals=0,
+                companion_selection="NO",
+                companion_odd=1.71,
+            )
+            return (old, new)
+
+    dashboard = ResearchDashboardService(LedgerRepo(), reverse_since=NOW)
+    rows = {row["fixture_id"]: row for row in dashboard.signals({})}
+    assert len(rows) == 2
+    assert rows["api-football:123"]["selection"] == "YES"
+    assert rows["api-football:123"]["outcome"] == "WIN"
+    assert rows["api-football:123"]["pnl_minor"] == 36_000
+    assert rows["api-football:124"]["selection"] == "NO"
+    assert rows["api-football:124"]["outcome"] == "WIN"
+    assert rows["api-football:124"]["pnl_minor"] == 21_300
+    assert rows["api-football:124"]["model_probability"] == 0.62
+    assert rows["api-football:124"]["expected_value"] == 0.364
+    assert sum(row["pnl_minor"] or 0 for row in rows.values()) == 57_300
+    original = {row["fixture_id"]: row for row in dashboard.signals({"strategy": ["original"]})}
+    assert original["api-football:124"]["selection"] == "YES"
+    assert original["api-football:124"]["outcome"] == "LOSS"
+    assert original["api-football:124"]["pnl_minor"] == -30_000
+
+
+def test_reverse_under_over_keeps_model_ev_unmodified() -> None:
+    original = signal_row()
+    original.update(
+        market="OU_25", selection="UNDER", companion_selection="OVER",
+        odds=1.94, companion_odd=1.88,
+    )
+    reverse = reversed_dc_paper_signal(original)
+    assert reverse is not None
+    assert reverse["selection"] == "OVER"
+    assert reverse["odds"] == 1.88
+    assert reverse["expected_value"] == original["expected_value"]
+    assert reverse["edge"] == original["edge"]
+    assert reverse["model_probability"] == original["model_probability"]
 
 
 def test_production_manual_void_is_reflected_in_research():
