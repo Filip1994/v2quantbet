@@ -423,6 +423,7 @@ class ResearchDashboardService:
         *,
         fixed_stake_minor: int = 30_000,
         reverse_since: datetime | None = None,
+        reverse_only: bool = False,
         strict_quote_age_seconds: int = 300,
         provider_snapshot_max_age_seconds: int = 36_000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -441,6 +442,7 @@ class ResearchDashboardService:
         ):
             raise ValueError("reverse_since must be timezone-aware")
         self._reverse_since = reverse_since.astimezone(UTC) if reverse_since else None
+        self._reverse_only = reverse_only
         self._strict_age = strict_quote_age_seconds
         self._provider_age = provider_snapshot_max_age_seconds
         self._clock = clock
@@ -785,8 +787,8 @@ class ResearchDashboardService:
                 self._signal_cache_at = monotonic()
             return cached
 
-    def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
-        canonical = tuple(
+    def _canonical_rows(self) -> tuple[dict[str, Any], ...]:
+        return tuple(
             row
             for row in _one_signal_per_fixture(self._all_signal_rows())
             if not is_universe_blocked_competition(
@@ -797,15 +799,38 @@ class ResearchDashboardService:
                 away_team=row.get("away_team"),
             )
         )
-        strategy = params.get(
-            "strategy", ["reverse" if self._reverse_since else "original"]
-        )[0].strip().casefold()
+
+    def reverse_coverage(self) -> dict[str, int]:
+        canonical = self._canonical_rows()
+        selected = sum(reversed_dc_paper_signal(row) is not None for row in canonical)
+        return {
+            "candidates": len(canonical),
+            "paper_picks": selected,
+            "missing_companion_quote": len(canonical) - selected,
+        }
+
+    def signals(self, params: dict[str, list[str]]) -> tuple[dict[str, Any], ...]:
+        canonical = self._canonical_rows()
+        strategy = (
+            "reverse" if self._reverse_only else params.get(
+                "strategy", ["reverse" if self._reverse_since else "original"]
+            )[0].strip().casefold()
+        )
         if strategy not in {"reverse", "original"}:
             raise ValueError("unknown research strategy")
         # One continuous paper ledger: historical choices stay unchanged and only
         # newly qualified decisions are executed on the opposite side.
         # Both periods belong to the same existing Research P/L and statistics.
-        if strategy == "reverse" and self._reverse_since is not None:
+        if self._reverse_only:
+            # Use the exact stored opposite quote for every historical and new
+            # candidate. Never expose the original selection as a fallback.
+            # Missing paired odds are excluded and counted in reverse_coverage.
+            rows = tuple(
+                self._derived(reversed_row)
+                for row in canonical
+                if (reversed_row := reversed_dc_paper_signal(row)) is not None
+            )
+        elif strategy == "reverse" and self._reverse_since is not None:
             def paper_decision(row: dict[str, Any]) -> dict[str, Any]:
                 qualified = row.get("qualified_at") or row.get("first_blocked_at")
                 if (
@@ -952,6 +977,16 @@ class ResearchDashboardService:
             self.signals(params) if query else self._analytics_signal_rows(),
             fixed_stake_minor=self._stake,
         )
+        if self._reverse_only:
+            snapshot["paper_strategy"] = "DC_REVERSED_PAPER_V1"
+            snapshot["reverse_mode"] = "ALL_HISTORY_COUNTERFACTUAL"
+            snapshot["reverse_coverage"] = self.reverse_coverage()
+            snapshot["definitions"]["universe"] = (
+                "Reverse-only selection and counterfactual P/L from recorded opposite-side odds. "
+                "Historic results are a retrospective backtest, not forward betting profit. "
+                + snapshot["definitions"]["universe"]
+            )
+            return snapshot
         strategy = params.get("strategy", ["reverse" if self._reverse_since else "original"])[0]
         if strategy == "reverse" and self._reverse_since:
             snapshot["paper_strategy"] = "DC_REVERSED_PAPER_V1"
@@ -2008,7 +2043,7 @@ main{{padding:14px}}header{{display:block}}}}
                 for label, key in columns
             )
 
-        reverse_view = bool(self._reverse_since and params.get("strategy", ["reverse"])[0].lower() == "reverse")
+        reverse_view = self._reverse_only or bool(self._reverse_since and params.get("strategy", ["reverse"])[0].lower() == "reverse")
         model_header = "Original model P" if reverse_view else "Model"
         edge_header = "Original edge" if reverse_view else "Edge"
         ev_header = "Original EV" if reverse_view else "EV"
@@ -2033,7 +2068,6 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<td><b>{_time(row["kickoff_at"])}</b>'
                     f'{kickoff_countdown(row["kickoff_at"]) if tab == "active" else ""}</td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}'
-                    + (f'<small>Model chose: {escape(str(row["original_selection"]))}</small>' if row.get("paper_strategy") else "")
                     + '</td>'
                     f'<td><b>{_pct(row["model_probability"])}</b>'
                     f'<small>fair {_pct(row["market_fair_probability"])} · {escape(row["probability_bucket"])}</small></td>'
@@ -2114,7 +2148,6 @@ main{{padding:14px}}header{{display:block}}}}
                     f'<small>{competition} · fixture {escape(str(row["provider_fixture_id"]))}</small></td>'
                     f'<td class="result-cell">{result_panel}</td>'
                     f'<td><span class="pick-pill">{escape(market_label(row))}</span>{retired_badge(row)}'
-                    + (f'<small>Model chose: {escape(str(row["original_selection"]))}</small>' if row.get("paper_strategy") else "")
                     + '</td>'
                     f'<td>{_time(row["kickoff_at"])}</td>'
                     f'<td><b>{_odd(row["odds"])}</b><small>{escape(row["odds_bucket"])} · {escape(row["bookmaker"])}</small></td>'
@@ -2187,7 +2220,7 @@ main{{padding:14px}}header{{display:block}}}}
         active_href = escape(tab_href("active"), quote=True)
         awaiting_href = escape(tab_href("awaiting"), quote=True)
         history_href = escape(tab_href("history"), quote=True)
-        strategy = params.get("strategy", ["reverse" if self._reverse_since else "original"])[0].strip().casefold()
+        strategy = "reverse" if self._reverse_only else params.get("strategy", ["reverse" if self._reverse_since else "original"])[0].strip().casefold()
         clear_href = f"/research?tab={tab}&strategy={strategy}"
         sort_hidden = ""
         if sort_key:
@@ -2196,31 +2229,48 @@ main{{padding:14px}}header{{display:block}}}}
                 f'<input type="hidden" name="dir" value="{escape(sort_dir, quote=True)}">'
             )
 
-        mode_banner = (
-            '<div role="status" style="padding:12px;margin-bottom:12px;border:1px solid #a27e3d;'
-            'border-radius:9px;background:#272219;color:#f4d49c">'
-            '<b>REVERSED DC PAPER V1</b> · Only picks qualified since '
-            + escape(_time(self._reverse_since))
-            + ' · Original model qualification, P, edge, EV and buckets stay unchanged. '
-            'Only the final paper selection and its real paired quote are reversed. '
-            'P/EV/edge describe the ORIGINAL signal, not the opposite outcome. '
-            'Single continuous Research P/L: historical outcomes preserved, only new decisions reversed. '
-            'Production unchanged. '
-            '<a style="color:#f4d49c" href="/research?strategy=original">Original history</a>'
-            '</div>'
-            if self._reverse_since is not None and strategy == "reverse"
-            else (
-                '<div role="status" style="padding:10px;margin-bottom:12px;border:1px solid #3c444c;'
-                'border-radius:9px">ORIGINAL RESEARCH · '
-                '<a href="/research?strategy=reverse">Reverse paper experiment</a></div>'
-                if self._reverse_since is not None else ""
+        if self._reverse_only:
+            coverage = self.reverse_coverage()
+            mode_banner = (
+                '<div role="status" style="padding:12px;margin-bottom:12px;'
+                'border:1px solid #a27e3d;border-radius:9px;background:#272219;color:#f4d49c">'
+                '<b>REVERSE ONLY DC PAPER</b> · Only opposite-side selections and P/L. '
+                'Historic results are retrospective counterfactual simulations; '
+                'new results continue in the same reverse-only paper series. '
+                'Model P, edge and EV describe the ORIGINAL gate, not expected returns on the reverse bet. '
+                f'Paired-quote coverage: {coverage["paper_picks"]}/{coverage["candidates"]}. '
+                f'Excluded without a real opposite quote: {coverage["missing_companion_quote"]}. '
+                'Real-money Production is unchanged.'
+                '</div>'
             )
-        )
-        performance_label = (
-            "Research flat P/L (original history + reversed new picks)" if strategy == "reverse" and self._reverse_since
-            else "Non-retired flat P/L"
-        )
-        analytics_href = "/research/analytics?strategy=" + strategy
+            performance_label = "Reverse-only paper P/L (includes retrospective history)"
+            analytics_href = "/research/analytics"
+        else:
+            mode_banner = (
+                '<div role="status" style="padding:12px;margin-bottom:12px;border:1px solid #a27e3d;'
+                'border-radius:9px;background:#272219;color:#f4d49c">'
+                '<b>REVERSED DC PAPER V1</b> · Only picks qualified since '
+                + escape(_time(self._reverse_since))
+                + ' · Original model qualification, P, edge, EV and buckets stay unchanged. '
+                'Only the final paper selection and its real paired quote are reversed. '
+                'P/EV/edge describe the ORIGINAL signal, not the opposite outcome. '
+                'Single continuous Research P/L: historical outcomes preserved, only new decisions reversed. '
+                'Production unchanged. '
+                '<a style="color:#f4d49c" href="/research?strategy=original">Original history</a>'
+                '</div>'
+                if self._reverse_since is not None and strategy == "reverse"
+                else (
+                    '<div role="status" style="padding:10px;margin-bottom:12px;border:1px solid #3c444c;'
+                    'border-radius:9px">ORIGINAL RESEARCH · '
+                    '<a href="/research?strategy=reverse">Reverse paper experiment</a></div>'
+                    if self._reverse_since is not None else ""
+                )
+            )
+            performance_label = (
+                "Research flat P/L (original history + reversed new picks)" if strategy == "reverse" and self._reverse_since
+                else "Non-retired flat P/L"
+            )
+            analytics_href = "/research/analytics?strategy=" + strategy
 
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -2320,7 +2370,7 @@ td.match{{min-width:250px}}td b{{font-weight:800}}small{{display:block;color:var
 <div class="table-title"><b>{("Active research board" if tab == "active" else "Awaiting result" if tab == "awaiting" else "Settled research history")}</b><span>{len(rows)} shown</span></div>
 <div class="table"><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div>
 </section>
-<footer><span>REVERSE PAPER: route labels describe the original Production candidate only. Original decisions and Production bets remain unchanged. Research close = last stored same-series/source pre-kickoff quote.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
+<footer><span>REVERSE PAPER: displayed selections, odds, results, and P/L are counterfactual opposites. Historic reversals are retrospective, not realized bets. Original qualification and real-money Production remain unchanged.</span><span>Times: Europe/Belgrade · Counterfactual flat stake only · buckets use research entry evaluation</span></footer>
 </main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 
