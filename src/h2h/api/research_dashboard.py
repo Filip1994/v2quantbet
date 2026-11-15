@@ -825,10 +825,21 @@ class ResearchDashboardService:
             # Use the exact stored opposite quote for every historical and new
             # candidate. Never expose the original selection as a fallback.
             # Missing paired odds are excluded and counted in reverse_coverage.
+            def public_reverse_row(original: dict[str, Any]) -> dict[str, Any] | None:
+                paper = reversed_dc_paper_signal(original)
+                if paper is None:
+                    return None
+                derived = self._derived(paper)
+                # Keep the original model decision only in the source evaluation.
+                # The public Research API and dashboard expose the reverse pick.
+                derived.pop("original_selection", None)
+                derived.pop("original_odds", None)
+                return derived
+
             rows = tuple(
-                self._derived(reversed_row)
+                paper
                 for row in canonical
-                if (reversed_row := reversed_dc_paper_signal(row)) is not None
+                if (paper := public_reverse_row(row)) is not None
             )
         elif strategy == "reverse" and self._reverse_since is not None:
             def paper_decision(row: dict[str, Any]) -> dict[str, Any]:
