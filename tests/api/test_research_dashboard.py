@@ -1155,3 +1155,76 @@ def test_manual_research_win_correction_overrides_prior_void_without_ft() -> Non
     row["production_manual_void"] = True
     assert counterfactual_outcome(row) == "VOID"
     assert counterfactual_pnl_minor(row, 30_000) == 0
+
+
+def test_reverse_only_reprojects_entire_history_and_rejects_original_query() -> None:
+    class ReverseOnlyRepo:
+        def list_signals(self, *, limit):
+            assert limit == 5000
+            first = signal_row()
+            first.update(
+                fixture_id="api-football:9001",
+                provider_fixture_id="9001",
+                research_signal_id="research-signal-v1:" + "1" * 64,
+                evaluation_id="value-evaluation-v1:" + "1" * 64,
+                companion_selection="NO",
+                companion_odd=1.71,
+                qualified_at=NOW - timedelta(days=10),
+            )
+            second = signal_row()
+            second.update(
+                fixture_id="api-football:9002",
+                provider_fixture_id="9002",
+                research_signal_id="research-signal-v1:" + "2" * 64,
+                evaluation_id="value-evaluation-v1:" + "2" * 64,
+                companion_selection="NO",
+                companion_odd=1.71,
+                regulation_home_goals=0,
+                regulation_away_goals=0,
+            )
+            missing = signal_row()
+            missing.update(
+                fixture_id="api-football:9003",
+                provider_fixture_id="9003",
+                research_signal_id="research-signal-v1:" + "3" * 64,
+                evaluation_id="value-evaluation-v1:" + "3" * 64,
+            )
+            # Missing companion selection/price must not fall back to model pick.
+            return (first, second, missing)
+
+    dashboard = ResearchDashboardService(
+        ReverseOnlyRepo(),
+        reverse_only=True,
+        reverse_since=NOW + timedelta(days=30),
+        clock=lambda: NOW + timedelta(hours=5),
+    )
+    rows = dashboard.signals({})
+    by_fixture = {row["fixture_id"]: row for row in rows}
+    assert len(rows) == 2
+    assert all(row["selection"] == "NO" for row in rows)
+    assert all(row["paper_strategy"] == "DC_REVERSED_PAPER_V1" for row in rows)
+    assert by_fixture["api-football:9001"]["outcome"] == "LOSS"
+    assert by_fixture["api-football:9001"]["pnl_minor"] == -30_000
+    assert by_fixture["api-football:9002"]["outcome"] == "WIN"
+    assert by_fixture["api-football:9002"]["pnl_minor"] == 21_300
+    assert sum(row["pnl_minor"] or 0 for row in rows) == -8_700
+
+    assert dashboard.signals({"strategy": ["original"]}) == rows
+    coverage = dashboard.reverse_coverage()
+    assert coverage == {
+        "candidates": 3,
+        "paper_picks": 2,
+        "missing_companion_quote": 1,
+    }
+    analytics = dashboard.analytics_snapshot("strategy=original")
+    assert analytics["paper_strategy"] == "DC_REVERSED_PAPER_V1"
+    assert analytics["reverse_coverage"] == coverage
+    assert analytics["reverse_mode"] == "ALL_HISTORY_COUNTERFACTUAL"
+
+    html = dashboard.render_html("tab=history&strategy=original")
+    assert "REVERSE ONLY DC PAPER" in html
+    assert "BTTS NO" in html
+    assert "Model chose:" not in html
+    assert "Original history" not in html
+    assert "Reverse-only paper P/L" in html
+    assert "-87 RSD" in html
