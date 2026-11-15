@@ -1203,6 +1203,7 @@ def test_reverse_only_reprojects_entire_history_and_rejects_original_query() -> 
     assert len(rows) == 2
     assert all(row["selection"] == "NO" for row in rows)
     assert all(row["paper_strategy"] == "DC_REVERSED_PAPER_V1" for row in rows)
+    assert all("original_selection" not in row and "original_odds" not in row for row in rows)
     assert by_fixture["api-football:9001"]["outcome"] == "LOSS"
     assert by_fixture["api-football:9001"]["pnl_minor"] == -30_000
     assert by_fixture["api-football:9002"]["outcome"] == "WIN"
