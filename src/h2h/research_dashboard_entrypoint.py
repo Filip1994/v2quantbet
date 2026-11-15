@@ -51,7 +51,7 @@ def main() -> None:
         repository,
         corner_repository=PostgreSQLCornerResearchRepository(_database_url()),
         fixed_stake_minor=_integer("QUANTBET_FIXED_STAKE_MINOR", "30000"),
-        reverse_since=_reverse_since(),
+        reverse_only=True,  # Mandatory on Railway: never serve original Research picks.
         strict_quote_age_seconds=_integer("QUANTBET_MAXIMUM_QUOTE_AGE_SECONDS", "300"),
         provider_snapshot_max_age_seconds=_integer(
             "QUANTBET_API_FOOTBALL_PUBLISHED_MAX_AGE_SECONDS", "36000"
