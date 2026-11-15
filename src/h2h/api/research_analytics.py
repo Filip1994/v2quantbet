@@ -340,7 +340,7 @@ def build_research_analytics_snapshot(
 
     settled_all = tuple(row for row in rows if row.get("outcome") != "PENDING")
     settled_active = tuple(
-        row for row in settled_all if row.get("paper_strategy") == "DC_REVERSED_PAPER_V1" or not is_retired_research_segment(row)
+        row for row in settled_all if not row.get("original_research_retired", is_retired_research_segment(row))
     )
     dated = tuple((row, _event_time(row)) for row in settled_active)
 
