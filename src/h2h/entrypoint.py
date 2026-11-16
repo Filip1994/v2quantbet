@@ -78,6 +78,7 @@ def _run_active_leader(
     instance_id: str,
 ) -> bool:
     _prepare_bankroll(application)
+    corner_only = os.getenv("QUANTBET_ENGINE_CORNER_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
     state.update(leadership="active")
     application.monitoring.reconcile.execute()
     application.results.repository.reconcile(reconciled_at=datetime.now(UTC))
@@ -86,14 +87,15 @@ def _run_active_leader(
     assert policy is not None and lifecycle is not None
     risk_snapshot = application.production_funnel.exposure_breakdown()
     LOGGER.info("production funnel exposure snapshot", extra=risk_snapshot)
-    application.runtime.due_opportunity_fixtures(
-        bookmaker_id=PRODUCTION_BOOKMAKER_ID,
-        allowed_statuses=policy.allowed_fixture_statuses,
-        now=datetime.now(UTC),
-        maximum_quote_age_seconds=policy.maximum_quote_age_seconds,
-        minimum_time_to_kickoff_seconds=policy.minimum_time_to_kickoff_seconds,
-        stale_retry_policy=application.settings.stale_quote_retry_policy,
-    )
+    if not corner_only:
+        application.runtime.due_opportunity_fixtures(
+            bookmaker_id=PRODUCTION_BOOKMAKER_ID,
+            allowed_statuses=policy.allowed_fixture_statuses,
+            now=datetime.now(UTC),
+            maximum_quote_age_seconds=policy.maximum_quote_age_seconds,
+            minimum_time_to_kickoff_seconds=policy.minimum_time_to_kickoff_seconds,
+            stale_retry_policy=application.settings.stale_quote_retry_policy,
+        )
 
     durable = application.prediction.durable_discovery
     if durable is None:
@@ -166,6 +168,12 @@ def _run_active_leader(
             daily_timezone=application.settings.application.bulletin_timezone.key,
         ),
     )
+
+    if corner_only:
+        # CornerLab runs in its own Railway collector. Keep only intake and
+        # daily settlement here; never run Dixon-Coles or Research generation.
+        jobs = tuple(job for job in jobs if job.name in {"production_intake", "results"})
+        LOGGER.info("corner-only mode: active jobs=%s", tuple(job.name for job in jobs))
 
     def degraded(error: BaseException) -> None:
         if isinstance(error, (ApiBudgetExceededError, TransportError)):
