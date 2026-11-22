@@ -18,10 +18,10 @@ MODULES = (
     ),
     (
         "CornerLab",
-        "https://quantbet-research-production.up.railway.app/research/analytics/corners",
+        "/quantlab?view=analytics&lab=corner",
         "⌜",
         "corner",
-        "Corner Analytics · Research",
+        "CornerLab istorija i bucket analitika · Operations",
     ),
     (
         "GoalLab",
@@ -60,7 +60,7 @@ MODULES = (
     ),
 )
 
-RETIRED_LAB_TONES = frozenset({'goal', 'h2h', 'cards'})
+RETIRED_LAB_TONES = frozenset({'research', 'goal', 'h2h', 'cards'})
 
 
 def manifest_json() -> bytes:
