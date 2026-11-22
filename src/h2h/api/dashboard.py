@@ -29,6 +29,7 @@ from h2h.api.universe_hub import manifest_json, render_hub
 from h2h.domain.operator_pick_state import OperatorPickState
 from h2h.domain.settlement import realized_clv_ppm
 from h2h.production_buckets import bucket_spec
+from h2h.quantlab.note_dialog import NOTE_DIALOG_SCRIPT_HASH
 
 
 WORKER_FRESHNESS_SECONDS = 600
@@ -139,10 +140,6 @@ def _policy(application: Any) -> Any:
 
 
 def _production_bucket_links_html(bucket_ids: Any) -> str:
-    research_base = os.environ.get(
-        "QUANTBET_RESEARCH_DASHBOARD_BASE_URL",
-        "https://quantbet-research-production.up.railway.app",
-    ).rstrip("/")
     links: list[str] = []
     for raw in bucket_ids or ():
         bucket_id = str(raw)
@@ -153,13 +150,19 @@ def _production_bucket_links_html(bucket_ids: Any) -> str:
         if spec.source_universe == 'GOALLAB':
             links.append(f'<span class="production-bucket-link retired" title="Archived GoalLab bucket">{escape(spec.label)}</span>')
             continue
-        # Old Corner identities stay readable after the standalone redirect retires.
-        path = (spec.analytics_path if spec.analytics_path.startswith('/research') else
-                '/research/analytics/corners?market=TOTAL_CORNERS&selection=OVER')
-        href = research_base + path
+        # Research stays offline. CornerLab links are local to Operations.
+        if spec.source_universe != "CORNERLAB":
+            links.append(
+                f'<span class="production-bucket-link retired" '
+                f'title="Research service offline">{escape(spec.label)}</span>'
+            )
+            continue
+        href = (
+            spec.analytics_path if spec.analytics_path.startswith("/quantlab?")
+            else "/quantlab?view=analytics&lab=corner"
+        )
         links.append(
             f'<a class="production-bucket-link" href="{escape(href, quote=True)}" '
-            'target="_blank" rel="noopener noreferrer" '
             f'title="{escape(bucket_id, quote=True)}">{escape(spec.label)}</a>'
         )
     return '<span class="production-bucket-links">' + " · ".join(links) + "</span>" if links else ""
@@ -1280,7 +1283,8 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 </style></head><body><main class="shell">
 <header><div><div class="eyebrow">QuantBet / Production</div><h1>Operations Dashboard</h1>
 <div class="subtitle">Durable PostgreSQL state and operator controls</div></div>
-<a class="hub-return" href="https://quantbet-dashboard-production.up.railway.app/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
+<a class="hub-return" href="/quantlab?view=analytics&amp;lab=corner" title="Historical CornerLab analytics">📊 Corner Analytics</a>
+<a class="hub-return" href="/hub" aria-label="Back to QuantBet HUB" title="Back to QuantBet HUB"><span aria-hidden="true">🏠</span> HUB</a>
 <div class="live"><span class="dot"></span>Database Connected · Generated {escape(self._dt(context["generated_at"]))}</div></header>
 {manual_panel}
 <section class="kpis">{cards_html}</section>
@@ -1320,11 +1324,70 @@ tbody tr{{transition:background .12s ease}}tbody tr:hover{{background:#102941}}t
 <span>Times: Europe/Belgrade · Refresh page for current durable state</span></footer></main>{COUNTDOWN_SCRIPT}</body></html>"""
 
 
+class CornerAnalyticsReadOnly:
+    """Render existing CornerLab evidence without starting Research or collectors."""
+
+    CACHE_SECONDS = 60
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._rows: tuple[dict[str, Any], ...] | None = None
+        self._rows_at = 0.0
+
+    def render(self, raw_query: str) -> str:
+        if len(raw_query) > 2048:
+            raise ValueError("query too long")
+        params = parse_qs(raw_query, keep_blank_values=True, max_num_fields=40)
+        if params.get("lab", ["corner"])[0].lower() != "corner":
+            raise LookupError("Only CornerLab is enabled in Operations")
+        view = params.get("view", ["analytics"])[0].lower()
+        if view not in {"analytics", "dashboard"}:
+            raise ValueError("invalid view")
+
+        # Import lazily: the main Production dashboard remains light.
+        from h2h.quantlab.dashboard_views import _all_rows, render_quantlab_view
+        from h2h.quantlab.repository import PostgreSQLQuantLabRepository
+
+        repository = PostgreSQLQuantLabRepository(os.environ["DATABASE_URL"])
+        source_rows = None
+        if view == "analytics":
+            with self._lock:
+                if self._rows is None or monotonic() - self._rows_at >= self.CACHE_SECONDS:
+                    # Reuse a single historic ledger read across all filter combinations.
+                    # No API-Football calls, workers or additional service.
+                    self._rows = _all_rows(repository, "CORNER")
+                    self._rows_at = monotonic()
+                source_rows = self._rows
+
+        normalized = raw_query
+        if "lab" not in params:
+            normalized += ("&" if normalized else "") + "lab=corner"
+        if "view" not in params:
+            normalized += ("&" if normalized else "") + "view=analytics"
+        html = render_quantlab_view(
+            repository,
+            normalized,
+            api_daily_limit=int(os.getenv("QUANTBET_API_DAILY_LIMIT", "7500")),
+            currency=os.getenv("QUANTBET_CURRENCY", "RSD"),
+            analytics_rows=source_rows,
+        )
+        return html.replace(
+            "<body>",
+            '<body><div style="padding:12px 24px;background:#0b2030;'
+            'border-bottom:1px solid #31516a;font:700 13px system-ui">'
+            '<a style="color:#8bd9ff;text-decoration:none" href="/dashboard">'
+            '← Production / Operations</a> · CornerLab historical analytics'
+            '</div>',
+            1,
+        )
+
+
 class DashboardHTTPService:
     """Small standalone HTTP surface for a Railway dashboard service."""
 
     def __init__(self, dashboard: DashboardService, *, host: str, port: int) -> None:
         self._dashboard = dashboard
+        self._corner_analytics = CornerAnalyticsReadOnly()
         service = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1343,6 +1406,20 @@ class DashboardHTTPService:
                                 service._json(self, 503, {"error": type(exc).__name__})
                             except (BrokenPipeError, ConnectionResetError):
                                 return
+                elif path in {"/quantlab", "/corners/analytics"}:
+                    if service._authorize(self):
+                        try:
+                            service._html(
+                                self, 200,
+                                service._corner_analytics.render(urlsplit(self.path).query),
+                            )
+                        except (BrokenPipeError, ConnectionResetError):
+                            return
+                        except (ValueError, LookupError):
+                            service._json(self, 400, {"error": "invalid_corner_filter"})
+                        except Exception as exc:
+                            LOGGER.exception("Corner analytics render failed")
+                            service._json(self, 503, {"error": type(exc).__name__})
                 elif path == "/api/settlement/status":
                     if service._authorize(self):
                         service._json(self, 200, dashboard.manual_settlement_status())
@@ -1433,7 +1510,8 @@ class DashboardHTTPService:
         handler.send_header("Cache-Control", "no-store")
         handler.send_header(
             "Content-Security-Policy",
-            f"default-src 'none'; style-src 'unsafe-inline'; script-src {COUNTDOWN_SCRIPT_CSP}",
+            f"default-src 'none'; style-src 'unsafe-inline'; "
+            f"script-src {COUNTDOWN_SCRIPT_CSP} 'sha256-{NOTE_DIALOG_SCRIPT_HASH}'",
         )
         handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("X-Frame-Options", "DENY")
