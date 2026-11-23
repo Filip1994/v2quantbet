@@ -30,7 +30,7 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 8
+    assert len(DEFAULT_BUCKET_IDS) == 12
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
 
@@ -264,14 +264,14 @@ def test_goallab_expected_total_bucket_boundaries(
 
 
 def test_default_bucket_order_is_stable_contract_order() -> None:
+    from h2h.corner_buckets import CORNER_OPERATIONS_IDS
+
     assert DEFAULT_BUCKET_IDS == (
         RESEARCH_BTTS_NO_ODDS_2_01_2_50,
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
         RESEARCH_OU_OVER_ODDS_1_81_2_00,
         RESEARCH_OU_UNDER_EDGE_10_15,
-        RESEARCH_OU_UNDER_EDGE_20_30,
-        CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
-        CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+        *CORNER_OPERATIONS_IDS,
         CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     )
 
