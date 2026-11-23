@@ -35,7 +35,7 @@ class ProductionBucketSpec:
     label: str
     source_universe: str
     analytics_path: str
-    reference_roi_pct: float
+    reference_roi_pct: float | None
 
 
 def _research_path(**params: str) -> str:
@@ -125,7 +125,7 @@ PRODUCTION_BUCKET_SPECS = (
             "bucket_market_probability_bucket": "50–55%",
             "bucket_entry_odds_bucket": "1.61–1.80",
         }) + "#bucket-picks",
-        0.0,  # Historical ROI is not known from the supplied EV/edge averages.
+        None,  # Historical ROI is not known from the supplied EV/edge averages.
     ),
     ProductionBucketSpec(
         GOALLAB_OU_OVER_XG_2_5_3_0,
