@@ -22,6 +22,7 @@ from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateE
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
     DEFAULT_BUCKET_IDS,
+    CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
     matching_bucket_ids,
     n_roi_priority_score,
@@ -52,7 +53,8 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
         raise ValueError("unknown production intake bucket(s): " + ", ".join(unknown))
     if not requested:
         raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one bucket")
-    return tuple(sorted(requested, key=_BUCKET_PRIORITY.__getitem__))
+    # Keep this explicitly approved calibration cohort when Railway uses a legacy allowlist.
+    return tuple(sorted(dict.fromkeys((*requested, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80)), key=_BUCKET_PRIORITY.__getitem__))
 
 
 def intake_contract_version(bucket_ids: tuple[str, ...]) -> str:
