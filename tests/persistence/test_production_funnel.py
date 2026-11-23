@@ -272,6 +272,7 @@ def test_default_bucket_order_is_stable_contract_order() -> None:
         RESEARCH_OU_UNDER_EDGE_20_30,
         CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
         CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
+        CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     )
 
 
