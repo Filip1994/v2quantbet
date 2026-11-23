@@ -24,6 +24,7 @@ from h2h.domain.operator_pick_state import OperatorPickState, OperatorPickStateE
 from h2h.production_buckets import (
     BUCKET_PRIORITY as _BUCKET_PRIORITY,
     DEFAULT_BUCKET_IDS,
+    CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     PRODUCTION_DESELECTED_BUCKET_IDS,
     KNOWN_BUCKET_IDS as _KNOWN_BUCKET_IDS,
     bucket_spec,
@@ -36,7 +37,7 @@ ConnectionFactory = Callable[[], Any]
 
 # Explicit operator preference: the seven selected Corner cubes share first priority;
 # measured evidence-weighted ROI orders them, then the existing Football buckets.
-_CORNER_FIRST_PRIORITY = dict.fromkeys(CORNER_OPERATIONS_IDS, 1)
+_CORNER_FIRST_PRIORITY = dict.fromkeys((*CORNER_OPERATIONS_IDS, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80), 1)
 _PRIORITY_POLICY_VERSION = "CORNER_SELECTED_CUBES_N_GT_10_THEN_DYNAMIC_ROI_KICKOFF_V3"
 _TOP_FIVE_CORNERS_FLAG = "QUANTBET_PRODUCTION_CORNER_TOP5_ONLY"
 _TOP_FIVE_CORNERS_MIN_N = 31
@@ -68,7 +69,8 @@ def active_bucket_ids(values: dict[str, str] | None = None) -> tuple[str, ...]:
     approved = tuple(item for item in requested if item not in PRODUCTION_DESELECTED_BUCKET_IDS)
     if not approved:
         raise ValueError("QUANTBET_PRODUCTION_INTAKE_BUCKETS must select at least one approved bucket")
-    return tuple(sorted(approved, key=_BUCKET_PRIORITY.__getitem__))
+    # This specifically approved calibration bucket is additive to the operator allowlist.
+    return tuple(sorted(dict.fromkeys((*approved, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80)), key=_BUCKET_PRIORITY.__getitem__))
 
 
 def production_corner_top_five_enabled(values: dict[str, str] | None = None) -> bool:
@@ -869,7 +871,7 @@ class PostgreSQLProductionFunnelRepository:
             raise ValueError("fallback_stake_minor must be positive")
         corner_top_five = production_corner_top_five_enabled()
         requested = (
-            CORNER_OPERATIONS_IDS if corner_top_five
+            (*CORNER_OPERATIONS_IDS, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80) if corner_top_five
             else active_bucket_ids() if bucket_ids is None else bucket_ids
         )
         if not requested or any(item not in _KNOWN_BUCKET_IDS for item in requested):
@@ -907,7 +909,8 @@ class PostgreSQLProductionFunnelRepository:
             )
             if corner_top_five:
                 # Goals remain in Research and GoalLab but cannot enter Operations.
-                selected = self._top_five_corner_bucket_ids(bucket_stats)
+                # Preserve the existing five ranked cubes and add the explicitly approved cohort.
+                selected = (*self._top_five_corner_bucket_ids(bucket_stats), CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80)
                 allowed = frozenset(selected)
                 contract = intake_contract_version(selected, max_lead_hours=max_lead_hours)
             bucket_order = tuple(
