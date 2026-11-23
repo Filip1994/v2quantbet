@@ -7,6 +7,7 @@ import pytest
 from h2h.corner_buckets import CORNER_OPERATIONS_IDS
 from h2h.production_buckets import (
     DEFAULT_BUCKET_IDS,
+    CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     CORNER_OVER_GAP_1_2_ODDS_1_61_1_80,
     CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00,
     bucket_matches,
@@ -34,7 +35,7 @@ from h2h.persistence.postgres_production_funnel import (
 
 def test_default_intake_contract_does_not_select_goallab_buckets() -> None:
     assert active_bucket_ids({}) == DEFAULT_BUCKET_IDS
-    assert len(DEFAULT_BUCKET_IDS) == 11
+    assert len(DEFAULT_BUCKET_IDS) == 12
     assert RESEARCH_OU_UNDER_EDGE_20_30 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_XG_2_5_3_0 not in DEFAULT_BUCKET_IDS
     assert GOALLAB_OU_OVER_ODDS_2_01_2_50 not in DEFAULT_BUCKET_IDS
@@ -49,6 +50,7 @@ def test_intake_contract_can_change_by_environment_without_core_code_change() ->
     }
 
     assert active_bucket_ids(values) == (
+        CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
         GOALLAB_OU_OVER_ODDS_2_01_2_50,
         RESEARCH_LOW_SCORING_NON_EXTREME,
     )
@@ -64,6 +66,7 @@ def test_deselected_b5_is_ignored_even_when_old_railway_env_lists_it() -> None:
     }
     assert active_bucket_ids(candidate) == (
         RESEARCH_OU_UNDER_ODDS_2_01_2_50,
+        CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
     )
     # Historical matching and data remain intact; only Operations intake is de-selected.
     assert bucket_matches({
@@ -630,3 +633,37 @@ def test_corner_top_five_fails_closed_without_five_qualified_buckets():
     stats = {bucket_id: {"graded_n": 31, "roi_pct": 10.0, "priority_score": 3.1}
              for bucket_id in CORNER_OPERATIONS_IDS[:2]}
     assert PostgreSQLProductionFunnelRepository._top_five_corner_bucket_ids(stats) == tuple(CORNER_OPERATIONS_IDS[:2])
+
+
+def test_calibration_corner_bucket_uses_exact_six_dimensional_cohort() -> None:
+    row = {
+        "market_key": "TOTAL_CORNERS",
+        "selection": "OVER",
+        "line": 8.5,
+        "model_probability": 0.625,
+        "market_probability": 0.525,
+        "odds": 1.70,
+        "expected_value": 0.10,
+        "edge": 0.10,
+    }
+    assert bucket_matches(row, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80)
+    assert CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80 in matching_bucket_ids(row, source_universe="CORNERLAB")
+    for field, invalid in (
+        ("selection", "UNDER"),
+        ("line", 9.5),
+        ("model_probability", 0.5999),
+        ("model_probability", 0.65),
+        ("market_probability", 0.4999),
+        ("market_probability", 0.55),
+        ("odds", 1.60),
+        ("odds", 1.81),
+    ):
+        assert not bucket_matches({**row, field: invalid}, CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80)
+
+
+def test_calibration_bucket_is_pinned_with_existing_operator_allowlist() -> None:
+    ids = active_bucket_ids({
+        "QUANTBET_PRODUCTION_INTAKE_BUCKETS": "RESEARCH_BTTS_NO_ODDS_2_01_2_50",
+    })
+    assert RESEARCH_BTTS_NO_ODDS_2_01_2_50 in ids
+    assert ids.count(CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80) == 1
