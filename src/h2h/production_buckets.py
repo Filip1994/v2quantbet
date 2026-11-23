@@ -20,6 +20,7 @@ RESEARCH_OU_UNDER_ODDS_1_81_2_00 = "RESEARCH_OU_UNDER_ODDS_1_81_2_00"
 RESEARCH_OU_UNDER_ODDS_2_01_2_50 = "RESEARCH_OU_UNDER_ODDS_2_01_2_50"
 RESEARCH_OU_OVER_ODDS_1_81_2_00 = "RESEARCH_OU_OVER_ODDS_1_81_2_00"
 CORNER_OVER_GAP_1_2_ODDS_1_61_1_80 = "CORNER_OVER_GAP_1_2_ODDS_1_61_1_80"
+CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80 = "CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80"
 CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00 = (
     "CORNER_OVER_MODEL_50_55_MARKET_45_50_ODDS_1_81_2_00"
 )
@@ -111,6 +112,21 @@ PRODUCTION_BUCKET_SPECS = (
         29.81,
     ),
     ProductionBucketSpec(
+        CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
+        "Corner OVER 8.5 · model P 60–65% · market P 50–55% · odds 1.61–1.80",
+        "CORNERLAB",
+        "/quantlab?" + urlencode({
+            "view": "analytics", "lab": "corner", "bucket": "1",
+            "bucket_corner_calibration_watch_bucket": "OVER model P 60–70%",
+            "bucket_selection": "OVER",
+            "bucket_line_bucket": "8.5",
+            "bucket_model_probability_bucket": "60–65%",
+            "bucket_market_probability_bucket": "50–55%",
+            "bucket_entry_odds_bucket": "1.61–1.80",
+        }) + "#bucket-picks",
+        0.0,  # Historical ROI is not known from the supplied EV/edge averages.
+    ),
+    ProductionBucketSpec(
         GOALLAB_OU_OVER_XG_2_5_3_0,
         "OU OVER · λ total 2.5–3.0",
         "GOALLAB",
@@ -156,6 +172,7 @@ DEFAULT_BUCKET_IDS = (
     RESEARCH_OU_OVER_ODDS_1_81_2_00,
     RESEARCH_OU_UNDER_EDGE_10_15,
     *CORNER_OPERATIONS_IDS,
+    CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80,
 )
 PRODUCTION_BUCKET_SPECS += tuple(
     ProductionBucketSpec(b.bucket_id,b.label,'CORNERLAB',b.analytics_path,0.0)
@@ -235,6 +252,21 @@ def bucket_matches(row: dict[str, Any], bucket_id: str) -> bool:
             and 0.50 <= float(model_p) < 0.55
             and 0.45 <= float(market_p) < 0.50
             and 1.80 < odds <= 2.00
+        )
+    if bucket_id == CORNER_CALIBRATION_OVER_8_5_MODEL_60_65_MARKET_50_55_ODDS_1_61_1_80:
+        model_p = row.get("model_probability")
+        market_p = row.get("market_probability")
+        line = row.get("line")
+        return (
+            market == "TOTAL_CORNERS"
+            and selection == "OVER"
+            and line is not None
+            and float(line) == 8.5
+            and model_p is not None
+            and 0.60 <= float(model_p) < 0.65
+            and market_p is not None
+            and 0.50 <= float(market_p) < 0.55
+            and 1.60 < odds <= 1.80
         )
     if bucket_id == GOALLAB_OU_OVER_XG_2_5_3_0:
         home = row.get("expected_home_goals")
